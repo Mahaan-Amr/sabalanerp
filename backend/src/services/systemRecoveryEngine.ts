@@ -981,6 +981,7 @@ export const stageAndPromoteRecovery = async (input: {
   bootstrapPassword?: string;
   applyMigrations?: boolean;
   preservePackage?: boolean;
+  prepareProtectedStage?: (client: PrismaClient) => Promise<void>;
   protectedDatabaseRoles?: ProtectedDatabaseRoleRecovery & { assertBoundary(): Promise<void> };
   applicationRecoveryRoles?: ProtectedDatabaseRoleRecovery & {
     assertBoundary(): Promise<void>;
@@ -1084,6 +1085,7 @@ export const stageAndPromoteRecovery = async (input: {
     try {
       await stagedClient.$queryRaw`SELECT 1`;
       await input.applicationRecoveryRoles?.prepareStage?.(stagedClient);
+      if (input.protectedDatabaseRoles) await input.prepareProtectedStage?.(stagedClient);
       await validateStoredFileReferences(stagedClient, payloadRoot);
       await stagedClient.authSession.updateMany({
         where: { revokedAt: null },

@@ -4,10 +4,36 @@ import { dirname, join, resolve } from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import envelope from '../../backend/scripts/system-recovery-envelope.cjs';
+import { selectQARecoveryTarget, verifyQAforegroundConsumer } from './system-recovery-owner-qa.mjs';
 
 const root = '/opt/sabalanerp';
 const operationId = /^c[a-z0-9]{24}$/;
 const rejected = () => Error('SYSTEM_RECOVERY_OWNER_HOST_REJECTED');
+
+export function recoveryMutationWithinBudget(started, now = process.hrtime.bigint()) {
+  return typeof started === 'bigint' && started >= 0n && now >= started && now - started < 900_000_000_000n;
+}
+
+export function assertOwnedRecoveryContainer(container, expected) {
+  if (!/^[a-f0-9]{64}$/.test(container?.Id || '') || container.Name !== '/' + expected.name || container.Image !== expected.image
+    || container.Config?.Labels?.['com.docker.compose.project'] !== 'sabalanerp'
+    || container.Config.Labels['com.docker.compose.service'] !== 'deployment'
+    || container.Config.Labels['io.sabalan.deployment.id'] !== expected.deploymentId
+    || JSON.stringify(container.Config.Cmd) !== JSON.stringify(['sh', 'scripts/with-backend-control-ownership.sh',
+      'node', 'dist/scripts/system-recovery-owner.js', '--sealed', expected.operationId, 'RESTORE'])) throw rejected();
+  return container.Id;
+}
+
+function stopOwnedContainer(name, image, deploymentId, id) {
+  requireNativeRoot();
+  if (!/^[a-zA-Z0-9_-]+$/.test(name) || !/^sha256:[a-f0-9]{64}$/.test(image)
+    || !/^deploy-[A-Za-z0-9_-]{1,120}$/.test(deploymentId) || !operationId.test(id)) throw rejected();
+  const [container] = JSON.parse(execFileSync('docker', ['inspect', name], { encoding: 'utf8', timeout: 10000 }));
+  const exact = assertOwnedRecoveryContainer(container, { name, image, deploymentId, operationId: id });
+  // A timeout is unknown completion, never permission to roll back. The caller
+  // must additionally reap Compose and prove native runtime closure.
+  execFileSync('docker', ['stop', '--time', '30', exact], { timeout: 45000, stdio: ['ignore', 'pipe', 'pipe'] });
+}
 
 export function decodeOwnerInbox(id, bytes, privateKey) {
   if (!operationId.test(id) || bytes.length > 32768) throw rejected();
@@ -63,8 +89,10 @@ function provision(directory) {
   try { fsyncSync(fd); } finally { closeSync(fd); }
 }
 
-function recoveryInbox(envFile) {
-  const compose = ['compose', '--project-name', 'sabalanerp', '--env-file', envFile, '-f', join(root, 'docker-compose.prod.yml')];
+function recoveryInbox(envFile, keyFile) {
+  const qa = process.env.DEPLOYMENT_QA_REHEARSAL_PLAN_FILE || process.env.DEPLOYMENT_QA_REHEARSAL_PLAN_SHA256;
+  const composeFile = qa ? selectQARecoveryTarget(envFile, keyFile).composeFile : 'docker-compose.prod.yml';
+  const compose = ['compose', '--project-name', 'sabalanerp', '--env-file', envFile, '-f', join(root, composeFile)];
   const container = execFileSync('docker', [...compose, 'ps', '-q', 'backend'], { encoding: 'utf8' }).trim();
   if (!/^[a-f0-9]{12,64}$/.test(container)) throw rejected();
   const [inspection] = JSON.parse(execFileSync('docker', ['inspect', container], { encoding: 'utf8' }));
@@ -87,7 +115,7 @@ async function consume(envFile, keyFile, watch) {
     // An uncertain prior child retains its hold. A later consumer never adopts it.
     try { lstatSync(join(root, '.deploy-state/system-recovery-backup-active.json')); throw rejected(); }
     catch (error) { if (error.code !== 'ENOENT') throw error; }
-    const inbox = recoveryInbox(envFile);
+    const inbox = recoveryInbox(envFile, keyFile);
     let names;
     try {
       if (realpathSync(inbox) !== inbox || !lstatSync(inbox).isDirectory()) throw rejected();
@@ -121,6 +149,9 @@ function serviceUnit(envFile, keyFile) {
 
 function verify(envFile, keyFile) {
   requireNativeRoot();
+  if (process.env.DEPLOYMENT_QA_REHEARSAL_PLAN_FILE || process.env.DEPLOYMENT_QA_REHEARSAL_PLAN_SHA256) {
+    return verifyQAforegroundConsumer(envFile, keyFile);
+  }
   const publicKey = createPublicKey(privateFile(keyFile)).export({ type: 'spki', format: 'pem' });
   const publicPath = join(dirname(keyFile), 'system-recovery-owner-public.pem');
   if (realpathSync(publicPath) !== publicPath || readFileSync(publicPath, 'utf8') !== publicKey) throw rejected();
@@ -145,6 +176,8 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
   const [command, ...args] = process.argv.slice(2);
   try {
     if (command === 'provision' && args.length === 1) provision(args[0]);
+    else if (command === 'within-budget' && args.length === 1) process.exitCode = recoveryMutationWithinBudget(BigInt(args[0])) ? 0 : 1;
+    else if (command === 'stop-owner' && args.length === 4) stopOwnedContainer(...args);
     else if (command === 'install' && args.length === 2) install(...args);
     else if (command === 'verify' && args.length === 2) verify(...args);
     else if (command === 'consume' && (args.length === 2 || (args.length === 3 && args[2] === '--watch'))) await consume(args[0], args[1], args[2] === '--watch');

@@ -30,18 +30,74 @@ system_recovery_backup_failure() {
   # Wait for the original attached Compose child before releasing host FD9.
   if [ -n "${backup_owner_pid:-}" ]; then wait "${backup_owner_pid}" || true; fi
   if [ -n "${owned_pid:-}" ]; then wait "${owned_pid}" || true; fi
+  if [ "${SYSTEM_RECOVERY_OWNER_ACTION:-BACKUP}" = RESTORE ] \
+    && [ "${MUTATION_STARTED:-0}" -eq 1 ] && [ "${PUBLIC_TRAFFIC_OPEN:-0}" -eq 0 ] \
+    && [ "${ROLLBACK_ALREADY_ATTEMPTED:-0}" -eq 0 ] \
+    && [ ! -e "${backup_snapshot}.startup-held.json" ]; then
+    if system_recovery_checkpoint_rollback; then exit 0; fi
+  fi
   if [ "${MAINTENANCE_ACTIVE}" -eq 1 ]; then
     control maintenance-on || true
+    if [ "${MUTATION_STARTED:-0}" -eq 1 ]; then
+      DEPLOYMENT_PHASE=RECOVERY_REQUIRED DEPLOYMENT_RESULT=RECOVERY_REQUIRED control finish || true
+    fi
     echo 'System Recovery backup held in maintenance. Preserve the active journal and investigate before reopening.' >&2
   fi
   cleanup_locks
   exit "${backup_status}"
 }
 
+system_recovery_checkpoint_rollback() {
+  ROLLBACK_ALREADY_ATTEMPTED=1
+  control maintenance-on && verify_public_maintenance && assert_system_recovery_advisory && control heartbeat || return 1
+  verify_database_role_pin && drain_release_for_rollback && assert_native_runtime_closed || return 1
+  # The original child has been reaped. Resolve only its bound journal under
+  # this same owner before the single canonical verified-checkpoint rollback.
+  run_original_owned_with_heartbeat run_backend sh scripts/with-backend-control-ownership.sh \
+    node dist/scripts/system-recovery-owner-reconcile.js "${SYSTEM_RECOVERY_OPERATION_ID}" || return 1
+  if [ "${DEPLOYMENT_PHASE:-}" != ROLLBACK_STARTED ]; then phase ROLLBACK_STARTED || return 1; fi
+  run_original_owned_with_heartbeat run_backend sh scripts/with-backend-control-ownership.sh \
+    node dist/scripts/deployment-rollback.js || return 1
+  run_original_owned_with_heartbeat run_backend sh scripts/with-backend-control-ownership.sh \
+    node dist/scripts/deployment-finalize-recovery.js || return 1
+  run_original_owned_with_heartbeat run_backend sh scripts/with-backend-control-ownership.sh \
+    node dist/scripts/system-recovery-rollback-receipt.js "${SYSTEM_RECOVERY_OPERATION_ID}" || return 1
+  assert_native_runtime_closed && assert_system_recovery_advisory && control heartbeat || return 1
+  capture_only_services | node "${OPERATIONS_ROOT}/deploy/scripts/capture-only-release.mjs" verify "${backup_snapshot}" "${ENV_FILE}" || return 1
+  rollback_snapshot="${backup_snapshot}.rollback.json"
+  node -e 'const fs=require("node:fs"),s=process.argv[1],d=process.argv[2];const f=fs.openSync(d,"wx",0o400);try{fs.writeFileSync(f,fs.readFileSync(s));fs.fsyncSync(f)}finally{fs.closeSync(f)}' "${backup_snapshot}" "${rollback_snapshot}" || return 1
+  rollback_restart_started="$(node -e 'process.stdout.write(process.hrtime.bigint().toString())')"
+  # Emergency recovery may outlast the mutation deadline. Its separate original-
+  # container restart is still bounded and requires the rollback owner receipt.
+  run_original_owned_with_heartbeat node "${OPERATIONS_ROOT}/deploy/scripts/capture-only-release.mjs" start-rolled-back \
+    "${rollback_snapshot}" "${ENV_FILE}" "${REPO_ROOT}/${COMPOSE_FILE}" 300 "${rollback_restart_started}" "${SESSION_HOST_PATH}" || return 1
+  SYSTEM_RECOVERY_RUNTIME_AFTER="$(compose exec -T backend node dist/scripts/system-recovery-runtime-proof.js)" || return 1
+  export SYSTEM_RECOVERY_RUNTIME_AFTER
+  DEPLOYMENT_GATE_MODE=APPLICATION_RECOVERY_ROLLBACK run_original_owned_with_heartbeat run_backend node dist/scripts/deployment-gates.js || return 1
+  verify_public_maintenance && assert_system_recovery_advisory && control heartbeat || return 1
+  PUBLIC_TRAFFIC_OPEN=1
+  control maintenance-off || return 1
+  DEPLOYMENT_PHASE=ROLLED_BACK DEPLOYMENT_RESULT=ROLLED_BACK control finish || return 1
+  MAINTENANCE_ACTIVE=0
+  node "${SYSTEM_RECOVERY_BACKUP_HOST}" clear "${SYSTEM_RECOVERY_BACKUP_INTENT}" "${DEPLOYMENT_ID}" "${SYSTEM_RECOVERY_OPERATION_ID}" || return 1
+  cleanup_locks
+  echo 'System Recovery failed; the verified pre-request checkpoint and original release reopened.'
+}
+
 run_system_recovery_backup() {
   trap 'system_recovery_backup_failure $?' EXIT
   trap 'exit 130' INT TERM HUP
-  [ "$(id -u)" = 0 ] && [ "${REPO_ROOT}" = /opt/sabalanerp ] && [ "${COMPOSE_FILE}" = docker-compose.prod.yml ] || return 1
+  [ "$(id -u)" = 0 ] && [ "${REPO_ROOT}" = /opt/sabalanerp ] || return 1
+  case "${COMPOSE_FILE}" in
+    docker-compose.prod.yml)
+      [ -z "${DEPLOYMENT_QA_REHEARSAL_PLAN_FILE:-}${DEPLOYMENT_QA_REHEARSAL_PLAN_SHA256:-}" ] || return 1
+      ;;
+    docker-compose.rehearsal.yml)
+      [ -n "${DEPLOYMENT_QA_REHEARSAL_PLAN_FILE:-}" ] && [ -n "${DEPLOYMENT_QA_REHEARSAL_PLAN_SHA256:-}" ] \
+        && [ "$(node "${OPERATIONS_ROOT}/deploy/scripts/system-recovery-owner-qa.mjs" select "${ENV_FILE}" "${DEPLOYMENT_SECRET_DIR}/system-recovery-owner-private.pem")" = docker-compose.rehearsal.yml ] || return 1
+      ;;
+    *) return 1 ;;
+  esac
   [ ! -e "${SESSION_HOST_PATH}" ] && [ ! -L "${SESSION_HOST_PATH}" ] \
     && [ ! -e "${CONFIGURATION_STATE}" ] && [ ! -L "${CONFIGURATION_STATE}" ] || return 1
   [ "$(env_value BACKEND_DATABASE_USER)" = sabalan_application_runtime ] || {
@@ -145,7 +201,10 @@ run_system_recovery_backup() {
     bind_host_backup_retention_receipt AFTER_CHECKPOINT
     run_original_owned_with_heartbeat run_backend node dist/scripts/deployment-retention-local.js apply AFTER_CHECKPOINT
     phase MUTATION_STARTED
+    MUTATION_STARTED=1
     restore_mutation_started="$(node -e 'process.stdout.write(process.hrtime.bigint().toString())')"
+    SYSTEM_RECOVERY_OWNER_CONTAINER="sabalanerp-recovery-owner-${DEPLOYMENT_ID}"
+    export SYSTEM_RECOVERY_OWNER_CONTAINER
   fi
 
   system_recovery_owner_command &
@@ -155,6 +214,16 @@ run_system_recovery_backup() {
   backup_heartbeat_elapsed=0
   while kill -0 "${backup_owner_pid}" 2>/dev/null; do
     sleep 5
+    if [ "${SYSTEM_RECOVERY_OWNER_ACTION:-BACKUP}" = RESTORE ] \
+      && ! node "${OPERATIONS_ROOT}/deploy/scripts/system-recovery-owner-host.mjs" within-budget "${restore_mutation_started}"; then
+      # Fence the old MUTATION_STARTED boundary before requesting termination.
+      # No rollback begins until Compose is reaped and native closure is proven.
+      phase ROLLBACK_STARTED || backup_heartbeat_good=0
+      node "${OPERATIONS_ROOT}/deploy/scripts/system-recovery-owner-host.mjs" stop-owner \
+        "${SYSTEM_RECOVERY_OWNER_CONTAINER}" "${DEPLOYMENT_TARGET_BACKEND_IMAGE}" \
+        "${DEPLOYMENT_ID}" "${SYSTEM_RECOVERY_OPERATION_ID}" || backup_heartbeat_good=0
+      break
+    fi
     backup_heartbeat_elapsed=$((backup_heartbeat_elapsed + 5))
     if [ "${backup_heartbeat_elapsed}" -ge 15 ]; then
       if ! assert_system_recovery_advisory || ! verify_public_maintenance || ! control heartbeat; then
@@ -163,8 +232,14 @@ run_system_recovery_backup() {
       backup_heartbeat_elapsed=0
     fi
   done
-  wait "${backup_owner_pid}"
+  owner_status=0
+  wait "${backup_owner_pid}" || owner_status=$?
   backup_owner_pid=""
+  [ "${owner_status}" -eq 0 ] || return "${owner_status}"
+  if [ "${SYSTEM_RECOVERY_OWNER_ACTION:-BACKUP}" = RESTORE ]; then
+    node "${OPERATIONS_ROOT}/deploy/scripts/system-recovery-owner-host.mjs" within-budget "${restore_mutation_started}" || return 1
+    [ "${DEPLOYMENT_PHASE:-}" != ROLLBACK_STARTED ] || return 1
+  fi
   [ "${backup_heartbeat_good}" -eq 1 ]
   assert_system_recovery_advisory
   control heartbeat
@@ -202,6 +277,7 @@ run_system_recovery_backup() {
   assert_system_recovery_advisory
   control heartbeat
   node -e 'if(process.hrtime.bigint()-BigInt(process.argv[1])>=900000000000n)process.exit(1)' "${reopen_budget_started}"
+  PUBLIC_TRAFFIC_OPEN=1
   control maintenance-off
   if [ "${SYSTEM_RECOVERY_OWNER_ACTION:-BACKUP}" = RESTORE ]; then
     phase TRAFFIC_OPENED

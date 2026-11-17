@@ -24,7 +24,6 @@ case "${1:-}" in
     shift
     set -- "$1" "$2"
     exec 8<&0 </dev/null
-    export COMPOSE_PROJECT_NAME=sabalanerp
     ;;
   --system-recovery-backup)
     [ "$#" -eq 3 ] || { echo 'Usage: deploy.sh --system-recovery-backup <env> <operation-id>' >&2; exit 1; }
@@ -37,7 +36,6 @@ case "${1:-}" in
     SYSTEM_RECOVERY_OPERATION_ID="$3"
     shift
     exec 8<&0 </dev/null
-    export COMPOSE_PROJECT_NAME=sabalanerp
     ;;
 esac
 CUSTOMER_ALLOCATION_CURRENT_DATA_ROLLBACK=0
@@ -90,7 +88,7 @@ fi
 CONFIGURATION_STATE="${REPO_ROOT}/.deploy-state/biometric-configuration.json"
 SYSTEM_RECOVERY_BACKUP_INTENT="${REPO_ROOT}/.deploy-state/system-recovery-backup-active.json"
 if [ "${SYSTEM_RECOVERY_BACKUP}" -eq 1 ]; then
-  [ "${DEPLOYMENT_MODE}" = release ] && [ -z "${DEPLOYMENT_CLAMAV_TARGET_IMAGE:-}${DEPLOYMENT_CUSTOMER_ALLOCATION_EVIDENCE_DIR:-}${DEPLOYMENT_QA_REHEARSAL_PLAN_FILE:-}${DEPLOYMENT_QA_REHEARSAL_PLAN_SHA256:-}" ] || {
+  [ "${DEPLOYMENT_MODE}" = release ] && [ -z "${DEPLOYMENT_CLAMAV_TARGET_IMAGE:-}${DEPLOYMENT_CUSTOMER_ALLOCATION_EVIDENCE_DIR:-}" ] || {
     echo 'System Recovery backup requires the unchanged canonical production release.' >&2
     exit 1
   }
@@ -339,8 +337,14 @@ run_backend() {
   fi
   backend_pull_policy=""
   if [ "${SYSTEM_RECOVERY_BACKUP}" -eq 1 ]; then backend_pull_policy="--pull=never"; fi
+  owner_container_option=""
+  if [ "${SYSTEM_RECOVERY_OWNER_ACTION:-}" = RESTORE ] && [ "$#" -ge 4 ] \
+    && [ "$1" = sh ] && [ "$2" = scripts/with-backend-control-ownership.sh ] \
+    && [ "$3" = node ] && [ "$4" = dist/scripts/system-recovery-owner.js ]; then
+    owner_container_option="--name ${SYSTEM_RECOVERY_OWNER_CONTAINER}"
+  fi
   DEPLOYMENT_BACKEND_IMAGE="${DEPLOYMENT_TARGET_BACKEND_IMAGE}" BACKEND_DB_CONNECTION_LIMIT=2 DATABASE_APPLICATION_NAME=sabalanerp-deployment \
-    docker compose --env-file "${ENV_FILE}" -f "$(runtime_compose_file)" ${legacy_control_files} run -T --rm --no-deps ${backend_pull_policy} \
+    docker compose --env-file "${ENV_FILE}" -f "$(runtime_compose_file)" ${legacy_control_files} run -T --rm --no-deps ${backend_pull_policy} ${owner_container_option} \
       --label "io.sabalan.deployment.id=${DEPLOYMENT_ID}" \
       -e "BACKEND_RUNTIME_ROLE=control" \
       -e DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX \
@@ -360,6 +364,7 @@ run_backend() {
       -e "DEPLOYMENT_ORIGINAL_RESULT=${DEPLOYMENT_ORIGINAL_RESULT:-}" \
       -e "DEPLOYMENT_GATE_MODE=${DEPLOYMENT_GATE_MODE:-}" \
       -e "SYSTEM_RECOVERY_POSTGRES_IMAGE_ID=${DEPLOYMENT_PREVIOUS_POSTGRES_IMAGE}" \
+      -e "SYSTEM_RECOVERY_OPERATION_ID=${SYSTEM_RECOVERY_OPERATION_ID:-}" \
       -e "SYSTEM_RECOVERY_RUNTIME_BEFORE=${SYSTEM_RECOVERY_RUNTIME_BEFORE:-}" \
       -e "SYSTEM_RECOVERY_RUNTIME_AFTER=${SYSTEM_RECOVERY_RUNTIME_AFTER:-}" \
       -e "DEPLOYMENT_LEASE_MS=1200000" \
@@ -1165,6 +1170,9 @@ if [ -n "${DEPLOYMENT_QA_REHEARSAL_PLAN_FILE:-}${DEPLOYMENT_QA_REHEARSAL_PLAN_SH
     "${DEPLOYMENT_QA_REHEARSAL_PLAN_FILE}" "${DEPLOYMENT_QA_REHEARSAL_PLAN_SHA256}" \
     "${REPO_ROOT}" "${ENV_FILE}")" || exit 1
   [ "${COMPOSE_FILE}" = docker-compose.rehearsal.yml ] || { echo 'QA_REHEARSAL_COMPOSE_INVALID' >&2; exit 1; }
+fi
+if [ "${SYSTEM_RECOVERY_BACKUP}" -eq 1 ] && [ "${COMPOSE_FILE}" = docker-compose.prod.yml ]; then
+  export COMPOSE_PROJECT_NAME=sabalanerp
 fi
 if [ "${PREBUILT_RELEASE}" -eq 1 ]; then
   # Select only the already-installed CONFIGs before taking the host/DB lease.

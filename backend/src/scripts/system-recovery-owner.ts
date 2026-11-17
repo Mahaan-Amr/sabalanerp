@@ -1,5 +1,5 @@
 import { disconnectDatabase, prisma } from '../lib/prisma';
-import { assertProtectedRoleCheckpointBoundary, configuredProtectedDatabaseRoleRecovery } from '../services/protectedDatabaseRoleRecovery';
+import { assertProtectedRoleCheckpointBoundary, captureProtectedDatabaseRoles, configuredProtectedDatabaseRoleRecovery } from '../services/protectedDatabaseRoleRecovery';
 import { RECOVERY_COORDINATION_DIR } from '../services/recoveryRuntime';
 import { assertRuntimeControlOwnership } from '../services/runtimeControlOwnership';
 import { executeBackupRequest, OWNER_BACKUP_REQUESTED } from '../services/systemRecoveryBackupRequest';
@@ -13,7 +13,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { Prisma } from '@prisma/client';
 import { assertRecoveryAllocationContinuity, captureRecoveryAllocationAuthority, readRecoveryAllocationAuthority,
-  recoveryOwnerReceiptPath, type RecoveryRuntimeProof } from '../services/systemRecoveryAllocationAuthority';
+  recoveryOwnerReceiptPath, recoveryOwnerPreparationPath, writeRecoveryOwnerFile, type RecoveryRuntimeProof } from '../services/systemRecoveryAllocationAuthority';
 
 const rejected = () => new Error('SYSTEM_RECOVERY_OWNER_ADMISSION_REJECTED');
 
@@ -37,6 +37,7 @@ async function main() {
     || !/^[a-f0-9]{64}$/.test(checkpoint.checksum || ''))) throw rejected();
 
   const advisoryApplicationName = 'sabalan-lock-' + deploymentId;
+  let restoreStarted = false;
   const assertBoundary = async () => {
     assertRuntimeControlOwnership();
     await assertProtectedRoleCheckpointBoundary({
@@ -44,7 +45,7 @@ async function main() {
       phase: restore ? 'MUTATION_STARTED' : 'SERVICES_DRAINED', checksum: checkpoint?.checksum,
     });
     const journal = await readRestoreJournal();
-    if (journal && (!restore || journal.operationId !== operationId)) throw rejected();
+    if (journal && (!restoreStarted || !restore || journal.operationId !== operationId)) throw rejected();
     const [database] = await prisma.$queryRaw<Array<{ admitted: boolean }>>`
       SELECT current_database() = ${scope.source} AND r.rolsuper AND r.rolcanlogin
         AND current_user = session_user AND d.datdba = r.oid
@@ -116,6 +117,13 @@ async function main() {
       if (!validation.compatibility.compatible || validation.manifest.packageType !== request.packageType) throw rejected();
       const runtimeBefore = JSON.parse(process.env.SYSTEM_RECOVERY_RUNTIME_BEFORE || 'null') as RecoveryRuntimeProof;
       const allocation = captureRecoveryAllocationAuthority(await readRecoveryAllocationAuthority(prisma), runtimeBefore);
+      const roles = await captureProtectedDatabaseRoles(process.env.DATABASE_URL!, scope.roles, async () => undefined);
+      await writeRecoveryOwnerFile(recoveryOwnerPreparationPath(deploymentId), {
+        format: 'sabalan-system-recovery-owner-preparation/v1', deploymentId, operationId,
+        leaseToken: process.env.DEPLOYMENT_LEASE_TOKEN, checksum: request.checksum, checkpointChecksum: checkpoint.checksum,
+        actorId: claim.actorId, sourcePath, sourceDatabase: scope.source, allocation, roles,
+      });
+      restoreStarted = true;
       const result = await stageAndPromoteRecovery({ operationId, sourcePath, passphrase,
         packageType: request.packageType, checksum: request.checksum!, actorId: claim.actorId,
         actorDisplay: claim.actorDisplay, authorizationMode: claim.authorization!.mode,
@@ -139,16 +147,19 @@ async function main() {
       if (!result.promoted) throw rejected();
       if (!result.verifyPromotedRoles) throw rejected();
       await result.verifyPromotedRoles();
+      // This standalone owner pool was terminated during the database rename.
+      // Reconnect the same client before journal finalization on the new DB.
+      await prisma.$disconnect();
+      await prisma.$connect();
+      await assertBoundary();
       await initializeSystemRecovery(prisma);
       if (await readRestoreJournal()) throw rejected();
       await assertBoundary();
       assertRecoveryAllocationContinuity(allocation, await readRecoveryAllocationAuthority(prisma), runtimeBefore);
-      const receipt = await fs.open(recoveryOwnerReceiptPath(deploymentId), 'wx', 0o400);
-      try {
-        await receipt.writeFile(JSON.stringify({ format: 'sabalan-system-recovery-owner-completion/v1', deploymentId,
-          operationId, ownerCompleted: true, allocation }) + '\n');
-        await receipt.sync();
-      } finally { await receipt.close(); }
+      await writeRecoveryOwnerFile(recoveryOwnerReceiptPath(deploymentId), {
+        format: 'sabalan-system-recovery-owner-completion/v1', deploymentId, operationId, ownerCompleted: true,
+        outcome: 'COMPLETED', allocation,
+      });
     } else await executeBackupRequest(prisma, {
       operationId, actorId: claim.actorId, packageType: claim.operation.packageType as 'COMPLETE' | 'SANITIZED_TEST', passphrase,
       protectedDatabaseRoles: claim.operation.packageType === 'COMPLETE' ? scope : undefined,

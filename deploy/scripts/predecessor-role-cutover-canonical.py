@@ -35,6 +35,7 @@ compose() { docker compose --project-name sabalanerp --env-file "$ENV_FILE" -f "
 env_value() { protected_env_value "$@"; }
 case "$1" in
   control) shift; protected_backend_run node dist/scripts/deployment-control.js "$@";;
+  gates) [ "$#" -eq 2 ]; DEPLOYMENT_GATE_MODE="$2" protected_backend_run node dist/scripts/deployment-gates.js;;
   renewal) protected_advisory_owned && protected_backend_run node dist/scripts/deployment-control.js heartbeat;;
   public-maintenance) protected_public_maintenance;;
   *) exit 64;;
@@ -143,6 +144,108 @@ def refresh_original_nginx(root, report_dir, coordination_dir, phase, proof, pla
     return receipt
 
 
+def acknowledge_role_gates(root, report_dir, coordination_dir, phase, proof, nginx, *,
+                           gates, verify_current, renewal, maintenance):
+    """Persist positive completion of the held gates, with public traffic still fenced."""
+    authority = host.context(root, report_dir, coordination_dir, phase)
+    session, checkpoint, binding = authority
+    state, mode, gate_count = ("RESTORED", "PREDECESSOR_ROLE_ROLLBACK", 16) if phase == "ROLLBACK_STARTED" else (
+        "APPLIED", "PREDECESSOR_ROLE_APPLIED", 19)
+    private, _ = host.transaction_paths(root, binding["deploymentId"])
+    role_raw = host.read_private(private.with_name("backend-runtime-" + state.lower() + "-proof.json"))[0]
+    nginx_raw = host.read_private(private.with_name("nginx-" + state.lower() + "-proof.json"))[0]
+    host.require(phase in ("MUTATION_STARTED", "ROLLBACK_STARTED")
+                 and role_raw == host.json_bytes(proof) and nginx_raw == host.json_bytes(nginx)
+                 and proof["state"] == state and proof["backendId"] == nginx["backendId"]
+                 and proof["deploymentId"] == nginx["deploymentId"] == binding["deploymentId"]
+                 and proof["checkpointSha256"] == nginx["checkpointSha256"] == binding["checkpointSha256"]
+                 and nginx["roleProofSha256"] == host.digest(role_raw)
+                 and proof["canOpenTraffic"] is False and nginx["canOpenTraffic"] is False)
+
+    def assert_current():
+        host.require(host.context(root, report_dir, coordination_dir, phase) == authority
+                     and renewal(session, checkpoint) is True and maintenance() is True
+                     and verify_current() is True)
+
+    assert_current()
+    raw, closure = gates(mode)
+    host.require(closure["outcome"] == "CLOSED" and closure["canOpenTraffic"] is False
+                 and closure["action"] == "deployment-gates" and closure["phase"] == phase
+                 and closure["deploymentId"] == binding["deploymentId"] and closure["checkpointSha256"] == binding["checkpointSha256"]
+                 and closure["childClosed"] is True and closure["stdoutClosed"] is True and closure["stderrClosed"] is True)
+    attempt = closure["attemptId"]
+    host.require(host.matches(r"[a-f0-9]{32}", attempt))
+    closure_path = private.with_name("native-" + attempt + "-result.json")
+    closure_raw = host.read_private(closure_path)[0]
+    host.require(closure_raw == host.json_bytes(closure))
+    result = json.loads(raw)
+    report_path = Path(result["reportPath"])
+    report_name = report_path.name
+    suffix = r"\.rollback" if state == "RESTORED" else ""
+    pattern = binding["deploymentId"] + suffix + r"(?:\.[0-9]+)?\.json"
+    host.require(set(result) == {"ok", "reportPath", "gates"} and result["ok"] is True
+                 and report_path.parent == Path("/app/deployment-reports") and host.matches(pattern, report_name))
+    report_raw = host.read_private(report_dir / report_name)[0]
+    report = json.loads(report_raw)
+    gates_rows = result["gates"]
+    checkpoint_gates = [gate for gate in gates_rows if gate["name"] == "checkpoint-manifest"]
+    host.require(report["format"] == "sabalan-deployment-report" and report["version"] == 1 and report["mode"] == mode
+                 and report["deploymentId"] == binding["deploymentId"] and report["releaseId"] == binding["releaseId"]
+                 and report["targetCommit"] == binding["targetCommit"] and report["gates"] == gates_rows
+                 and len(gates_rows) == gate_count and len({gate["name"] for gate in gates_rows}) == gate_count
+                 and all(gate["passed"] is True for gate in gates_rows) and len(checkpoint_gates) == 1)
+    verified = checkpoint_gates[0]["details"]
+    host.require(verified["checksum"] == binding["checkpointSha256"] and verified["releaseId"] == binding["releaseId"]
+                 and verified["remoteReadBack"] is True)
+    assert_current()
+    host.require(host.read_private(closure_path)[0] == closure_raw
+                 and host.read_private(report_dir / report_name)[0] == report_raw
+                 and host.read_private(private.with_name("backend-runtime-" + state.lower() + "-proof.json"))[0] == role_raw
+                 and host.read_private(private.with_name("nginx-" + state.lower() + "-proof.json"))[0] == nginx_raw)
+    acknowledgement = {"format": "sabalan-predecessor-role-gate-acknowledgement-v1", **binding,
+                       "state": state, "gateMode": mode, "gateCount": gate_count, "backendId": proof["backendId"],
+                       "nginxId": nginx["nginxId"], "roleProofSha256": host.digest(role_raw),
+                       "nginxProofSha256": host.digest(nginx_raw), "gateReport": report_name,
+                       "gateReportSha256": host.digest(report_raw),
+                       "nativeClosureSha256": host.digest(closure_raw), "canOpenTraffic": False}
+    host.write_private(private.with_name("role-gates-" + state.lower() + "-acknowledgement.json"),
+                       host.json_bytes(acknowledgement))
+    return acknowledgement
+
+
+def start_original_siblings(root, report_dir, coordination_dir, phase, proof, planned, *, inspect, renewal, maintenance):
+    session, checkpoint, binding = host.context(root, report_dir, coordination_dir, phase)
+    private, _ = host.transaction_paths(root, binding["deploymentId"])
+    original = json.loads(host.read_private(private.with_name("backend-runtime-preimage.json"))[0])
+    host.require(original["binding"] == binding and maintenance() is True and renewal(session, checkpoint) is True)
+
+    def inspect_original():
+        rows = host.container_state(inspect(), binding["rollbackReleaseSet"])
+        host.verify_runtime_graph(rows, original["containers"])
+        host.require(rows["backend"]["Id"] == proof["backendId"])
+        return rows
+
+    names = ("frontend", "inquiry")
+    rows = inspect_original()
+    host.require(all(rows[name]["Id"] == planned[name] for name in names))
+    stopped = [planned[name] for name in names if rows[name]["State"]["Running"] is not True]
+    if stopped:
+        state = "restored" if phase == "ROLLBACK_STARTED" else "applied"
+        intent = private.with_name("start-original-siblings-" + state + "-intent.json")
+        host.require(not os.path.lexists(intent))
+        host.write_private(intent, host.json_bytes({**binding, "containerIds": stopped, "backendId": proof["backendId"]}))
+        native.run_native_child(root, report_dir, coordination_dir, phase, "start-original-siblings",
+                                (*DOCKER, "start", *stopped), renewal=renewal)
+    deadline = time.monotonic() + 90
+    while time.monotonic() < deadline:
+        host.require(renewal(session, checkpoint) is True and maintenance() is True)
+        rows = inspect_original()
+        if all(rows[name]["State"]["Running"] is True and rows[name]["State"]["Health"]["Status"] == "healthy" for name in names):
+            return
+        time.sleep(1)
+    host.require(False)
+
+
 def run_canonical_foreground(root, env, report_dir, coordination_dir, preflight, credential_fd):
     """Run the already-owned configuration continuation through native transports."""
     session, checkpoint, binding = owner_context(root, env, report_dir, coordination_dir)
@@ -227,6 +330,9 @@ def run_canonical_foreground(root, env, report_dir, coordination_dir, preflight,
         control_argv=lambda command, args: canonical_shell(env, compose, "control", command, *args),
     )
 
+    start_original_siblings(root, report_dir, coordination_dir, phase, proof, preflight["containers"],
+                            inspect=inspect, renewal=renew, maintenance=maintenance)
+
     def restart(identifier):
         native.run_native_child(root, report_dir, coordination_dir, phase, "refresh-nginx",
                                 (*DOCKER, "restart", "--time", "30", identifier), renewal=renew)
@@ -245,4 +351,26 @@ def run_canonical_foreground(root, env, report_dir, coordination_dir, preflight,
     nginx = refresh_original_nginx(root, report_dir, coordination_dir, phase, proof, preflight["containers"]["nginx"],
                                    inspect=inspect, renewal=renew, maintenance=maintenance, restart=restart,
                                    wait_for_healthy=wait_for_health)
-    return {"runtimeProof": proof, "nginxProof": nginx, "canOpenTraffic": False}
+    original = json.loads(host.read_private(private.with_name("backend-runtime-preimage.json"))[0])
+    host.require(original["binding"] == binding)
+    final_rows = host.container_state(inspect(), graph)
+    host.verify_runtime_graph(final_rows, original["containers"])
+    host.require(final_rows["backend"]["Id"] == proof["backendId"]
+                 and [row["IPAddress"] for row in final_rows["backend"]["NetworkSettings"]["Networks"].values()] == [proof["backendAddress"]])
+    final_backend = host.backend_observation(final_rows)
+
+    def prove_current_graph():
+        rows = host.container_state(inspect(), graph)
+        return (host.backend_observation(rows) == final_backend
+                and rows["nginx"]["Id"] == nginx["nginxId"]
+                and rows["nginx"]["State"]["StartedAt"] == nginx["refreshedStartedAt"]
+                and rows["nginx"]["State"]["Health"]["Status"] == "healthy")
+
+    def gates(mode):
+        return native.run_native_child(root, report_dir, coordination_dir, phase, "deployment-gates",
+                                       canonical_shell(env, compose, "gates", mode), renewal=renew, budget_seconds=600)
+
+    gate_proof = acknowledge_role_gates(root, report_dir, coordination_dir, phase, proof, nginx,
+                                        gates=gates, verify_current=prove_current_graph, renewal=renew,
+                                        maintenance=maintenance)
+    return {"runtimeProof": proof, "nginxProof": nginx, "gateAcknowledgement": gate_proof, "canOpenTraffic": False}

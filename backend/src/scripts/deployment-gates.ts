@@ -3,8 +3,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { disconnectDatabase, prisma } from '../lib/prisma';
-import { assertMandatoryDeploymentGates, connectionUtilizationDecision, runMandatoryDeploymentGates } from '../services/deploymentGates';
+import { assertMandatoryDeploymentGates, completePredecessorRoleGateReport, connectionUtilizationDecision,
+  predecessorRoleGateModes, predecessorRoleGatePhase, runMandatoryDeploymentGates } from '../services/deploymentGates';
 import { assertRemoteCheckpointFingerprint } from '../services/deploymentCheckpointStorage';
+import { readDeploymentMaintenance } from '../services/deploymentMaintenance';
 import { RECOVERY_COORDINATION_DIR } from '../services/recoveryRuntime';
 import { sha256File } from '../services/recoveryCrypto';
 import { validateLiveStoredFileReferences } from '../services/systemRecoveryEngine';
@@ -16,7 +18,8 @@ const execFileAsync = promisify(execFile);
 const deploymentId = String(process.env.DEPLOYMENT_ID || '').trim();
 const reportRoot = process.env.DEPLOYMENT_REPORT_DIR || '/app/deployment-reports';
 const gateMode = process.env.DEPLOYMENT_GATE_MODE || 'RELEASE';
-const rollbackMode = gateMode === 'ROLLBACK';
+const rolePhase = predecessorRoleGatePhase(gateMode);
+const rollbackMode = gateMode === 'ROLLBACK' || gateMode === predecessorRoleGateModes.rollback;
 const previousUnchangedMode = gateMode === 'PREVIOUS_UNCHANGED';
 const releaseMode = !rollbackMode && !previousUnchangedMode;
 
@@ -57,9 +60,45 @@ const performanceExportStorageGate = async () => {
   }
 };
 
+const assertRoleGateBoundary = async () => {
+  const token = process.env.DEPLOYMENT_LEASE_TOKEN;
+  const releaseId = process.env.DEPLOYMENT_RELEASE_ID;
+  const commit = process.env.DEPLOYMENT_TARGET_COMMIT;
+  const session = JSON.parse(await fs.promises.readFile(path.join(reportRoot, 'active-deployment-session.json'), 'utf8'));
+  const maintenance = await readDeploymentMaintenance(RECOVERY_COORDINATION_DIR);
+  if (!rolePhase || process.env.BACKEND_RUNTIME_ROLE !== 'control' || process.env.DEPLOYMENT_MODE !== 'configuration'
+    || !token || session.purpose !== 'predecessor-role-cutover' || session.phase !== rolePhase
+    || session.deploymentId !== deploymentId || session.leaseToken !== token || session.releaseId !== releaseId
+    || session.targetCommit !== commit || maintenance?.deploymentId !== deploymentId || maintenance?.releaseId !== releaseId) {
+    throw new Error('The role cutover gate requires its owned maintenance boundary.');
+  }
+  const active = await prisma.deploymentOperation.findUnique({ where: { activeKey: 'production' } });
+  const checkpoint = active?.checkpointJson as { checksum?: string; releaseId?: string; localVerified?: boolean; remoteVerified?: boolean } | null;
+  const report = active?.reportJson as { state?: string; loginVerifierSha256?: string } | null;
+  const applied = gateMode === predecessorRoleGateModes.applied;
+  if (!active || active.id !== deploymentId || active.releaseId !== releaseId || active.targetCommit !== commit
+    || active.owner !== session.owner || active.phase !== rolePhase || active.leaseToken !== token || active.leaseExpiresAt.getTime() <= Date.now()
+    || checkpoint?.releaseId !== releaseId || !/^[a-f0-9]{64}$/.test(checkpoint?.checksum || '')
+    || checkpoint?.localVerified !== true || checkpoint?.remoteVerified !== true
+    || (applied ? report?.state !== 'staged' || !/^[a-f0-9]{64}$/.test(report.loginVerifierSha256 || '')
+      : report?.state !== 'restored' || report.loginVerifierSha256 !== undefined)) {
+    throw new Error('The role cutover gate requires its exact checkpoint and credential state.');
+  }
+  return { checksum: checkpoint!.checksum!, releaseId: releaseId! };
+};
+
 const main = async () => {
   if (!deploymentId) throw Object.assign(new Error('DEPLOYMENT_ID is required.'), { code: 'DEPLOYMENT_CONFIGURATION_MISSING' });
   if (process.env.DEPLOYMENT_ONLINE_GATE_CONTEXT) throw new Error('ONLINE_GATE_RETIRED');
+  const activeSession = await fs.promises.readFile(path.join(reportRoot, 'active-deployment-session.json'), 'utf8')
+    .then(raw => JSON.parse(raw), error => {
+      if (error?.code === 'ENOENT') return null;
+      throw error;
+    });
+  if (activeSession?.purpose === 'predecessor-role-cutover' && !rolePhase) {
+    throw new Error('Ordinary gates cannot replace the owned predecessor role receipt.');
+  }
+  const roleCheckpoint = rolePhase ? await assertRoleGateBoundary() : null;
   const inquiryDatabase = process.env.INQUIRY_RECOVERY_SOURCE_DIR
     ? path.join(process.env.INQUIRY_RECOVERY_SOURCE_DIR, 'inquiry.db')
     : '/app/recovery-sources/inquiry/inquiry.db';
@@ -185,8 +224,14 @@ const main = async () => {
   const serialized = `${JSON.stringify(report, null, 2)}\n`;
   await fs.promises.writeFile(reportPath, serialized, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
   await fs.promises.writeFile(coordinationPath, serialized, { encoding: 'utf8', mode: 0o600 });
-  if (releaseMode) await prisma.deploymentOperation.update({ where: { id: deploymentId }, data: { reportJson: report as any } });
+  if (releaseMode && !rolePhase) await prisma.deploymentOperation.update({ where: { id: deploymentId }, data: { reportJson: report as any } });
   assertMandatoryDeploymentGates(gates);
+  if (roleCheckpoint) {
+    const current = await assertRoleGateBoundary();
+    if (current.checksum !== roleCheckpoint.checksum || !completePredecessorRoleGateReport(report, roleCheckpoint)) {
+      throw new Error('The owned role cutover gate report is incomplete.');
+    }
+  }
   console.log(JSON.stringify({ ok: true, reportPath, gates }));
 };
 

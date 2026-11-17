@@ -26,6 +26,30 @@ export function completeReleaseDeploymentGateReport(report: unknown) {
     && mandatoryReleaseDeploymentGateNames.every(name => gates.some(gate => gate!.name === name));
 }
 
+export const predecessorRoleGateModes = {
+  applied: 'PREDECESSOR_ROLE_APPLIED',
+  rollback: 'PREDECESSOR_ROLE_ROLLBACK',
+} as const;
+
+export const predecessorRoleGatePhase = (mode: string) =>
+  mode === predecessorRoleGateModes.applied ? 'MUTATION_STARTED'
+    : mode === predecessorRoleGateModes.rollback ? 'ROLLBACK_STARTED' : null;
+
+export function completePredecessorRoleGateReport(report: unknown, checkpoint: { checksum: string; releaseId: string }) {
+  if (!report || typeof report !== 'object' || Array.isArray(report)) return false;
+  const value = report as Record<string, any>;
+  if (!predecessorRoleGatePhase(value.mode) || value.format !== 'sabalan-deployment-report' || value.version !== 1
+    || value.releaseId !== checkpoint.releaseId || !Array.isArray(value.gates)) return false;
+  const excluded = new Set(['migration-history', 'shipment-statement-runtime-state', 'contract-financial-evidence']);
+  const required = value.mode === predecessorRoleGateModes.applied
+    ? mandatoryReleaseDeploymentGateNames : mandatoryReleaseDeploymentGateNames.filter(name => !excluded.has(name));
+  if (value.gates.length !== required.length || !required.every(name =>
+    value.gates.filter((gate: any) => gate?.name === name && gate?.passed === true).length === 1)) return false;
+  const verification = value.gates.find((gate: any) => gate.name === 'checkpoint-manifest').details;
+  return verification?.checksum === checkpoint.checksum && verification?.releaseId === checkpoint.releaseId
+    && verification?.remoteReadBack === true;
+}
+
 /** Earlier qualification gates allow private readiness startup only. They do
  * not assert that the later protected deployment passed its production gates. */
 export function completeProtectedPrivateQualificationPrerequisite(value:unknown,expected:{releaseId:string;manifestSha256:string;qualificationCheckpointSha256:string;qualificationReports:Record<string,string>}){

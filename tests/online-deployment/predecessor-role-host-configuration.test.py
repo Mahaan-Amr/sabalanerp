@@ -566,6 +566,66 @@ class HostConfigurationTest(unittest.TestCase):
         self.assertEqual(receipt["outcome"], "HELD")
         self.assertFalse(receipt["canOpenTraffic"])
 
+    def test_gate_acknowledgement_requires_current_runtime_proxy_and_owned_native_report(self):
+        with self.owner():
+            for phase, state, mode, count in (
+                ("MUTATION_STARTED", "APPLIED", "PREDECESSOR_ROLE_APPLIED", 19),
+                ("ROLLBACK_STARTED", "RESTORED", "PREDECESSOR_ROLE_ROLLBACK", 16),
+            ):
+                with self.subTest(phase=phase):
+                    self.write_phase(phase)
+                    identity = {"deploymentId": self.session["deploymentId"], "checkpointSha256": self.checkpoint["checksum"],
+                                "backendId": "a" * 64, "canOpenTraffic": False}
+                    proof = {**identity, "state": state}
+                    _, _, binding = canonical.host.context(self.root, self.root / "reports", self.root / "coordination", phase)
+                    private, _ = canonical.host.transaction_paths(self.root, binding["deploymentId"])
+                    role_raw = canonical.host.json_bytes(proof)
+                    private_write(private.with_name("backend-runtime-" + state.lower() + "-proof.json"), role_raw)
+                    nginx = {**identity, "nginxId": "e" * 64, "roleProofSha256": canonical.host.digest(role_raw)}
+                    private_write(private.with_name("nginx-" + state.lower() + "-proof.json"), canonical.host.json_bytes(nginx))
+                    gate_rows = [{"name": "gate-" + str(i), "passed": True} for i in range(count - 1)]
+                    gate_rows.append({"name": "checkpoint-manifest", "passed": True,
+                                      "details": {"checksum": self.checkpoint["checksum"], "remoteReadBack": True,
+                                                  "releaseId": self.session["releaseId"]}})
+                    report = {"format": "sabalan-deployment-report", "version": 1, "mode": mode,
+                              "deploymentId": self.session["deploymentId"], "releaseId": self.session["releaseId"],
+                              "targetCommit": self.session["targetCommit"], "gates": gate_rows}
+                    name = self.session["deploymentId"] + (".rollback" if state == "RESTORED" else "") + ".json"
+                    report_file = self.root / "reports" / name
+                    report_raw = canonical.host.json_bytes(report)
+                    private_write(report_file, report_raw)
+                    closure = {"format": "sabalan-predecessor-role-native-result/v1", **identity,
+                               "outcome": "CLOSED", "action": "deployment-gates", "phase": phase,
+                               "attemptId": ("1" if state == "APPLIED" else "2") * 32,
+                               "childClosed": True, "stdoutClosed": True, "stderrClosed": True}
+                    closure_file = private.with_name("native-" + closure["attemptId"] + "-result.json")
+                    private_write(closure_file, canonical.host.json_bytes(closure))
+
+                    def gates(selected):
+                        self.assertEqual(selected, mode)
+                        return json.dumps({"ok": True, "reportPath": "/app/deployment-reports/" + name,
+                                           "gates": gate_rows}).encode(), closure
+
+                    def acknowledge(verify_current):
+                        return canonical.acknowledge_role_gates(
+                            self.root, self.root / "reports", self.root / "coordination", phase, proof, nginx,
+                            gates=gates, verify_current=verify_current, renewal=lambda session, point: True,
+                            maintenance=lambda: True,
+                        )
+
+                    with self.assertRaises(canonical.host.RoleHostConfigurationError):
+                        acknowledge(lambda: False)
+                    report["targetCommit"] = "2" * 40
+                    private_write(report_file, canonical.host.json_bytes(report))
+                    with self.assertRaises(canonical.host.RoleHostConfigurationError):
+                        acknowledge(lambda: True)
+                    private_write(report_file, report_raw)
+                    ack = acknowledge(lambda: True)
+                    self.assertEqual(ack["gateMode"], mode)
+                    self.assertEqual(ack["gateCount"], count)
+                    self.assertFalse(ack["canOpenTraffic"])
+                    self.assertEqual(ack["gateReportSha256"], hashlib.sha256(report_raw).hexdigest())
+
     def test_restore_if_receipt_publication_fails_after_env_replacement(self):
         receipt = self.root / ".deploy-state" / ("predecessor-role-host-" + self.session["deploymentId"]) / "receipt.json"
         receipt.parent.mkdir(mode=0o700)

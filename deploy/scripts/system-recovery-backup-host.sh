@@ -61,6 +61,21 @@ verify_system_recovery_reopened_configuration() {
   verify_predecessor_database_roles
 }
 
+capture_system_recovery_runtime_after() {
+  # mktemp exclusively creates a mode-0600 file beside the root-owned session.
+  # Keep the phase-owning monitor in this shell; only the readback may use a
+  # command substitution. A failed capture stays private for incident review.
+  runtime_proof_file="$(mktemp "${SESSION_HOST_PATH}.runtime-proof.XXXXXX")" || return 1
+  exec 6>"${runtime_proof_file}" || return 1
+  runtime_proof_status=0
+  run_system_recovery_postowner compose exec -T backend node dist/scripts/system-recovery-runtime-proof.js >&6 || runtime_proof_status=$?
+  exec 6>&-
+  [ "${runtime_proof_status}" -eq 0 ] || return "${runtime_proof_status}"
+  SYSTEM_RECOVERY_RUNTIME_AFTER="$(cat "${runtime_proof_file}")" || return 1
+  rm -- "${runtime_proof_file}" || return 1
+  export SYSTEM_RECOVERY_RUNTIME_AFTER
+}
+
 system_recovery_backup_failure() {
   backup_status="$1"
   trap - EXIT
@@ -299,8 +314,7 @@ run_system_recovery_backup() {
     "${backup_snapshot}" "${ENV_FILE}" "${REPO_ROOT}/${COMPOSE_FILE}" 300 "${reopen_budget_started}" "${SESSION_HOST_PATH}"
   run_system_recovery_postowner verify_system_recovery_reopened_configuration
   if [ "${SYSTEM_RECOVERY_OWNER_ACTION:-BACKUP}" = RESTORE ]; then
-    SYSTEM_RECOVERY_RUNTIME_AFTER="$(run_system_recovery_postowner compose exec -T backend node dist/scripts/system-recovery-runtime-proof.js)"
-    export SYSTEM_RECOVERY_RUNTIME_AFTER
+    capture_system_recovery_runtime_after
     SYSTEM_RECOVERY_GATES_CONTAINER="sabalanerp-recovery-gates-${DEPLOYMENT_ID}"
     export SYSTEM_RECOVERY_GATES_CONTAINER
     DEPLOYMENT_GATE_MODE=APPLICATION_RECOVERY run_system_recovery_postowner run_backend node dist/scripts/deployment-gates.js

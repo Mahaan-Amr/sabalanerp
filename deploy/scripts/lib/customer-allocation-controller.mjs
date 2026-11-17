@@ -1,12 +1,14 @@
 import { createHash } from 'node:crypto';
 import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
+import { assertProductionDatabaseRoleConfiguration } from '../../../scripts/production-database-role-boundary.mjs';
 import { verifyCustomerAllocationGoManifest } from './customer-allocation-go-manifest.mjs';
 
 const reject = () => { throw new Error('CUSTOMER_ALLOCATION_CONTROLLER_REJECTED'); };
 
 /** Use the controller client and a connection from the configured backend runtime. */
-export function customerAllocationControllerDatabase(client, runtimeClient) {
+export function customerAllocationControllerDatabase(client, runtimeClient, roleConfiguration) {
+  assertProductionDatabaseRoleConfiguration(roleConfiguration ?? {});
   return { transaction: async work => {
     if (!runtimeClient || runtimeClient === client) reject();
     const runtime = await runtimeClient.query(`

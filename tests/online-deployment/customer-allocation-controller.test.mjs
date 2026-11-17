@@ -54,6 +54,13 @@ const input = (db, signed = envelope(payload())) => {
     approver: { keyId: 'independent-approver-1', publicKey } };
 };
 const runtime = { query: async () => ({ rows: [{ pid: 42 }] }) };
+const databaseUrl = role => `postgresql://${role}:test-secret@postgres:5432/sabalanerp?schema=public&connection_limit=1&pool_timeout=10`;
+const roles = {
+  runtimeUrl: databaseUrl('sabalan_application_runtime'),
+  controlUrl: databaseUrl('bootstrap'),
+  allocationControllerUrl: databaseUrl('sabalan_allocation_controller'),
+  bootstrapUser: 'bootstrap',
+};
 
 custodyTest('a signed exact GO changes control once under the locked deployment operation', async () => {
   const db = authority();
@@ -75,7 +82,7 @@ custodyTest('database adapter retains the lock and writes the receipt in one tra
     if (sql.includes('controller_activate')) return { rows: [{ state: 'ACTIVE', manifest_sha256: values[3] }] };
     return { rows: [] };
   } };
-  const result = await activateCustomerAllocation(input(customerAllocationControllerDatabase(client, runtime)));
+  const result = await activateCustomerAllocation(input(customerAllocationControllerDatabase(client, runtime, roles)));
   assert.equal(result.state, 'ACTIVE');
   assert.deepEqual(calls.map(call => call.sql.trimStart().startsWith('SELECT') ? 'SELECT' : call.sql),
     ['BEGIN', 'SELECT', 'SELECT', 'SELECT', 'COMMIT']);
@@ -93,7 +100,7 @@ custodyTest('database adapter retains the lock and writes the receipt in one tra
     }
     return query(sql, values);
   };
-  await assert.rejects(activateCustomerAllocation(input(customerAllocationControllerDatabase(client, runtime))));
+  await assert.rejects(activateCustomerAllocation(input(customerAllocationControllerDatabase(client, runtime, roles))));
   assert.equal(calls.at(-1).sql, 'ROLLBACK');
 });
 
@@ -107,7 +114,7 @@ custodyTest('database adapter rejects an unqualified controller or runtime befor
           admitted_controller_session: controller, admitted_runtime_session: application,
         }] : [] };
       },
-    }, runtime);
+    }, runtime, roles);
     await assert.rejects(activateCustomerAllocation(input(db)), /CUSTOMER_ALLOCATION_CONTROLLER_REJECTED/);
     assert.equal(calls.at(-1), 'ROLLBACK');
     assert.ok(calls.every(sql => !sql.includes('controller_lock')));
@@ -129,7 +136,7 @@ test('closure passes the exact activation digest and rolls back a mismatched rec
       }
       return { rows: [] };
     },
-  }, runtime);
+  }, runtime, roles);
   const [deploymentId, leaseToken, releaseId, manifestSha256] = values;
   await assert.rejects(closeCustomerAllocation({ db, deploymentId, leaseToken, releaseId, manifestSha256 }));
   assert.equal(calls.at(-1), 'ROLLBACK');

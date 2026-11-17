@@ -31,3 +31,7 @@ The migration-history health gate defaults to proving the control is closed. For
 ## Evidence custody
 
 The Linux allocation controller reads `decision.json`, `cohort.json`, `reader.json`, `populated-qa.json` and `rollback.json` from one canonical directory accessible only to the controller's host user. It checks ownership, file type, link count, access mode and file identity across each read. The controller computes SHA-256 from the evidence files and compares the digests to the signed decision. Candidate and predecessor image identities still come from the protected runner's installed-image inspection. The approver key is pinned separately. The evidence hash binds the reviewed bytes to the decision, while qualification of the actual evidence is the independent approver's responsibility.
+
+## Isolated credential configuration
+
+The qualification overlay `docker-compose.database-role-split.yml` renders a separate bounded URL for the backend and for the protected deployment service. The allocation controller credential is supplied only to its dedicated process. Its database adapter requires all three URLs to target the same database with separate login names and rejects a runtime or allocation-controller login that uses the bootstrap identity. Render checks verify that the backend receives no privileged credential and neither service receives the allocation controller credential. The production runner has yet to adopt the overlay with checkpoint-bound environment custody and role-aware restore.

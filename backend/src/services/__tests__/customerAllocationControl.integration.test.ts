@@ -169,18 +169,31 @@ test('dedicated PostgreSQL logins enforce allocation authority on real connectio
           ${closureId}, ${closureToken}, ${rollbackRelease}, ${'b'.repeat(64)})
       `;
       assert.equal(closed.state, 'CLOSED');
+      const recoveryBackend = process.env.ACCOUNTING_ALLOCATION_TEST_RECOVERY_BACKEND;
+      let recoveryWorkspace = workspace;
+      let recoveryClient = runtime;
+      if (recoveryBackend) {
+        const recoveryRequire = createRequire(path.resolve(recoveryBackend, 'package.json'));
+        const { PrismaClient: RecoveryClient } = recoveryRequire('@prisma/client') as typeof import('@prisma/client');
+        const url = new URL(temporary.databaseUrl);
+        url.username = roles[0];
+        url.password = passwords[0];
+        recoveryClient = new RecoveryClient({ datasources: { db: { url: url.href } } });
+        clients.push(recoveryClient);
+        recoveryWorkspace = recoveryRequire('./dist/services/accountingCustomerWorkspace.js') as typeof workspace;
+      }
       assert.equal(await admitted(), false);
-      assert.deepEqual(await workspace.readCustomerAllocationCommandStatus(runtime, customer, command), {
+      assert.deepEqual(await recoveryWorkspace.readCustomerAllocationCommandStatus(recoveryClient, customer, command), {
         status: 'COMMITTED', result: posted,
       });
-      await assert.rejects(workspace.recordCustomerWorkspaceTreasury(runtime, customer, {
+      await assert.rejects(recoveryWorkspace.recordCustomerWorkspaceTreasury(recoveryClient, customer, {
         ...command, idempotencyKey: randomUUID(),
       }), { code: 'CUSTOMER_SOURCE_SHARES_CLOSED' });
       const creditShare = await admin.accountingSettlementAllocation.findFirstOrThrow({ where: { creditItemId: credit.id } });
       const reversal = { ...f.common, kind: 'REVERSE_ALLOCATION' as const, allocationId: creditShare.id,
         amountRials: 0n, allocations: [], idempotencyKey: randomUUID() };
-      const reversed = await workspace.recordCustomerWorkspaceTreasury(runtime, customer, reversal);
-      assert.deepEqual(await workspace.recordCustomerWorkspaceTreasury(runtime, customer, reversal), reversed);
+      const reversed = await recoveryWorkspace.recordCustomerWorkspaceTreasury(recoveryClient, customer, reversal);
+      assert.deepEqual(await recoveryWorkspace.recordCustomerWorkspaceTreasury(recoveryClient, customer, reversal), reversed);
       assert.equal(await admin.accountingSettlementAllocation.count(), 3);
       const corrected = await read();
       assert.equal(corrected.debitOpenRials, 1n);

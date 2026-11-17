@@ -38,6 +38,12 @@ test('predecessor renders restricted backend and privileged control without chan
   assert.ok(!JSON.stringify(backend.environment).includes(env.POSTGRES_PASSWORD));
   assert.equal(backend.depends_on.clamav.condition, 'service_healthy');
   assert.ok(clamav);
+  const publicKey = backend.volumes.filter(mount => mount.target === '/run/deployment-secrets/system-recovery-owner-public.pem');
+  assert.equal(publicKey.length, 1);
+  assert.equal(publicKey[0].read_only, true);
+  assert.equal(backend.environment.SYSTEM_RECOVERY_OWNER_PUBLIC_KEY_FILE, publicKey[0].target);
+  assert.ok(!JSON.stringify(backend).includes('system-recovery-owner-private'));
+  assert.ok(!backend.volumes.some(mount => mount.target === '/run/deployment-secrets'));
 });
 
 test('split and unsplit credentials cannot be substituted during protected rollout', () => {

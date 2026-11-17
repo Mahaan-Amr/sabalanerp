@@ -43,7 +43,7 @@ system_recovery_backup_failure() {
 system_recovery_checkpoint_rollback() {
   ROLLBACK_ALREADY_ATTEMPTED=1
   control maintenance-on && verify_public_maintenance && assert_system_recovery_advisory && control heartbeat || return 1
-  verify_database_role_pin && drain_release_for_rollback && assert_native_runtime_closed || return 1
+  verify_predecessor_database_roles && drain_release_for_rollback && assert_native_runtime_closed || return 1
   # The original child has been reaped. Resolve only its bound journal under
   # this same owner before the single canonical verified-checkpoint rollback.
   run_original_owned_with_heartbeat run_backend sh scripts/with-backend-control-ownership.sh \

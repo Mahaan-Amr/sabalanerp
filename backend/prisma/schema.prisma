@@ -3863,7 +3863,7 @@ model DispatchOtpChallenge {
   id             String                      @id @default(cuid())
   sessionId      String
   digest         String
-  code           String?                     // Exact SMS code; older challenges only have a digest.
+  code           String? @ignore             // Retained for migration compatibility. OTP custody is digest-only.
   expiresAt      DateTime
   resendAfter    DateTime
   incorrectCount Int                         @default(0)

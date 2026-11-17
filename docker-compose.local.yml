@@ -81,8 +81,9 @@ services:
       - path: ./apps/biometric-connector-windows/backend-default.env
       - path: ./apps/biometric-connector-windows/.local/backend.env
         required: false
-    stop_grace_period: 30s
-    command: ["sh", "-c", "node dist/scripts/recovery-database-preflight.js && npx prisma migrate deploy && node dist/index.js"]
+    # Allow the four-minute application drain and time for its owner's final database checks.
+    stop_grace_period: 5m
+    command: ["sh", "scripts/with-backend-control-ownership.sh", "sh", "-c", "node dist/scripts/recovery-database-preflight.js && npx prisma migrate deploy && exec node dist/index.js"]
     environment:
       NODE_ENV: development
       PORT: 5000

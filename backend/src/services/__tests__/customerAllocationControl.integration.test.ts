@@ -211,6 +211,17 @@ test('dedicated PostgreSQL logins enforce allocation authority on real connectio
       const corrected = await read();
       assert.equal(corrected.debitOpenRials, 1n);
       assert.equal(corrected.standaloneCreditRials, 1n);
+      const receiptShare = await admin.accountingSettlementAllocation.findFirstOrThrow({
+        where: { treasuryTransactionId: receipt.id, reversesId: null },
+      });
+      const receiptReversal = { ...reversal, allocationId: receiptShare.id, idempotencyKey: randomUUID() };
+      const receiptReversed = await recoveryWorkspace.recordCustomerWorkspaceTreasury(recoveryClient, customer, receiptReversal);
+      assert.deepEqual(await recoveryWorkspace.recordCustomerWorkspaceTreasury(recoveryClient, customer, receiptReversal), receiptReversed);
+      await assert.rejects(recoveryWorkspace.recordCustomerWorkspaceTreasury(recoveryClient, customer, {
+        ...receiptReversal, reference: 'different correction evidence',
+      }), { code: 'ALLOCATION_REVERSAL_CONFLICT' });
+      assert.equal(await admin.accountingSettlementAllocation.count({ where: { reversesId: receiptShare.id } }), 1);
+      assert.equal((await read()).debitOpenRials, 3n);
     } finally {
       if (previousRelease === undefined) delete process.env.DEPLOYMENT_RELEASE_ID;
       else process.env.DEPLOYMENT_RELEASE_ID = previousRelease;

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { cpSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 import { PrismaClient } from '@prisma/client';
 import { requireCustomerSourceSharesWithin } from '../customerSemanticCompatibility';
@@ -146,6 +147,18 @@ test('dedicated PostgreSQL logins enforce allocation authority on real connectio
       symlinkSync(path.resolve('../packages'), path.join(imageFixture, 'packages'), 'junction');
       writeFileSync(path.join(backend, '.allocation-build-commit'), `${commit}\n`, { flag: 'wx' });
       process.env.DEPLOYMENT_RELEASE_ID = release;
+      const runtimeUrl = new URL(temporary.databaseUrl);
+      runtimeUrl.username = roles[0];
+      runtimeUrl.password = passwords[0];
+      const acceptance = spawnSync(process.execPath, ['node_modules/tsx/dist/cli.mjs', 'src/services/__tests__/customerAllocationHttpRaces.ts'], {
+        env: { ...process.env, DATABASE_URL: runtimeUrl.href, ALLOCATION_HTTP_ADMIN_DATABASE_URL: temporary.databaseUrl,
+          ALLOCATION_HTTP_BUILD: backend, ALLOCATION_HTTP_FIXTURE: JSON.stringify({
+            actor: f.actor, common: f.common, financial: { id: f.financial.id }, bank: { id: f.bank.id },
+          }) },
+        stdio: 'inherit', timeout: 75_000,
+      });
+      if (acceptance.error) throw acceptance.error;
+      assert.equal(acceptance.status, 0, 'guarded HTTP acceptance');
       const load = createRequire(__filename);
       const workspace = load(path.join(backend, 'dist/services/accountingCustomerWorkspace.js')) as typeof import('../accountingCustomerWorkspace');
       const intents = load(path.join(backend, 'dist/services/accountingCustomerAllocationIntent.js')) as typeof import('../accountingCustomerAllocationIntent');
@@ -153,7 +166,7 @@ test('dedicated PostgreSQL logins enforce allocation authority on real connectio
       const posted = await workspace.recordCustomerWorkspaceTreasury(runtime, customer, command);
       assert.equal((await read()).debitOpenRials, 0n);
       assert.equal((await read()).standaloneCreditRials, 0n);
-      assert.equal(await admin.accountingSettlementAllocation.count(), 2);
+      assert.equal(await admin.accountingSettlementAllocation.count({ where: { parentCommandKey: command.idempotencyKey } }), 2);
       const closureId = randomUUID();
       const closureToken = randomUUID();
       const rollbackRelease = 'direct-login-rollback';
@@ -194,7 +207,7 @@ test('dedicated PostgreSQL logins enforce allocation authority on real connectio
         amountRials: 0n, allocations: [], idempotencyKey: randomUUID() };
       const reversed = await recoveryWorkspace.recordCustomerWorkspaceTreasury(recoveryClient, customer, reversal);
       assert.deepEqual(await recoveryWorkspace.recordCustomerWorkspaceTreasury(recoveryClient, customer, reversal), reversed);
-      assert.equal(await admin.accountingSettlementAllocation.count(), 3);
+      assert.equal(await admin.accountingSettlementAllocation.count({ where: { creditItemId: credit.id } }), 2);
       const corrected = await read();
       assert.equal(corrected.debitOpenRials, 1n);
       assert.equal(corrected.standaloneCreditRials, 1n);

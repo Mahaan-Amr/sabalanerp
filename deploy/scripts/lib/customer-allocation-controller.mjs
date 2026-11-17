@@ -59,7 +59,10 @@ export function customerAllocationControllerDatabase(client, runtimeClient) {
             AND NOT EXISTS (
               SELECT 1 FROM pg_catalog.pg_proc AS p
               WHERE p.pronamespace = 'public'::pg_catalog.regnamespace
-                AND p.prosecdef AND (p.proowner = r.oid OR pg_catalog.has_function_privilege(r.oid, p.oid, 'EXECUTE'))
+                AND p.prosecdef AND (p.proowner = r.oid OR (
+                  pg_catalog.has_function_privilege(r.oid, p.oid, 'EXECUTE')
+                  AND p.oid IS DISTINCT FROM pg_catalog.to_regprocedure('public.customer_allocation_runtime_admitted(text,text)')
+                ))
             )
         ) AS admitted_runtime_session
       `, [runtimePid]);

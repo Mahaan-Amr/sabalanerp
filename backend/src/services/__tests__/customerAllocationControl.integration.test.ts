@@ -83,6 +83,15 @@ test('controller session authorization can activate once under a live locked dep
     });
     const audit = await db.$queryRaw<Array<{ event: string }>>`SELECT event FROM public.customer_allocation_release_audit`;
     assert.deepEqual(audit.map(row => row.event), ['ACTIVATED']);
+    const runtimeAdmission = (commit: string, release: string) => db.$transaction(async tx => {
+      await tx.$executeRawUnsafe('SET SESSION AUTHORIZATION sabalan_application_runtime');
+      const [row] = await tx.$queryRaw<Array<{ admitted: boolean }>>`
+        SELECT public.customer_allocation_runtime_admitted(${commit}, ${release}) AS admitted
+      `;
+      await tx.$executeRawUnsafe('RESET SESSION AUTHORIZATION');
+      return row.admitted;
+    });
+    assert.equal(await runtimeAdmission('a'.repeat(40), 'release-456'), false, 'activation is not serving authority before traffic opens');
     await assert.rejects(db.$transaction(async tx => {
       await tx.$executeRawUnsafe('SET SESSION AUTHORIZATION sabalan_allocation_controller');
       await tx.$queryRawUnsafe('SELECT * FROM public.customer_allocation_controller_activate($1, $2, $3, $4, $5)',
@@ -92,6 +101,9 @@ test('controller session authorization can activate once under a live locked dep
     const closureId = `${deploymentId}-close`;
     const closureLease = `${leaseToken}-close`;
     await db.deploymentOperation.update({ where: { id: deploymentId }, data: { activeKey: null, phase: 'COMPLETED' } });
+    assert.equal(await runtimeAdmission('a'.repeat(40), 'release-456'), true);
+    assert.equal(await runtimeAdmission('f'.repeat(40), 'release-456'), false);
+    assert.equal(await runtimeAdmission('a'.repeat(40), 'other-release'), false);
     await db.deploymentOperation.create({ data: {
       id: closureId, activeKey: 'production', releaseId: 'rollback-release', targetCommit: 'c'.repeat(40),
       owner: 'controller-test', phase: 'MUTATION_STARTED', leaseToken: closureLease,
@@ -118,6 +130,7 @@ test('controller session authorization can activate once under a live locked dep
     `;
     assert.deepEqual(history.map(row => row.event), ['ACTIVATED', 'CLOSED']);
     assert.ok(history.every(row => row.manifest_sha256 === 'b'.repeat(64)));
+    assert.equal(await runtimeAdmission('a'.repeat(40), 'release-456'), false, 'closure removes posting authority');
     assert.deepEqual(await verifyCustomerAllocationDeploymentState(db), { customerAllocationDatabaseProtections: 'verified' });
   } finally { await db.$disconnect(); await temporary.cleanup(); }
 });

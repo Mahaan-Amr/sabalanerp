@@ -131,6 +131,9 @@ ARG PERFORMANCE_SOURCE_HASH=unattested
 LABEL io.sabalan.release.upload-policy=no-malware-scan
 LABEL io.sabalan.performance.source-commit=$PERFORMANCE_SOURCE_COMMIT \
   io.sabalan.performance.source-hash=$PERFORMANCE_SOURCE_HASH
+RUN printf '%s\n' "$PERFORMANCE_SOURCE_COMMIT" > /app/.allocation-build-commit \
+  && chown root:root /app/.allocation-build-commit \
+  && chmod 0444 /app/.allocation-build-commit
 
 EXPOSE 5000
 

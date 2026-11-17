@@ -47,6 +47,16 @@ export async function verifyCustomerAllocationDeploymentState(database: Pick<Pri
         AND p.prosecdef
     )
     AND EXISTS (
+      SELECT 1 FROM pg_proc p CROSS JOIN pg_roles runtime
+      WHERE p.oid = to_regprocedure('public.customer_allocation_runtime_admitted(text,text)')
+        AND p.prosecdef AND runtime.rolname = 'sabalan_application_runtime'
+        AND has_function_privilege(runtime.oid, p.oid, 'EXECUTE')
+        AND NOT EXISTS (
+          SELECT 1 FROM aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) AS access
+          WHERE access.grantee = 0 AND access.privilege_type = 'EXECUTE'
+        )
+    )
+    AND EXISTS (
       SELECT 1 FROM pg_index i
       WHERE i.indexrelid = to_regclass('public.customer_allocation_release_audit_activation_once')
         AND i.indrelid = to_regclass('public.customer_allocation_release_audit')

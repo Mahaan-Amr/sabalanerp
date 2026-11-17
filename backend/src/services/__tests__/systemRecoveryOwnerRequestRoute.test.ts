@@ -114,7 +114,9 @@ test('restricted System Recovery records an authenticated complete backup reques
   writeAdmitted = false;
   const held = await post({ adminPassword: password }, 'admin');
   assert.equal(held.status, 503);
-  assert.equal((await held.json()).error, 'RECOVERY_WRITE_ADMISSION_CLOSED');
+  const holdResponse = await held.json();
+  assert(holdResponse && typeof holdResponse === 'object' && 'error' in holdResponse);
+  assert.equal(holdResponse.error, 'RECOVERY_WRITE_ADMISSION_CLOSED');
   writeAdmitted = true;
   failAudit = true;
   const failed = await post({ adminPassword: password }, 'admin');

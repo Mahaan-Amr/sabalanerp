@@ -252,5 +252,52 @@ class TransferTests(unittest.TestCase):
             self.assertTrue((stage / 'backend.docker.tar').exists())
 
 
+class ReviewedPlanTests(unittest.TestCase):
+    def plan(self):
+        return {
+            'format': 'sabalan-reviewed-qa-image-export/v1',
+            'sourceCommit': 'a' * 40,
+            'images': EXPORT.IMAGES,
+            'exportServices': ['backend', 'frontend', 'inquiry'],
+            'destination': 'sabalanerp-qa-current-images-fixture-20261117',
+            'sourceReserveBytes': EXPORT.SOURCE_RESERVE,
+            'backupReserveBytes': EXPORT.BACKUP_RESERVE,
+            'destinationReserveBytes': EXPORT.D_RESERVE,
+            'maximumArchiveBytes': 600_000_000,
+            'maximumTotalBytes': 1_500_000_000,
+        }
+
+    def test_seals_complete_source_census_and_the_selected_subset(self):
+        with tempfile.TemporaryDirectory() as directory:
+            file = Path(directory) / 'plan.json'
+            raw = json.dumps(self.plan()).encode()
+            file.write_bytes(raw)
+            sealed = EXPORT.read_reviewed_export_plan(file, hashlib.sha256(raw).hexdigest())
+            self.assertEqual(sealed.images, EXPORT.IMAGES)
+            self.assertEqual(sealed.selected, ('backend', 'frontend', 'inquiry'))
+            self.assertEqual(sealed.destination.parent, EXPORT.DEST.parent)
+            self.assertEqual(sealed.commit, 'a' * 40)
+            with self.assertRaisesRegex(EXPORT.ExportGuardError, 'EXPORT_PLAN_HASH_MISMATCH'):
+                EXPORT.read_reviewed_export_plan(file, '0' * 64)
+
+    def test_rejects_path_overrides_unreviewed_targets_and_reduced_reserves(self):
+        for patch in (
+            {'destination': '../other-directory'},
+            {'images': {'backend': EXPORT.IMAGES['backend']}},
+            {'exportServices': ['backend', 'backend']},
+            {'exportServices': ['unknown']},
+            {'sourceCommit': "' bad"},
+            {'sourceReserveBytes': EXPORT.SOURCE_RESERVE - 1},
+            {'backupReserveBytes': EXPORT.BACKUP_RESERVE - 1},
+            {'destinationReserveBytes': EXPORT.D_RESERVE - 1},
+            {'maximumArchiveBytes': 2_000_000_000},
+        ):
+            with self.subTest(patch=patch), tempfile.TemporaryDirectory() as directory:
+                file = Path(directory) / 'plan.json'
+                raw = json.dumps({**self.plan(), **patch}).encode()
+                file.write_bytes(raw)
+                with self.assertRaises(EXPORT.ExportGuardError):
+                    EXPORT.read_reviewed_export_plan(file, hashlib.sha256(raw).hexdigest())
+
 if __name__ == '__main__':
     unittest.main()

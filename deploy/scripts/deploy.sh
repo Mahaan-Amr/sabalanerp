@@ -161,14 +161,23 @@ preserved_clamav_guard() {
   fi
 }
 
+runtime_compose_file() {
+  if [ "${COMPOSE_FILE}" = docker-compose.rehearsal.yml ] && [ "${LEGACY_RELEASE_GRAPH}" -eq 0 ] \
+    && { [ -n "${ALLOCATION_EVIDENCE_DIR}" ] || [ "${CUSTOMER_ALLOCATION_CURRENT_DATA_ROLLBACK}" -eq 1 ]; }; then
+    printf '%s\n' docker-compose.rehearsal-scanner-free.yml
+  else
+    printf '%s\n' "${COMPOSE_FILE}"
+  fi
+}
+
 compose() {
   if [ -n "${DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX:-}" ]; then
     preserved_clamav_guard compose "$@" || return 1
   fi
   if [ "${LEGACY_RELEASE_GRAPH}" -eq 1 ] && [ "${COMPOSE_FILE}" = docker-compose.prod.yml ]; then
-    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" -f "${LEGACY_SCANNER_COMPOSE}" "$@"
+    docker compose --env-file "${ENV_FILE}" -f "$(runtime_compose_file)" -f "${LEGACY_SCANNER_COMPOSE}" "$@"
   else
-    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" "$@"
+    docker compose --env-file "${ENV_FILE}" -f "$(runtime_compose_file)" "$@"
   fi
 }
 
@@ -245,7 +254,7 @@ run_backend() {
     legacy_control_files="-f ${LEGACY_SCANNER_COMPOSE}"
   fi
   DEPLOYMENT_BACKEND_IMAGE="${DEPLOYMENT_TARGET_BACKEND_IMAGE}" BACKEND_DB_CONNECTION_LIMIT=2 DATABASE_APPLICATION_NAME=sabalanerp-deployment \
-    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ${legacy_control_files} run -T --rm --no-deps \
+    docker compose --env-file "${ENV_FILE}" -f "$(runtime_compose_file)" ${legacy_control_files} run -T --rm --no-deps \
       --label "io.sabalan.deployment.id=${DEPLOYMENT_ID}" \
       -e "BACKEND_RUNTIME_ROLE=control" \
       -e DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX \
@@ -325,7 +334,7 @@ run_backend_timed() {
     DEPLOYMENT_BACKEND_IMAGE="${DEPLOYMENT_TARGET_BACKEND_IMAGE}" \
     BACKEND_DB_CONNECTION_LIMIT=2 \
     DATABASE_APPLICATION_NAME=sabalanerp-deployment \
-    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ${legacy_control_files} run -T --rm --no-deps \
+    docker compose --env-file "${ENV_FILE}" -f "$(runtime_compose_file)" ${legacy_control_files} run -T --rm --no-deps \
       --label "io.sabalan.deployment.id=${DEPLOYMENT_ID}" \
       -e "BACKEND_RUNTIME_ROLE=control" \
       -e DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX \
@@ -597,7 +606,7 @@ try_acquire_advisory() {
   lock_token="SABALAN_DEPLOYMENT_LOCK_${DEPLOYMENT_ID}"
   ADVISORY_APPLICATION_NAME="sabalan-lock-${DEPLOYMENT_ID}"
   rm -f "${REPO_ROOT}/.deploy-state/advisory-lock.log"
-  docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" exec -T \
+  docker compose --env-file "${ENV_FILE}" -f "$(runtime_compose_file)" exec -T \
     -e "PGAPPNAME=${ADVISORY_APPLICATION_NAME}" postgres sh -c \
     "psql -At -v ON_ERROR_STOP=1 -U \"\$POSTGRES_USER\" -d postgres -c \"SELECT pg_advisory_lock(741936425); SELECT '${lock_token}'; SELECT pg_sleep(21600);\"" \
     >"${REPO_ROOT}/.deploy-state/advisory-lock.log" 2>&1 &
@@ -1264,7 +1273,8 @@ case "${previous_upload_policy}" in
       }
     fi
     if [ "${DEPLOYMENT_MODE}" = release ] && [ "${CAPTURE_ONLY}" -eq 0 ] && [ "${DEPLOYMENT_CLAMAV_REPAIR}" = false ] \
-      && [ "${COMPOSE_FILE}" = docker-compose.prod.yml ] && [ -z "${DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX:-}" ]; then
+      && { [ "${COMPOSE_FILE}" = docker-compose.prod.yml ] || [ -n "${ALLOCATION_EVIDENCE_DIR}" ]; } \
+      && [ -z "${DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX:-}" ]; then
       LEGACY_RELEASE_GRAPH=0
     fi
     ;;
@@ -1817,7 +1827,7 @@ if [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ] \
   || { [ "${DEPLOYMENT_MODE}" = configuration ] && [ "${LEGACY_RELEASE_GRAPH}" -eq 1 ]; } \
   || [ "${CUSTOMER_ALLOCATION_CURRENT_DATA_ROLLBACK}" -eq 1 ]; then
   remaining="$(remaining_mutation_seconds)" || exit 1
-  timeout "${remaining}" docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" exec -T backend sh -c '
+  timeout "${remaining}" docker compose --env-file "${ENV_FILE}" -f "$(runtime_compose_file)" exec -T backend sh -c '
     set -eu
     test "${HR_HIRING_ANTIVIRUS_COMMAND:-}" = "/app/scripts/hr-clamdscan.sh"
     command -v clamdscan >/dev/null

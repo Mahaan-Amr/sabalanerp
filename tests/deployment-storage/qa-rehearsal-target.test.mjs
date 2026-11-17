@@ -73,6 +73,31 @@ test('scanner-free rehearsal has no scanner on the graph and still isolates appl
   assert.throws(() => validateQaRenderedConfig(config, undefined, options));
 });
 
+test('the protected controller selects QA runtime Compose through activation and rollback', {
+  skip: process.platform === 'win32' && 'requires a POSIX shell',
+}, () => {
+  const source = fs.readFileSync(path.join(repositoryRoot, 'deploy/scripts/deploy.sh'), 'utf8');
+  const select = /^runtime_compose_file\(\) \{[\s\S]*?^\}/m.exec(source)?.[0];
+  assert.ok(select);
+  const qa = 'docker-compose.rehearsal.yml';
+  const scannerFree = 'docker-compose.rehearsal-scanner-free.yml';
+  for (const [file, legacy, activation, rollback, expected] of [
+    [qa, '0', '', '0', qa],
+    [qa, '0', '/private/evidence', '0', scannerFree],
+    [qa, '1', '/private/evidence', '0', qa],
+    [qa, '0', '', '1', scannerFree],
+    [qa, '1', '', '1', qa],
+    ['docker-compose.prod.yml', '0', '', '1', 'docker-compose.prod.yml'],
+  ]) {
+    const output = execFileSync('sh', ['-eu', '-c', select + '\n' + 'runtime_compose_file'], {
+      encoding: 'utf8',
+      env: { ...process.env, COMPOSE_FILE: file, LEGACY_RELEASE_GRAPH: legacy,
+        ALLOCATION_EVIDENCE_DIR: activation, CUSTOMER_ALLOCATION_CURRENT_DATA_ROLLBACK: rollback },
+    });
+    assert.equal(output.trim(), expected);
+  }
+});
+
 test('QA backend healthcheck uses real readiness except for the exact sealed candidate identity', async () => {
   const candidate = 'c'.repeat(40), sourceHash = 'd'.repeat(64);
   const armed = renderedConfig({ QA_REHEARSAL_FAIL_BACKEND_COMMIT: candidate,

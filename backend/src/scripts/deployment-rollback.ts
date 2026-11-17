@@ -5,6 +5,7 @@ import { disconnectDatabase, prisma } from '../lib/prisma';
 import { readSecret } from '../services/deploymentCheckpointStorage';
 import { decryptRecoveryArchive, sha256File } from '../services/recoveryCrypto';
 import { stageAndPromoteRecovery, validateRecoveryPackage } from '../services/systemRecoveryEngine';
+import { assertProtectedRoleCheckpointBoundary, configuredProtectedDatabaseRoleRecovery } from '../services/protectedDatabaseRoleRecovery';
 import { RECOVERY_COORDINATION_DIR, setRecoveryRuntimeState } from '../services/recoveryRuntime';
 
 type CheckpointMetadata = {
@@ -28,7 +29,15 @@ const main = async () => {
     throw Object.assign(new Error('The local rollback checkpoint checksum changed.'), { code: 'DEPLOYMENT_ROLLBACK_CHECKSUM_MISMATCH' });
   }
   const localKey = await readSecret('DEPLOYMENT_LOCAL_ROLLBACK_KEY');
-  const validated = await validateRecoveryPackage({ sourcePath: metadata.localPath, passphrase: localKey, prisma });
+  const roleRecovery = configuredProtectedDatabaseRoleRecovery();
+  const protectedDatabaseRoles = roleRecovery && {
+    ...roleRecovery,
+    assertBoundary: () => assertProtectedRoleCheckpointBoundary({ prisma, coordinationDir: RECOVERY_COORDINATION_DIR,
+      id: metadata.deploymentId, phase: 'ROLLBACK_STARTED', checksum: metadata.checksum }),
+  };
+  await protectedDatabaseRoles?.assertBoundary();
+  const validated = await validateRecoveryPackage({ sourcePath: metadata.localPath, passphrase: localKey, prisma,
+    protectedDatabaseRoles: protectedDatabaseRoles ?? null });
   const clamavUnit = path.join(RECOVERY_COORDINATION_DIR, `clamav-checkpoint-${metadata.deploymentId}`);
   if (validated.manifest.components.some((item) => item.path.startsWith(`recovery-coordination/clamav-checkpoint-${metadata.deploymentId}/`))) {
     const session = JSON.parse(await fs.promises.readFile(path.join(process.env.DEPLOYMENT_REPORT_DIR || '/app/deployment-reports', 'active-deployment-session.json'), 'utf8'));
@@ -64,6 +73,7 @@ const main = async () => {
     breakGlassReason: `Automatic rollback for deployment ${metadata.deploymentId}`,
     applyMigrations: false,
     preservePackage: true,
+    protectedDatabaseRoles,
     onProgress: async (progress) => console.log(JSON.stringify({ event: 'rollback-progress', progress })),
   });
   console.log(JSON.stringify({ ok: true, result, rollbackReleaseSet: metadata.rollbackReleaseSet }));

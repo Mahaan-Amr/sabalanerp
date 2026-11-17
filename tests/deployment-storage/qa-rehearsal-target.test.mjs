@@ -5,7 +5,10 @@ import { createServer } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { validateQaNetworkNamespace, validateQaRenderedConfig, validateQaRenderedMounts, validateQaRuntimeEnvironment, validateQaTargetBinding } from '../../deploy/scripts/qa-rehearsal-target.mjs';
+
+const repositoryRoot = path.resolve(fileURLToPath(new URL('../../', import.meta.url)));
 
 const qaEnvironment = {
   DOMAIN: 'erp.qa.test',
@@ -38,6 +41,7 @@ const qaEnvironment = {
 
 function renderedConfig(overrides = {}) {
   const output = execFileSync('docker', ['compose', '--profile', 'deployment', '-p', 'sabalanerp', '-f', 'docker-compose.rehearsal.yml', 'config', '--format', 'json'], {
+    cwd: repositoryRoot,
     env: { ...process.env, ...qaEnvironment, QA_REHEARSAL_FAIL_BACKEND_COMMIT: '',
       QA_REHEARSAL_FAIL_BACKEND_SOURCE_HASH: '', ...overrides, DEPLOYMENT_QA_REHEARSAL_PLAN_SHA256:'a'.repeat(64) },
     encoding: 'utf8',
@@ -130,7 +134,7 @@ test('real rehearsal graph binds every deployment recovery volume to the QA proj
     const environment = { ...qaEnvironment, DEPLOYMENT_SECRET_DIR: secretDir,
       DEPLOYMENT_REMOTE_MOUNT_HOST: remoteDir, DEPLOYMENT_REPORT_DIR_HOST: reportDir };
     assert.doesNotThrow(() => validateQaRenderedMounts(config, {
-      qaRoot, repositoryRoot: process.cwd(), environment,
+      qaRoot, repositoryRoot, environment,
     }));
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

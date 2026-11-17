@@ -1,5 +1,4 @@
 'use client';
-import { financialRecordReviewHref } from '@/features/accounting/financialRecordReviewHref';
 import { accountingCorrectionFields } from '@/features/accounting/accountingCorrectionFields';
 import { contractLifecycleLabel, contractLifecycleFilterOptions } from '@/features/sales/contractLifecyclePresentation';
 import { ErpButton } from '@/components/erp';
@@ -205,12 +204,6 @@ export default function AccountingContractsPage() {
     dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
     idempotencyKey: `receivable:${contract.contractId}:planned`,
   });
-
-  const getPendingInvoiceCandidates = (contract: AccountingContractRow) =>
-    (contract.financialRecords || []).filter((record) => (
-      record.kind === 'INVOICE_CANDIDATE' &&
-      !['ISSUED', 'POSTED', 'VOIDED'].includes(record.status)
-    ));
 
   const openPdfUrl = (url: string, tryPrint: boolean) => {
     const viewerUrl = toPdfViewerUrl(url);
@@ -471,12 +464,8 @@ export default function AccountingContractsPage() {
         title: accountingActionAvailability(contract, 'CREATE_CORRECTION_REQUEST')?.reason || undefined,
         onClick: () => setCorrectionTarget(contract) } as ErpAction] : []),
   ] : [
-    { label: getPendingInvoiceCandidates(contract).length > 0
-      && accountingActionAvailability(contract, 'APPROVE_FINANCIAL_INVOICE')?.visible
-      ? 'بررسی و تأیید مالی' : 'مشاهده پرونده',
-      href: getPendingInvoiceCandidates(contract).length === 1 && accountingActionAvailability(contract, 'APPROVE_FINANCIAL_INVOICE')?.visible
-        ? financialRecordReviewHref(getPendingInvoiceCandidates(contract)[0].id, `${pathname}${searchParams.toString() ? `?${searchParams.toString()}` : ''}`)
-        : `/dashboard/accounting/contracts/${encodeURIComponent(contract.contractId)}?section=financial&returnTo=${encodeURIComponent(`${pathname}${searchParams.toString() ? `?${searchParams.toString()}` : ''}`)}`,
+    { label: 'مشاهده پرونده',
+      href: `/dashboard/accounting/contracts/${encodeURIComponent(contract.contractId)}?section=financial&returnTo=${encodeURIComponent(`${pathname}${searchParams.toString() ? `?${searchParams.toString()}` : ''}`)}`,
       icon: FaEye, tone: 'primary' },
     {
       label: 'دانلود PDF قرارداد',

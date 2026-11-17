@@ -17,6 +17,7 @@ function installTsHook(){
 }
 const serviceImages={backend:'1',frontend:'2',inquiry:'3',nginx:'4',postgres:'5',clamav:'6'};
 const image=service=>'sha256:'+serviceImages[service].repeat(64);
+const backendId='1'.repeat(64);
 const rollbackEnvironment={PERFORMANCE_RELEASE_COMMIT:'a'.repeat(40),PERFORMANCE_RELEASE_SOURCE_HASH:'b'.repeat(64),PERFORMANCE_RELEASE_BACKEND_IMAGE:image('backend'),PERFORMANCE_RELEASE_FRONTEND_IMAGE:image('frontend'),PERFORMANCE_RELEASE_INQUIRY_IMAGE:image('inquiry'),PERFORMANCE_RELEASE_SCHEMA_HASH:'b'.repeat(64),PERFORMANCE_RELEASE_POLICY_HASH:'b'.repeat(64),PERFORMANCE_RELEASE_INFRASTRUCTURE_HASH:'b'.repeat(64),PERFORMANCE_RUNTIME_INFRASTRUCTURE_HASH:'b'.repeat(64)};
 (async()=>{
  record({kind,args:a,phase:phase()});
@@ -27,7 +28,11 @@ const rollbackEnvironment={PERFORMANCE_RELEASE_COMMIT:'a'.repeat(40),PERFORMANCE
  }
  if(kind==='python3'){
   const [script,mode,compose,environment,previousImage,plan,session]=a;
-  if(!script?.endsWith('/deploy/scripts/legacy-backend-signal.py')||!['--preflight','--forward','--assert-resolved'].includes(mode))throw Error('Unexpected fixture python command');
+  if(script?.endsWith('/deploy/scripts/dispatch-volume-transition.py')){
+   if(!['stage','attest','transition'].includes(mode)||compose!==path.join(root,'docker-compose.prod.yml')||environment!==path.join(root,'.env.prod')||previousImage!==backendId||plan!==image('backend')||a.length!==6)throw Error('Dispatch transition fixture identity mismatch');
+   console.log('legacy');return;
+  }
+  if(!script?.endsWith('/deploy/scripts/legacy-backend-signal.py')||!['--preflight','--forward','--assert-resolved','--assert-current-stopped','--assert-unleased-drain-allowed'].includes(mode))throw Error('Unexpected fixture python command');
   if(failure==='legacy-signal'&&mode==='--preflight')process.exit(48);
   if(compose!==path.join(root,'docker-compose.prod.yml')||environment!==path.join(root,'.env.prod')||previousImage!==image('backend')||plan!==path.join(root,'.deploy-state','legacy-backend-drain-'+process.env.DEPLOYMENT_ID+'.json'))throw Error('Legacy signal fixture identity mismatch');
   const marker=path.join(root,'reports/fixture-legacy-preflight.json');
@@ -37,8 +42,11 @@ const rollbackEnvironment={PERFORMANCE_RELEASE_COMMIT:'a'.repeat(40),PERFORMANCE
    if(a.length!==7||session!==path.join(root,'reports/active-deployment-session.json')||!fs.existsSync(marker)||phase()!=='TRAFFIC_BLOCKED'||!fs.existsSync(path.join(root,'maintenance.json')))throw Error('Legacy forward boundary unproven');
    if(JSON.stringify(JSON.parse(fs.readFileSync(marker)))!==JSON.stringify({previousImage,plan}))throw Error('Legacy preflight changed');
    fs.writeFileSync(forwarded,JSON.stringify({previousImage,plan}),{flag:'wx'});
+  } else if(mode==='--assert-unleased-drain-allowed'){
+   if(a.length!==6||!fs.existsSync(marker)||fs.existsSync(forwarded))throw Error('Unleased drain boundary unproven');
   } else {
-   if(a.length!==6||!fs.existsSync(marker)||!fs.existsSync(forwarded)||JSON.stringify(JSON.parse(fs.readFileSync(marker)))!==JSON.stringify({previousImage,plan})||JSON.stringify(JSON.parse(fs.readFileSync(forwarded)))!==JSON.stringify({previousImage,plan}))throw Error('Legacy resolution without original forward');
+   if(a.length!==(mode==='--assert-current-stopped'?7:6)||!fs.existsSync(marker)||!fs.existsSync(forwarded)||JSON.stringify(JSON.parse(fs.readFileSync(marker)))!==JSON.stringify({previousImage,plan})||JSON.stringify(JSON.parse(fs.readFileSync(forwarded)))!==JSON.stringify({previousImage,plan}))throw Error('Legacy resolution without original forward');
+   if(mode==='--assert-current-stopped'&&(session!==path.join(root,'reports/active-deployment-session.json')||!['TRAFFIC_BLOCKED','SERVICES_DRAINED','REMOTE_CHECKPOINT_VERIFIED'].includes(phase())))throw Error('Current stopped boundary unproven');
   }
   return;
  }
@@ -96,32 +104,35 @@ const rollbackEnvironment={PERFORMANCE_RELEASE_COMMIT:'a'.repeat(40),PERFORMANCE
  if(kind!=='docker')throw Error('Only known test adapters are permitted');
  if(a[0]==='info'){console.log(root);return;}
  if(a[0]==='image' && a[1]==='inspect'){
-  if(a.includes('{{.Size}}'))console.log('1000000');
+  if(a.some(value=>value.includes('io.sabalan.performance.source-commit')))console.log('c'.repeat(40));
+  else if(a.some(value=>value.includes('io.sabalan.performance.source-hash')))console.log('b'.repeat(64));
+  else if(a.includes('{{.Size}}'))console.log('1000000');
   else {const name=a.at(-1); console.log(name.startsWith('sha256:')?name:name.startsWith('fixture/backend:')?'sha256:'+'8'.repeat(64):name.startsWith('fixture/frontend:')?'sha256:'+'9'.repeat(64):name.startsWith('fixture/inquiry:')?'sha256:'+'a'.repeat(64):image('nginx'));}return;
  }
  if(a[0]==='builder')return;
  if(a[0]==='volume'&&a[1]==='inspect'){console.log(root);return;}
  if(a[0]==='inspect'){
   if(a.includes('--format')){
-   const format=a[a.indexOf('--format')+1],service=a.at(-1);
-   console.log(format==='{{.Image}}'?image(service):format==='{{.State.Running}}'?'false':'10.0.0.2');
-  } else console.log(JSON.stringify([{Id:'backend',Image:image('backend'),Config:{Env:Object.entries(rollbackEnvironment).map(([k,v])=>k+'='+v)},State:{Running:true}}]));
+   const format=a[a.indexOf('--format')+1],service=a.at(-1),name=service===backendId?'backend':service;
+   console.log(format==='{{.Image}}'?image(name):format==='{{.Id}}'?(name==='backend'?backendId:name):format==='{{.State.Running}}'?'false':'10.0.0.2');
+  } else console.log(JSON.stringify([{Id:backendId,Image:image('backend'),Config:{Env:Object.entries(rollbackEnvironment).map(([k,v])=>k+'='+v)},State:{Running:true},Mounts:[]}]));
   return;
  }
  if(a[0]==='cp'){
   const [source,destination]=a.slice(1).filter(value=>value!=='-a');
   if(source==='clamav:/etc/clamav/.' && destination==='-'){process.stdout.write('effective-config-fixture');return;}
-  if(source.startsWith('backend:/app/recovery-coordination/')){copy(path.join(coordination,source.split('/app/recovery-coordination/')[1]),destination);return;}
-  if(destination==='backend:/app/recovery-coordination/'){copy(source,path.join(coordination,path.basename(source)));return;}
+  if(source.startsWith(backendId+':/app/recovery-coordination/')){copy(path.join(coordination,source.split('/app/recovery-coordination/')[1]),destination);return;}
+  if(destination===backendId+':/app/recovery-coordination/'){copy(source,path.join(coordination,path.basename(source)));return;}
   if(source==='-'){
    if(!read('runtime.json').bankRestored)throw Error('Configuration must follow bank restore');
    fs.writeFileSync(path.join(root,'restored-config.tar'),fs.readFileSync(0));return;
   }
   throw Error('Unexpected copy');
  }
+ if(a[0]==='exec'&&a[1]===backendId&&a.at(-1).includes('p=/app/storage/dispatch-documents'))return;
  if(a[0]!=='compose')throw Error('Unexpected Docker command');
- if(a.includes('ps')){console.log(a.at(-1));return;}
- if(a.includes('config')){console.log(a.includes('json')?'{"name":"fixture"}':'services: {}');return;}
+ if(a.includes('ps')){console.log(a.at(-1)==='backend'?backendId:a.at(-1));return;}
+ if(a.includes('config')){console.log(a.includes('json')?JSON.stringify({name:'fixture',services:{backend:{volumes:[{type:'volume',source:'backend_storage_dispatch_documents',target:'/app/storage/dispatch-documents'}]}},volumes:{backend_storage_dispatch_documents:{name:'fixture_dispatch_documents'}}}):'services: {}');return;}
  if(a.some(value=>value.includes('exec python3 - --assert-closed'))){if(failure==='runtime-not-closed')process.exit(49);return;}
  if(a.includes('build')||a.includes('create')||a.includes('stop')||a.includes('start'))return;
  if(a.includes('up')){

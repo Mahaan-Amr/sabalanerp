@@ -119,6 +119,7 @@ const accountingActionFeature: Record<string, string[]> = {
   START_ACCOUNTING_VOID_CASE: [FEATURES.ACCOUNTING_RECORDS_APPROVE_VOID],
   CANCEL_ACCOUNTING_VOID_CASE: [FEATURES.ACCOUNTING_RECORDS_APPROVE_VOID],
   CREATE_INVOICE: [FEATURES.ACCOUNTING_INVOICE_CANDIDATES_MANAGE],
+  SAVE_INVOICE_DRAFT: [FEATURES.ACCOUNTING_INVOICE_CANDIDATES_MANAGE],
   CREATE_REPLACEMENT_INVOICE: [FEATURES.ACCOUNTING_RECORDS_APPROVE_VOID],
   CREATE_RECEIVABLE: [FEATURES.ACCOUNTING_RECEIVABLES_MANAGE],
   APPROVE_FINANCIAL_INVOICE: [FEATURES.ACCOUNTING_RECORDS_APPROVE_VOID],
@@ -1797,7 +1798,9 @@ router.post(
     body('reason').optional().isString(),
     body('systemInvoiceNumber').optional().isString(),
     body('systemInvoiceDate').optional().isString(),
-    body('sepidarAmount').optional().isNumeric()
+    body('sepidarAmount').optional().if(body('kind').not().equals('SAVE_INVOICE_DRAFT')).isNumeric(),
+    body('sepidarAmount').optional().if(body('kind').equals('SAVE_INVOICE_DRAFT')).custom(value =>
+      typeof value === 'string' || typeof value === 'number')
   ],
   createAccountingActionHandler(),
 );

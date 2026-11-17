@@ -18,7 +18,7 @@ export const accountingContractListSelect = {
 } satisfies Prisma.SalesContractSelect;
 
 export const accountingFinancialSummarySelect = {
-  id: true, contractId: true, kind: true, status: true, amount: true,
+  id: true, contractId: true, kind: true, status: true, sourceKind: true, amount: true,
   currency: true, systemInvoiceNumber: true, systemInvoiceDate: true,
   sepidarAmount: true, financiallyApprovedAt: true, createdAt: true, metadata: true,
 } satisfies Prisma.AccountingFinancialRecordSelect;

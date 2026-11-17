@@ -14,12 +14,12 @@ const key = Buffer.alloc(32, 7).toString('base64');
 const workstation = { commandSecretBase64: key, activeTransportKeyId: 'transport-v1', transportKeysBase64: { 'transport-v1': key } };
 function containers(coordination) {
   const records = ['backend', 'frontend', 'inquiry', 'nginx', 'postgres', 'clamav'].map((service, index) => ({
-    Id: service, Image: `sha256:${String(index + 1).repeat(64)}`,
+    Id: String(index + 1).repeat(12), Image: `sha256:${String(index + 1).repeat(64)}`,
     Config: { Labels: { 'com.docker.compose.service': service }, Env: [] },
     State: { Running: true, Health: { Status: 'healthy' } },
     Mounts: [],
   }));
-  const identity = Object.fromEntries(releaseEnvironmentKeys.map(name => [name, name.endsWith('_COMMIT') ? 'a'.repeat(40) : name.endsWith('_IMAGE') ? records.find(c => name.includes(c.Id.toUpperCase()))?.Image : 'b'.repeat(64)]));
+  const identity = Object.fromEntries(releaseEnvironmentKeys.map(name => [name, name.endsWith('_COMMIT') ? 'a'.repeat(40) : name.endsWith('_IMAGE') ? records.find(c => name.includes(c.Config.Labels['com.docker.compose.service'].toUpperCase()))?.Image : 'b'.repeat(64)]));
   records[0].Config.Env = [...Object.entries(identity).map(([name, value]) => `${name}=${value}`), 'BIOMETRIC_WORKSTATIONS_JSON={}', 'RECOVERY_COORDINATION_DIR=/app/recovery-coordination', 'JWT_SECRET=secret-do-not-output'];
   records[0].Mounts = [{ Destination: '/app/recovery-coordination', Source: coordination, RW: true }];
   return records;
@@ -154,7 +154,7 @@ for (const failure of ['storage', 'preflight', 'native-closure', 'checkpoint', '
     fs.writeFileSync(fakeLegacySignal, `const fs=require('fs'),path=require('path'),assert=require('assert/strict');
 const a=process.argv.slice(2),[script,mode,compose,environment,image,plan,session]=a;
 assert.ok(script.endsWith('/deploy/scripts/legacy-backend-signal.py'));
-assert.ok(['--preflight','--forward','--assert-resolved'].includes(mode));
+assert.ok(['--preflight','--forward','--assert-current-stopped','--assert-resolved'].includes(mode));
 assert.equal(compose,path.join(process.env.DEPLOYMENT_REPO_ROOT,'docker-compose.prod.yml').replaceAll(String.fromCharCode(92),'/'));
 assert.equal(environment,process.env.TEST_ENV);assert.match(image,/^sha256:[a-f0-9]{64}$/);
 assert.equal(image,JSON.parse(fs.readFileSync(process.env.TEST_CONTAINERS))[0].Image);
@@ -162,7 +162,7 @@ assert.equal(plan,path.join(process.env.DEPLOYMENT_REPO_ROOT,'.deploy-state','le
 const marker=path.join(process.env.TEST_REPORTS,'fixture-legacy-preflight.json');
 fs.appendFileSync(process.env.TEST_LOG,JSON.stringify(['fixture-legacy-signal',mode])+'\\n');
 if(mode==='--preflight'){assert.equal(a.length,6);fs.writeFileSync(marker,JSON.stringify({image,plan}),{flag:'wx'});}
-else if(mode==='--forward'){assert.equal(a.length,7);assert.deepEqual(JSON.parse(fs.readFileSync(marker)),{image,plan});assert.equal(session,path.join(process.env.TEST_REPORTS,'active-deployment-session.json').replaceAll(String.fromCharCode(92),'/'));assert.equal(JSON.parse(fs.readFileSync(session)).phase,'TRAFFIC_BLOCKED');}
+else if(mode==='--forward'||mode==='--assert-current-stopped'){assert.equal(a.length,7);assert.deepEqual(JSON.parse(fs.readFileSync(marker)),{image,plan});assert.equal(session,path.join(process.env.TEST_REPORTS,'active-deployment-session.json').replaceAll(String.fromCharCode(92),'/'));const phase=JSON.parse(fs.readFileSync(session)).phase;if(mode==='--forward')assert.equal(phase,'TRAFFIC_BLOCKED');else assert.ok(['TRAFFIC_BLOCKED','SERVICES_DRAINED','REMOTE_CHECKPOINT_VERIFIED'].includes(phase));}
 else {assert.equal(a.length,6);if(fs.existsSync(marker))assert.deepEqual(JSON.parse(fs.readFileSync(marker)),{image,plan});}
 `);
     fs.writeFileSync(path.join(bin, 'python3'), `#!/bin/sh\ncase "$1" in */deploy/scripts/legacy-backend-signal.py) exec '${nodeBinary}' '${fakeLegacySignal.replaceAll('\\', '/')}' "$@";; *) echo 'fixture refuses unexpected python invocation' >&2; exit 99;; esac\n`, { mode: 0o755 });
@@ -170,8 +170,8 @@ else {assert.equal(a.length,6);if(fs.existsSync(marker))assert.deepEqual(JSON.pa
     fs.writeFileSync(fakeDocker, `const fs=require('fs');const path=require('path');const a=process.argv.slice(2);fs.appendFileSync(process.env.TEST_LOG,JSON.stringify(a)+'\\n');const records=JSON.parse(fs.readFileSync(process.env.TEST_CONTAINERS));const env=k=>(a.find(v=>v.startsWith(k+'='))||'').slice(k.length+1);const session=path.join(process.env.TEST_REPORTS,'active-deployment-session.json');
 if(a[0]==='inspect' && a.includes('--format')){console.log(a.includes('{{.Image}}')?records.find(r=>r.Id===a.at(-1)).Image:'10.0.0.2');}
 else if(a[0]==='inspect'){console.log(JSON.stringify(records.filter(r=>a.slice(1).includes(r.Id))));}
-else if(a.includes('ps')){console.log(a.at(-1));}
-else if(a.includes('config')){console.log('services: {}');}
+else if(a.includes('ps')){console.log(records.find(r=>r.Config.Labels['com.docker.compose.service']===a.at(-1))?.Id||'');}
+else if(a.includes('config')){console.log(a.includes('--format')&&a[a.indexOf('--format')+1]==='json'?JSON.stringify({name:'sabalanerp',services:{backend:{volumes:[{type:'volume',source:'backend_storage_dispatch_documents',target:'/app/storage/dispatch-documents',read_only:false}]}},volumes:{backend_storage_dispatch_documents:{name:'sabalanerp_backend_storage_dispatch_documents'}}}):'services: {}');}
 else if(a.includes('dist/scripts/deployment-performance-identity.js')){fs.writeFileSync(require('path').join(process.env.TEST_REPORTS,'performance-database-'+a.find(v=>v.startsWith('DEPLOYMENT_ID=')).slice(14)+'.json'),JSON.stringify({schemaHash:'b'.repeat(64),policyHash:'b'.repeat(64)}));}
 else if(a.includes('dist/scripts/validate-production-environment.js')){if(process.env.TEST_FAILURE==='preflight')process.exit(42);}
 else if(a.includes('dist/scripts/deployment-control.js')){const c=a[a.indexOf('dist/scripts/deployment-control.js')+1];if(c==='prepare'){fs.writeFileSync(session,JSON.stringify({phase:'PREFLIGHT',leaseToken:'fixture-lease',rollbackPerformanceEnvironment:Object.fromEntries(records[0].Config.Env.filter(v=>v.startsWith('PERFORMANCE_')).map(v=>[v.split('=')[0],v.slice(v.indexOf('=')+1)]))}));}else if(c==='acquire'||c==='transition'){const s=JSON.parse(fs.readFileSync(session));s.phase=c==='acquire'?'LEASE_ACQUIRED':env('DEPLOYMENT_PHASE');fs.writeFileSync(session,JSON.stringify(s));}else if(c==='finish'||c==='cancel-preflight'){fs.rmSync(session,{force:true});}}
@@ -208,7 +208,8 @@ else{process.exit(99);}`);
     const legacy = mode => rows.findIndex(row => row[0] === 'fixture-legacy-signal' && row[1] === mode);
     if (!['storage', 'preflight'].includes(failure)) {
       assert.ok(legacy('--preflight') >= 0 && legacy('--forward') > legacy('--preflight'));
-      assert.ok(legacy('--assert-resolved') > legacy('--forward'), 'legacy signal must resolve after forwarding');
+      assert.ok(legacy('--assert-current-stopped') > legacy('--forward'), 'legacy backend must remain stopped after forwarding');
+      assert.ok(legacy('--assert-resolved') > legacy('--assert-current-stopped'), 'legacy signal must resolve after stopped-state proof');
       assert.ok(nativeClosure > legacy('--assert-resolved'), 'legacy signal must resolve before native closure');
       if (checkpoint >= 0) assert.ok(checkpoint > nativeClosure, 'checkpoint must follow native closure');
     }
@@ -224,13 +225,21 @@ else{process.exit(99);}`);
     if (failure === 'after-mutation') assert.ok(commands.includes('deployment-rollback.js'));
     assert.ok(!/fetch|pull|checkout/.test(fs.readFileSync(path.join(f.root, 'git.log'), 'utf8')));
     if (failure === 'success') { assert.ok(fs.readFileSync(f.environment, 'utf8').includes('LAPTOP-01')); assert.ok(!commands.includes('deployment-rollback.js')); } else assert.equal(fs.readFileSync(f.environment, 'utf8'), before);
-    if (failure === 'native-closure') {
-      assert.ok(fs.existsSync(path.join(f.root, '.deploy-state/biometric-configuration.json')), 'uncertain native work keeps recovery evidence');
-      assert.ok(!commands.includes('maintenance-off'), 'failure before mutation cannot reopen an orphan runtime');
-      assert.ok(!commands.includes('deployment-rollback.js'), 'uncertain native work cannot restore older data');
+    if (['native-closure', 'checkpoint'].includes(failure)) {
+      assert.ok(fs.existsSync(path.join(f.root, '.deploy-state/biometric-configuration.json')), 'uncertain original work keeps recovery evidence');
+      assert.ok(!commands.includes('maintenance-off'), 'uncertain original work cannot reopen the application');
+      assert.ok(!commands.includes('deployment-rollback.js'), 'uncertain original work cannot restore older data');
       const rows = commands.trim().split(/\r?\n/).map(line => JSON.parse(line));
-      assert.ok(!rows.some(row => row.includes('up') && row.includes('backend')), 'uncertain native work cannot start the prior application');
-    } else assert.ok(!fs.existsSync(path.join(f.root, '.deploy-state/biometric-configuration.json')));
+      assert.ok(!rows.some(row => row.includes('up') && row.includes('backend')), 'uncertain original work cannot start the prior application');
+    } else {
+      const sessionFile = path.join(reports, 'active-deployment-session.json');
+      const phase = fs.existsSync(sessionFile) ? JSON.parse(fs.readFileSync(sessionFile, 'utf8')).phase : 'none';
+      const recoveryErrors = result.stderr.split(/\r?\n/)
+        .filter(line => /not proven|remains|failed|error|invalid|fixture/i.test(line)).slice(-5)
+        .map(line => line.replaceAll(key, '[redacted]').replaceAll('secret-do-not-output', '[redacted]')).join(' | ');
+      assert.ok(!fs.existsSync(path.join(f.root, '.deploy-state/biometric-configuration.json')),
+        `configuration snapshot retained: phase=${phase}, maintenanceOff=${commands.includes('maintenance-off')}, previousGate=${commands.includes('deployment-gates.js')}, nativeCheck=${commands.includes('exec python3 - --assert-closed')}, restart=${commands.includes('"up"')}, recoveryErrors=${recoveryErrors}`);
+    }
     assert.ok(!`${result.stdout}${result.stderr}`.includes(key));
   } catch (error) { originalFailure = error; throw error; }
   finally { try { dispose(f); } catch (error) { if (!originalFailure) throw error; } }

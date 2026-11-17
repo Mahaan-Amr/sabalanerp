@@ -13,6 +13,9 @@
 
 - The migration compiler and its drift-rejection tests pass (4 tests). Database client ownership and the design-system adoption check pass. Design-system foundation and adoption suites pass (25 and 14 tests).
 - The targeted deployment, capture and scanner-transition fixtures pass under WSL Linux (43 tests). These are controller fixtures, not a protected production-state rehearsal.
+- Prisma client generation, backend build and shared package builds pass. Two authenticated HTTP tests pass on isolated databases in the existing local PostgreSQL service. The grouped-posting test replaces the admission decision within the test process and does not qualify the production activation control.
+- Next.js compiled, completed its type check and generated 145 static pages. The Windows build process had not exited at the time of this handoff, so browser artifact finalization is unverified.
+- The local Git hook launcher could not start its shell. All three checks in the hook were run explicitly before the integration commit.
 
 ## Remaining release evidence
 

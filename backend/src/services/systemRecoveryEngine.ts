@@ -21,6 +21,7 @@ import { adoptRecoveryStagedInquiry, captureInquiryBusinessProof, verifyInquiryT
   type InquiryBusinessProof, type InquiryTransformation } from './inquiryMigrationPlan';
 import { applicationRecoveryStageRole, prepareApplicationRecoveryStage, retireApplicationRecoveryStageRole } from './applicationRecoveryStage';
 import { nativePostgresCliConnection } from './nativePostgresCli';
+import { migrateRecoveryArchivePrivately } from './privateRecoveryPostgres';
 
 const execFileAsync = promisify(execFile);
 const PACKAGES_DIR = path.join(RECOVERY_ROOT, 'packages');
@@ -200,9 +201,10 @@ const dumpDatabase = async (databaseUrl: string, destination: string, snapshot?:
   });
 };
 
-const restoreDatabase = async (databaseUrl: string, database: string, source: string) => {
+const restoreDatabase = async (databaseUrl: string, database: string, source: string, section?: 'pre-data' | 'data' | 'post-data') => {
   const args = databaseArgs(databaseUrl, database);
-  await execFileAsync('pg_restore', [...args.connection, '--no-owner', '--no-privileges', '--exit-on-error', source], {
+  await execFileAsync('pg_restore', [...args.connection, '--no-owner', '--no-privileges', '--exit-on-error',
+    ...(section ? [`--section=${section}`] : []), source], {
     env: args.env,
     windowsHide: true,
     maxBuffer: 8 * 1024 * 1024,
@@ -411,7 +413,7 @@ const extractRecoveryArchive = async (archivePath: string, payloadRoot: string) 
     }
   }
   const verbose = await execFileAsync('tar', ['-tvzf', archivePath], { windowsHide: true, maxBuffer: 32 * 1024 * 1024 });
-  if (verbose.stdout.split(/\r?\n/).some((line) => /^[lh]/.test(line))) {
+  if (verbose.stdout.split(/\r?\n/).some((line) => line.length > 0 && !/^[-d]/.test(line))) {
     throw Object.assign(new Error('Recovery archive links are not permitted.'), { code: 'UNSAFE_RECOVERY_ARCHIVE' });
   }
   await execFileAsync('tar', ['-xzf', archivePath, '-C', payloadRoot, '--no-same-owner', '--no-same-permissions'], { windowsHide: true });
@@ -1045,15 +1047,31 @@ export const stageAndPromoteRecovery = async (input: {
     await createDatabase(process.env.DATABASE_URL || '', stagedDatabase, Boolean(protectedRoles || roleScope));
     const stagedUrl = databaseUrlWithName(process.env.DATABASE_URL || '', stagedDatabase);
     if (input.applicationRecoveryRoles) {
-      applicationStage = await prepareApplicationRecoveryStage(process.env.DATABASE_URL || '', stagedDatabase, input.applicationRecoveryRoles);
+      applicationStage = await prepareApplicationRecoveryStage(process.env.DATABASE_URL || '', stagedDatabase,
+        input.applicationRecoveryRoles, path.join(jobRoot, 'trusted-control-data.dump'));
     }
     const restoreUrl = applicationStage?.loginUrl || stagedUrl;
-    await restoreDatabase(restoreUrl, stagedDatabase, path.join(payloadRoot, 'database', 'main.dump'));
+    let restoreDump = path.join(payloadRoot, 'database', 'main.dump');
+    if (applicationStage && input.applicationRecoveryRoles) {
+      const migrated = await migrateRecoveryArchivePrivately({ sourceDump: restoreDump, workDirectory: jobRoot,
+        applyMigrations: input.applyMigrations !== false, databaseSemantics: applicationStage.databaseSemantics,
+        assertBoundary: input.applicationRecoveryRoles.assertBoundary,
+        verifyCurrentSchema: applicationStage.verifyMigratedSchema });
+      restoreDump = migrated.dumpPath;
+    }
+    if (applicationStage?.authorityDataPath) {
+      await restoreDatabase(restoreUrl, stagedDatabase, restoreDump, 'pre-data');
+      await restoreDatabase(restoreUrl, stagedDatabase, restoreDump, 'data');
+      await restoreDatabase(restoreUrl, stagedDatabase, applicationStage.authorityDataPath, 'data');
+      await restoreDatabase(restoreUrl, stagedDatabase, restoreDump, 'post-data');
+    } else {
+      await restoreDatabase(restoreUrl, stagedDatabase, restoreDump);
+    }
     if (protectedRoles && input.protectedDatabaseRoles) {
       await input.protectedDatabaseRoles.assertBoundary();
       await applyProtectedDatabaseRoles(stagedUrl, input.protectedDatabaseRoles.roles, protectedRoles, input.protectedDatabaseRoles.source);
     }
-    if (input.applyMigrations !== false) await migrateDatabase(restoreUrl);
+    if (input.applyMigrations !== false && !applicationStage) await migrateDatabase(restoreUrl);
     await applicationStage?.verifySchema();
     if (input.packageType === 'SANITIZED_TEST') {
       if (process.env.NODE_ENV === 'production' || process.env.ALLOW_SANITIZED_RECOVERY !== 'true') {

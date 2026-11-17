@@ -10,6 +10,7 @@ import ts from 'typescript';
 async function fixture(stageSchema: string, cleanupAdmitted = true) {
   const statements: string[] = [];
   const connections: Array<{ connected: boolean; ended: boolean }> = [];
+  const dumps: string[][] = [];
   const control = 'postgres';
   let rolePresent = false;
   const roles = [
@@ -31,6 +32,8 @@ async function fixture(stageSchema: string, cleanupAdmitted = true) {
     async end() { this.state.ended = true; }
     async query(sql: string) {
       statements.push(sql);
+      if (sql.includes('pg_database_collation_actual_version')) return { rows: [{ encoding: 'UTF8', collate: 'en_US.utf8',
+        ctype: 'en_US.utf8', provider: 'c', icuLocale: null, collationVersion: null, actualCollationVersion: null, serverVersionNum: 150010 }] };
       if (sql.includes('CREATE ROLE')) rolePresent = true;
       if (sql.includes('DROP ROLE')) rolePresent = false;
       if (sql.includes('AS stage_role_admitted')) return { rows: rolePresent ? [{ stage_role_admitted: cleanupAdmitted,
@@ -45,11 +48,12 @@ async function fixture(stageSchema: string, cleanupAdmitted = true) {
     }
   }
   const exec = Object.assign(() => {}, { [promisify.custom]: async (_tool: string, args: string[], options: any) => {
+    dumps.push([...args]);
     assert.equal(args.includes('--no-owner'), true);
     assert.equal(args.includes('--no-privileges'), true);
     assert.equal(args.some(arg => arg.includes('secret')), false, 'password stays outside argv');
     const stage = args.some(arg => arg.includes('sabalan_restore_'));
-    if (!stage) assert.equal(args.slice(-2).join(','), '--snapshot,trusted-snapshot');
+    if (!stage && !args.includes('--data-only')) assert.equal(args.slice(-2).join(','), '--snapshot,trusted-snapshot');
     assert.equal(options.env.PGPASSWORD, 'secret');
     return { stdout: stage ? stageSchema : 'CREATE TABLE public.orders (id integer);\n', stderr: '' };
   } });
@@ -72,7 +76,7 @@ async function fixture(stageSchema: string, cleanupAdmitted = true) {
     return exported;
   }
   const api = await load(path.join(__dirname, '..', 'applicationRecoveryStage.ts'));
-  return { api, statements, connections, scope: {
+  return { api, statements, connections, dumps, scope: {
     roles: { runtime: roles[1].name, controller: roles[0].name }, source: 'main', assertBoundary: async () => {},
   } };
 }
@@ -92,6 +96,19 @@ test('application stage refuses owner elevation when restored definitions differ
   assert.equal(statements.some(sql => sql.includes('NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS')), true);
   assert.equal(statements.some(sql => /SET ROLE/.test(sql)), false);
   assert.equal(statements.some(sql => /DROP ROLE/.test(sql)), true);
+});
+
+test('trusted control history and audit identity are captured from the same snapshot as the target schema', async () => {
+  const { api, scope, dumps } = await fixture('CREATE TABLE public.orders (id integer);\n');
+  const stage = await api.prepareApplicationRecoveryStage('postgresql://postgres:secret@localhost/main',
+    'sabalan_restore_abcdef012345', scope, '/private/trusted-control.dump');
+  const capsule = dumps.find(args => args.includes('--data-only'))!;
+  assert.equal(capsule[capsule.indexOf('--snapshot') + 1], 'trusted-snapshot');
+  assert.equal(capsule[capsule.indexOf('--file') + 1], '/private/trusted-control.dump');
+  assert.equal(capsule.filter(arg => arg.startsWith('--table=')).join(','),
+    '--table=public.deployment_operations,--table=public.customer_allocation_release_control,--table=public.customer_allocation_release_audit,--table=public.partner_release_readiness_publications,--table=public.customer_allocation_release_audit_id_seq');
+  assert.equal(stage.authorityDataPath, '/private/trusted-control.dump');
+  await stage.cleanup();
 });
 
 test('application stage verifies full schema and disables its login before assigning trusted ownership and ACLs', async () => {

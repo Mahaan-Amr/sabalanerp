@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { PrismaClient } from '@prisma/client';
@@ -96,7 +97,7 @@ async function withTransaction<T>(databaseUrl: string, mode: 'READ ONLY' | 'READ
   }
 }
 
-async function readIdentity(client: Client, roles: RoleSplit) {
+async function readIdentity(client: Client, roles: RoleSplit, requireRuntimeLogin = true) {
   const { rows: [identity] } = await client.query(`
     SELECT current_database() AS database, session_user AS control,
       current_user = session_user AND r.rolsuper AND r.rolcanlogin AND d.datdba = r.oid AS admitted,
@@ -120,7 +121,8 @@ async function readIdentity(client: Client, roles: RoleSplit) {
     FROM pg_roles r JOIN pg_authid auth USING (oid) WHERE r.rolname IN ($1, $2)
   `, [roles.runtime, roles.controller]);
   if (attributes.length !== 2 || attributes.some(role => !role.restricted
-    || (role.name === 'sabalan_application_runtime' && !role.login))) {
+    || (role.name === 'sabalan_application_runtime' && role.login !== requireRuntimeLogin)
+    || (!requireRuntimeLogin && role.login))) {
     fail('The protected database roles are missing or have unsupported attributes or memberships.');
   }
   const roleAttributes: RoleAttributes[] = attributes.map(({ name, login, connectionLimit, validUntil }) => ({ name, login, connectionLimit, validUntil }));
@@ -316,4 +318,172 @@ export async function assertProtectedRoleCheckpointBoundary(input: {
       ))
   `;
   if (active.length !== 1) fail('The owned deployment lease or verified role checkpoint is no longer active.');
+}
+
+type CutoverRoutine = {
+  name: string;
+  arguments: string;
+  definitionSha256: string;
+  execute: 'controller' | 'runtime' | 'owner';
+};
+type CutoverCatalog = {
+  migrationSha256: string;
+  tables: Record<string, string[]>;
+  sequences: string[];
+  protectedSequences: string[];
+  definerRoutines: CutoverRoutine[];
+  invokerRoutinesSha256: string;
+};
+const cutoverRoles = { runtime: 'sabalan_application_runtime', controller: 'sabalan_allocation_controller' };
+const sha256 = (content: string | Buffer) => createHash('sha256').update(content).digest('hex');
+
+async function verifyCutoverMigrationLedger(client: Client, directory: string, expectedDigest: string) {
+  const names = (await fs.readdir(directory, { withFileTypes: true }))
+    .filter(entry => entry.isDirectory()).map(entry => entry.name).sort();
+  if (!names.length || names.some(name => !/^\d+_[a-zA-Z0-9_]+$/.test(name))) {
+    fail('The cutover migration directory is invalid.');
+  }
+  const checksums = Object.fromEntries(await Promise.all(names.map(async name =>
+    [name, sha256(await fs.readFile(path.join(directory, name, 'migration.sql')))] as const)));
+  if (sha256(JSON.stringify(checksums)) !== expectedDigest) fail('The cutover source migration digest changed.');
+  const { rows } = await client.query(`
+    SELECT migration_name AS name, checksum, finished_at IS NOT NULL AS finished
+    FROM public._prisma_migrations WHERE rolled_back_at IS NULL
+  `);
+  if (rows.length !== names.length || new Set(rows.map(row => row.name)).size !== names.length
+    || rows.some(row => !row.finished || checksums[row.name] !== row.checksum)) {
+    fail('The live migration ledger differs from the cutover source migrations.');
+  }
+  return names.length;
+}
+
+const routineKey = (name: string, argumentTypes: string) => JSON.stringify([name, argumentTypes]);
+
+/** Read-only admission for the first split, before the runtime receives a credential. */
+export function verifyPredecessorRoleCutover(input: {
+  databaseUrl: string;
+  migrationsDirectory: string;
+  catalogFile: string;
+  stage: 'before-grants' | 'grants-staged';
+}) {
+  return withTransaction(input.databaseUrl, 'READ ONLY', async client => {
+    if (input.stage !== 'before-grants' && input.stage !== 'grants-staged') fail('Unknown cutover verification stage.');
+    const { control } = await readIdentity(client, cutoverRoles, false);
+    const catalogBytes = await fs.readFile(input.catalogFile);
+    const manifest = JSON.parse(catalogBytes.toString('utf8')) as CutoverCatalog;
+    const migrations = await verifyCutoverMigrationLedger(client, input.migrationsDirectory, manifest.migrationSha256);
+    const objects = canonicalObjects(await readCatalog(client), control, cutoverRoles);
+    const { rows: [state] } = await client.query(`
+      SELECT
+        (SELECT count(*) = 1 AND bool_and(id = 'grouped-allocation' AND state = 'CLOSED')
+          FROM public.customer_allocation_release_control) AS closed,
+        NOT EXISTS (SELECT FROM pg_class WHERE relnamespace = 'public'::regnamespace
+          AND relkind IN ('p', 'f', 'v', 'm')) AS relations
+    `);
+    if (!state.closed || !state.relations) fail('The cutover requires a closed allocation boundary and the reviewed relation types.');
+
+    const tables = new Map<string, string[]>();
+    for (const [profile, names] of Object.entries(manifest.tables)) {
+      if (!/^(NONE|SELECT( INSERT)?( UPDATE)?( DELETE)?)$/.test(profile)) fail('Unknown cutover table privilege profile.');
+      for (const name of names) {
+        if (tables.has(name)) fail('Duplicate cutover table identity.');
+        tables.set(name, profile === 'NONE' ? [] : profile.split(' '));
+      }
+    }
+    const protectedTables = ['_prisma_migrations', 'deployment_operations', 'customer_allocation_release_control',
+      'customer_allocation_release_audit', 'shipment_statement_migration_evidence',
+      'shipment_statement_migration_manifests', 'shipment_statement_migration_runs'];
+    if (protectedTables.some(name => tables.get(name)?.length !== 0)) fail('A protected table is outside the cutover denial inventory.');
+    if (tables.get('recovery_operations')?.join(' ') !== 'SELECT INSERT UPDATE'
+      || tables.get('recovery_audit_events')?.join(' ') !== 'SELECT INSERT') fail('The cutover recovery status or audit permissions changed.');
+    const sequences = new Set([...manifest.sequences, ...manifest.protectedSequences]);
+    if (manifest.sequences.includes('customer_allocation_release_audit_id_seq') ||
+        !manifest.protectedSequences.includes('customer_allocation_release_audit_id_seq')) {
+      fail('The allocation audit sequence is outside the cutover denial inventory.');
+    }
+    const definerRoutines = new Map(manifest.definerRoutines.map(routine =>
+      [routineKey(routine.name, routine.arguments), routine]));
+    const { rows: routineDefinitions } = await client.query(`
+      SELECT proname AS name, oidvectortypes(proargtypes) AS arguments, pg_get_functiondef(oid) AS definition
+      FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND prosecdef
+    `);
+    const approvedExecutors: Record<string, CutoverRoutine['execute']> = {
+      [routineKey('customer_allocation_controller_activate', 'text, text, text, text, timestamp with time zone')]: 'controller',
+      [routineKey('customer_allocation_controller_close', 'text, text, text, text')]: 'controller',
+      [routineKey('customer_allocation_controller_lock', 'text, text')]: 'controller',
+      [routineKey('customer_allocation_runtime_admitted', 'text, text')]: 'runtime',
+      [routineKey('require_active_grouped_allocation_child', '')]: 'owner',
+    };
+    if (definerRoutines.size !== Object.keys(approvedExecutors).length || routineDefinitions.length !== definerRoutines.size
+      || routineDefinitions.some(row => {
+        const key = routineKey(row.name, row.arguments);
+        const routine = definerRoutines.get(key);
+        return !routine || routine.execute !== approvedExecutors[key]
+          || sha256(row.definition.replace(/\r\n/g, '\n')) !== routine.definitionSha256;
+      })) fail('A privileged routine differs from the reviewed cutover inventory.');
+
+    const tableCount = tables.size;
+    const sequenceCount = sequences.size;
+    const invokers: string[] = [];
+    const staged = input.stage === 'grants-staged';
+    for (const object of objects) {
+      const expected: string[] = [];
+      const expectGrants = (recipient: string, ...verbs: string[]) =>
+        expected.push(...verbs.map(verb => `${recipient}:${verb}`));
+      switch (object.kind) {
+        case 'DATABASE':
+          if (staged) {
+            expectGrants(cutoverRoles.runtime, 'CONNECT');
+            expectGrants(cutoverRoles.controller, 'CONNECT');
+          } else expectGrants('', 'CONNECT', 'TEMPORARY');
+          break;
+        case 'SCHEMA':
+          if (staged) {
+            expectGrants(cutoverRoles.runtime, 'USAGE');
+            expectGrants(cutoverRoles.controller, 'USAGE');
+          } else expectGrants('', 'USAGE');
+          break;
+        case 'TABLE': {
+          const verbs = tables.get(object.name) ?? fail(`Unexpected cutover table: ${object.name}`);
+          if (staged) expectGrants(cutoverRoles.runtime, ...verbs);
+          tables.delete(object.name);
+          break;
+        }
+        case 'SEQUENCE':
+          if (!sequences.delete(object.name)) fail(`Unexpected cutover sequence: ${object.name}`);
+          if (staged && manifest.sequences.includes(object.name)) expectGrants(cutoverRoles.runtime, 'USAGE');
+          break;
+        case 'FUNCTION': {
+          const key = routineKey(object.name, object.arguments);
+          if (object.securityDefiner) {
+            const executor = approvedExecutors[key];
+            if (executor === 'runtime' || executor === 'controller') expectGrants(cutoverRoles[executor], 'EXECUTE');
+          } else {
+            invokers.push(key);
+            expectGrants('', 'EXECUTE');
+          }
+          break;
+        }
+        default:
+          fail(`Unexpected cutover object kind: ${object.kind}`);
+      }
+      const actual = object.grants.filter(grant => grant.grantee !== object.owner)
+        .map(grant => `${grant.grantee}:${grant.privilege}`).sort();
+      if (JSON.stringify(actual) !== JSON.stringify(expected.sort())) {
+        fail(`Cutover privilege drift on ${object.kind} ${object.name || '(current database)'}.`);
+      }
+    }
+    if (tables.size || sequences.size || sha256(JSON.stringify(invokers.sort())) !== manifest.invokerRoutinesSha256) {
+      fail('The cutover object identities differ from the reviewed inventory.');
+    }
+    return {
+      stage: input.stage,
+      catalogSha256: sha256(catalogBytes),
+      migrationSha256: manifest.migrationSha256,
+      migrations,
+      tables: tableCount,
+      sequences: sequenceCount,
+      securityDefinerRoutines: routineDefinitions.length,
+    };
+  });
 }

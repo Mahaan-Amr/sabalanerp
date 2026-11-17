@@ -43,11 +43,14 @@ test('customer workspace: exact balances, immutable history, refund limits and C
       expectedSnapshotHash: openingSnapshot.openingSnapshotHash!, identityConfirmed: true, totalConfirmed: true,
       lines: [{ key: 'opening', kind: 'RECEIVABLE' as const, amountRials: 1000n, reference: 'مانده باز تأییدشده', existingSourceIds: [] }],
     } };
-    const result = await recordCustomerAccountOperation(db, id, opening);
-    assert.deepEqual(await recordCustomerAccountOperation(db, id, opening), result);
+    await assert.rejects(recordCustomerAccountOperation(db, id, opening), { code: 'CUSTOMER_SOURCE_SHARES_CLOSED' });
+    assert.equal(await db.accountingCustomerProfile.count(), 0);
+    assert.equal(await db.accountingLedgerVoucher.count(), 0);
+    const debit = { ...common, kind: 'DEBIT' as const, amountRials: 1000n, idempotencyKey: randomUUID() };
+    const result = await recordCustomerAccountOperation(db, id, debit);
+    assert.deepEqual(await recordCustomerAccountOperation(db, id, debit), result);
     const profileId = result.profileId;
-    await assert.rejects(recordCustomerAccountOperation(db, id, { ...opening, amountRials: 2000n }), /اطلاعات دیگری/);
-    await assert.rejects(recordCustomerAccountOperation(db, id, { ...opening, idempotencyKey: randomUUID() }), /قبلاً ثبت/);
+    await assert.rejects(recordCustomerAccountOperation(db, id, { ...debit, amountRials: 2000n }), { code: 'IDEMPOTENCY_KEY_REUSED' });
     await assert.rejects(recordCustomerAccountOperation(db, id, { ...common, kind: 'DEBIT', amountRials: 10n, idempotencyKey: randomUUID(), actor: { ...actor, profile: 'VIEWER' } }), /مجوز/);
     const receipt = await recordCustomerWorkspaceTreasury(db, id, { ...common, occurredAt: new Date('2026-10-02'), kind: 'RECEIPT', amountRials: 600n, bankLedgerId: bank.id, financialAccountId: financial.id, idempotencyKey: randomUUID(), allocations: [] });
     const receiptId = (receipt as { id: string }).id;

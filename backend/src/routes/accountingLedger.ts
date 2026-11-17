@@ -133,7 +133,8 @@ const run = (handler: (req: WorkspaceRequest) => Promise<unknown>) => async (req
   try {
     res.json({ success: true, data: serialize(await handler(req)) });
   } catch (error) {
-    if ((error as { code?: string })?.code === 'P2034') {
+    const failure = error as { code?: string; meta?: { code?: string } } | undefined;
+    if (failure?.code === 'P2034' || (failure?.code === 'P2010' && failure.meta?.code === '40001')) {
       res.status(409).json({ success: false, code: 'ACCOUNTING_CONCURRENT_CHANGE', error: 'حساب هم‌زمان تغییر کرده است؛ اطلاعات را به‌روز کنید و فرمان را دوباره بررسی کنید.' });
       return;
     }

@@ -5,7 +5,9 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
-import {validateImmutableApplicationGraph,prebuiltReleaseExports,readPinnedContent,contentCommand} from './prebuilt-release-plan.mjs';
+import {validateImmutableApplicationGraph,validateInstalledApplicationGraph,prebuiltReleaseExports,readPinnedContent,contentCommand} from './prebuilt-release-plan.mjs';
+import {maintenanceImageBinding,readMaintenanceRecord,validateMaintenanceResume,validateMaintenanceBinding} from '../../backend/scripts/maintenance-image-binding.mjs';
+import {validatePreservationJournal} from './preserved-clamav.mjs';
 import {productionImageStore} from './production-image-execution-binding.mjs';
 const roles=['backend','frontend','inquiry'],hash=/^[a-f0-9]{64}$/,commit=/^[a-f0-9]{40}$/,image=/^sha256:[a-f0-9]{64}$/;
 const sha=raw=>createHash('sha256').update(raw).digest('hex');
@@ -21,6 +23,7 @@ export function validateMaintenanceSelection(plan,actual){
  assert.deepEqual(actual.target,plan.target,'MAINTENANCE_TARGET_CHANGED');
  keys(plan.operations,['commit','tree','files']);assert.match(plan.operations.commit,commit);assert.match(plan.operations.tree,commit);assert.match(plan.operations.files['deploy/scripts/deploy.sh'],hash);assert.deepEqual(actual.operations,plan.operations,'MAINTENANCE_OPERATIONS_CHANGED');
  assert.ok(['no-malware-scan','legacy-scanner'].includes(plan.uploadPolicy));assert.equal(actual.uploadPolicy,plan.uploadPolicy);assert.equal(actual.scannerRetained,plan.uploadPolicy==='legacy-scanner','MAINTENANCE_SOURCE_SCANNER_GRAPH_CHANGED');
+ assert.equal(actual.operationsScannerRetained,actual.scannerRetained,'MAINTENANCE_OPERATIONS_SCANNER_GRAPH_INCOMPATIBLE');
  keys(plan.images,roles);
  for(const role of roles){
   const selected=plan.images[role];keys(selected,['image','archiveFile','archiveGraph','browser']);assert.match(selected.image,image);assert.ok(path.posix.isAbsolute(selected.archiveFile));
@@ -50,7 +53,7 @@ function source(repository){
 function operations(root){
  const git=(...args)=>contentCommand('git',args,root).trim();assert.equal(git('status','--porcelain','--untracked-files=all'),'','MAINTENANCE_OPERATIONS_DIRTY');
  // Ordinary Git source pin: no online generated host pack or online authority.
- const files={};for(const relative of git('ls-files','--','deploy','scripts','docker-compose*.yml','package.json','package-lock.json').split('\n')){
+ const files={};for(const relative of git('ls-files','--','deploy','scripts','backend/scripts','docker-compose*.yml','package.json','package-lock.json').split('\n')){
   assert.ok(relative&&!relative.split('/').includes('..')&&!path.isAbsolute(relative));files[relative]=sha(readPinnedContent(path.join(root,relative)));
  }
  return {commit:git('rev-parse','HEAD'),tree:git('rev-parse','HEAD^{tree}'),files};
@@ -61,10 +64,32 @@ function archive(repository,operationsRoot,file,selectedImage,role){
  return result;
 }
 async function main(){
- assert.equal(process.platform,'linux');assert.equal(process.getuid(),0);assertOrdinaryEnvironment();
+ assert.equal(process.platform,'linux');assert.equal(process.getuid(),0);
+ if(process.argv[2]==='resume'){
+  assert.equal(process.argv.length,4);
+  const sessionFile=process.argv[3],session=JSON.parse(readPinnedContent(sessionFile)),directory=path.dirname(sessionFile);
+  assert.match(session.deploymentId,/^[a-zA-Z0-9_-]{1,160}$/);
+  const journalRaw=readPinnedContent(path.join(directory,'active-deployment.jsonl'));
+  const first=validatePreservationJournal(journalRaw.toString('utf8').split(/\r?\n/).filter(Boolean).map(line=>JSON.parse(line)));
+  const recordFile=path.join(directory,'maintenance-images-'+session.deploymentId+'.json');
+  const inherited=process.env.DEPLOYMENT_MAINTENANCE_IMAGE_BINDING_HEX?validateMaintenanceBinding(JSON.parse(Buffer.from(process.env.DEPLOYMENT_MAINTENANCE_IMAGE_BINDING_HEX,'hex'))):null;
+  const record=fs.existsSync(recordFile)?readMaintenanceRecord(recordFile,session.maintenanceImages):null;
+  const binding=validateMaintenanceResume(session,first,record,inherited);
+  if(binding){
+   const savedPlan=JSON.parse(Buffer.from(record.planRawBase64,'base64'));
+   const current=source(process.cwd());assert.equal(current.head,savedPlan.applicationCommit);assert.equal(current.tree,savedPlan.applicationTree);assert.equal(current.status,'');assert.equal(current.inquiryStatus,'');assert.equal(current.inquiryHead,savedPlan.inquirySourceCommit);assert.equal(current.inquiryGitlink,savedPlan.inquirySourceCommit);
+   assert.deepEqual(operations(path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..')),savedPlan.operations,'MAINTENANCE_RECOVERY_OPERATIONS_CHANGED');
+   if(binding.content.target.composeFile==='docker-compose.rehearsal.yml')assert.equal(process.env.DEPLOYMENT_QA_REHEARSAL_PLAN_SHA256,binding.content.target.qaPlanSha256);else assert.ok(!process.env.DEPLOYMENT_QA_REHEARSAL_PLAN_FILE&&!process.env.DEPLOYMENT_QA_REHEARSAL_PLAN_SHA256);
+   const store=productionImageStore(JSON.parse(contentCommand('docker',['info','--format','{{json .}}'],process.cwd())));assert.equal(store,binding.content.imageStore);
+   for(const role of roles){const selected=binding.content.images[role],rows=JSON.parse(contentCommand('docker',['image','inspect',selected.image],process.cwd()));assert.equal(rows.length,1);validateInstalledApplicationGraph(selected,rows[0],store);}
+   process.stdout.write("export DEPLOYMENT_MAINTENANCE_IMAGE_BINDING_HEX='"+Buffer.from(JSON.stringify(binding)).toString('hex')+"'\nexport DEPLOYMENT_MAINTENANCE_UPLOAD_POLICY='"+binding.content.uploadPolicy+"'\n");
+  }
+  return;
+ }
+ assertOrdinaryEnvironment();
  assert.equal(process.argv.length,9);const [mode,file,pin,repository,operationsRoot,composeFile,qaPin]=process.argv.slice(2);
  assert.ok(['attest','verify','bind'].includes(mode));assert.equal(fs.realpathSync(repository),repository);assert.equal(fs.realpathSync(operationsRoot),operationsRoot);process.chdir(repository);
- const input=JSON.parse(readPinnedContent(file,pin,{privatePlan:true,maximum:8*1024**2}));
+ const planRaw=readPinnedContent(file,pin,{privatePlan:true,maximum:8*1024**2}),input=JSON.parse(planRaw);
  const target={composeFile,qaPlanSha256:qaPin==='production'?null:qaPin};
  if(composeFile==='docker-compose.rehearsal.yml'){
   assert.equal(process.env.DEPLOYMENT_QA_REHEARSAL_PLAN_SHA256,qaPin);assert.ok(process.env.DEPLOYMENT_QA_REHEARSAL_PLAN_FILE);
@@ -87,9 +112,11 @@ async function main(){
  }
  const label=actual.images.backend.Config.Labels['io.sabalan.release.upload-policy'];
  actual.uploadPolicy=label||'legacy-scanner';assert.ok(['no-malware-scan','legacy-scanner'].includes(actual.uploadPolicy),'MAINTENANCE_UPLOAD_POLICY_CHANGED');
- const graphFile=composeFile==='docker-compose.rehearsal.yml'&&actual.uploadPolicy==='no-malware-scan'?'docker-compose.rehearsal-scanner-free.yml':composeFile;
+ const graphFile=contentCommand('sh',[path.join(operationsRoot,'deploy/scripts/release-compose-file.sh'),composeFile,'0',actual.uploadPolicy],repository).trim();
  const rendered=JSON.parse(contentCommand('docker',['compose','--profile','deployment','--env-file',process.env.DEPLOYMENT_PREBUILT_ENV_FILE,'-f',path.join(repository,graphFile),'-p','sabalanerp','config','--format','json'],repository));
  assert.equal(rendered.name,'sabalanerp');actual.scannerRetained=Object.hasOwn(rendered.services,'clamav');
+ const operationsConfig=JSON.parse(contentCommand('docker',['compose','--profile','deployment','--env-file',process.env.DEPLOYMENT_PREBUILT_ENV_FILE,'-f',path.join(operationsRoot,'docker-compose.prod.yml'),'-p','sabalanerp','config','--format','json'],operationsRoot));
+ actual.operationsScannerRetained=Object.hasOwn(operationsConfig.services,'clamav');
  let plan=input;
  if(mode==='attest'){
   // The producer measures bytes itself. This receipt makes no build-success,
@@ -102,10 +129,12 @@ async function main(){
  assert.deepEqual(source(repository),Object.fromEntries(['head','tree','status','inquiryGitlink','inquiryHead','inquiryStatus'].map(k=>[k,actual[k]]))); assert.deepEqual(operations(operationsRoot),actual.operations);
  if(mode==='bind'){
   assertLock(repository);assert.match(process.env.DEPLOYMENT_ID??'',/^deploy-[A-Za-z0-9_-]{1,160}$/);
-  const directory=path.join(repository,'.deploy-state'),record=path.join(directory,'maintenance-images-'+process.env.DEPLOYMENT_ID+'.json');
-  const fd=fs.openSync(record,'wx',0o400);try{fs.writeFileSync(fd,JSON.stringify({format:'sabalan-maintenance-image-binding/v1',deploymentId:process.env.DEPLOYMENT_ID,planSha256:pin,plan,releaseAdmission:false})+'\n');fs.fsyncSync(fd);}finally{fs.closeSync(fd);}
+  const directory=process.env.DEPLOYMENT_MAINTENANCE_REPORT_DIR;assert.ok(path.isAbsolute(directory)&&fs.realpathSync(directory)===directory);
+  const record=path.join(directory,'maintenance-images-'+process.env.DEPLOYMENT_ID+'.json'),binding=maintenanceImageBinding(plan,pin);
+  const fd=fs.openSync(record,'wx',0o400);try{fs.writeFileSync(fd,JSON.stringify({format:'sabalan-maintenance-image-record/v1',binding,planRawBase64:planRaw.toString('base64')})+'\n');fs.fsyncSync(fd);}finally{fs.closeSync(fd);}
   const dir=fs.openSync(directory,'r');try{fs.fsyncSync(dir);}finally{fs.closeSync(dir);}
+  process.stdout.write("export DEPLOYMENT_MAINTENANCE_IMAGE_BINDING_HEX='"+Buffer.from(JSON.stringify(binding)).toString('hex')+"'\n");
 }
- if(mode==='attest'){assertLock(repository);process.stdout.write(JSON.stringify(plan)+'\n');}else process.stdout.write(prebuiltReleaseExports(selected));
+ if(mode==='attest'){assertLock(repository);process.stdout.write(JSON.stringify(plan)+'\n');}else process.stdout.write(prebuiltReleaseExports(selected)+"export DEPLOYMENT_MAINTENANCE_UPLOAD_POLICY='"+plan.uploadPolicy+"'\n");
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url))main().catch(error=>{process.stderr.write('MAINTENANCE_IMAGE_SELECTION_INVALID: '+error.message+'\n');process.exitCode=1;});

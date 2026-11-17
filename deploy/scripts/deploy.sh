@@ -51,6 +51,7 @@ unset DEPLOYMENT_CAPTURE_PAUSE_STARTED_NS
 PREBUILT_RELEASE=0
 MAINTENANCE_IMAGE_SELECTION=0
 unset DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX
+unset DEPLOYMENT_MAINTENANCE_IMAGE_BINDING_HEX DEPLOYMENT_MAINTENANCE_UPLOAD_POLICY
 PREBUILT_RELEASE_PLAN=""
 PREBUILT_RELEASE_SHA256=""
 if [ "${1:-}" = "--maintenance-images" ]; then
@@ -217,12 +218,9 @@ preserved_clamav_guard() {
 }
 
 runtime_compose_file() {
-  if [ "${COMPOSE_FILE}" = docker-compose.rehearsal.yml ] && [ "${LEGACY_RELEASE_GRAPH}" -eq 0 ] \
-    && { [ -n "${ALLOCATION_EVIDENCE_DIR}" ] || [ "${CUSTOMER_ALLOCATION_CURRENT_DATA_ROLLBACK}" -eq 1 ]; }; then
-    printf '%s\n' docker-compose.rehearsal-scanner-free.yml
-  else
-    printf '%s\n' "${COMPOSE_FILE}"
-  fi
+  runtime_policy="${DEPLOYMENT_MAINTENANCE_UPLOAD_POLICY:-}"
+  if [ -n "${ALLOCATION_EVIDENCE_DIR}" ] || [ "${CUSTOMER_ALLOCATION_CURRENT_DATA_ROLLBACK}" -eq 1 ]; then runtime_policy=no-malware-scan; fi
+  sh "${OPERATIONS_ROOT}/deploy/scripts/release-compose-file.sh" "${COMPOSE_FILE}" "${LEGACY_RELEASE_GRAPH}" "${runtime_policy}"
 }
 
 compose() {
@@ -242,9 +240,14 @@ run_compose() {
 
 verify_prebuilt_release() {
   if [ "${MAINTENANCE_IMAGE_SELECTION}" -eq 1 ]; then
-    DEPLOYMENT_PREBUILT_ENV_FILE="${ENV_FILE}" node "${OPERATIONS_ROOT}/deploy/scripts/maintenance-image-selection.mjs" "${1:-verify}" \
+    set -- node "${OPERATIONS_ROOT}/deploy/scripts/maintenance-image-selection.mjs" "${1:-verify}" \
       "${PREBUILT_RELEASE_PLAN}" "${PREBUILT_RELEASE_SHA256}" "${REPO_ROOT}" "${OPERATIONS_ROOT}" \
       "${COMPOSE_FILE}" "${DEPLOYMENT_QA_REHEARSAL_PLAN_SHA256:-production}"
+    if [ "${DB_LEASE_ACQUIRED}" -eq 1 ]; then
+      DEPLOYMENT_PREBUILT_ENV_FILE="${ENV_FILE}" run_original_owned_with_heartbeat "$@"
+    else
+      DEPLOYMENT_PREBUILT_ENV_FILE="${ENV_FILE}" DEPLOYMENT_MAINTENANCE_REPORT_DIR="${SESSION_HOST_PATH%/*}" "$@"
+    fi
     return $?
   fi
   DEPLOYMENT_PREBUILT_ENV_FILE="${ENV_FILE}" node "${OPERATIONS_ROOT}/deploy/scripts/prebuilt-release-plan.mjs" \
@@ -372,6 +375,7 @@ run_backend() {
       --label "io.sabalan.deployment.id=${DEPLOYMENT_ID}" \
       -e "BACKEND_RUNTIME_ROLE=control" \
       -e DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX \
+      -e DEPLOYMENT_MAINTENANCE_IMAGE_BINDING_HEX \
       -e "DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_SHA256=${DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_SHA256:-}" \
       -e "DEPLOYMENT_CLAMAV_REPAIR=${DEPLOYMENT_CLAMAV_REPAIR}" \
       -e "DEPLOYMENT_CLAMAV_OPERATION=${DEPLOYMENT_CLAMAV_OPERATION}" \
@@ -458,6 +462,7 @@ run_backend_timed() {
       --label "io.sabalan.deployment.id=${DEPLOYMENT_ID}" \
       -e "BACKEND_RUNTIME_ROLE=control" \
       -e DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX \
+      -e DEPLOYMENT_MAINTENANCE_IMAGE_BINDING_HEX \
       -e "DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_SHA256=${DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_SHA256:-}" \
       -e "DEPLOYMENT_CLAMAV_REPAIR=${DEPLOYMENT_CLAMAV_REPAIR}" \
       -e "DEPLOYMENT_CLAMAV_OPERATION=${DEPLOYMENT_CLAMAV_OPERATION}" \
@@ -1199,14 +1204,6 @@ fi
 if [ "${SYSTEM_RECOVERY_BACKUP}" -eq 1 ] && [ "${COMPOSE_FILE}" = docker-compose.prod.yml ]; then
   export COMPOSE_PROJECT_NAME=sabalanerp
 fi
-if [ "${PREBUILT_RELEASE}" -eq 1 ]; then
-  # Select only the already-installed CONFIGs before taking the host/DB lease.
-  # A plan selects content; it never grants original qualification authority.
-  prebuilt_exports="$(verify_prebuilt_release)" || exit 1
-  eval "${prebuilt_exports}"
-  preserved_clamav_guard health || exit 1
-fi
-
 DEPLOYMENT_SECRET_DIR="$(env_value DEPLOYMENT_SECRET_DIR)"
 DEPLOYMENT_REMOTE_MOUNT_HOST="$(env_value DEPLOYMENT_REMOTE_MOUNT_HOST)"
 DEPLOYMENT_REPORT_DIR_HOST="$(env_value DEPLOYMENT_REPORT_DIR_HOST)"
@@ -1259,6 +1256,8 @@ if [ "${SYSTEM_RECOVERY_BACKUP}" -eq 1 ]; then
 fi
 
 if [ -f "${SESSION_HOST_PATH}" ]; then
+  maintenance_resume="$(node "${OPERATIONS_ROOT}/deploy/scripts/maintenance-image-selection.mjs" resume "${SESSION_HOST_PATH}")" || exit 1
+  eval "${maintenance_resume}"
   preservation_resume="$(node "${OPERATIONS_ROOT}/deploy/scripts/preserved-clamav.mjs" resume "${SESSION_HOST_PATH}")" || exit 1
   eval "${preservation_resume}"
   preserved_clamav_guard identity || exit 1
@@ -1357,6 +1356,14 @@ if [ -f "${SESSION_HOST_PATH}" ]; then
   esac
 fi
 
+if [ "${PREBUILT_RELEASE}" -eq 1 ]; then
+  # Original-session recovery above precedes any newly supplied content plan.
+  # No selected runtime, source fetch, storage cleanup or build has begun.
+  prebuilt_exports="$(verify_prebuilt_release)" || exit 1
+  eval "${prebuilt_exports}"
+  preserved_clamav_guard health || exit 1
+fi
+
 if [ -f "${CONFIGURATION_STATE}" ]; then
   echo "Unfinished configuration state exists without a deployment session; inspect and recover it before a new release." >&2
   exit 1
@@ -1415,7 +1422,8 @@ case "${previous_upload_policy}" in
       }
     fi
     if [ "${DEPLOYMENT_MODE}" = release ] && [ "${CAPTURE_ONLY}" -eq 0 ] && [ "${DEPLOYMENT_CLAMAV_REPAIR}" = false ] \
-      && { [ "${COMPOSE_FILE}" = docker-compose.prod.yml ] || [ -n "${ALLOCATION_EVIDENCE_DIR}" ]; } \
+      && { [ "${COMPOSE_FILE}" = docker-compose.prod.yml ] || [ -n "${ALLOCATION_EVIDENCE_DIR}" ] \
+        || [ "${DEPLOYMENT_MAINTENANCE_UPLOAD_POLICY:-}" = no-malware-scan ]; } \
       && [ -z "${DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX:-}" ]; then
       LEGACY_RELEASE_GRAPH=0
     fi
@@ -1676,7 +1684,8 @@ if [ "${PREBUILT_RELEASE}" -eq 1 ]; then
 fi
 if [ "${MAINTENANCE_IMAGE_SELECTION}" -eq 1 ]; then
   # Fsynced content identity survives interruption; journal/leases retain authority.
-  verify_prebuilt_release bind >/dev/null || exit 1
+  maintenance_binding="$(verify_prebuilt_release bind)" || exit 1
+  eval "${maintenance_binding}"
 fi
 control prepare
 SESSION_PREPARED=1

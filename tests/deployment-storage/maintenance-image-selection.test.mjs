@@ -4,7 +4,7 @@ import {validateMaintenanceSelection} from '../../deploy/scripts/maintenance-ima
 const h=c=>c.repeat(64),id=c=>'sha256:'+h(c);
 export function fixture(){
  const plan={format:'sabalan-maintenance-image-selection/v1',uploadPolicy:'no-malware-scan',applicationCommit:'a'.repeat(40),applicationTree:'b'.repeat(40),applicationSourceHash:h('c'),inquirySourceCommit:'d'.repeat(40),imageStore:'classic',target:{composeFile:'docker-compose.prod.yml',qaPlanSha256:null},operations:{commit:'a'.repeat(40),tree:'b'.repeat(40),files:{'deploy/scripts/deploy.sh':h('e')}},images:{}};
- const actual={uploadPolicy:'no-malware-scan',scannerRetained:false,head:plan.applicationCommit,tree:plan.applicationTree,status:'',inquiryHead:plan.inquirySourceCommit,inquiryGitlink:plan.inquirySourceCommit,inquiryStatus:'',operations:structuredClone(plan.operations),target:structuredClone(plan.target),imageStore:'classic',images:{},archiveReceipts:{},browsers:{}};
+ const actual={uploadPolicy:'no-malware-scan',scannerRetained:false,operationsScannerRetained:false,head:plan.applicationCommit,tree:plan.applicationTree,status:'',inquiryHead:plan.inquirySourceCommit,inquiryGitlink:plan.inquirySourceCommit,inquiryStatus:'',operations:structuredClone(plan.operations),target:structuredClone(plan.target),imageStore:'classic',images:{},archiveReceipts:{},browsers:{}};
  for(const [n,role]of ['backend','frontend','inquiry'].entries()){
   const graph={index:id(String(n+1)),platform:id('4'),config:id(String(n+5)),rootfsDiffIds:[id('8')],archiveSha256:h('9'),archiveBytes:10240};
   const browser=role==='backend'?null:{id:role==='frontend'?'erp_actual_build123':'inquiry_actual_build123',nativeBuildId:role==='frontend'?'erp_actual_build123':'native-next-build',manifestSha256:h('f')};
@@ -51,7 +51,7 @@ test('actual runner entry reaches maintenance selection with QA and custody whil
  assert.notEqual(run(['--prebuilt-release','/private/env','/private/plan',h('a')]).status,0);
 });
 test('QA selector precedes content selection and full maintenance, signed activation and reopening keep their order',()=>{
- const ordered=['COMPOSE_FILE="$(node "${OPERATIONS_ROOT}/deploy/scripts/qa-rehearsal-target.mjs"','  prebuilt_exports="$(verify_prebuilt_release)"','exec 9>"${LOCK_FILE}"','verify_prebuilt_release bind','control prepare','control acquire','phase MAINTENANCE_REQUESTED','phase TRAFFIC_BLOCKED','phase SERVICES_DRAINED','phase LOCAL_CHECKPOINT_VERIFIED','phase REMOTE_CHECKPOINT_VERIFIED','phase MUTATION_STARTED','phase MIGRATIONS_APPLIED','run_customer_allocation_controller activate','phase RELEASE_STARTED','phase GATES_PASSED','phase TRAFFIC_OPENED'];
+ const ordered=['COMPOSE_FILE="$(node "${OPERATIONS_ROOT}/deploy/scripts/qa-rehearsal-target.mjs"','exec 9>"${LOCK_FILE}"','maintenance-image-selection.mjs" resume','  prebuilt_exports="$(verify_prebuilt_release)"','verify_prebuilt_release bind','control prepare','control acquire','phase MAINTENANCE_REQUESTED','phase TRAFFIC_BLOCKED','phase SERVICES_DRAINED','phase LOCAL_CHECKPOINT_VERIFIED','phase REMOTE_CHECKPOINT_VERIFIED','phase MUTATION_STARTED','phase MIGRATIONS_APPLIED','run_customer_allocation_controller activate','phase RELEASE_STARTED','phase GATES_PASSED','phase TRAFFIC_OPENED'];
  let cursor=0;for(const token of ordered){const next=script.indexOf(token,cursor);assert.ok(next>=cursor,token);cursor=next+token.length;}
  const verify=script.slice(script.indexOf('verify_prebuilt_release() {'),script.indexOf('customer_allocation_retention_path() {'));
  assert.match(verify,/maintenance-image-selection.mjs/);assert.match(verify,/"\$\{COMPOSE_FILE\}"/);
@@ -61,6 +61,24 @@ test('QA selector precedes content selection and full maintenance, signed activa
 test('the same content selector supports a scanner-retaining predecessor only with its exact source graph',()=>{
  const {plan,actual}=fixture();plan.uploadPolicy=actual.uploadPolicy='legacy-scanner';delete actual.images.backend.Config.Labels['io.sabalan.release.upload-policy'];
  assert.throws(()=>validateMaintenanceSelection(plan,actual),/MAINTENANCE_SOURCE_SCANNER_GRAPH_CHANGED/);
- actual.scannerRetained=true;assert.equal(validateMaintenanceSelection(plan,actual).releaseAdmission,false);
+ actual.scannerRetained=actual.operationsScannerRetained=true;assert.equal(validateMaintenanceSelection(plan,actual).releaseAdmission,false);
  actual.images.backend.Config.Labels['io.sabalan.release.upload-policy']='no-malware-scan';assert.throws(()=>validateMaintenanceSelection(plan,actual),/MAINTENANCE_UPLOAD_POLICY_CHANGED/);
+});
+test('candidate and retained QA graphs use the same shared decision without requiring allocation activation',()=>{
+ const selector=new URL('../../deploy/scripts/release-compose-file.sh',import.meta.url);
+ for(const [compose,legacy,policy,expected]of [['docker-compose.rehearsal.yml','0','no-malware-scan','docker-compose.rehearsal-scanner-free.yml'],['docker-compose.rehearsal.yml','1','no-malware-scan','docker-compose.rehearsal.yml'],['docker-compose.rehearsal.yml','1','legacy-scanner','docker-compose.rehearsal.yml'],['docker-compose.prod.yml','0','no-malware-scan','docker-compose.prod.yml']]){
+  const result=spawnSync(shell,[selector.pathname.replace(/^\/([A-Za-z]:)/,'$1'),compose,legacy,policy],{encoding:'utf8'});assert.equal(result.status,0,result.stderr);assert.equal(result.stdout.trim(),expected);
+ }
+ assert.match(script,/release-compose-file.sh/);
+});
+test('scanner-retaining source cannot select incompatible scanner-free operations before runtime changes',()=>{
+ const {plan,actual}=fixture();plan.uploadPolicy=actual.uploadPolicy='legacy-scanner';actual.scannerRetained=true;actual.operationsScannerRetained=false;delete actual.images.backend.Config.Labels['io.sabalan.release.upload-policy'];
+ assert.throws(()=>validateMaintenanceSelection(plan,actual),/MAINTENANCE_OPERATIONS_SCANNER_GRAPH_INCOMPATIBLE/);
+});
+test('ordinary QA retains the observed legacy scanner for rollback while executing the selected scanner-free target',()=>{
+ const from=script.indexOf('case "${previous_upload_policy}" in'),to=script.indexOf('export DEPLOYMENT_PREVIOUS_BACKEND_IMAGE',from);const block=script.slice(from,to);assert.ok(from>0&&to>from);
+ for(const [policy,expected]of [['no-malware-scan','0'],['legacy-scanner','1']]){
+  const code=`set -eu\nprevious_upload_policy=''; LEGACY_RELEASE_GRAPH=0; DEPLOYMENT_CLAMAV_REPAIR=false; DEPLOYMENT_MODE=release; CAPTURE_ONLY=0; COMPOSE_FILE=docker-compose.rehearsal.yml; ALLOCATION_EVIDENCE_DIR=''; DEPLOYMENT_MAINTENANCE_UPLOAD_POLICY=${policy}\nimage_of_service(){ printf retained-scanner-image; }; compose(){ printf retained-scanner-container; }; docker(){ printf healthy; }\n${block}\nprintf '%s:%s' "$LEGACY_RELEASE_GRAPH" "$DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE"\n`;
+  const result=spawnSync(shell,['-c',code],{encoding:'utf8'});assert.equal(result.status,0,result.stderr);assert.equal(result.stdout,expected+':retained-scanner-image');
+ }
 });

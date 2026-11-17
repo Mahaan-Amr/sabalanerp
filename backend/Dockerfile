@@ -50,6 +50,7 @@ COPY backend/tsconfig.json ./
 COPY backend/tsconfig.cutover.json ./
 COPY backend/scripts/shipment-statement-cutover.ts ./scripts/shipment-statement-cutover.ts
 COPY backend/scripts/clamav-checkpoint.mjs backend/scripts/clamav-checkpoint.d.mts backend/scripts/clamav-incident-policy.mjs backend/scripts/preserved-clamav-policy.mjs backend/scripts/preserved-clamav-policy.d.mts ./scripts/
+COPY backend/scripts/maintenance-image-binding.mjs backend/scripts/maintenance-image-binding.d.mts ./scripts/
 COPY backend/src ./src
 
 RUN npx prisma generate

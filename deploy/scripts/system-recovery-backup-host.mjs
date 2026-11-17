@@ -6,27 +6,33 @@ const operationIdPattern = /^c[a-z0-9]{24}$/;
 const deploymentIdPattern = /^deploy-[a-zA-Z0-9_-]{1,120}$/;
 const maximumBytes = 4096;
 
-async function relayInput(runner, envFile, operationId) {
+async function relayInput(runner, envFile, operationId, action) {
   if (!operationIdPattern.test(operationId ?? '') || process.stdin.isTTY) throw new Error();
+  if (action !== undefined && !['BACKUP', 'RESTORE'].includes(action)) throw new Error();
   const input = fstatSync(0);
   if (!input.isFIFO() && !input.isSocket()) throw new Error();
-  const passphrase = Buffer.alloc(maximumBytes);
+  const passphrase = Buffer.alloc(action ? 16384 : maximumBytes);
   const deadline = setTimeout(() => process.stdin.destroy(new Error()), 10_000);
   let length = 0;
   try {
     for await (const chunk of process.stdin) {
-      if (chunk.length > maximumBytes - length) throw new Error();
+      if (chunk.length > passphrase.length - length) throw new Error();
       length += chunk.copy(passphrase, length);
     }
     const value = new TextDecoder('utf-8', { fatal: true }).decode(passphrase.subarray(0, length));
-    if (value.length < 12 || !/[a-z]/i.test(value) || !/[0-9]/.test(value)) throw new Error();
+    if (action) {
+      const contents = JSON.parse(value);
+      if (contents.request?.operationId !== operationId || contents.request?.action !== action
+        || !/^[a-f0-9]{64}$/.test(contents.sealedSha256 || '')) throw new Error();
+    } else if (value.length < 12 || !/[a-z]/i.test(value) || !/[0-9]/.test(value)) throw new Error();
     clearTimeout(deadline);
 
     if (process.platform !== 'linux' || process.getuid() !== 0) {
       console.error('SYSTEM_RECOVERY_BACKUP_REQUIRES_NATIVE_ROOT');
       return 1;
     }
-    const child = spawn('/bin/sh', [runner, '--system-recovery-backup-input', realpathSync(envFile), operationId], {
+    const child = spawn('/bin/sh', [runner, action ? '--system-recovery-owner-input' : '--system-recovery-backup-input',
+      realpathSync(envFile), operationId, ...(action ? [action] : [])], {
       detached: true,
       stdio: ['pipe', 'inherit', 'inherit'],
     });
@@ -79,6 +85,7 @@ function updateIntent(action, file, deploymentId, operationId) {
 const [command, ...args] = process.argv.slice(2);
 try {
   if (command === 'launch' && args.length === 3) process.exitCode = await relayInput(...args);
+  else if (command === 'launch-owner' && args.length === 4) process.exitCode = await relayInput(...args);
   else if ((command === 'hold' || command === 'clear') && args.length === 3) updateIntent(command, ...args);
   else throw new Error();
 } catch {

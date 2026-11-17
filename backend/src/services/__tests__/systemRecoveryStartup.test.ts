@@ -24,16 +24,18 @@ test('restricted recovery startup preserves pending owner requests and keeps res
       },
     } as unknown as PrismaClient;
     const ownerRequest = {
-      status: 'CREATING', source: 'CREATED', packageType: 'COMPLETE', progress: 0, storageName: null,
+      status: 'CREATING', source: 'CREATED', progress: 0, storageName: null,
       auditEvents: { some: { eventType: 'RECOVERY_OWNER_BACKUP_REQUESTED' } },
     };
     await initializeSystemRecovery(startupDatabase);
     assert.deepEqual(updates[0]?.where, {
       status: { in: ['CREATING', 'VALIDATING', 'RESTORING'] },
-      NOT: ownerRequest,
+      NOT: { OR: [ownerRequest, { status: 'RESTORING', progress: 0,
+        auditEvents: { some: { eventType: 'RECOVERY_OWNER_HANDOFF_REQUESTED' } } }] },
     });
     const { expiresAt, ...expired } = updates[1]?.where ?? {};
-    assert.deepEqual(expired, ownerRequest);
+    assert.deepEqual(expired, { OR: [ownerRequest, { status: 'RESTORING', progress: 0,
+      auditEvents: { some: { eventType: 'RECOVERY_OWNER_HANDOFF_REQUESTED' } } }] });
     assert(typeof expiresAt === 'object' && expiresAt !== null && 'lte' in expiresAt && expiresAt.lte instanceof Date);
     assert.deepEqual(updates[1]?.data, { status: 'EXPIRED' });
     let databaseCalls = 0;

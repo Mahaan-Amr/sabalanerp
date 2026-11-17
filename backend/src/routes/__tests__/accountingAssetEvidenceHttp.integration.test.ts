@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { createRequire } from 'node:module';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -13,7 +14,8 @@ import { prisma } from '../../lib/prisma';
 test('asset upload retries preserve one evidence row and audit on real PostgreSQL', async () => {
   const db = new URL(process.env.DATABASE_URL || '');
   assert(['127.0.0.1', 'localhost'].includes(db.hostname) && db.port === '55432');
-  assert.equal(db.pathname, '/sabalanerp_qa_finance_clean_20261102');
+  assert(db.pathname === '/sabalanerp_qa_finance_clean_20261102'
+    || /^\/sabalanerp_concurrency_[a-f0-9]{16}$/.test(db.pathname));
   const suffix = randomUUID();
   const entity = await prisma.accountingLegalEntity.create({ data: { code: `qa-${suffix}`, namePersian: 'آزمون', activeFrom: new Date('2026-01-01'), createdBy: 'qa' } });
   const book = await prisma.accountingBook.create({ data: { legalEntityId: entity.id, code: `qa-${suffix}`, namePersian: 'آزمون', createdBy: 'qa' } });
@@ -59,6 +61,23 @@ test('asset upload retries preserve one evidence row and audit on real PostgreSQ
     assert.equal('malwareScanAt' in json[0].data, false);
     const evidence = await prisma.accountingArchiveEvidence.findMany({ where: { sourceEntityId: asset.id } });
     assert.equal(evidence.length, 1);
+    const [scanMetadata] = await prisma.$queryRaw<Array<{ status: string | null; scannedAt: Date | null }>>`
+      SELECT "malwareScanStatus" AS status, "malwareScanAt" AS "scannedAt"
+      FROM public.accounting_archive_evidence WHERE id = ${evidence[0].id}
+    `;
+    assert.deepEqual(scanMetadata, { status: null, scannedAt: null }, 'scanner-free upload must not claim a scan');
+    const legacyClientPath = process.env.SABALAN_QA_LEGACY_ATTACHMENT_CLIENT;
+    if (legacyClientPath) {
+      assert(path.isAbsolute(legacyClientPath));
+      const { PrismaClient: LegacyClient } = createRequire(__filename)(legacyClientPath);
+      const legacy = new LegacyClient({ datasources: { db: { url: db.href } } });
+      try {
+        await assert.rejects(legacy.accountingArchiveEvidence.findUniqueOrThrow({
+          where: { id: evidence[0].id }, select: { malwareScanStatus: true },
+        }), { code: 'P2032' }, 'a legacy nonnullable client cannot read the newly accepted evidence');
+        console.log('Legacy attachment client rejected new scanner-free evidence with P2032.');
+      } finally { await legacy.$disconnect(); }
+    }
     const download = await fetch(`${base}/assets/${asset.id}/evidence/${evidence[0].id}/download?bookId=${book.id}`);
     assert.equal(download.status, 200);
     assert.equal(await download.text(), '%PDF-1.4\nqa-one');

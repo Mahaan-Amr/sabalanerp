@@ -268,7 +268,9 @@ router.post('/uploads', requireLegacyRecoveryExecution, upload.single('file'), a
     backgroundStarted = true;
     setImmediate(async () => {
       try {
-        const validation = await validateRecoveryPackage({ sourcePath: stored.destination, passphrase, prisma });
+        const validation = await validateRecoveryPackage({
+          sourcePath: stored.destination, expectedChecksum: stored.sha256, passphrase, prisma,
+        });
         if (validation.manifest.packageType === 'SANITIZED_TEST' && (process.env.NODE_ENV === 'production' || process.env.ALLOW_SANITIZED_RECOVERY !== 'true')) {
           throw Object.assign(new Error('Sanitized test restore is disabled in this environment.'), { code: 'SANITIZED_RESTORE_DISABLED' });
         }
@@ -354,7 +356,9 @@ router.post('/:id/restore', requireLegacyRecoveryExecution, async (req: AuthRequ
       confirmationPhrase: req.body.confirmationPhrase,
     });
     const sourcePath = recoveryPackagePath(operation.source, operation.storageName);
-    const validation = await validateRecoveryPackage({ sourcePath, passphrase, prisma });
+    const validation = await validateRecoveryPackage({
+      sourcePath, expectedChecksum: operation.encryptedSha256, passphrase, prisma,
+    });
     if (!validation.compatibility.compatible) return res.status(409).json({ success: false, error: 'RECOVERY_PACKAGE_INCOMPATIBLE', data: validation.compatibility });
     if (!acquireRecoveryOperation()) return res.status(409).json({ success: false, error: 'RECOVERY_OPERATION_IN_PROGRESS' });
     lockAcquired = true;

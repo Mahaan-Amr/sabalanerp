@@ -39,6 +39,8 @@ services:
       dockerfile: backend/Dockerfile
       network: host
       args:
+        RECOVERY_POSTGRES_IMAGE: ${RECOVERY_POSTGRES_IMAGE:-postgres:15-alpine}
+        RECOVERY_POSTGRES_IMAGE_ID: ${RECOVERY_POSTGRES_IMAGE_ID:-unattested}
         PERFORMANCE_SOURCE_COMMIT: ${PERFORMANCE_SOURCE_COMMIT}
         PERFORMANCE_SOURCE_HASH: ${PERFORMANCE_SOURCE_HASH}
         DEBIAN_MIRROR: ${DEBIAN_MIRROR:-http://deb.debian.org/debian}

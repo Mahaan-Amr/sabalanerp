@@ -5,9 +5,7 @@ type ExpectedAllocationActivation = {
 };
 
 /** Read-only verification of the database protections installed by migration. */
-export async function verifyCustomerAllocationDeploymentState(
-  database: Pick<PrismaClient, '$queryRaw'>, expected?: ExpectedAllocationActivation,
-) {
+export async function verifyCustomerAllocationDatabaseProtections(database: Pick<PrismaClient, '$queryRaw'>) {
   const [state] = await database.$queryRaw<Array<{
     triggersReady: boolean; pendingIndexReady: boolean; fencesReady: boolean;
   }>>`
@@ -85,6 +83,12 @@ export async function verifyCustomerAllocationDeploymentState(
   if (!state?.triggersReady || !state.pendingIndexReady || !state.fencesReady) {
     throw new Error('Customer allocation database protections are incomplete.');
   }
+}
+
+export async function verifyCustomerAllocationDeploymentState(
+  database: Pick<PrismaClient, '$queryRaw'>, expected?: ExpectedAllocationActivation,
+) {
+  await verifyCustomerAllocationDatabaseProtections(database);
   if (expected) {
     if (!expected.deploymentId || !expected.releaseId || !expected.leaseToken
       || !/^[0-9a-f]{40}$/.test(expected.targetCommit) || !/^[0-9a-f]{64}$/.test(expected.manifestSha256)) {

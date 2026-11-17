@@ -11,7 +11,9 @@ import { sha256File } from '../services/recoveryCrypto';
 import { validateLiveStoredFileReferences } from '../services/systemRecoveryEngine';
 import { verifyShipmentStatementDeploymentState } from '../services/shipmentStatementOperations';
 import { verifyInquiryBaseline, inspectInquiryBaseline } from '../services/inquiryMigrationPlan';
-import { verifyCustomerAllocationDeploymentState } from '../services/accountingCustomerAllocationDeployment';
+import { verifyCustomerAllocationDatabaseProtections, verifyCustomerAllocationDeploymentState } from '../services/accountingCustomerAllocationDeployment';
+import { assertRecoveryAllocationContinuity, readRecoveryAllocationAuthority, readRecoveryOwnerReceipt,
+  type RecoveryRuntimeProof } from '../services/systemRecoveryAllocationAuthority';
 
 const execFileAsync = promisify(execFile);
 const deploymentId = String(process.env.DEPLOYMENT_ID || '').trim();
@@ -19,6 +21,7 @@ const reportRoot = process.env.DEPLOYMENT_REPORT_DIR || '/app/deployment-reports
 const gateMode = process.env.DEPLOYMENT_GATE_MODE || 'RELEASE';
 const rollbackMode = gateMode === 'ROLLBACK';
 const previousUnchangedMode = gateMode === 'PREVIOUS_UNCHANGED';
+const applicationRecoveryMode = gateMode === 'APPLICATION_RECOVERY';
 const releaseMode = !rollbackMode && !previousUnchangedMode;
 
 const httpGate = (url: string) => async () => {
@@ -85,9 +88,18 @@ const main = async () => {
           manifestSha256, deploymentId, releaseId: process.env.DEPLOYMENT_RELEASE_ID ?? '',
           targetCommit: process.env.DEPLOYMENT_TARGET_COMMIT ?? '', leaseToken: process.env.DEPLOYMENT_LEASE_TOKEN ?? '',
         };
-        const allocation = await verifyCustomerAllocationDeploymentState(prisma, expectedAllocation);
-        if (expectedAllocation) {
-          const runtimeAddress = process.env.DEPLOYMENT_CUSTOMER_ALLOCATION_RUNTIME_ADDRESS ?? '';
+        let allocation;
+        let recoveredRuntime: RecoveryRuntimeProof | undefined;
+        if (applicationRecoveryMode) {
+          if (expectedAllocation) throw new Error('Application recovery cannot publish new allocation authority.');
+          const receipt = await readRecoveryOwnerReceipt(deploymentId);
+          await verifyCustomerAllocationDatabaseProtections(prisma);
+          recoveredRuntime = JSON.parse(process.env.SYSTEM_RECOVERY_RUNTIME_AFTER || 'null') as RecoveryRuntimeProof;
+          assertRecoveryAllocationContinuity(receipt.allocation, await readRecoveryAllocationAuthority(prisma), recoveredRuntime);
+          allocation = { customerAllocationDatabaseProtections: 'verified', preservedCurrentAllocationAuthority: receipt.allocation.state };
+        } else allocation = await verifyCustomerAllocationDeploymentState(prisma, expectedAllocation);
+        if (expectedAllocation || applicationRecoveryMode) {
+          const runtimeAddress = recoveredRuntime?.address || process.env.DEPLOYMENT_CUSTOMER_ALLOCATION_RUNTIME_ADDRESS || '';
           if (!isIP(runtimeAddress)) throw new Error('Customer allocation runtime address is unverified.');
           const [sessions] = await prisma.$queryRaw<Array<{ admitted: boolean }>>`
             SELECT count(*) > 0 AND bool_and(usename = 'sabalan_application_runtime') AS admitted

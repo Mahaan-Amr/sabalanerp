@@ -12,6 +12,8 @@ import { initializeSystemRecovery } from '../services/systemRecoveryLifecycle';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { Prisma } from '@prisma/client';
+import { assertRecoveryAllocationContinuity, captureRecoveryAllocationAuthority, readRecoveryAllocationAuthority,
+  recoveryOwnerReceiptPath, type RecoveryRuntimeProof } from '../services/systemRecoveryAllocationAuthority';
 
 const rejected = () => new Error('SYSTEM_RECOVERY_OWNER_ADMISSION_REJECTED');
 
@@ -112,6 +114,8 @@ async function main() {
       const sourcePath = recoveryPackagePath(operation.source, operation.storageName!);
       const validation = await validateRecoveryPackage({ sourcePath, expectedChecksum: request.checksum, passphrase, prisma });
       if (!validation.compatibility.compatible || validation.manifest.packageType !== request.packageType) throw rejected();
+      const runtimeBefore = JSON.parse(process.env.SYSTEM_RECOVERY_RUNTIME_BEFORE || 'null') as RecoveryRuntimeProof;
+      const allocation = captureRecoveryAllocationAuthority(await readRecoveryAllocationAuthority(prisma), runtimeBefore);
       const result = await stageAndPromoteRecovery({ operationId, sourcePath, passphrase,
         packageType: request.packageType, checksum: request.checksum!, actorId: claim.actorId,
         actorDisplay: claim.actorDisplay, authorizationMode: claim.authorization!.mode,
@@ -133,10 +137,18 @@ async function main() {
         },
       });
       if (!result.promoted) throw rejected();
-      await result.verifyPromotedRoles?.();
+      if (!result.verifyPromotedRoles) throw rejected();
+      await result.verifyPromotedRoles();
       await initializeSystemRecovery(prisma);
       if (await readRestoreJournal()) throw rejected();
       await assertBoundary();
+      assertRecoveryAllocationContinuity(allocation, await readRecoveryAllocationAuthority(prisma), runtimeBefore);
+      const receipt = await fs.open(recoveryOwnerReceiptPath(deploymentId), 'wx', 0o400);
+      try {
+        await receipt.writeFile(JSON.stringify({ format: 'sabalan-system-recovery-owner-completion/v1', deploymentId,
+          operationId, ownerCompleted: true, allocation }) + '\n');
+        await receipt.sync();
+      } finally { await receipt.close(); }
     } else await executeBackupRequest(prisma, {
       operationId, actorId: claim.actorId, packageType: claim.operation.packageType as 'COMPLETE' | 'SANITIZED_TEST', passphrase,
       protectedDatabaseRoles: claim.operation.packageType === 'COMPLETE' ? scope : undefined,

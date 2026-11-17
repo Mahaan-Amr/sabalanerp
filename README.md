@@ -123,9 +123,16 @@ The frontend is available at `http://localhost:3000`, the inquiry app at
 on ports `55432` and `56379`, respectively. Persistent database and upload volumes
 are preserved when stopping the stack with `npm run docker:local:down`.
 
-Before a planned Windows restart or Docker Desktop shutdown, run
-`npm run docker:local:down` and wait for it to finish. It verifies the backend's
-clean shutdown while PostgreSQL is still running before it stops the stack.
+For the full stack started with `docker:local:up`, run `npm run docker:local:down`
+before a planned Windows restart or Docker Desktop shutdown. Wait for success.
+The command verifies the backend's native shutdown receipt while the same
+PostgreSQL instance is still running, then stops the stack. If teardown is
+interrupted, rerun the same command. It can resume while the original backend
+container and the same running PostgreSQL instance are still available for
+verification.
+
+Use `npm run docker:local:down -- --backend-only` to verify the backend shutdown
+while leaving the other services running.
 
 If Windows reserves either default web port, set `LOCAL_FRONTEND_HOST_PORT` and
 `LOCAL_INQUIRY_HOST_PORT` in the ignored root `.env` file. The containers continue
@@ -149,7 +156,12 @@ performs an initial source synchronization after building, so files changed whil
 image builds cannot be stale. Dependency manifest changes rebuild only the affected
 service.
 
-Use `npm run docker:dev:down` to stop development. Before committing or pushing,
+Use `npm run docker:dev:down` to stop a stack started with `docker:dev`. The
+watch-mode backend runs through `tsx watch`, so this command uses Compose's
+ordinary shutdown. The native shutdown receipt check belongs to the full local
+stack and its `docker:local:down` command.
+
+Before committing or pushing,
 run `npm run docker:verify`; it builds the production-like images, applies migrations,
 waits for healthy containers, and smoke-tests the backend, both UIs, and API proxy.
 

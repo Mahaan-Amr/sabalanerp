@@ -1,8 +1,8 @@
 import { deepStrictEqual } from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, rmdirSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, rmdirSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -30,8 +30,46 @@ function copyNativeRecord(id) {
   }
 }
 
-export function stopLocalDocker({ runDocker = docker, readNativeRecord = copyNativeRecord } = {}) {
-  runDocker([...compose, 'ps']);
+function saveShutdownProof(directory, file, proof) {
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  const temporaryDirectory = mkdtempSync(join(directory, 'write-'));
+  const temporaryFile = join(temporaryDirectory, 'proof.json');
+  try {
+    writeFileSync(temporaryFile, JSON.stringify(proof), { mode: 0o600, flag: 'wx', flush: true });
+    renameSync(temporaryFile, file);
+  } finally {
+    rmSync(temporaryFile, { force: true });
+    rmdirSync(temporaryDirectory);
+  }
+}
+
+function loadShutdownProof(file) {
+  try {
+    return JSON.parse(readFileSync(file));
+  } catch (error) {
+    if (error.code === 'ENOENT') throw new Error('The stopped local backend has no saved shutdown proof.');
+    throw error;
+  }
+}
+
+function parseActiveClaim(bytes) {
+  const claim = JSON.parse(bytes);
+  if (claim?.format !== 'sabalan-runtime-native/v1' || claim.role !== 'standalone'
+      || claim.phase !== 'ACTIVE' || typeof claim.instanceId !== 'string' || !/^[a-f0-9]{48}$/.test(claim.instanceId)) {
+    throw new Error('The local backend has no valid ACTIVE native claim for this shutdown.');
+  }
+  return claim;
+}
+
+export function stopLocalDocker({
+  runDocker = docker, readNativeRecord = copyNativeRecord, backendOnly = false,
+  proofDirectory = join(homedir(), '.sabalanerp-local-shutdown'),
+} = {}) {
+  if (!runDocker([...compose, 'ps', '--all', '--quiet']).trim()) {
+    if (backendOnly) throw new Error('There is no local backend to drain.');
+    console.log('The local Docker stack is already down.');
+    return;
+  }
   const serviceId = (service) => {
     const id = runDocker([...compose, 'ps', '--all', '--quiet', service]).trim();
     if (!/^[a-f0-9]{64}$/.test(id)) throw new Error(`Expected exactly one local ${service} container.`);
@@ -51,24 +89,40 @@ export function stopLocalDocker({ runDocker = docker, readNativeRecord = copyNat
   const postgres = serviceId('postgres');
   const backendBefore = inspect(backend, 'backend');
   const postgresBefore = inspect(postgres, 'postgres');
-  if (backendBefore.State.Status !== 'running' || postgresBefore.State.Status !== 'running') {
-    throw new Error('A running local backend and PostgreSQL are required to prove this shutdown.');
+  if (postgresBefore.State.Status !== 'running') {
+    throw new Error('A running local PostgreSQL is required to prove this shutdown.');
   }
-  if (backendBefore.Config.StopSignal && !['SIGTERM', '15'].includes(backendBefore.Config.StopSignal)) {
-    throw new Error('The local backend is configured with a stop signal other than SIGTERM.');
+  const identity = {
+    backend, postgres,
+    backendStartedAt: backendBefore.State.StartedAt,
+    postgresStartedAt: postgresBefore.State.StartedAt,
+  };
+  if (!identity.backendStartedAt || !identity.postgresStartedAt) {
+    throw new Error('Could not verify the local backend and PostgreSQL start times.');
   }
-  const claimBytes = readNativeRecord(backend);
-  const claim = JSON.parse(claimBytes);
-  if (claim?.format !== 'sabalan-runtime-native/v1' || claim.role !== 'standalone'
-      || claim.phase !== 'ACTIVE' || typeof claim.instanceId !== 'string' || !/^[a-f0-9]{48}$/.test(claim.instanceId)) {
-    throw new Error('The running local backend has no valid ACTIVE native claim.');
+  const proofFile = join(proofDirectory, 'shutdown.json');
+  let claimBytes;
+  let claim;
+  if (backendBefore.State.Status === 'running') {
+    if (backendBefore.Config.StopSignal && !['SIGTERM', '15'].includes(backendBefore.Config.StopSignal)) {
+      throw new Error('The local backend is configured with a stop signal other than SIGTERM.');
+    }
+    claimBytes = readNativeRecord(backend);
+    claim = parseActiveClaim(claimBytes);
+    saveShutdownProof(proofDirectory, proofFile, { identity, claimBase64: claimBytes.toString('base64') });
+    console.log('Draining the local backend with PostgreSQL still running. Allow up to five minutes.');
+    runDocker(['stop', '--time', '300', backend]);
+  } else if (backendBefore.State.Status === 'exited') {
+    const proof = loadShutdownProof(proofFile);
+    deepStrictEqual(proof.identity, identity, 'The saved shutdown proof is for a different backend or PostgreSQL run.');
+    claimBytes = Buffer.from(proof.claimBase64, 'base64');
+    claim = parseActiveClaim(claimBytes);
+  } else {
+    throw new Error('The local backend must be running or have exited after a verified shutdown attempt.');
   }
-
-  console.log('Draining the local backend with PostgreSQL still running. Allow up to five minutes.');
-  runDocker(['stop', '--time', '300', backend]);
   const { State: backendAfter } = inspect(backend, 'backend');
   if (backendAfter.Status !== 'exited' || backendAfter.ExitCode !== 0 || backendAfter.OOMKilled
-      || backendAfter.StartedAt !== backendBefore.State.StartedAt) {
+      || !backendAfter.FinishedAt || backendAfter.StartedAt !== identity.backendStartedAt) {
     throw new Error('The original local backend did not exit cleanly.');
   }
   const closure = JSON.parse(readNativeRecord(backend));
@@ -89,13 +143,21 @@ export function stopLocalDocker({ runDocker = docker, readNativeRecord = copyNat
       || serviceId('backend') !== backend || serviceId('postgres') !== postgres) {
     throw new Error('The local Compose services changed during shutdown.');
   }
+  if (backendOnly) {
+    console.log('Verified the local backend native closure with PostgreSQL still running.');
+    return;
+  }
   console.log('Verified the local backend native closure. Stopping the remaining local services.');
   runDocker([...compose, 'down']);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
-    stopLocalDocker();
+    const args = process.argv.slice(2);
+    if (args.length > 1 || (args.length === 1 && args[0] !== '--backend-only')) {
+      throw new Error('Usage: node scripts/stop-local-docker.mjs [--backend-only]');
+    }
+    stopLocalDocker({ backendOnly: args[0] === '--backend-only' });
   } catch (error) {
     console.error(`Local shutdown failed. Keep Docker Desktop and Windows running. ${error.message}`);
     process.exitCode = 1;

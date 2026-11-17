@@ -16,6 +16,7 @@ const INQUIRY_IMAGE = 'sha256:861da55794e7dac1e98c972c3f8f3bbb2ec3b3289df10d27e1
 const OLD_BOOT = 'ecdfd6df-b536-4161-9bef-a97e7a69f788';
 const BOOT = 'e758296d-c127-49c1-94d4-636136f61d1b';
 const PROJECT = 'sabalanerp-local';
+const compose = ['compose', '-p', PROJECT, '-f', 'docker-compose.local.yml'];
 const COORDINATION = '/app/recovery-coordination';
 const PRIMARY = String.raw`D:\sabalanerp-local-recovery-20261117`;
 const INDEPENDENT = String.raw`C:\Users\PC\Documents\Codex\sabalanerp-local-recovery-20261117`;
@@ -101,7 +102,7 @@ async function verifyCheckpoint() {
 }
 
 function observeIncident() {
-  docker(['compose', '-f', 'docker-compose.local.yml', 'ps', '--all']);
+  docker([...compose, 'ps', '--all']);
   const containers = inspect(...SERVICES.map(service => PROJECT + '-' + service + '-1'));
   assert.equal(containers.length, SERVICES.length);
   const services = Object.fromEntries(SERVICES.map((service, index) => [service, containers[index]]));
@@ -169,13 +170,13 @@ const [candidateImageId, extra] = process.argv.slice(2);
 assert.equal(process.platform, 'win32', 'run on the Windows checkpoint host');
 assert.equal(extra, undefined);
 assert.match(candidateImageId ?? '', IMAGE);
+const initial = observeIncident();
 const [baseImage, candidate] = inspect('--type=image', OLD_IMAGE, candidateImageId);
 assert.equal(baseImage.Id, OLD_IMAGE);
 assert.equal(candidate.Id, candidateImageId);
 assert.equal(candidate.RootFS.Layers.length, baseImage.RootFS.Layers.length + 1);
 assert.deepEqual(candidate.RootFS.Layers.slice(0, -1), baseImage.RootFS.Layers);
 assert.deepEqual(candidate.Config, baseImage.Config);
-const initial = observeIncident();
 const checkpoint = await verifyCheckpoint();
 assert.deepEqual(observeIncident(), initial);
 

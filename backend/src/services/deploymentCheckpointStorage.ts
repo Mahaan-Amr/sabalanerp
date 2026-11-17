@@ -24,7 +24,7 @@ export type CheckpointObject = {
   onlineDirectoryEvidence?: OnlineDirectoryEvidence;
   localVerified?: boolean;
   manifestReadable?: boolean;
-  manifest?: { packageType?: string };
+  manifest?: import('./deploymentCheckpointPolicy').RemoteCheckpointArtifact['manifest'];
   compatibility?: { local?: { compatible?: boolean } };
 };
 
@@ -463,6 +463,7 @@ export const enforceFilesystemRemoteRetention = async (root: string, activeDeplo
     sourceMachineUuidSha256: artifact.sourceMachineUuidSha256,
     sourceKernelBootIdSha256: artifact.sourceKernelBootIdSha256,
     lastDrill: artifact.lastDrill,
+    manifest: artifact.manifest,
     onlineDirectoryEvidence: artifact.onlineDirectoryEvidence,
     active: artifact.id === activeDeploymentId || artifact.active === true,
     incidentOpen: artifact.incidentOpen === true || localHolds.has(artifact.id),

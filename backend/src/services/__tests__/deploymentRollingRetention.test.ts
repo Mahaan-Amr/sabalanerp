@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { withHealthyDrill } from './deploymentCheckpointDrill.fixture';
 import { test } from 'node:test';
-import { hasHealthyIndependentCheckpointDrill, planRemoteCheckpointRetention } from '../deploymentCheckpointPolicy';
+import { hasHealthyIndependentCheckpointDrill, planRemoteCheckpointRetention, PROTECTED_DATABASE_ROLE_COMPONENT } from '../deploymentCheckpointPolicy';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -26,6 +26,22 @@ test('independent drill must bind full verified scope, exact archive and distinc
     ].map(change => ({ lastDrill: { ...point.lastDrill, ...change } })),
   ];
   for (const change of invalid) assert.equal(hasHealthyIndependentCheckpointDrill({ ...point, ...change }), false, JSON.stringify(change));
+});
+
+test('role-aware COMPLETE checkpoints require the exact role snapshot readback before counting as healthy', () => {
+  const snapshotSha256 = '8'.repeat(64);
+  const point = withHealthyDrill({
+    id: 'role-point', releaseId: 'release', size: 100,
+    manifest: { packageType: 'COMPLETE', components: [{ path: PROTECTED_DATABASE_ROLE_COMPONENT, sha256: snapshotSha256, size: 64 }] },
+  });
+  const roleEvidence = { snapshotSha256, targetSealSha256: '9'.repeat(64), owner: 'isolated_owner' };
+  assert.equal(hasHealthyIndependentCheckpointDrill(point), false);
+  assert.equal(hasHealthyIndependentCheckpointDrill({
+    ...point, lastDrill: { ...point.lastDrill, verifiedDatabaseRoles: { ...roleEvidence, snapshotSha256: '7'.repeat(64) } },
+  }), false);
+  assert.equal(hasHealthyIndependentCheckpointDrill({
+    ...point, lastDrill: { ...point.lastDrill, verifiedDatabaseRoles: roleEvidence },
+  }), true);
 });
 
 test('new local-validation-only uploads cannot displace independently healthy recovery points', async () => {

@@ -36,6 +36,20 @@ export const planLocalCheckpointCleanup = (input: {
   };
 };
 
+export const PROTECTED_DATABASE_ROLE_COMPONENT = 'database/protected-role-acls.json';
+type CheckpointManifestEvidence = { packageType?: string; components?: Array<{ path: string; sha256: string; size: number }> };
+
+export function protectedCheckpointRoleComponent(manifest: CheckpointManifestEvidence | undefined) {
+  const matches = manifest?.components?.filter(component => component.path === PROTECTED_DATABASE_ROLE_COMPONENT) ?? [];
+  if (!matches.length) return undefined;
+  const [component] = matches;
+  if (matches.length !== 1 || manifest?.packageType !== 'COMPLETE' || !/^[a-f0-9]{64}$/.test(component.sha256)
+    || !Number.isSafeInteger(component.size) || component.size < 1) {
+    throw new Error('DEPLOYMENT_DRILL_ROLE_COMPONENT_UNPROVEN');
+  }
+  return component;
+}
+
 export type IndependentCheckpointDrill = {
   format: 'sabalan-independent-checkpoint-drill/v1'; status: 'HEALTHY'; phase: 'COMPLETE';
   operationId: string; checkpointId: string; releaseId: string; checksum: string; size: number;
@@ -43,14 +57,15 @@ export type IndependentCheckpointDrill = {
   sourceKernelBootIdSha256: string; recoveryKernelBootIdSha256: string;
   startedAt: string; completedAt: string; stagedPostgresRestore: true; stagedSqliteIntegrity: true;
   verifiedFiles: true; verifiedApplicationPayloads: true; verifiedBusinessData: true;
+  verifiedDatabaseRoles?: { snapshotSha256: string; targetSealSha256: string; owner: string };
 };
 export type RemoteCheckpointArtifact = LocalCheckpointArtifact & { releaseId: string; checksum?: string;
   sourceMachineUuidSha256?: string; sourceKernelBootIdSha256?: string; restoreVerified?: boolean; lastDrill?: unknown;
-  onlineDirectoryEvidence?: OnlineDirectoryEvidence };
+  onlineDirectoryEvidence?: OnlineDirectoryEvidence; manifest?: CheckpointManifestEvidence };
 
 /** Local restore validation and remote byte equality do not prove independent recovery. */
 export const hasHealthyIndependentCheckpointDrill = (artifact: Pick<RemoteCheckpointArtifact,
-  'id' | 'releaseId' | 'checksum' | 'size' | 'sourceMachineUuidSha256' | 'sourceKernelBootIdSha256' | 'lastDrill'>): boolean => {
+  'id' | 'releaseId' | 'checksum' | 'size' | 'sourceMachineUuidSha256' | 'sourceKernelBootIdSha256' | 'lastDrill' | 'manifest'>): boolean => {
   const drill = artifact.lastDrill as Partial<IndependentCheckpointDrill> | undefined;
   const digest = (value: unknown) => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
   if (!drill || drill.format !== 'sabalan-independent-checkpoint-drill/v1' || drill.status !== 'HEALTHY'
@@ -66,6 +81,16 @@ export const hasHealthyIndependentCheckpointDrill = (artifact: Pick<RemoteCheckp
     || !/^\d+$/.test(drill.operationId.slice(`drill-${artifact.id}-`.length))
     || !drill.startedAt || !drill.completedAt || !Number.isFinite(Date.parse(drill.startedAt))
     || !Number.isFinite(Date.parse(drill.completedAt)) || Date.parse(drill.completedAt) < Date.parse(drill.startedAt)) return false;
+  try {
+    const component = protectedCheckpointRoleComponent(artifact.manifest);
+    if (component || drill.verifiedDatabaseRoles) {
+      const roles = drill.verifiedDatabaseRoles;
+      if (!component || !roles || roles.snapshotSha256 !== component.sha256 || !digest(roles.targetSealSha256)
+        || typeof roles.owner !== 'string' || !roles.owner) return false;
+    }
+  } catch {
+    return false;
+  }
   return drill.stagedPostgresRestore === true && drill.stagedSqliteIntegrity === true
     && drill.verifiedFiles === true && drill.verifiedApplicationPayloads === true && drill.verifiedBusinessData === true;
 };

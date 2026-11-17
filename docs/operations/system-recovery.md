@@ -55,7 +55,7 @@ The temporary local ADMIN must change its password at first login.
 
 ## Restricted database role handoff
 
-Under the restricted PostgreSQL role, the dashboard's direct backup, upload validation, and restore execution endpoints return `SYSTEM_RECOVERY_OWNER_HANDOFF_UNAVAILABLE`. Existing backup download and receipt paths remain available under the current ADMIN password check. The legacy single-role workflow retains its existing HTTP behavior.
+Under the restricted PostgreSQL role, the dashboard's direct backup and restore execution endpoints return `SYSTEM_RECOVERY_OWNER_HANDOFF_UNAVAILABLE`. Upload validation remains available: it authenticates the encrypted package and checks manifest, component integrity and release compatibility without executing the archived SQL or creating a database. Existing backup download, receipt and second-ADMIN approval paths also remain available under their current password and authorization checks. The legacy single-role workflow retains its existing HTTP behavior.
 
 An authenticated ADMIN can submit a complete backup request to `POST /api/system-recovery/owner-backup-requests` on the restricted runtime. Send a JSON object containing only `adminPassword`. A successful response is HTTP 202 with the operation `id` and `CREATING` status in `data`. After verifying the current password, the backend records the operation and `RECOVERY_OWNER_BACKUP_REQUESTED` audit event in one transaction. The request survives backend restart while unclaimed and expires after 24 hours. The endpoint returns the ID for the private host handoff described below.
 

@@ -21,6 +21,8 @@ import { RECOVERY_COORDINATION_DIR } from '../services/recoveryRuntime';
 import { assertProtectedBootstrapBoundary, compileProtectedBootstrapSource, runProtectedBootstrapBaseline } from '../services/protectedBootstrapMigrations';
 import { assertBootstrapNativeCompletion } from '../services/protectedBridgeMigrations';
 import { assertPredecessorRoleRollbackBeforeTraffic, changeProtectedPredecessorRoleGrants, protectedPredecessorRoleCutoverPurpose } from '../services/protectedDatabaseRoleRecovery';
+import { authorisePredecessorRoleTerminal, finishPredecessorRoleTerminal, observePredecessorRoleTerminalOpening,
+  openPredecessorRoleTerminal, readPredecessorRoleTerminal } from '../services/predecessorRoleTerminal';
 
 const REPORT_DIR = process.env.DEPLOYMENT_REPORT_DIR || '/app/deployment-reports';
 const SESSION_PATH = path.join(REPORT_DIR, 'active-deployment-session.json');
@@ -194,6 +196,48 @@ function readRuntimeCredentialFrame() {
   }
 }
 
+function readTerminalFrame() {
+  const data = Buffer.alloc(16385);
+  let length = 0;
+  while (length < data.length) {
+    const bytes = fs.readSync(0, data, length, data.length - length, null);
+    if (!bytes) break;
+    length += bytes;
+  }
+  if (!length || length === data.length) throw new Error('PREDECESSOR_ROLE_TERMINAL_UNPROVEN');
+  return data.subarray(0, length);
+}
+
+function requireRoleTerminalControl() {
+  if (process.env.BACKEND_RUNTIME_ROLE !== 'control' || process.env.DEPLOYMENT_MODE !== 'configuration'
+    || process.argv.length !== 3) throw new Error('PREDECESSOR_ROLE_TERMINAL_UNPROVEN');
+}
+
+async function persistRoleTerminalJournal(session: Session, phase: 'COMPLETED' | 'ROLLED_BACK') {
+  const final = path.join(REPORT_DIR, session.deploymentId + '.journal.jsonl');
+  if (fs.existsSync(JOURNAL_PATH)) {
+    if (fs.existsSync(final)) throw new Error('PREDECESSOR_ROLE_TERMINAL_UNPROVEN');
+    const entries = await validateDeploymentHostJournal(JOURNAL_PATH);
+    if (entries.some(entry => entry.deploymentId !== session.deploymentId)) throw new Error('PREDECESSOR_ROLE_TERMINAL_UNPROVEN');
+    const terminal = entries.at(-1);
+    if (terminal?.event === 'role-cutover-terminal') {
+      if (terminal.phase !== phase) throw new Error('PREDECESSOR_ROLE_TERMINAL_UNPROVEN');
+    } else {
+      await journal({ ...session, phase }, 'role-cutover-terminal');
+    }
+    await fs.promises.rename(JOURNAL_PATH, final);
+  }
+  const recorded = (await validateDeploymentHostJournal(final)).at(-1);
+  if (recorded?.deploymentId !== session.deploymentId || recorded.phase !== phase || recorded.event !== 'role-cutover-terminal') {
+    throw new Error('PREDECESSOR_ROLE_TERMINAL_UNPROVEN');
+  }
+  await fs.promises.rm(SESSION_PATH, { force: true });
+  if (process.platform === 'linux') {
+    const directory = await fs.promises.open(REPORT_DIR, 'r');
+    try { await directory.sync(); } finally { await directory.close(); }
+  }
+}
+
 const main = async () => {
   const command = process.argv[2];
   const store = new PrismaDeploymentStore(prisma);
@@ -216,8 +260,34 @@ const main = async () => {
     return;
   }
 
+  if (command === 'read-predecessor-role-terminal') {
+    requireRoleTerminalControl();
+    console.log(JSON.stringify({ ok: true, result: await readPredecessorRoleTerminal(
+      prisma, required('DEPLOYMENT_ID'), required('DEPLOYMENT_LEASE_TOKEN')) }));
+    return;
+  }
+
   const session = await readSession();
-  if (command === 'stage-predecessor-role-grants' || command === 'restore-predecessor-role-grants'
+  if (['authorise-predecessor-role-terminal', 'open-predecessor-role-terminal', 'observe-predecessor-role-terminal',
+    'finish-predecessor-role-terminal'].includes(command || '')) {
+    requireRoleTerminalControl();
+    if (session.deploymentId !== required('DEPLOYMENT_ID')) throw new Error('PREDECESSOR_ROLE_TERMINAL_UNPROVEN');
+    const context = { prisma, session, reportDir: REPORT_DIR, coordinationDir: RECOVERY_COORDINATION_DIR,
+      token: required('DEPLOYMENT_LEASE_TOKEN') };
+    let result;
+    if (command === 'authorise-predecessor-role-terminal') {
+      result = await authorisePredecessorRoleTerminal(context, readTerminalFrame());
+    } else if (command === 'open-predecessor-role-terminal') {
+      result = await openPredecessorRoleTerminal(context);
+    } else if (command === 'observe-predecessor-role-terminal') {
+      result = await observePredecessorRoleTerminalOpening(context);
+    } else {
+      const phase = await finishPredecessorRoleTerminal(context, readTerminalFrame());
+      await persistRoleTerminalJournal(session, phase);
+      result = { phase };
+    }
+    console.log(JSON.stringify({ ok: true, result }));
+  } else if (command === 'stage-predecessor-role-grants' || command === 'restore-predecessor-role-grants'
     || command === 'activate-predecessor-runtime-login' || command === 'attest-predecessor-backend-runtime') {
     const attesting = command === 'attest-predecessor-backend-runtime';
     if (process.env.BACKEND_RUNTIME_ROLE !== 'control' || process.argv.length !== (attesting ? 5 : 3)) {
@@ -415,7 +485,11 @@ const main = async () => {
 
 main()
   .catch((error: any) => {
-    console.error(JSON.stringify({ ok: false, code: error?.code || 'DEPLOYMENT_CONTROL_FAILED', message: error?.message }));
+    if (process.argv[2]?.endsWith('-predecessor-role-terminal')) {
+      console.error(JSON.stringify({ ok: false, code: 'PREDECESSOR_ROLE_TERMINAL_UNPROVEN' }));
+    } else {
+      console.error(JSON.stringify({ ok: false, code: error?.code || 'DEPLOYMENT_CONTROL_FAILED', message: error?.message }));
+    }
     process.exitCode = error?.code === 'P2021' ? 4 : 1;
   })
   .finally(() => disconnectDatabase());

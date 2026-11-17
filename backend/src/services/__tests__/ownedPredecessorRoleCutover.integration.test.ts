@@ -8,6 +8,8 @@ import test from 'node:test';
 import { appendDeploymentHostJournal } from '../deploymentHostJournal';
 import { checkpointMetadataTransport } from '../deploymentCheckpointMetadataIdentity';
 import { verifyPredecessorRoleCutover } from '../protectedDatabaseRoleRecovery';
+import { mandatoryReleaseDeploymentGateNames } from '../deploymentGates';
+import { finishPredecessorRoleTerminal } from '../predecessorRoleTerminal';
 import { createTemporaryConcurrencyDatabase } from './shipmentStatementConcurrency/database';
 
 const source = process.env.ACCOUNTING_LEDGER_TEST_DATABASE_URL;
@@ -27,6 +29,8 @@ test('owned deployment stages manifest ACLs and restores the matching preimage w
     const commit = 'c'.repeat(40);
     const image = `sha256:${'d'.repeat(64)}`;
     const owner = 'fixture';
+    const graph = Object.fromEntries(['backend', 'frontend', 'inquiry', 'nginx', 'postgres', 'clamav']
+      .map(name => [name, image]));
     const now = new Date();
     const localPath = path.join(root, 'checkpoint.sabrec');
     const remoteRoot = path.join(root, 'remote');
@@ -44,13 +48,13 @@ test('owned deployment stages manifest ACLs and restores the matching preimage w
       sourceDatabase, createdAt: now.toISOString(), archivePath: localPath, localPath, size: Buffer.byteLength(archive),
       localVerified: true, remoteVerified: true, localRestoreVerified: true, manifestReadable: true,
       checksum: createHash('sha256').update(archive).digest('hex'), remotePath,
-      remoteFingerprint: { size: remoteStat.size, mtimeMs: remoteStat.mtimeMs },
+      remoteFingerprint: { size: remoteStat.size, mtimeMs: remoteStat.mtimeMs }, rollbackReleaseSet: graph,
     };
     await writeFile(path.join(root, 'deployment-checkpoint.json'), JSON.stringify(checkpointMetadataTransport(checkpoint)));
     const remoteSidecar = JSON.stringify({ ...checkpointMetadataTransport(checkpoint), localPath: undefined, archivePath: undefined });
     await writeFile(`${remotePath}.json`, remoteSidecar);
     const session = { deploymentId: id, leaseToken: token, releaseId: id, targetCommit: commit, owner,
-      bootstrap: false, purpose: 'predecessor-role-cutover', controlImage: image };
+      bootstrap: false, purpose: 'predecessor-role-cutover', controlImage: image, rollbackReleaseSet: graph };
     const phase = async (value: string) => {
       await writeFile(path.join(root, 'active-deployment-session.json'), JSON.stringify({ ...session, phase: value }));
       await db.deploymentOperation.update({ where: { id }, data: { phase: value } });
@@ -180,6 +184,68 @@ test('owned deployment stages manifest ACLs and restores the matching preimage w
     assert.equal(liveSession.status, 0, liveSession.stderr);
     assert.deepEqual(JSON.parse(liveSession.stdout).runtimeProof, {
       deploymentId: id, checkpointSha256: checkpoint.checksum, backendId, backendAddress: address, role: 'postgres',
+    });
+
+    const terminalControl = (command: string, input?: Buffer) => control(command, { DEPLOYMENT_MODE: 'configuration' }, input);
+    const unauthorised = terminalControl('open-predecessor-role-terminal');
+    assert.equal(unauthorised.status, 1);
+    const omitted = new Set(['migration-history', 'shipment-statement-runtime-state', 'contract-financial-evidence']);
+    const gates = mandatoryReleaseDeploymentGateNames.filter(name => !omitted.has(name)).map(name => ({
+      name, passed: true, durationMs: 1,
+      ...(name === 'checkpoint-manifest' ? { details: { checksum: checkpoint.checksum, releaseId: id, remoteReadBack: true } } : {}),
+    }));
+    const mode = 'PREDECESSOR_ROLE_ROLLBACK';
+    const gateReport = id + '.rollback.json';
+    const reportRaw = Buffer.from(JSON.stringify({ format: 'sabalan-deployment-report', version: 1,
+      mode, deploymentId: id, releaseId: id, targetCommit: commit, gates }));
+    const hash = (raw: Buffer) => createHash('sha256').update(raw).digest('hex');
+    await writeFile(path.join(root, gateReport), reportRaw, { mode: 0o600 });
+    const gateAck = Buffer.from(JSON.stringify({
+      format: 'sabalan-predecessor-role-gate-acknowledgement-v1', deploymentId: id, releaseId: id, targetCommit: commit,
+      state: 'RESTORED', canOpenTraffic: false, gateMode: mode, gateCount: gates.length,
+      checkpointSha256: checkpoint.checksum, checkpointMetadataSha256: receipt.checkpointMetadataSha256,
+      scannerBindingSha256: '1'.repeat(64), roleProofSha256: '2'.repeat(64), nginxProofSha256: '3'.repeat(64),
+      nativeClosureSha256: '4'.repeat(64), backendId, nginxId: '5'.repeat(64), gateReport,
+      gateReportSha256: hash(reportRaw), rollbackReleaseSet: graph,
+    }));
+    const authorise = terminalControl('authorise-predecessor-role-terminal', gateAck);
+    assert.equal(authorise.status, 0, authorise.stderr);
+    const ready = JSON.parse(authorise.stdout).result;
+    assert.equal(ready.gateAcknowledgementSha256, hash(gateAck));
+    const originals = ['erp.fixture.test', 'inquiry.fixture.test'];
+    const intent = Buffer.from(JSON.stringify({
+      format: 'sabalan-predecessor-role-public-intent/v1', deploymentId: id, releaseId: id, targetCommit: commit,
+      state: 'RESTORED', phase: 'ROLLBACK_STARTED', trafficMayHaveOpened: true, rollbackReleaseSet: graph,
+      checkpointSha256: checkpoint.checksum, checkpointMetadataSha256: receipt.checkpointMetadataSha256,
+      scannerBindingSha256: '1'.repeat(64), hostHoldSha256: '6'.repeat(64), reportHoldSha256: hash(await readFile(holdPath)),
+      backendId, nginxId: ready.nginxId, gateAcknowledgementSha256: hash(gateAck), origins: originals, expectedTerminal: 'ROLLED_BACK',
+    }));
+    await writeFile(openIntentPath, intent, { mode: 0o600 });
+    const opened = terminalControl('open-predecessor-role-terminal');
+    assert.equal(opened.status, 0, opened.stderr);
+    assert.equal(JSON.parse(opened.stdout).result.intentSha256, hash(intent));
+    const duplicateOpening = terminalControl('open-predecessor-role-terminal');
+    assert.equal(duplicateOpening.status, 1, duplicateOpening.stderr);
+    const observed = terminalControl('observe-predecessor-role-terminal');
+    assert.equal(observed.status, 0, observed.stderr);
+    const publicProof = {
+      format: 'sabalan-predecessor-role-public-readback/v1', deploymentId: id, checkpointSha256: checkpoint.checksum,
+      backendId, nginxId: ready.nginxId, gateAcknowledgementSha256: hash(gateAck),
+      origins: Object.fromEntries(originals.map(origin => [origin, 200])),
+      intentSha256: hash(intent), expectedTerminal: 'ROLLED_BACK',
+    };
+    const forged = terminalControl('finish-predecessor-role-terminal', Buffer.from(JSON.stringify({ ...publicProof, origins: {} })));
+    assert.equal(forged.status, 1, forged.stderr);
+    const publicFrame = Buffer.from(JSON.stringify(publicProof));
+    assert.equal(await finishPredecessorRoleTerminal({ prisma: db, session: { ...session, phase: 'ROLLBACK_STARTED' },
+      token, reportDir: root, coordinationDir: root }, publicFrame), 'ROLLED_BACK');
+    const finish = terminalControl('finish-predecessor-role-terminal', publicFrame);
+    assert.equal(finish.status, 0, finish.stderr);
+    const terminal = terminalControl('read-predecessor-role-terminal');
+    assert.equal(terminal.status, 0, terminal.stderr);
+    assert.deepEqual(JSON.parse(terminal.stdout).result, {
+      deploymentId: id, releaseId: id, targetCommit: commit, checkpointSha256: checkpoint.checksum,
+      gateAcknowledgementSha256: hash(gateAck), phase: 'ROLLED_BACK', activeLeases: 0,
     });
   } finally {
     await db.$disconnect();

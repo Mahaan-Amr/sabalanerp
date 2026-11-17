@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { hasHealthyIndependentCheckpointDrill, protectedCheckpointRoleComponent, type RemoteCheckpointArtifact } from './deploymentCheckpointPolicy';
 
 export type DeploymentDrillMetadata = {
   deploymentId: string;
@@ -7,7 +8,19 @@ export type DeploymentDrillMetadata = {
   remoteVerified: boolean;
   lastDrill?: { status?: string; completedAt?: string };
   lastRehearsal?: { status?: string; completedAt?: string };
-};
+} & Partial<Pick<RemoteCheckpointArtifact, 'id' | 'releaseId' | 'size' | 'checksum' | 'sourceMachineUuidSha256'
+  | 'sourceKernelBootIdSha256' | 'manifest'>>;
+
+export function hasCurrentDrillEvidence(item: DeploymentDrillMetadata) {
+  if (item.lastDrill?.status !== 'HEALTHY' || !item.lastDrill.completedAt) return false;
+  try {
+    if (!protectedCheckpointRoleComponent(item.manifest) && !('verifiedDatabaseRoles' in item.lastDrill)) return true;
+    return item.id === item.deploymentId && typeof item.releaseId === 'string' && typeof item.size === 'number'
+      && hasHealthyIndependentCheckpointDrill({ ...item, id: item.id, releaseId: item.releaseId, size: item.size });
+  } catch {
+    return false;
+  }
+}
 
 type MetadataFileSystem = {
   readdir: (directory: string) => Promise<fs.Dirent[]>;

@@ -85,11 +85,22 @@ export async function cancelCustomerAllocationIntent(database: PrismaClient, acc
     };
     await serializeCustomerAllocationWithin(tx, resolved.profile.id);
     await tx.$executeRaw`SELECT public.serialize_customer_command_key_within(${input.idempotencyKey})`;
-    const canceled = await tx.accountingCustomerAllocationIntent.updateMany({
-      where: { ...identity, state: 'PENDING' }, data: { state: 'CANCELED' },
-    });
-    if (canceled.count === 1) return { status: 'CANCELED' as const };
+    const recordCancellation = async (intentId: string) => {
+      await createAccountingLedgerPrismaRepository(tx, true).appendAudit({
+        action: 'CUSTOMER_ALLOCATION_INTENT_CANCELED', result: 'SUCCEEDED', actorId: identity.ownerId,
+        effectiveProfile: input.actor.profile, entityType: 'CUSTOMER_ALLOCATION_INTENT', entityId: intentId,
+        correlationId: identity.idempotencyKey, payloadHash: identity.commandHash,
+      });
+      return { status: 'CANCELED' as const };
+    };
     const intent = await tx.accountingCustomerAllocationIntent.findFirst({ where: identity });
+    if (intent?.state === 'PENDING') {
+      const canceled = await tx.accountingCustomerAllocationIntent.updateMany({
+        where: { id: intent.id, state: 'PENDING' }, data: { state: 'CANCELED' },
+      });
+      if (canceled.count !== 1) return fail('ALLOCATION_INTENT_CHANGED', 'وضعیت درخواست تغییر کرد؛ پرونده را به‌روز کنید.');
+      return recordCancellation(intent.id);
+    }
     if (intent?.state === 'CANCELED') return { status: 'CANCELED' as const };
     if (intent?.state === 'COMMITTED' && intent.result !== null) return { status: 'COMMITTED' as const, result: intent.result };
     const prior = await tx.accountingCustomerCommand.findUnique({ where: { idempotencyKey: input.idempotencyKey } });
@@ -102,7 +113,11 @@ export async function cancelCustomerAllocationIntent(database: PrismaClient, acc
       data: { ...identity, accountId: identity.profileId, command: JSON.parse(serialized), state: 'CANCELED' },
       skipDuplicates: true,
     });
-    return tombstone.count === 1 ? { status: 'CANCELED' as const } : unknown();
+    if (tombstone.count !== 1) return unknown();
+    const created = await tx.accountingCustomerAllocationIntent.findUniqueOrThrow({
+      where: { idempotencyKey: identity.idempotencyKey },
+    });
+    return recordCancellation(created.id);
   }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
 }
 

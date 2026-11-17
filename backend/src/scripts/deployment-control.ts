@@ -177,6 +177,23 @@ const cutoverPreMutationPhases: DeploymentPhase[] = [
   'LOCAL_CHECKPOINT_VERIFIED', 'REMOTE_CHECKPOINT_VERIFIED', 'ABORTED',
 ];
 
+function readRuntimeCredentialFrame() {
+  // One ACL digest and one canonical 32-byte unpadded base64url password.
+  const input = Buffer.alloc(108);
+  try {
+    let length = 0;
+    while (length < input.length) {
+      const next = fs.readSync(0, input, length, input.length - length, null);
+      if (!next) break;
+      length += next;
+    }
+    if (length !== 107) throw new Error('The cutover credential frame is invalid.');
+    return { stagedAclSha256: input.toString('latin1', 0, 64), password: Buffer.from(input.subarray(64, 107)) };
+  } finally {
+    input.fill(0);
+  }
+}
+
 const main = async () => {
   const command = process.argv[2];
   const store = new PrismaDeploymentStore(prisma);
@@ -200,19 +217,32 @@ const main = async () => {
   }
 
   const session = await readSession();
-  if (command === 'stage-predecessor-role-grants' || command === 'restore-predecessor-role-grants') {
+  if (command === 'stage-predecessor-role-grants' || command === 'restore-predecessor-role-grants'
+    || command === 'activate-predecessor-runtime-login') {
     if (process.env.BACKEND_RUNTIME_ROLE !== 'control' || process.argv.length !== 3) {
       throw new Error('The first role cutover requires the dedicated control-plane command.');
     }
-    const roleCutover = await changeProtectedPredecessorRoleGrants({
-      action: command === 'stage-predecessor-role-grants' ? 'stage' : 'restore', session,
-      coordinationDir: RECOVERY_COORDINATION_DIR, journalPath: JOURNAL_PATH,
-      deploymentId: required('DEPLOYMENT_ID'), leaseToken: required('DEPLOYMENT_LEASE_TOKEN'),
-      controlImage: required('DEPLOYMENT_CONTROL_IMAGE'), databaseUrl: required('DATABASE_URL'),
-      remoteRoot: process.env.DEPLOYMENT_REMOTE_MOUNT,
-      migrationsDirectory: path.resolve('prisma', 'migrations'), catalogFile: path.resolve('scripts', 'predecessor-role-catalog.json'),
-    });
-    console.log(JSON.stringify({ ok: true, roleCutover }));
+    const action = command === 'stage-predecessor-role-grants' ? 'stage'
+      : command === 'restore-predecessor-role-grants' ? 'restore' : 'activate';
+    const credential = action === 'activate' ? readRuntimeCredentialFrame() : undefined;
+    try {
+      const roleCutover = await changeProtectedPredecessorRoleGrants({
+        action, credential, session,
+        coordinationDir: RECOVERY_COORDINATION_DIR, journalPath: JOURNAL_PATH,
+        deploymentId: required('DEPLOYMENT_ID'), leaseToken: required('DEPLOYMENT_LEASE_TOKEN'),
+        controlImage: required('DEPLOYMENT_CONTROL_IMAGE'), databaseUrl: required('DATABASE_URL'),
+        remoteRoot: process.env.DEPLOYMENT_REMOTE_MOUNT,
+        migrationsDirectory: path.resolve('prisma', 'migrations'), catalogFile: path.resolve('scripts', 'predecessor-role-catalog.json'),
+      });
+      console.log(JSON.stringify({ ok: true, roleCutover }));
+    } catch (error: any) {
+      if (action === 'activate' && error?.code !== 'PROTECTED_DATABASE_ROLE_RECOVERY_REJECTED') {
+        throw new Error('The first cutover runtime credential could not be proven.');
+      }
+      throw error;
+    } finally {
+      credential?.password.fill(0);
+    }
   } else if (command === 'incident-boundary-state') {
     if (session.clamavOperation !== 'incident-recovery' || session.deploymentId !== required('DEPLOYMENT_ID')
       || session.clamavIncidentSnapshotSha256 !== required('DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256')) {

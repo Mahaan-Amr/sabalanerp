@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -66,9 +66,9 @@ test('owned deployment stages manifest ACLs and restores the matching preimage w
     for (const value of ['SERVICES_DRAINED', 'LOCAL_CHECKPOINT_VERIFIED', 'REMOTE_CHECKPOINT_VERIFIED', 'MUTATION_STARTED']) {
       await phase(value);
     }
-    const control = (command: string, environment: NodeJS.ProcessEnv = {}) => {
+    const control = (command: string, environment: NodeJS.ProcessEnv = {}, input?: Buffer) => {
       const run = spawnSync(process.execPath, ['node_modules/tsx/dist/cli.mjs', 'src/scripts/deployment-control.ts', command], {
-        encoding: 'utf8', env: { ...process.env, DATABASE_URL: fixture.databaseUrl, BACKEND_RUNTIME_ROLE: 'control',
+        input, encoding: 'utf8', env: { ...process.env, DATABASE_URL: fixture.databaseUrl, BACKEND_RUNTIME_ROLE: 'control',
           DEPLOYMENT_ID: id, DEPLOYMENT_LEASE_TOKEN: token, DEPLOYMENT_CONTROL_IMAGE: image,
           DEPLOYMENT_REPORT_DIR: root, RECOVERY_COORDINATION_DIR: root, DEPLOYMENT_REMOTE_MOUNT: remoteRoot, ...environment },
       });
@@ -124,6 +124,15 @@ test('owned deployment stages manifest ACLs and restores the matching preimage w
     const repeat = control('stage-predecessor-role-grants');
     assert.equal(repeat.status, 0, repeat.stderr);
     assert.deepEqual(JSON.parse(repeat.stdout).roleCutover, { ...receipt, outcome: 'already-staged' });
+    const password = randomBytes(32).toString('base64url');
+    const invalidFrame = control('activate-predecessor-runtime-login', {}, Buffer.from('invalid input'));
+    assert.equal(invalidFrame.status, 1);
+    assert.match(invalidFrame.stderr, /credential frame is invalid/);
+    const wrongStage = control('activate-predecessor-runtime-login', {}, Buffer.from('0'.repeat(64) + password));
+    assert.equal(wrongStage.status, 1);
+    assert.match(wrongStage.stderr, /exact owned staged ACL receipt/);
+    assert.ok(!wrongStage.stdout.includes(password) && !wrongStage.stderr.includes(password));
+    assert.deepEqual(await verify('grants-staged'), { ...initial, stage: 'grants-staged' });
     const reopen = control('maintenance-off');
     assert.equal(reopen.status, 1, reopen.stderr);
     assert.match(reopen.stderr, /qualified host recovery/);

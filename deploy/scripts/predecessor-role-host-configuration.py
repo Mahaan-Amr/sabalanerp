@@ -128,6 +128,7 @@ def context(root, report_dir, coordination_dir, phase):
     identity = {key: session[key] for key in ("deploymentId", "releaseId", "targetCommit", "rollbackReleaseSet")}
     graph = identity["rollbackReleaseSet"]
     require(session["phase"] == phase and session["bootstrap"] is False
+            and session["purpose"] == "predecessor-role-cutover"
             and all(matches(r"[A-Za-z0-9_-]{1,160}", identity[key]) for key in ("deploymentId", "releaseId"))
             and matches(r"[a-f0-9]{40}", identity["targetCommit"])
             and set(graph) == SERVICES and all(matches(r"sha256:[a-f0-9]{64}", image) for image in graph.values())
@@ -148,7 +149,11 @@ def assert_stage(raw, binding, checkpoint):
     require(isinstance(raw, bytes) and 0 < len(raw) <= 16384)
     proof = json.loads(raw)
     receipt = proof["roleCutover"]
-    require(proof["ok"] is True and receipt["format"] == "sabalan-predecessor-role-acl-cutover-v1"
+    require(set(proof) == {"ok", "roleCutover"} and set(receipt) == {
+        "format", "outcome", "deploymentId", "releaseId", "controlImage", "checkpointSha256",
+        "checkpointMetadataSha256", "sourceDatabase", "catalogSha256", "migrationSha256", "migrations",
+        "tables", "views", "sequences", "securityDefinerRoutines", "preimageSha256", "stagedAclSha256",
+    } and proof["ok"] is True and receipt["format"] == "sabalan-predecessor-role-acl-cutover-v1"
             and receipt["outcome"] in ("staged", "already-staged")
             and receipt["controlImage"] == binding["rollbackReleaseSet"]["backend"]
             and receipt["sourceDatabase"] == checkpoint["sourceDatabase"]
@@ -225,6 +230,27 @@ def publish_receipt(path, binding, stage_digest, state):
                "stageReceiptSha256": stage_digest, "state": state}
     write_private(path, json_bytes(receipt))
     return receipt
+
+
+def activate_login(root, report_dir, coordination_dir, credential_fd, stage_receipt, *, invoke):
+    """Pass a sealed credential to the original protected control command by stdin.
+
+    invoke must run the owned one-off deployment service in the foreground and
+    return its parsed redacted result. The frame must never enter argv or env.
+    """
+    try:
+        phase = "MUTATION_STARTED"
+        authority = context(root, report_dir, coordination_dir, phase)
+        stage = assert_stage(stage_receipt, authority[2], authority[1])
+        password = read_credential(credential_fd)
+        proof = invoke(stage["stagedAclSha256"].encode("ascii") + password)
+        receipt = proof["roleCutover"]
+        require(set(proof) == {"ok", "roleCutover"} and proof["ok"] is True and receipt["outcome"] in ("login-activated", "login-already-active")
+                and receipt == {**stage, "outcome": receipt["outcome"]})
+        require(context(root, report_dir, coordination_dir, phase) == authority)
+        return proof
+    except Exception:
+        raise RoleHostConfigurationError("PREDECESSOR_ROLE_HOST_CONFIGURATION_UNPROVEN") from None
 
 
 def apply(root, env, report_dir, coordination_dir, credential_fd, stage_receipt, *, observe, verify_boundary):

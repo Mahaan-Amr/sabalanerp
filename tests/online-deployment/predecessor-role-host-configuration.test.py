@@ -47,7 +47,7 @@ class HostConfigurationTest(unittest.TestCase):
             "targetCommit": "a" * 40,
             "owner": "protected-owner",
             "leaseToken": "c" * 64,
-            "bootstrap": False,
+            "bootstrap": False, "purpose": "predecessor-role-cutover",
             "controlImage": GRAPH["backend"],
             "rollbackReleaseSet": GRAPH,
             "preservedClamav": {"selection": {"image": GRAPH["clamav"]}},
@@ -141,6 +141,24 @@ class HostConfigurationTest(unittest.TestCase):
             self.assertNotIn(value, receipt_bytes)
         self.assertEqual(self.env.stat().st_mode & 0o777, 0o600)
 
+
+    def test_transfers_only_sealed_credential_and_exact_staged_binding(self):
+        def invoke(frame):
+            staged_hash = json.loads(self.stage)["roleCutover"]["stagedAclSha256"]
+            self.assertEqual(frame, staged_hash.encode() + PASSWORD)
+            return {"ok": True, "roleCutover": {
+                **json.loads(self.stage)["roleCutover"], "outcome": "login-activated",
+            }}
+
+        paths = (self.root, self.root / "reports", self.root / "coordination")
+        with self.owner(sealed=False) as credential:
+            with self.assertRaises(roles.RoleHostConfigurationError):
+                roles.activate_login(*paths, credential, self.stage, invoke=invoke)
+        with self.owner() as credential:
+            proof = roles.activate_login(*paths, credential, self.stage, invoke=invoke)
+            self.assertEqual(proof["roleCutover"]["outcome"], "login-activated")
+            self.assertNotIn(PASSWORD, json.dumps(proof).encode())
+        self.assertEqual(self.env.read_bytes(), ORIGINAL)
 
     def test_restore_if_receipt_publication_fails_after_env_replacement(self):
         receipt = self.root / ".deploy-state" / ("predecessor-role-host-" + self.session["deploymentId"]) / "receipt.json"

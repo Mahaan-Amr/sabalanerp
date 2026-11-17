@@ -24,6 +24,7 @@ async function fixture(stageSchema: string, cleanupAdmitted = true) {
   class Client {
     state = { connected: false, ended: false };
     database: string;
+    pinned = false;
     constructor(config: { connectionString: string }) {
       this.database = new URL(config.connectionString).pathname.slice(1);
       connections.push(this.state);
@@ -31,6 +32,9 @@ async function fixture(stageSchema: string, cleanupAdmitted = true) {
     async connect() { this.state.connected = true; }
     async end() { this.state.ended = true; }
     async query(sql: string) {
+      if (/SET (LOCAL )?search_path = pg_catalog/.test(sql)) this.pinned = true;
+      else if (!sql.startsWith('BEGIN ISOLATION LEVEL')) assert.equal(this.pinned, true,
+        'database-level search_path may resolve public.pg_get_functiondef; pin before any owner query');
       statements.push(sql);
       if (sql.includes('pg_database_collation_actual_version')) return { rows: [{ encoding: 'UTF8', collate: 'en_US.utf8',
         ctype: 'en_US.utf8', provider: 'c', icuLocale: null, collationVersion: null, actualCollationVersion: null, serverVersionNum: 150010 }] };

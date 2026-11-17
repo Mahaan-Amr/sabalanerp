@@ -24,6 +24,7 @@ async function command(url: string, sql: string) {
   const client = new Client({ connectionString: connection.toString(), connectionTimeoutMillis: 10000 });
   try {
     await client.connect();
+    await client.query('SET search_path = pg_catalog');
     return await client.query(sql);
   } finally { await client.end(); }
 }

@@ -49,6 +49,7 @@ test('the complete current release is admitted only with its reviewed ordered SQ
     '20261115131000_accounting_private_marker_index',
     '20261116100000_customer_pickup_driver_source',
     '20261116100100_customer_pickup_dispatch',
+    '20261117120000_retire_attachment_scan_status',
     '20261116120000_customer_allocation_intents',
     '20261116121000_bind_allocation_intent_result',
     '20261116122000_serialize_customer_allocation_reservations',
@@ -58,7 +59,6 @@ test('the complete current release is admitted only with its reviewed ordered SQ
     '20261116131000_customer_allocation_closed_control',
     '20261116132000_close_grouped_allocation_child_backstop',
     '20261116133000_customer_allocation_controller_transition',
-    '20261117120000_retire_attachment_scan_status',
     '20261117130000_store_dispatch_exit_otp_code',
   ];
   const files = names.map(name => [name, fs.readFileSync(path.join(directory, name, 'migration.sql'))] as const);
@@ -80,10 +80,10 @@ test('the complete current release is admitted only with its reviewed ordered SQ
   assert.throws(() => compileProtectedCurrentRelease(files.slice(1)), /CURRENT_RELEASE_SET_UNPROVEN/);
   const changed = files.map(([name, bytes], index) => index === 3 ? [name, Buffer.concat([bytes, Buffer.from('\n-- drift')])] as const : [name, bytes] as const);
   assert.throws(() => compileProtectedCurrentRelease(changed), /SQL_IDENTITY_MISMATCH/);
-  assert.deepEqual(release[28].functions, ['serialize_customer_command_key_within', 'serialize_customer_allocation_intent_insert']);
-  assert.deepEqual(release[31].functions, ['require_active_grouped_allocation_child']);
-  assert.equal(release[33].statements.length, 5);
-  assert.ok(release[33].statements.every(sql => /^ALTER TABLE/.test(sql)));
+  assert.deepEqual(release[29].functions, ['serialize_customer_command_key_within', 'serialize_customer_allocation_intent_insert']);
+  assert.deepEqual(release[32].functions, ['require_active_grouped_allocation_child']);
+  assert.equal(release[24].statements.length, 5);
+  assert.ok(release[24].statements.every(sql => /^ALTER TABLE/.test(sql)));
   for (let migrationIndex = 22; migrationIndex < files.length; migrationIndex++) {
     const changedMigration = files.map(([name, bytes], index) => index === migrationIndex
       ? [name, Buffer.concat([bytes, Buffer.from('\n-- drift')])] as const : [name, bytes] as const);

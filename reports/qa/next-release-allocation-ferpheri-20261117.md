@@ -7,7 +7,7 @@
 - Production was rechecked after the financial amount hotfix and runs `6e8d91fc66007f967809646f5ccec061cd7d9ea1`. That hotfix is merged into this integration. It adds no migrations. Refresh the running image set before operator handoff.
 - GitHub main and Ferpheri both resolved to `917e044419cd9eb88483fad96d83544d545c9579`. The dispatch and attachment scanning changes are already included. The Inquiry gitlink is `92b96e265cb1a32deeeed3da494501df3db9a544`.
 - The integration merges allocation candidate `95c270717`. PR #462 is an older deny-only review branch. Its deployment code is not the base for this integration.
-- The protected migration catalog appends eleven byte-pinned migrations in one new receipt epoch. The prior three epochs retain their identities. Nine migrations install allocation intent recovery, grouped lineage, database fences and the dormant controller transition. One relaxes attachment scan metadata requirements, and one adds a nullable dispatch OTP column.
+- The protected migration catalog appends eleven byte-pinned migrations. The attachment compatibility migration occupies its own receipt epoch for the scanner-retaining predecessor. The final epoch adds nine allocation migrations and one nullable dispatch OTP column. Previously deployed epochs retain their identities.
 
 ## Verified in this integration
 
@@ -21,6 +21,7 @@
 - Six controller and signature tests and four isolated PostgreSQL tests passed after the controller integration. The PostgreSQL test impersonates a no-login controller in an isolated fixture to verify the lock and one-time transition. Deployment wiring and actual runtime credential separation remain open.
 - The protected migrator passed on a populated, temporary database in the existing local PostgreSQL service. The old runners established the 22 and 2 historical receipts, then the candidate with inherited Linux FD9 installed all eleven pending migrations. Both same-operation retry and a later operation reported zero pending migrations. Voucher rows and exact balances (41 rials debt, 30 rials unapplied receipt) were unchanged. The fixture uses a synthetic lease and checkpoint binding, so this evidence covers the migration runner and receipt history, not a protected production-state rehearsal.
 - The candidate's asset-evidence HTTP fixture uploaded and downloaded the original bytes, with both historical scan columns NULL. A client generated from the exact `6e8d91fc` Prisma schema returned P2032 when reading the same row. This establishes a current-data schema incompatibility. It does not exercise the retained image or establish the compatibility of a successor.
+- Branch `codex/scanner-rollback-compatible-predecessor` keeps the original scanner graph and upload checks. Its isolated asset HTTP test recorded CLEAN and a scan timestamp for a fresh upload, delivered the original bytes from a scanner-free fixture, and rejected an explicitly infected fixture. Its backend build and focused migration, asset-integrity and HR contract checks passed. Exact predecessor image and the protected two-release migration and rollback sequence still need qualification.
 - The local Git hook launcher could not start its shell. All three checks in the hook were run explicitly before the integration commit.
 
 ## Remaining release evidence

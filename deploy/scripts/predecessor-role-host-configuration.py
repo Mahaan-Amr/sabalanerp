@@ -531,3 +531,137 @@ def _continue_backend(root, env, report_dir, coordination_dir, pinned_containers
              "backendImage": graph["backend"], "state": expected_host_state, "canOpenTraffic": False}
     write_private(private_path.with_name("backend-runtime-" + expected_host_state.lower() + "-proof.json"), json_bytes(proof))
     return proof
+
+def foreground(root, env, report_dir, coordination_dir, preflight, credential_fd, *, control,
+               verify_boundary, observe, inspect, recreate_backend):
+    """Compose the protected same-image operation through its foreground owner.
+
+    The caller owns the existing deployment lock, advisory session, maintenance
+    boundary, and lease. control must use the canonical foreground one-off runner
+    with the given command and args. A binary input is used only for LOGIN.
+    This continuation neither authorizes public traffic nor finalizes the lease.
+    """
+    try:
+        return _foreground(root, env, report_dir, coordination_dir, preflight, credential_fd, control=control,
+                           verify_boundary=verify_boundary, observe=observe, inspect=inspect, recreate_backend=recreate_backend)
+    except Exception:
+        raise RoleHostConfigurationError("PREDECESSOR_ROLE_FOREGROUND_UNPROVEN") from None
+
+
+def _foreground(root, env, report_dir, coordination_dir, preflight, credential_fd, *, control,
+                verify_boundary, observe, inspect, recreate_backend):
+    verify_lock(root)
+    phase = json.loads(read_private(report_dir / "active-deployment-session.json")[0])["phase"]
+    require(phase in ("MUTATION_STARTED", "ROLLBACK_STARTED"))
+    session, checkpoint, binding = context(root, report_dir, coordination_dir, phase)
+    restoring = phase == "ROLLBACK_STARTED"
+    require(verify_boundary(session, checkpoint) is True)
+    require(set(preflight) == {
+        "format", "sourceCommit", "sourceHash", "browserBuildId", "images", "containers",
+        "preservedClamavSelectionSha256", "databaseTopology", "canMutate", "canOpenTraffic", "planSha256",
+    } and preflight["format"] == "sabalan-predecessor-role-cutover-preflight/v1"
+        and preflight["sourceCommit"] == binding["targetCommit"]
+        and preflight["images"] == binding["rollbackReleaseSet"]
+        and preflight["preservedClamavSelectionSha256"] == session["preservedClamav"]["selectionSha256"]
+        and preflight["databaseTopology"] == "legacy" and preflight["canMutate"] is False and preflight["canOpenTraffic"] is False
+        and all(matches(r"[a-f0-9]{64}", preflight[key]) for key in ("sourceHash", "planSha256"))
+        and matches(r"[A-Za-z0-9_-]{1,128}", preflight["browserBuildId"])
+        and set(preflight["containers"]) == SERVICES
+        and all(matches(r"[a-f0-9]{64}", identifier) for identifier in preflight["containers"].values()))
+
+    private_path, _ = transaction_paths(root, binding["deploymentId"])
+    plan_path = private_path.with_name("foreground-plan.json")
+    stage_path = private_path.with_name("foreground-stage.json")
+    if restoring:
+        require(credential_fd is None)
+    else:
+        read_credential(credential_fd)
+    try:
+        owned = json.loads(read_private(plan_path)[0])
+    except FileNotFoundError:
+        require(not restoring)
+        current, info = read_private(env)
+        containers = container_state(inspect(), binding["rollbackReleaseSet"])
+        require({key: row["Id"] for key, row in containers.items()} == preflight["containers"])
+        model, graph, installed = observe(current)
+        previous_runtime, _ = verify_legacy(model, graph, installed, binding["rollbackReleaseSet"])
+        require(backend_runtime_url(containers["backend"]) == previous_runtime)
+        owned = {"binding": binding, "preflight": preflight, "environment": str(env),
+                 "previousSha256": digest(current), "environmentMode": stat.S_IMODE(info.st_mode), "environmentGid": info.st_gid}
+        write_private(plan_path, json_bytes(owned))
+    require(owned["binding"] == binding and owned["preflight"] == preflight and owned["environment"] == str(env))
+
+    def verify_owned_environment():
+        current = read_private(env)[0]
+        require_current_environment(env, current, owned)
+        try:
+            snapshot, previous = load_snapshot(private_path, env, binding)
+        except FileNotFoundError:
+            require(digest(current) == owned["previousSha256"])
+        else:
+            require(snapshot["previousSha256"] == owned["previousSha256"]
+                    and (current == previous or digest(current) == snapshot["targetSha256"]))
+
+    def run(command, args=(), stdin=None):
+        require(context(root, report_dir, coordination_dir, phase) == (session, checkpoint, binding))
+        require(verify_boundary(session, checkpoint) is True)
+        verify_owned_environment()
+        raw = control(command, args, stdin)
+        verify_owned_environment()
+        require(isinstance(raw, bytes) and 0 < len(raw) <= 16384)
+        require(context(root, report_dir, coordination_dir, phase) == (session, checkpoint, binding))
+        return raw
+
+    restored = None
+    try:
+        stage_raw = read_private(stage_path)[0]
+    except FileNotFoundError:
+        if restoring:
+            # If the stage process lost its stdout before any host snapshot,
+            # the database's transaction record can prove the prior ACLs.
+            require(not os.path.lexists(private_path))
+            restored = json.loads(run("restore-predecessor-role-grants"))
+            require(set(restored) == {"ok", "roleCutover"} and restored["ok"] is True
+                    and restored["roleCutover"]["outcome"] in ("restored", "already-restored"))
+            stage_raw = json_bytes({"ok": True, "roleCutover": {**restored["roleCutover"], "outcome": "already-staged"}})
+        else:
+            stage_raw = run("stage-predecessor-role-grants")
+        assert_stage(stage_raw, binding, checkpoint)
+        write_private(stage_path, stage_raw)
+    stage = assert_stage(stage_raw, binding, checkpoint)
+
+    if restoring:
+        restored = restored or json.loads(run("restore-predecessor-role-grants"))
+        outcome = restored["roleCutover"]["outcome"]
+        require(outcome in ("restored", "already-restored") and restored == {"ok": True, "roleCutover": {**stage, "outcome": outcome}})
+        if not os.path.lexists(private_path):
+            # Before any config snapshot, the original host transaction cannot
+            # have replaced the environment. Prove its exact earlier bytes.
+            previous = read_private(env)[0]
+            require(digest(previous) == owned["previousSha256"])
+            require_current_environment(env, previous, owned)
+            model, graph, installed = observe(previous)
+            previous_runtime, url = verify_legacy(model, graph, installed, binding["rollbackReleaseSet"])
+            snapshot = {
+                "binding": binding, "environment": str(env), "stageReceiptSha256": digest(stage_raw),
+                "previous": base64.b64encode(previous).decode(), "previousSha256": digest(previous),
+                "targetSha256": None, "targetRuntimeSha256": None, "baselineModelSha256": digest(json_bytes(model)),
+                "previousRuntimeSha256": digest(previous_runtime.encode()), "previousRuntimeUser": unquote(url.username),
+                "environmentMode": owned["environmentMode"], "environmentGid": owned["environmentGid"],
+            }
+            write_private(private_path, json_bytes(snapshot))
+        restore(root, env, report_dir, coordination_dir, observe=observe,
+                verify_boundary=lambda actual, point, _: verify_boundary(actual, point))
+    else:
+        activate_login(root, report_dir, coordination_dir, credential_fd, stage_raw,
+                       invoke=lambda frame: json.loads(run("activate-predecessor-runtime-login", stdin=frame)))
+        apply(root, env, report_dir, coordination_dir, credential_fd, stage_raw, observe=observe,
+              verify_boundary=lambda actual, point, receipt: receipt == stage_raw and verify_boundary(actual, point))
+
+    def attest(expected):
+        response = json.loads(run("attest-predecessor-backend-runtime", (expected["backendAddress"], expected["backendId"])))
+        require(set(response) == {"ok", "runtimeProof"} and response["ok"] is True)
+        return response["runtimeProof"]
+
+    return continue_backend(root, env, report_dir, coordination_dir, preflight["containers"], inspect=inspect,
+                            recreate_backend=recreate_backend, verify_boundary=verify_boundary, prove_role=attest)

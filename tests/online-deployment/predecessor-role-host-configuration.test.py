@@ -50,7 +50,7 @@ class HostConfigurationTest(unittest.TestCase):
             "bootstrap": False, "purpose": "predecessor-role-cutover",
             "controlImage": GRAPH["backend"],
             "rollbackReleaseSet": GRAPH,
-            "preservedClamav": {"selection": {"image": GRAPH["clamav"]}},
+            "preservedClamav": {"selection": {"image": GRAPH["clamav"]}, "selectionSha256": "7" * 64},
         }
         self.write_phase("MUTATION_STARTED")
         marker = {key: self.session[key] for key in ("deploymentId", "releaseId")}
@@ -254,6 +254,162 @@ class HostConfigurationTest(unittest.TestCase):
             self.assertEqual(restored["role"], "owner")
             self.assertEqual(self.env.read_bytes(), ORIGINAL)
             self.assertEqual(len(calls), 2)
+
+    def test_foreground_uses_exact_stage_after_a_lost_login_reply_and_rolls_back(self):
+        original = {name: str(i) * 64 for i, name in enumerate(SERVICES, 1)}
+        plan = {
+            "format": "sabalan-predecessor-role-cutover-preflight/v1", "sourceCommit": self.session["targetCommit"],
+            "sourceHash": "8" * 64, "browserBuildId": "erp_fixture", "images": GRAPH, "containers": original,
+            "preservedClamavSelectionSha256": "7" * 64, "databaseTopology": "legacy", "canMutate": False,
+            "canOpenTraffic": False, "planSha256": "9" * 64,
+        }
+        actual_stage = json.loads(self.stage)["roleCutover"]
+        calls = []
+        allow_next_step = False
+        backend_id = original["backend"]
+        installed = CONTROL_URL
+        running = False
+        address = "172.24.0.5"
+        paths = (self.root, self.env, self.root / "reports", self.root / "coordination")
+
+        def control(command, args, stdin):
+            calls.append(command)
+            if command == "attest-predecessor-backend-runtime":
+                self.assertEqual((args, stdin), ((address, backend_id), None))
+                return json.dumps({"ok": True, "runtimeProof": {
+                    "role": "owner" if installed == CONTROL_URL else "sabalan_application_runtime",
+                    "backendId": backend_id, "backendAddress": address, "deploymentId": self.session["deploymentId"],
+                    "checkpointSha256": self.checkpoint["checksum"],
+                }}).encode()
+            self.assertEqual(args, ())
+            if command == "stage-predecessor-role-grants":
+                self.assertIsNone(stdin)
+                return self.stage
+            if command == "restore-predecessor-role-grants":
+                self.assertIsNone(stdin)
+                return json.dumps({"ok": True, "roleCutover": {**actual_stage, "outcome": "restored"}}).encode()
+            self.assertEqual(command, "activate-predecessor-runtime-login")
+            self.assertEqual(stdin, actual_stage["stagedAclSha256"].encode() + PASSWORD)
+            if allow_next_step:
+                return json.dumps({"ok": True, "roleCutover": {**actual_stage, "outcome": "login-already-active"}}).encode()
+            raise RuntimeError("Native activation reply unavailable")
+
+        def boundary(session, checkpoint):
+            self.assertEqual((session, checkpoint), (self.session, self.checkpoint))
+            return True
+
+        def inspect():
+            rows = []
+            for name in SERVICES:
+                identifier = backend_id if name == "backend" else original[name]
+                rows.append({
+                    "Id": identifier, "Image": GRAPH[name], "Created": "2026-11-17",
+                    "Config": {"Hostname": identifier[:12], "Env": ["DATABASE_URL=" + installed] if name == "backend" else [],
+                               "Labels": {"com.docker.compose.service": name, "com.docker.compose.project": "sabalanerp"}},
+                    "HostConfig": {}, "Mounts": [],
+                    "State": {"StartedAt": "2026-11-17", "Pid": 17, "Health": {"Status": "healthy"},
+                              "Running": running if name == "backend" else True, "Restarting": False, "Dead": False},
+                    "NetworkSettings": {"Networks": {"app_network": {"IPAddress": address}}},
+                })
+            return rows
+
+        def recreate(command):
+            nonlocal backend_id, installed, running
+            self.assertEqual(command[-1], "backend")
+            calls.append("recreate")
+            running = True
+            rollback = self.session["phase"] == "ROLLBACK_STARTED"
+            backend_id = ("b" if rollback else "a") * 64
+            installed = CONTROL_URL if rollback else RUNTIME_URL
+            return True
+
+        def foreground(credential):
+            return roles.foreground(
+                *paths, plan, credential, control=control, verify_boundary=boundary, observe=self.observe,
+                inspect=inspect, recreate_backend=recreate,
+            )
+
+        with self.owner() as credential:
+            with self.assertRaises(roles.RoleHostConfigurationError):
+                foreground(credential)
+            self.assertEqual(calls, ["stage-predecessor-role-grants", "activate-predecessor-runtime-login"])
+            self.assertEqual(self.env.read_bytes(), ORIGINAL)
+            drifted = ORIGINAL + b"\nUNRELATED=drift\n"
+            private_write(self.env, drifted)
+            with self.assertRaises(roles.RoleHostConfigurationError):
+                foreground(credential)
+            self.assertEqual(calls, ["stage-predecessor-role-grants", "activate-predecessor-runtime-login"])
+            self.assertEqual(self.env.read_bytes(), drifted)
+            private_write(self.env, ORIGINAL)
+            allow_next_step = True
+            target = foreground(credential)
+            self.assertEqual(target["role"], "sabalan_application_runtime")
+            self.assertEqual(calls, ["stage-predecessor-role-grants", "activate-predecessor-runtime-login",
+                                     "activate-predecessor-runtime-login", "recreate", "attest-predecessor-backend-runtime"])
+            self.assertEqual(self.env.read_bytes(), TARGET)
+            self.assertFalse(target["canOpenTraffic"])
+
+            self.write_phase("ROLLBACK_STARTED")
+            running = False
+            prior = foreground(None)
+            self.assertEqual(prior["role"], "owner")
+            self.assertEqual(calls[-3:], ["restore-predecessor-role-grants", "recreate", "attest-predecessor-backend-runtime"])
+            self.assertEqual(self.env.read_bytes(), ORIGINAL)
+            self.assertFalse(prior["canOpenTraffic"])
+
+    def test_foreground_rollback_recovers_owned_stage_if_native_reply_was_lost(self):
+        ids = {name: str(i) * 64 for i, name in enumerate(SERVICES, 1)}
+        plan = {
+            "format": "sabalan-predecessor-role-cutover-preflight/v1", "sourceCommit": self.session["targetCommit"],
+            "sourceHash": "8" * 64, "browserBuildId": "erp_fixture", "images": GRAPH, "containers": ids,
+            "preservedClamavSelectionSha256": "7" * 64, "databaseTopology": "legacy", "canMutate": False,
+            "canOpenTraffic": False, "planSha256": "9" * 64,
+        }
+        stage = json.loads(self.stage)["roleCutover"]
+        called = []
+
+        def control(command, args, stdin):
+            called.append(command)
+            self.assertIsNone(stdin)
+            if command == "stage-predecessor-role-grants":
+                raise RuntimeError("Committed in the fixture but no stdout was received")
+            if command == "restore-predecessor-role-grants":
+                return json.dumps({"ok": True, "roleCutover": {**stage, "outcome": "restored"}}).encode()
+            self.assertEqual(command, "attest-predecessor-backend-runtime")
+            return json.dumps({"ok": True, "runtimeProof": {
+                "deploymentId": self.session["deploymentId"], "checkpointSha256": self.checkpoint["checksum"],
+                "backendAddress": "172.22.0.5", "backendId": ids["backend"], "role": "owner",
+            }}).encode()
+
+        def inspect():
+            return [{
+                "Id": ids[name], "Created": "2026-11-17", "Image": GRAPH[name],
+                "Config": {"Hostname": ids[name][:12], "Env": ["DATABASE_URL=" + CONTROL_URL] if name == "backend" else [],
+                           "Labels": {"com.docker.compose.service": name, "com.docker.compose.project": "sabalanerp"}},
+                "HostConfig": {}, "Mounts": [],
+                "State": {"StartedAt": "2026-11-17", "Pid": 5, "Health": {"Status": "healthy"},
+                          "Running": True, "Restarting": False, "Dead": False},
+                "NetworkSettings": {"Networks": {"app_network": {"IPAddress": "172.22.0.5"}}},
+            } for name in SERVICES]
+
+        def foreground(credential):
+            return roles.foreground(
+                self.root, self.env, self.root / "reports", self.root / "coordination", plan, credential,
+                control=control, verify_boundary=lambda session, checkpoint: (session, checkpoint) == (self.session, self.checkpoint),
+                observe=self.observe, inspect=inspect, recreate_backend=lambda command: self.fail("The exact original backend serves"),
+            )
+
+        with self.owner() as credential:
+            with self.assertRaises(roles.RoleHostConfigurationError):
+                foreground(credential)
+            self.assertEqual(called, ["stage-predecessor-role-grants"])
+            self.write_phase("ROLLBACK_STARTED")
+            result = foreground(None)
+            self.assertEqual(result["backendId"], ids["backend"])
+            self.assertFalse(result["canOpenTraffic"])
+            self.assertEqual(self.env.read_bytes(), ORIGINAL)
+            self.assertEqual(called, ["stage-predecessor-role-grants", "restore-predecessor-role-grants",
+                                      "attest-predecessor-backend-runtime"])
 
     def test_restore_if_receipt_publication_fails_after_env_replacement(self):
         receipt = self.root / ".deploy-state" / ("predecessor-role-host-" + self.session["deploymentId"]) / "receipt.json"

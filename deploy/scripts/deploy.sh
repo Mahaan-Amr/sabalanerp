@@ -4,6 +4,14 @@ set -eu
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 REPO_ROOT="${DEPLOYMENT_REPO_ROOT:-$(CDPATH= cd -- "${SCRIPT_DIR}/../.." && pwd)}"
 OPERATIONS_ROOT="$(CDPATH= cd -- "${SCRIPT_DIR}/../.." && pwd)"
+CUSTOMER_ALLOCATION_CURRENT_DATA_ROLLBACK=0
+CUSTOMER_ALLOCATION_ROLLBACK_EVIDENCE=""
+if [ "${1:-}" = "--customer-allocation-current-data-rollback" ]; then
+  shift
+  [ "$#" -eq 2 ] || { echo 'Usage: deploy.sh --customer-allocation-current-data-rollback <env> <historical-GO-evidence-directory>' >&2; exit 1; }
+  CUSTOMER_ALLOCATION_CURRENT_DATA_ROLLBACK=1
+  CUSTOMER_ALLOCATION_ROLLBACK_EVIDENCE="$2"
+fi
 CAPTURE_ONLY=0
 unset DEPLOYMENT_CAPTURE_PAUSE_STARTED_NS
 PREBUILT_RELEASE=0
@@ -37,6 +45,12 @@ case "${DEPLOYMENT_MODE}" in
   *) echo "DEPLOYMENT_MODE must be release or configuration." >&2; exit 1 ;;
 esac
 [ "${CAPTURE_ONLY}" -eq 0 ] || [ "${DEPLOYMENT_MODE}" = "release" ] || { echo "Capture-only cannot change configuration." >&2; exit 1; }
+if [ "${CUSTOMER_ALLOCATION_CURRENT_DATA_ROLLBACK}" -eq 1 ]; then
+  [ "${DEPLOYMENT_MODE}" = release ] && [ "${CAPTURE_ONLY}" -eq 0 ] && [ "${PREBUILT_RELEASE}" -eq 0 ] \
+    && [ "${OFFLINE_CLAMAV_INCIDENT}" -eq 0 ] && [ -z "${DEPLOYMENT_CLAMAV_TARGET_IMAGE:-}" ] || {
+    echo 'Customer allocation current-data rollback requires a dedicated protected release.' >&2; exit 1;
+  }
+fi
 CONFIGURATION_STATE="${REPO_ROOT}/.deploy-state/biometric-configuration.json"
 CONFIGURATION_ACTIVE=0
 DEPLOYMENT_CLAMAV_TARGET_IMAGE="${DEPLOYMENT_CLAMAV_TARGET_IMAGE:-}"
@@ -106,8 +120,14 @@ ALLOCATION_AUTHORITY_DIR="${DEPLOYMENT_CUSTOMER_ALLOCATION_AUTHORITY_DIR:-}"
 ALLOCATION_APPROVER_SHA256="${DEPLOYMENT_CUSTOMER_ALLOCATION_APPROVER_SHA256:-}"
 ALLOCATION_RELEASE_SCRIPT="${OPERATIONS_ROOT}/deploy/scripts/customer-allocation-release.mjs"
 allocation_predecessor=""
-if [ -n "${ALLOCATION_EVIDENCE_DIR}" ]; then
-  [ -n "${ALLOCATION_EVIDENCE_DIR}" ] && [ -n "${ALLOCATION_AUTHORITY_DIR}" ] \
+if [ "${CUSTOMER_ALLOCATION_CURRENT_DATA_ROLLBACK}" -eq 1 ]; then
+  [ -z "${ALLOCATION_EVIDENCE_DIR}" ] && [ -n "${ALLOCATION_AUTHORITY_DIR}" ] \
+    && [ -n "${ALLOCATION_APPROVER_SHA256}" ] || {
+    echo 'Customer allocation rollback requires closure credentials with activation unselected.' >&2
+    exit 1
+  }
+elif [ -n "${ALLOCATION_EVIDENCE_DIR}" ]; then
+  [ -n "${ALLOCATION_AUTHORITY_DIR}" ] \
     && [ -n "${ALLOCATION_APPROVER_SHA256}" ] && [ "${ALLOCATION_EVIDENCE_DIR}" != "${ALLOCATION_AUTHORITY_DIR}" ] \
     && [ "${DEPLOYMENT_MODE}" = release ] && [ "${CAPTURE_ONLY}" -eq 0 ] && [ "${PREBUILT_RELEASE}" -eq 0 ] \
     && [ "${OFFLINE_CLAMAV_INCIDENT}" -eq 0 ] && [ "${DEPLOYMENT_CLAMAV_REPAIR}" = false ] || {
@@ -157,6 +177,12 @@ verify_prebuilt_release() {
     "${PREBUILT_RELEASE_PLAN}" "${PREBUILT_RELEASE_SHA256}" "${REPO_ROOT}" "${OPERATIONS_ROOT}"
 }
 
+select_customer_allocation_predecessor() {
+  node "${OPERATIONS_ROOT}/deploy/scripts/lib/customer-allocation-current-data.mjs" select \
+    "${CUSTOMER_ALLOCATION_ROLLBACK_EVIDENCE}" "${DEPLOYMENT_PREVIOUS_BACKEND_IMAGE}" \
+    "${DEPLOYMENT_PREVIOUS_FRONTEND_IMAGE}" "${DEPLOYMENT_PREVIOUS_INQUIRY_IMAGE}"
+}
+
 capture_remaining_seconds() {
   [ "${CAPTURE_ONLY}" -eq 1 ] && [ -n "${capture_pause_started:-}" ] || return 1
   node -e 'const elapsed=process.hrtime.bigint()-BigInt(process.argv[1]);if(elapsed<0n)process.exit(1);const left=(900000000000n-elapsed)/1000000000n;const requested=BigInt(process.argv[2]);if(left<=0n||requested<=0n)process.exit(1);process.stdout.write((left<requested?left:requested).toString())' "${capture_pause_started}" "$1"
@@ -196,6 +222,9 @@ start_release_services() {
       legacy_scanner_id="$(compose ps -a -q clamav)" || return 1
       [ -n "${legacy_scanner_id}" ] || return 1
       [ "$(docker inspect --format '{{.Image}}' "${legacy_scanner_id}")" = "${DEPLOYMENT_CLAMAV_IMAGE}" ] || return 1
+      if [ "${CUSTOMER_ALLOCATION_CURRENT_DATA_ROLLBACK}" -eq 1 ] && [ "${DEPLOYMENT_PHASE:-}" = RELEASE_STARTED ]; then
+        [ "$(docker inspect --format '{{.Id}}' "${legacy_scanner_id}")" = "${CUSTOMER_ALLOCATION_RETAINED_SCANNER}" ] || return 1
+      fi
       compose start --wait --wait-timeout "${wait_seconds}" clamav || return 1
       compose up -d --no-deps --no-build --wait --wait-timeout "${wait_seconds}" postgres backend frontend inquiry nginx || return 1
     fi
@@ -210,7 +239,9 @@ start_release_services() {
 
 run_backend() {
   legacy_control_files=""
-  if [ "${COMPOSE_FILE}" = docker-compose.prod.yml ] && [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ]; then
+  if [ "${COMPOSE_FILE}" = docker-compose.prod.yml ] \
+    && { [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ] || \
+      { [ "${CUSTOMER_ALLOCATION_CURRENT_DATA_ROLLBACK}" -eq 1 ] && [ "${LEGACY_RELEASE_GRAPH}" -eq 1 ]; }; }; then
     legacy_control_files="-f ${LEGACY_SCANNER_COMPOSE}"
   fi
   DEPLOYMENT_BACKEND_IMAGE="${DEPLOYMENT_TARGET_BACKEND_IMAGE}" BACKEND_DB_CONNECTION_LIMIT=2 DATABASE_APPLICATION_NAME=sabalanerp-deployment \
@@ -285,7 +316,9 @@ run_backend_timed() {
   duration="$1"
   shift
   legacy_control_files=""
-  if [ "${COMPOSE_FILE}" = docker-compose.prod.yml ] && [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ]; then
+  if [ "${COMPOSE_FILE}" = docker-compose.prod.yml ] \
+    && { [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ] || \
+      { [ "${CUSTOMER_ALLOCATION_CURRENT_DATA_ROLLBACK}" -eq 1 ] && [ "${LEGACY_RELEASE_GRAPH}" -eq 1 ]; }; }; then
     legacy_control_files="-f ${LEGACY_SCANNER_COMPOSE}"
   fi
   timeout "${duration}" env \
@@ -616,6 +649,12 @@ cleanup_configuration_snapshot() {
 }
 
 switch_to_previous_images() {
+  scanner_journal="${REPO_ROOT}/.deploy-state/customer-allocation-rollback-${DEPLOYMENT_ID}.scanner.json"
+  if [ -e "${scanner_journal}" ] || [ -L "${scanner_journal}" ]; then
+    [ "${DB_LEASE_ACQUIRED}" -eq 1 ] && [ "${DEPLOYMENT_PHASE:-}" = ROLLBACK_STARTED ] || return 1
+    run_original_owned_with_heartbeat node "${OPERATIONS_ROOT}/deploy/scripts/lib/customer-allocation-current-data.mjs" \
+      stop-staged-scanner "${scanner_journal}" || return 1
+  fi
   if [ "${CONFIGURATION_ACTIVE}" -eq 1 ]; then
     node "${OPERATIONS_ROOT}/scripts/deployment-biometric-configuration.mjs" persist "${REPO_ROOT}" previous || return 1
     configuration_exports="$(node "${OPERATIONS_ROOT}/scripts/deployment-biometric-configuration.mjs" exports "${REPO_ROOT}" previous)" || return 1
@@ -951,8 +990,8 @@ recover_failure() {
 
   if [ "${DEPLOYMENT_PHASE:-}" = "ROLLBACK_STARTED" ] \
     && run_backend sh scripts/with-backend-control-ownership.sh node dist/scripts/deployment-rollback.js \
-    && run_backend sh scripts/with-backend-control-ownership.sh node dist/scripts/deployment-finalize-recovery.js; then
-    switch_to_previous_images
+    && run_backend sh scripts/with-backend-control-ownership.sh node dist/scripts/deployment-finalize-recovery.js \
+    && switch_to_previous_images; then
     restore_clamav_configuration || exit 1
     if start_release_services 300 \
       && verify_clamav_repair_runtime \
@@ -1176,7 +1215,8 @@ if [ "${DEPLOYMENT_MODE}" = "configuration" ]; then
   sh "${OPERATIONS_ROOT}/deploy/scripts/storage-preflight.sh" "${ENV_FILE}" "${REPO_ROOT}" "${OPERATIONS_ROOT}" 0 0 "${COMPOSE_FILE}"
 fi
 
-if [ "${DEPLOYMENT_MODE}" = "release" ] && [ "${CAPTURE_ONLY}" -eq 0 ] && [ "${PREBUILT_RELEASE}" -eq 0 ]; then
+if [ "${DEPLOYMENT_MODE}" = "release" ] && [ "${CAPTURE_ONLY}" -eq 0 ] && [ "${PREBUILT_RELEASE}" -eq 0 ] \
+  && [ "${CUSTOMER_ALLOCATION_CURRENT_DATA_ROLLBACK}" -eq 0 ]; then
 if [ "${OFFLINE_CLAMAV_INCIDENT}" -eq 1 ]; then
   node "${OPERATIONS_ROOT}/scripts/clamav-release-readiness.mjs" offline-source-import "${OFFLINE_CLAMAV_MANIFEST}" "${OFFLINE_CLAMAV_MANIFEST_SHA256}" "${REPO_ROOT}" "${OPERATIONS_ROOT}"
 else
@@ -1194,7 +1234,8 @@ fi
 
 DEPLOYMENT_TARGET_COMMIT="$(git rev-parse HEAD)"
 
-if [ "${DEPLOYMENT_MODE}" = "release" ] && [ "${CAPTURE_ONLY}" -eq 0 ] && [ "${PREBUILT_RELEASE}" -eq 0 ]; then
+if [ "${DEPLOYMENT_MODE}" = "release" ] && [ "${CAPTURE_ONLY}" -eq 0 ] && [ "${PREBUILT_RELEASE}" -eq 0 ] \
+  && [ "${CUSTOMER_ALLOCATION_CURRENT_DATA_ROLLBACK}" -eq 0 ]; then
 backend_repository="$(env_value DEPLOYMENT_BACKEND_IMAGE_REPOSITORY)"
 frontend_repository="$(env_value DEPLOYMENT_FRONTEND_IMAGE_REPOSITORY)"
 inquiry_repository="$(env_value DEPLOYMENT_INQUIRY_IMAGE_REPOSITORY)"
@@ -1231,10 +1272,6 @@ case "${previous_upload_policy}" in
 esac
 export DEPLOYMENT_PREVIOUS_BACKEND_IMAGE DEPLOYMENT_PREVIOUS_FRONTEND_IMAGE DEPLOYMENT_PREVIOUS_INQUIRY_IMAGE DEPLOYMENT_PREVIOUS_NGINX_IMAGE DEPLOYMENT_PREVIOUS_POSTGRES_IMAGE DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE
 
-if [ -n "${ALLOCATION_EVIDENCE_DIR}" ] && [ "${CUSTOMER_ALLOCATION_CURRENT_DATA_ROLLBACK:-0}" -eq 1 ]; then
-  echo 'Customer allocation activation and current-data rollback require separate protected deployments.' >&2
-  exit 1
-fi
 if [ -n "${ALLOCATION_EVIDENCE_DIR}" ]; then
   [ "${LEGACY_RELEASE_GRAPH}" -eq 0 ] && [ -n "${legacy_scanner_id:-}" ] && [ -z "${DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX:-}" ] || {
     echo 'Customer allocation activation requires a scanner-free target and an exact running predecessor scanner.' >&2
@@ -1243,7 +1280,7 @@ if [ -n "${ALLOCATION_EVIDENCE_DIR}" ]; then
   allocation_predecessor="$(node "${ALLOCATION_RELEASE_SCRIPT}" observe-predecessor \
     "$(compose ps -q backend)" "$(compose ps -q frontend)" "$(compose ps -q inquiry)" \
     "${legacy_scanner_id}" "$(compose ps -q postgres)")" || exit 1
-elif [ "${CUSTOMER_ALLOCATION_CURRENT_DATA_ROLLBACK:-0}" -eq 1 ]; then
+elif [ "${CUSTOMER_ALLOCATION_CURRENT_DATA_ROLLBACK}" -eq 1 ]; then
   allocation_predecessor="$(node "${ALLOCATION_RELEASE_SCRIPT}" observe-database \
     "$(compose ps -q backend)" "$(compose ps -q postgres)")" || exit 1
 fi
@@ -1258,6 +1295,10 @@ export DEPLOYMENT_PREVIOUS_PERFORMANCE_ENVIRONMENT
 if [ "${DEPLOYMENT_MODE}" = "configuration" ] || [ "${CAPTURE_ONLY}" -eq 1 ]; then
   existing_exports="$(capture_only_services | node "${OPERATIONS_ROOT}/scripts/deployment-existing-release.mjs")"
   eval "${existing_exports}"
+fi
+if [ "${CUSTOMER_ALLOCATION_CURRENT_DATA_ROLLBACK}" -eq 1 ]; then
+  customer_allocation_predecessor="$(select_customer_allocation_predecessor)" || exit 1
+  eval "${customer_allocation_predecessor}"
 fi
 DEPLOYMENT_RELEASE_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(printf '%s' "${DEPLOYMENT_TARGET_COMMIT}" | cut -c1-12)-${DEPLOYMENT_MODE}"
 DEPLOYMENT_ID="deploy-${DEPLOYMENT_RELEASE_ID}"
@@ -1287,7 +1328,16 @@ if [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ]; then
 fi
 
 if [ "${DEPLOYMENT_MODE}" = "release" ] && [ "${CAPTURE_ONLY}" -eq 0 ]; then
-if [ "${PREBUILT_RELEASE}" -eq 0 ]; then
+if [ "${CUSTOMER_ALLOCATION_CURRENT_DATA_ROLLBACK}" -eq 1 ]; then
+  dispatch_volume_transition stage
+  sh "${OPERATIONS_ROOT}/deploy/scripts/storage-preflight.sh" "${ENV_FILE}" "${REPO_ROOT}" "${OPERATIONS_ROOT}" 0 0 "${COMPOSE_FILE}"
+  [ "$(select_customer_allocation_predecessor)" = "${customer_allocation_predecessor}" ] || exit 1
+  DEPLOYMENT_NGINX_IMAGE="${DEPLOYMENT_PREVIOUS_NGINX_IMAGE}"
+  DEPLOYMENT_POSTGRES_IMAGE="${DEPLOYMENT_PREVIOUS_POSTGRES_IMAGE}"
+  DEPLOYMENT_CLAMAV_IMAGE=""
+  export DEPLOYMENT_NGINX_IMAGE DEPLOYMENT_POSTGRES_IMAGE DEPLOYMENT_CLAMAV_IMAGE
+  compose config --quiet
+elif [ "${PREBUILT_RELEASE}" -eq 0 ]; then
 backend_image_size="$(docker image inspect --format '{{.Size}}' "${DEPLOYMENT_PREVIOUS_BACKEND_IMAGE}")"
 frontend_image_size="$(docker image inspect --format '{{.Size}}' "${DEPLOYMENT_PREVIOUS_FRONTEND_IMAGE}")"
 inquiry_image_size="$(docker image inspect --format '{{.Size}}' "${DEPLOYMENT_PREVIOUS_INQUIRY_IMAGE}")"
@@ -1402,7 +1452,8 @@ if [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ]; then
   export DEPLOYMENT_CLAMAV_IMAGE
 fi
 if [ "${DEPLOYMENT_MODE}" = release ] && [ "${CAPTURE_ONLY}" -eq 0 ] \
-  && [ "${LEGACY_RELEASE_GRAPH}" -eq 0 ] && [ -z "${DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX:-}" ]; then
+  && [ "${LEGACY_RELEASE_GRAPH}" -eq 0 ] && [ -z "${DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX:-}" ] \
+  && [ "${CUSTOMER_ALLOCATION_CURRENT_DATA_ROLLBACK}" -eq 0 ]; then
   target_upload_policy="$(docker image inspect --format '{{index .Config.Labels "io.sabalan.release.upload-policy"}}' "${DEPLOYMENT_TARGET_BACKEND_IMAGE}")"
   [ "${target_upload_policy}" = no-malware-scan ] || {
     echo 'The candidate image does not attest to the scanner-free release graph.' >&2; exit 1;
@@ -1472,6 +1523,9 @@ acquire_code=$?
 set -e
 if [ "${acquire_code}" -eq 4 ]; then
   [ "${CAPTURE_ONLY}" -eq 0 ] || { echo "Capture-only requires an existing canonical DB lease schema; no bootstrap mutation is permitted." >&2; exit 1; }
+  [ "${CUSTOMER_ALLOCATION_CURRENT_DATA_ROLLBACK}" -eq 0 ] || {
+    echo 'Customer allocation rollback requires an existing canonical DB lease schema.' >&2; exit 1;
+  }
   BOOTSTRAP=1
   DEPLOYMENT_INITIAL_SCHEMA_BOOTSTRAP=true
   export DEPLOYMENT_INITIAL_SCHEMA_BOOTSTRAP
@@ -1564,6 +1618,26 @@ assert_qa_remote_checkpoint_mount
 phase MUTATION_STARTED
 MUTATION_STARTED=1
 mutation_started_at="$(date +%s)"
+if [ "${CUSTOMER_ALLOCATION_CURRENT_DATA_ROLLBACK}" -eq 1 ]; then
+  verify_public_maintenance || exit 1
+  control heartbeat || exit 1
+  [ "$(select_customer_allocation_predecessor)" = "${customer_allocation_predecessor}" ] || exit 1
+  remaining="$(remaining_mutation_seconds)" || exit 1
+  run_backend_timed "${remaining}" node node_modules/prisma/build/index.js migrate status --schema prisma/schema.prisma
+  remaining_mutation_seconds >/dev/null
+  closed_manifest="$(run_original_owned_with_heartbeat run_customer_allocation_controller close \
+    "${DEPLOYMENT_PREVIOUS_BACKEND_IMAGE}" "${CUSTOMER_ALLOCATION_CLOSE_MANIFEST_SHA256}")" || exit 1
+  [ "${closed_manifest}" = "${CUSTOMER_ALLOCATION_CLOSE_MANIFEST_SHA256}" ] || {
+    echo 'Customer allocation closure receipt did not match the active manifest.' >&2; exit 1;
+  }
+  remaining_mutation_seconds >/dev/null
+  scanner_journal="${REPO_ROOT}/.deploy-state/customer-allocation-rollback-${DEPLOYMENT_ID}.scanner.json"
+  node "${OPERATIONS_ROOT}/deploy/scripts/lib/customer-allocation-current-data.mjs" stage-scanner \
+    "${scanner_journal}" "${CUSTOMER_ALLOCATION_RETAINED_SCANNER}" "${CUSTOMER_ALLOCATION_SCANNER_IMAGE}"
+  DEPLOYMENT_CLAMAV_IMAGE="${CUSTOMER_ALLOCATION_SCANNER_IMAGE}"
+  export DEPLOYMENT_CLAMAV_IMAGE
+  LEGACY_RELEASE_GRAPH=1
+fi
 if [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ]; then
   remaining="$(remaining_mutation_seconds)" || exit 1
   run_backend_timed "${remaining}" node scripts/clamav-checkpoint.mjs activate
@@ -1739,7 +1813,9 @@ if [ -n "${ALLOCATION_EVIDENCE_DIR}" ]; then
 else
   run_backend_timed "${remaining}" node dist/scripts/deployment-gates.js
 fi
-if [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ] || { [ "${DEPLOYMENT_MODE}" = configuration ] && [ "${LEGACY_RELEASE_GRAPH}" -eq 1 ]; }; then
+if [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ] \
+  || { [ "${DEPLOYMENT_MODE}" = configuration ] && [ "${LEGACY_RELEASE_GRAPH}" -eq 1 ]; } \
+  || [ "${CUSTOMER_ALLOCATION_CURRENT_DATA_ROLLBACK}" -eq 1 ]; then
   remaining="$(remaining_mutation_seconds)" || exit 1
   timeout "${remaining}" docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" exec -T backend sh -c '
     set -eu

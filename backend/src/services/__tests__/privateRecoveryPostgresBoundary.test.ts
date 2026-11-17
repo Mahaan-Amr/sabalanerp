@@ -39,6 +39,9 @@ test('the kernel boundary blocks outgoing network and fd-passing bypasses and re
   assert.match(native, /ARG\(4\) \+ 4/);
   assert.match(native, /SECCOMP_RET_KILL_PROCESS/);
   assert.match(native, /0x40000000U/);
+  assert.ok(native.lastIndexOf('prctl(PR_SET_PDEATHSIG, SIGKILL)') > native.lastIndexOf('setgid(65532) || setuid(65532)'));
+  assert.match(native, /getppid\(\) != parent/);
+  assert.match(native, /SABALAN_RECOVERY_PARENT_PID/);
   assert.match(native, /SYS_pidfd_open/);
   assert.match(native, /candidate.st_dev == root.st_dev && candidate.st_ino == root.st_ino/);
   assert.match(native, /SYS_pidfd_send_signal/);

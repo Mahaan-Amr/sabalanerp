@@ -6666,6 +6666,8 @@ model AccountingSettlementAllocation {
   id                    String                               @id @default(cuid())
   treasuryTransactionId String?
   creditItemId          String?
+  parentCommandKey      String?
+  sourcePlanHash        String?
   reversesId            String?                              @unique
   reversedById          String?                              @unique
   reason                String?

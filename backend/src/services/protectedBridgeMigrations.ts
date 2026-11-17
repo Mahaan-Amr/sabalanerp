@@ -33,6 +33,15 @@ const nextReleaseCatalog = {
     tables: ['accounting_customer_command_key_fences', 'accounting_customer_allocation_intents'],
     functions: ['serialize_customer_command_key_within', 'serialize_customer_allocation_intent_insert'],
   },
+  '20261116130000_grouped_allocation_child_lineage': {
+    tables: ['accounting_settlement_allocations'], functions: ['verify_grouped_allocation_child'],
+  },
+  '20261116131000_customer_allocation_closed_control': {
+    tables: ['customer_allocation_release_control'], functions: ['keep_customer_allocation_control_closed'],
+  },
+  '20261116132000_close_grouped_allocation_child_backstop': {
+    tables: ['accounting_settlement_allocations'], functions: ['require_active_grouped_allocation_child'],
+  },
   [retireAttachmentScanStatusName]: {
     tables: ['support_ticket_attachments', 'accounting_archive_evidence', 'hr_employment_contract_documents', 'purchasing_attachments'],
     functions: [],
@@ -73,12 +82,15 @@ const currentRelease = {
   '20261116122000_serialize_customer_allocation_reservations': ['a21cc1a12f8bfae622302c39d258ca881c0be2847e1329cae70f9baa5d272670', 1],
   '20261116123000_cancel_unreceived_allocation_intents': ['f46bae03614df7d3dfca3e611bedc91f597f87571bc94142e251a7763340ff12', 3],
   '20261116124000_serialize_allocation_command_keys': ['2f2f1742ea48a8e11bb8b9db4829532278af27356af4308df03264b9248d6e99', 5],
+  '20261116130000_grouped_allocation_child_lineage': ['64b0e0bae723c37775e9d67b36dc607c156fa9d02476d132f925e1011fb64135', 5],
+  '20261116131000_customer_allocation_closed_control': ['a2d5edfe312f2e85d2a17e0deb26c6d7838534cf40713a741349b1e65bf2131c', 4],
+  '20261116132000_close_grouped_allocation_child_backstop': ['bc83e4c5dbf13051374ebaaab5bb1a5b75682b6044eb179ac03e94a971c18c90', 2],
   [retireAttachmentScanStatusName]: ['9fad9a9544c0c5da8fe58b4f636c2b35ad420fd871c3a7392e12911c5fd4ab91', 5],
   '20261117130000_store_dispatch_exit_otp_code': ['375715f6a9930906e9cfae9b5bfbd59c4e4371d5d70587ec651de81afb7e2353', 1],
 } as const;
 export const protectedCurrentReleaseNames: readonly string[] = Object.freeze(Object.keys(currentRelease));
 // Each release extends the ledger while preserving the prior release-set hashes.
-const protectedReleaseEpochEnds = Object.freeze([12, 22, 24, 31]);
+const protectedReleaseEpochEnds = Object.freeze([12, 22, 24, 34]);
 const releaseSetSha256 = (files: CurrentFile[], index: number) => sha(files.slice(0,
   protectedReleaseEpochEnds.find(end => index < end)!).map(file => file.sha256).join('\n'));
 

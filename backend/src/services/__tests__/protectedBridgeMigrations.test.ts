@@ -54,6 +54,9 @@ test('the complete current release is admitted only with its reviewed ordered SQ
     '20261116122000_serialize_customer_allocation_reservations',
     '20261116123000_cancel_unreceived_allocation_intents',
     '20261116124000_serialize_allocation_command_keys',
+    '20261116130000_grouped_allocation_child_lineage',
+    '20261116131000_customer_allocation_closed_control',
+    '20261116132000_close_grouped_allocation_child_backstop',
     '20261117120000_retire_attachment_scan_status',
     '20261117130000_store_dispatch_exit_otp_code',
   ];
@@ -77,8 +80,9 @@ test('the complete current release is admitted only with its reviewed ordered SQ
   const changed = files.map(([name, bytes], index) => index === 3 ? [name, Buffer.concat([bytes, Buffer.from('\n-- drift')])] as const : [name, bytes] as const);
   assert.throws(() => compileProtectedCurrentRelease(changed), /SQL_IDENTITY_MISMATCH/);
   assert.deepEqual(release[28].functions, ['serialize_customer_command_key_within', 'serialize_customer_allocation_intent_insert']);
-  assert.equal(release[29].statements.length, 5);
-  assert.ok(release[29].statements.every(sql => /^ALTER TABLE/.test(sql)));
+  assert.deepEqual(release[31].functions, ['require_active_grouped_allocation_child']);
+  assert.equal(release[32].statements.length, 5);
+  assert.ok(release[32].statements.every(sql => /^ALTER TABLE/.test(sql)));
   for (let migrationIndex = 22; migrationIndex < files.length; migrationIndex++) {
     const changedMigration = files.map(([name, bytes], index) => index === migrationIndex
       ? [name, Buffer.concat([bytes, Buffer.from('\n-- drift')])] as const : [name, bytes] as const);

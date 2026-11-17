@@ -187,7 +187,7 @@ export async function recordCustomerWorkspaceTreasury(database: PrismaClient, id
   if (!input.confirmed || input.reason.trim().length < 8 || !input.reference.trim()) return fail('ACCOUNTING_EVIDENCE_REQUIRED', 'دلیل، مرجع مستندات و تأیید ثبت قطعی الزامی است.', 400);
   if (input.actor.profile === 'VIEWER') return fail('ACCOUNTING_WRITE_FORBIDDEN', 'مجوز ثبت عملیات مالی ندارید.', 403);
   if (!Number.isFinite(input.occurredAt.getTime()) || input.occurredAt > new Date() || input.idempotencyKey.length < 8) return fail('INVALID_OPERATION_DATE', 'تاریخ عملیات و کلید مستقل فرمان معتبر باشند.', 400);
-  return database.$transaction(async tx => {
+  const result = await database.$transaction(async tx => {
     if (!['RECEIPT', 'ALLOCATION', 'REVERSE_ALLOCATION'].includes(input.kind)
       || input.parts !== undefined || input.sourceAllocations !== undefined
       || (input.kind === 'ALLOCATION' && input.creditItemId !== undefined)) {
@@ -267,7 +267,8 @@ export async function recordCustomerWorkspaceTreasury(database: PrismaClient, id
         // Every child carries the entire confirmed plan: a retry cannot append another source.
         const results: Array<Awaited<ReturnType<typeof allocateCustomerCreditPrisma>>> = [];
         for (const row of plan) {
-          const command = { ...context, sourcePlanHash, idempotencyKey: `${input.idempotencyKey}:${row.receiptId ?? row.creditItemId}`,
+          const command = { ...context, sourcePlanHash, parentCommandKey: input.idempotencyKey,
+            idempotencyKey: `${input.idempotencyKey}:${row.receiptId ?? row.creditItemId}`,
             allocations: row.allocations, documentDate: input.occurredAt, reason: input.reason.trim(), reference: input.reference.trim(),
             receivableLedgerId: rule.receivableAccountId };
           if (row.creditItemId) {
@@ -300,6 +301,16 @@ export async function recordCustomerWorkspaceTreasury(database: PrismaClient, id
     return reverseCustomerAllocationPrisma(tx, { ...context, allocationId: allocation!.id, reason: input.reason.trim(), reference: input.reference.trim(), documentDate: input.occurredAt,
       customerAdvanceLedgerId: rule.customerAdvanceAccountId, receivableLedgerId: rule.receivableAccountId });
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 30_000 });
+  if (input.kind === 'ALLOCATION' && input.sourceAllocations !== undefined
+    && Array.isArray((result as { allocationIds?: unknown })?.allocationIds)) {
+    // PostgreSQL checks grouped child admission at commit. A transaction
+    // adapter can return the callback value even after a deferred constraint
+    // abort; never acknowledge a result without its durable parent command.
+    const committed = await database.accountingCustomerCommand.findUnique({ where: { idempotencyKey: input.idempotencyKey }, select: { id: true } });
+    if (!committed) throw new AccountingCustomerTreasuryError('CUSTOMER_SOURCE_SHARES_CLOSED',
+      'این عملیات مالی پس از تکمیل به‌روزرسانی در دسترس قرار می‌گیرد. درخواست ثبت نشد.', 409);
+  }
+  return result;
 }
 
 export async function recordCustomerAccountOperation(database: PrismaClient, id: string, input: CustomerAccountOperation) {

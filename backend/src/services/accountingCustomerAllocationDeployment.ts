@@ -2,14 +2,19 @@ import type { PrismaClient } from '@prisma/client';
 
 /** Read-only verification of the database protections installed by migration. */
 export async function verifyCustomerAllocationDeploymentState(database: Pick<PrismaClient, '$queryRaw'>) {
-  const [state] = await database.$queryRaw<Array<{ triggersReady: boolean; pendingIndexReady: boolean; fencesReady: boolean }>>`
-    WITH expected(table_name, trigger_name, function_name, trigger_type) AS (
+  const [state] = await database.$queryRaw<Array<{
+    triggersReady: boolean; pendingIndexReady: boolean; fencesReady: boolean;
+  }>>`
+    WITH expected(table_name, trigger_name, function_name, trigger_type, deferred) AS (
       VALUES
-        ('accounting_customer_commands', 'bind_customer_allocation_intent_result', 'bind_customer_allocation_intent_result', 5),
-        ('accounting_customer_commands', 'serialize_customer_allocation_parent', 'serialize_customer_allocation_parent', 7),
-        ('accounting_customer_allocation_intents', 'allocation_intent_evidence_immutable', 'protect_allocation_intent_evidence', 27),
-        ('accounting_customer_allocation_intents', 'verify_customer_allocation_intent_result', 'verify_customer_allocation_intent_result', 23),
-        ('accounting_customer_allocation_intents', 'serialize_customer_allocation_intent_insert', 'serialize_customer_allocation_intent_insert', 7)
+        ('accounting_customer_commands', 'bind_customer_allocation_intent_result', 'bind_customer_allocation_intent_result', 5, false),
+        ('accounting_customer_commands', 'serialize_customer_allocation_parent', 'serialize_customer_allocation_parent', 7, false),
+        ('accounting_customer_allocation_intents', 'allocation_intent_evidence_immutable', 'protect_allocation_intent_evidence', 27, false),
+        ('accounting_customer_allocation_intents', 'verify_customer_allocation_intent_result', 'verify_customer_allocation_intent_result', 23, false),
+        ('accounting_customer_allocation_intents', 'serialize_customer_allocation_intent_insert', 'serialize_customer_allocation_intent_insert', 7, false),
+        ('accounting_settlement_allocations', 'verify_grouped_allocation_child', 'verify_grouped_allocation_child', 5, true),
+        ('accounting_settlement_allocations', 'require_active_grouped_allocation_child', 'require_active_grouped_allocation_child', 5, true),
+        ('customer_allocation_release_control', 'keep_customer_allocation_control_closed', 'keep_customer_allocation_control_closed', 62, false)
     ), expected_fences(table_name, key_name) AS (
       VALUES ('public.accounting_customer_allocation_fences', 'profileId'),
         ('public.accounting_customer_command_key_fences', 'idempotencyKey')
@@ -24,6 +29,7 @@ export async function verifyCustomerAllocationDeploymentState(database: Pick<Pri
         WHERE n.nspname = 'public' AND pn.nspname = 'public'
           AND c.relname = e.table_name AND t.tgname = e.trigger_name AND p.proname = e.function_name
           AND t.tgtype = e.trigger_type AND t.tgenabled IN ('O', 'A') AND NOT t.tgisinternal AND t.tgqual IS NULL
+          AND t.tgdeferrable = e.deferred AND t.tginitdeferred = e.deferred
       )
     ) AS "triggersReady", EXISTS (
       SELECT 1 FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid
@@ -46,5 +52,10 @@ export async function verifyCustomerAllocationDeploymentState(database: Pick<Pri
   if (!state?.triggersReady || !state.pendingIndexReady || !state.fencesReady) {
     throw new Error('Customer allocation database protections are incomplete.');
   }
+  const [control] = await database.$queryRaw<Array<{ closed: boolean }>>`
+    SELECT count(*) = 1 AND bool_and(id = 'grouped-allocation' AND state = 'CLOSED') AS closed
+    FROM public.customer_allocation_release_control
+  `;
+  if (!control?.closed) throw new Error('Customer allocation release control is not closed.');
   return { customerAllocationDatabaseProtections: 'verified' };
 }

@@ -224,10 +224,15 @@ verify_prebuilt_release() {
     set -- node "${OPERATIONS_ROOT}/deploy/scripts/maintenance-image-selection.mjs" "${1:-verify}" \
       "${PREBUILT_RELEASE_PLAN}" "${PREBUILT_RELEASE_SHA256}" "${REPO_ROOT}" "${OPERATIONS_ROOT}" \
       "${COMPOSE_FILE}" "${DEPLOYMENT_QA_REHEARSAL_PLAN_SHA256:-production}"
+    if [ "$3" = bind ]; then
+      : "${SESSION_HOST_PATH:?Maintenance image binding requires the canonical session path.}"
+      DEPLOYMENT_MAINTENANCE_REPORT_DIR="${SESSION_HOST_PATH%/*}"
+      export DEPLOYMENT_MAINTENANCE_REPORT_DIR
+    fi
     if [ "${DB_LEASE_ACQUIRED}" -eq 1 ]; then
       DEPLOYMENT_PREBUILT_ENV_FILE="${ENV_FILE}" run_original_owned_with_heartbeat "$@"
     else
-      DEPLOYMENT_PREBUILT_ENV_FILE="${ENV_FILE}" DEPLOYMENT_MAINTENANCE_REPORT_DIR="${SESSION_HOST_PATH%/*}" "$@"
+      DEPLOYMENT_PREBUILT_ENV_FILE="${ENV_FILE}" "$@"
     fi
     return $?
   fi

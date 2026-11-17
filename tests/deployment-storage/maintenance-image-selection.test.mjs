@@ -80,3 +80,11 @@ test('retained predecessor observes its mandatory scanner image and keeps the si
  assert.match(script,/verify_predecessor_database_roles/);
  assert.doesNotMatch(script,/LEGACY_RELEASE_GRAPH=0/);
 });
+test('readonly maintenance verification needs no session path while binding requires its canonical report parent',()=>{
+ const from=script.indexOf('verify_prebuilt_release() {'),to=script.indexOf('\ncustomer_allocation_retention_path() {',from);assert.ok(from>=0&&to>from);
+ const verifier=script.slice(from,to);
+ for(const [mode,session,lease,status,expected]of [['verify',null,0,0,'NODE:verify:unset:/private/env'],['bind',null,0,1,''],['bind','/reports/active-deployment-session.json',0,0,'NODE:bind:/reports:/private/env'],['verify',null,1,0,'OWNED;NODE:verify:unset:/private/env']]){
+  const code=`set -eu\nunset SESSION_HOST_PATH DEPLOYMENT_MAINTENANCE_REPORT_DIR\nMAINTENANCE_IMAGE_SELECTION=1; DB_LEASE_ACQUIRED=${lease}; OPERATIONS_ROOT=/operations; PREBUILT_RELEASE_PLAN=/private/plan; PREBUILT_RELEASE_SHA256=hash; REPO_ROOT=/repository; COMPOSE_FILE=docker-compose.prod.yml; ENV_FILE=/private/env\n${session?"SESSION_HOST_PATH='"+session+"'":''}\nnode(){ printf 'NODE:%s:%s:%s' "$2" "${'$'}{DEPLOYMENT_MAINTENANCE_REPORT_DIR-unset}" "$DEPLOYMENT_PREBUILT_ENV_FILE"; }\nrun_original_owned_with_heartbeat(){ printf 'OWNED;'; "$@"; }\n${verifier}\nverify_prebuilt_release ${mode}\n`;
+  const result=spawnSync(shell,['-c',code],{encoding:'utf8'});if(status===0)assert.equal(result.status,0,result.stderr);else assert.notEqual(result.status,0);assert.equal(result.stdout,expected);
+ }
+});

@@ -96,6 +96,17 @@ test('one immutable pending intent is shared across devices without admitting a 
     assert.deepEqual(await cancelCustomerAllocationIntent(f.db, customer, canceled), { status: 'CANCELED' });
     assert.deepEqual(await cancelCustomerAllocationIntent(f.db, customer, canceled), { status: 'CANCELED' });
     const canceledRow = await f.db.accountingCustomerAllocationIntent.findUniqueOrThrow({ where: { idempotencyKey: canceled.idempotencyKey } });
+    const cancellationAudit = await f.db.accountingLedgerAuditEntry.findMany({
+      where: { action: 'CUSTOMER_ALLOCATION_INTENT_CANCELED' },
+    });
+    assert.equal(cancellationAudit.length, 2, 'only successful initial cancellations are audited');
+    const tombstone = await f.db.accountingCustomerAllocationIntent.findUniqueOrThrow({ where: { idempotencyKey: unreceived.idempotencyKey } });
+    for (const intent of [canceledRow, tombstone]) {
+      const audit = cancellationAudit.find(entry => entry.entityId === intent.id);
+      assert.equal(audit?.actorId, f.actor.id);
+      assert.equal(audit?.correlationId, intent.idempotencyKey);
+      assert.equal(audit?.payloadHash, intent.commandHash);
+    }
     await assert.rejects(f.db.accountingCustomerCommand.create({ data: {
       ...parent, idempotencyKey: canceledRow.idempotencyKey, commandHash: canceledRow.commandHash,
     } }), /ALLOCATION_INTENT_COMMAND_MISMATCH/);

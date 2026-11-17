@@ -109,6 +109,8 @@ export async function migrateRecoveryArchivePrivately(input: {
   let started = false;
   let child: ReturnType<typeof spawn> | undefined;
   let failed: Error | undefined;
+  let settled = false;
+  let childSettled: Promise<void> | undefined;
   try {
     await fs.cp(TEMPLATE, root, { recursive: true, verbatimSymlinks: true });
     await fs.chmod(root, 0o755);
@@ -122,8 +124,10 @@ export async function migrateRecoveryArchivePrivately(input: {
     };
     child = spawn(LAUNCHER, [root], { env: environment(), stdio: ['ignore', 'ignore', 'ignore'] });
     started = true;
-    child.once('error', error => { failed = error; });
-    child.once('exit', () => { failed = new Error('Private PostgreSQL stopped before migration completed.'); });
+    childSettled = new Promise(resolve => {
+      child!.once('error', error => { failed = error; settled = true; resolve(); });
+      child!.once('exit', () => { failed = new Error('Private PostgreSQL stopped before migration completed.'); settled = true; resolve(); });
+    });
     let ready = false;
     for (let attempt = 0; attempt < 100; attempt++) {
       if (failed) throw failed;
@@ -168,9 +172,23 @@ export async function migrateRecoveryArchivePrivately(input: {
   } finally {
     // The native owner uses pidfds and the exact jail-root inode, including
     // descendants whose PostgreSQL session startup legitimately calls setsid.
-    if (started) await run(LAUNCHER, ['--stop', root], { env: environment(), timeout: 15000, maxBuffer: 1024 * 1024 });
-    if (child && child.exitCode === null && child.signalCode === null) {
-      await new Promise<void>(resolve => { child!.once('exit', () => resolve()); });
+    if (started) {
+      try {
+        await run(LAUNCHER, ['--stop', root], { env: environment(), timeout: 15000, maxBuffer: 1024 * 1024 });
+      } finally {
+        // Also retire the tracked launcher if it had not entered its jail when
+        // the first sweep ran. Spawn errors are settlement, not an exit event.
+        if (!settled) child?.kill('SIGKILL');
+      }
+      let deadline: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([childSettled, new Promise<never>((_resolve, rejectDeadline) => {
+          deadline = setTimeout(() => rejectDeadline(new Error('Private PostgreSQL launcher did not retire.')), 5000);
+        })]);
+      } finally { if (deadline) clearTimeout(deadline); }
+      // No launcher can now create a new jailed descendant between this final
+      // pidfd sweep and deletion of its private root.
+      await run(LAUNCHER, ['--stop', root], { env: environment(), timeout: 15000, maxBuffer: 1024 * 1024 });
     }
     await fs.rm(temporary, { recursive: true });
   }

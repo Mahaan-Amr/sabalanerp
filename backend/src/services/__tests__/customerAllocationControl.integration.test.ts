@@ -1,10 +1,108 @@
 import assert from 'node:assert/strict';
+import { randomBytes } from 'node:crypto';
 import test from 'node:test';
 import { PrismaClient } from '@prisma/client';
 import { requireCustomerSourceSharesWithin } from '../customerSemanticCompatibility';
 import { verifyCustomerAllocationDeploymentState } from '../accountingCustomerAllocationDeployment';
 import path from 'node:path';
 import { createTemporaryConcurrencyDatabase } from './shipmentStatementConcurrency/database';
+
+test('dedicated PostgreSQL logins enforce allocation authority on real connections', {
+  skip: process.env.ACCOUNTING_ALLOCATION_TEST_DIRECT_LOGINS !== '1', timeout: 180_000,
+}, async () => {
+  const source = process.env.ACCOUNTING_LEDGER_TEST_DATABASE_URL;
+  assert(source);
+  const temporary = await createTemporaryConcurrencyDatabase({
+    repositoryRoot: path.resolve(process.cwd(), '..'), sourceDatabaseUrl: source, migrateEmptySchema: true,
+  });
+  const admin = temporary.client();
+  const roles = ['sabalan_application_runtime', 'sabalan_allocation_controller'] as const;
+  const passwords = roles.map(() => randomBytes(32).toString('hex'));
+  const expiresAt = new Date(Date.now() + 120_000).toISOString();
+  const clients: PrismaClient[] = [];
+  let configured = false;
+  try {
+    await admin.$transaction(async tx => {
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(456, 2)::text`;
+      const dormant = await tx.$queryRaw<Array<{ role: string }>>`
+        SELECT rolname::text AS role FROM pg_authid AS principal
+        WHERE rolname IN ('sabalan_application_runtime', 'sabalan_allocation_controller')
+          AND NOT (rolcanlogin OR rolsuper OR rolcreaterole OR rolcreatedb OR rolinherit OR rolreplication OR rolbypassrls)
+          AND rolpassword IS NULL AND (rolvaliduntil IS NULL OR rolvaliduntil = 'infinity'::timestamptz)
+          AND NOT EXISTS (SELECT 1 FROM pg_auth_members WHERE roleid = principal.oid OR member = principal.oid)
+      `;
+      assert.deepEqual(dormant.map(row => row.role).sort(), [...roles].sort());
+      for (const [i, role] of roles.entries()) {
+        await tx.$executeRawUnsafe(`ALTER ROLE "${role}" LOGIN PASSWORD '${passwords[i]}' VALID UNTIL '${expiresAt}'`);
+      }
+    });
+    configured = true;
+    const wrongCredential = new URL(temporary.databaseUrl);
+    wrongCredential.username = roles[0];
+    wrongCredential.password = randomBytes(32).toString('hex');
+    const invalidClient = new PrismaClient({ datasources: { db: { url: wrongCredential.href } } });
+    try { await assert.rejects(invalidClient.$connect(), /authentication failed/i); }
+    finally { await invalidClient.$disconnect(); }
+    for (const [i, role] of roles.entries()) {
+      const url = new URL(temporary.databaseUrl);
+      url.username = role;
+      url.password = passwords[i];
+      clients.push(new PrismaClient({ datasources: { db: { url: url.href } } }));
+    }
+    const [runtime, controller] = clients;
+    for (const [i, client] of clients.entries()) {
+      const [identity] = await client.$queryRaw<Array<{ role: string; database: string }>>`
+        SELECT session_user::text AS role, current_database()::text AS database
+      `;
+      assert.deepEqual(identity, { role: roles[i], database: temporary.databaseName });
+    }
+    const deploymentId = `direct-login-${temporary.runId}`;
+    const token = randomBytes(16).toString('hex');
+    const release = 'direct-login-release';
+    const commit = 'a'.repeat(40);
+    await admin.deploymentOperation.create({ data: {
+      id: deploymentId, activeKey: 'production', releaseId: release, targetCommit: commit,
+      owner: 'isolated-direct-login-fixture', phase: 'MIGRATIONS_APPLIED', leaseToken: token,
+      leaseExpiresAt: new Date(Date.now() + 90_000), heartbeatAt: new Date(), startedAt: new Date(),
+    } });
+    await assert.rejects(runtime.$queryRaw`SELECT id FROM public.deployment_operations`, /permission denied/);
+    await assert.rejects(runtime.$queryRaw`
+      SELECT * FROM public.customer_allocation_controller_lock(${deploymentId}, ${token})
+    `, /permission denied/);
+    await assert.rejects(controller.$executeRaw`
+      UPDATE public.customer_allocation_release_control SET state = 'ACTIVE'
+    `, /permission denied/);
+    const admitted = async () => {
+      const [row] = await runtime.$queryRaw<Array<{ admitted: boolean }>>`
+        SELECT public.customer_allocation_runtime_admitted(${commit}, ${release}) AS admitted
+      `;
+      return row.admitted;
+    };
+    assert.equal(await admitted(), false);
+    const [receipt] = await controller.$queryRaw<Array<{ state: string }>>`
+      SELECT * FROM public.customer_allocation_controller_activate(
+        ${deploymentId}, ${token}, ${release}, ${'b'.repeat(64)}, ${new Date(Date.now() + 60_000)})
+    `;
+    assert.equal(receipt.state, 'ACTIVE');
+    assert.equal(await admitted(), false);
+    await admin.deploymentOperation.update({ where: { id: deploymentId }, data: { phase: 'COMPLETED', activeKey: null } });
+    assert.equal(await admitted(), true);
+  } finally {
+    try {
+      await Promise.allSettled(clients.map(client => client.$disconnect()));
+      if (configured) await admin.$transaction(async tx => {
+        await tx.$queryRaw`SELECT pg_advisory_xact_lock(456, 2)::text`;
+        const held = await tx.$queryRaw<Array<{ role: string }>>`
+          SELECT rolname::text AS role FROM pg_authid
+          WHERE rolname IN ('sabalan_application_runtime', 'sabalan_allocation_controller')
+            AND rolcanlogin AND rolvaliduntil = ${new Date(expiresAt)}
+        `;
+        assert.deepEqual(held.map(row => row.role).sort(), [...roles].sort());
+        for (const role of roles) await tx.$executeRawUnsafe(`ALTER ROLE "${role}" NOLOGIN PASSWORD NULL VALID UNTIL 'infinity'`);
+      });
+    } finally { await admin.$disconnect(); await temporary.cleanup(); }
+  }
+});
 
 test('migration-owned allocation control is closed and cannot be opened by the application', async () => {
   const url = process.env.ACCOUNTING_LEDGER_TEST_DATABASE_URL;

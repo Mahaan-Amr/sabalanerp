@@ -1,0 +1,11 @@
+# The exact old container is already exited. Replace only its existing service
+# for the one-shot controller, preserving the Compose project and data mounts.
+name: sabalanerp-local
+services:
+  backend:
+    image: ${LOCAL_NATIVE_REBOOT_IMAGE_ID:?immutable image ID required}
+    command: ["sh", "scripts/with-backend-control-ownership.sh", "--reconcile-local-reboot-20261117"]
+    restart: "no"
+    stop_grace_period: 5m
+    environment:
+      LOCAL_NATIVE_REBOOT_20261117_HOST_PROOF_BASE64: ${LOCAL_NATIVE_REBOOT_20261117_HOST_PROOF_BASE64:?verified host proof required}

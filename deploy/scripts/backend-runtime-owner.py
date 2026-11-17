@@ -5,6 +5,7 @@ No expiry, process-name lookup, SQL cancellation, forced termination or reset.
 If the container itself dies, ACTIVE refuses a replacement before application
 construction. A normal code rollback never restores an earlier database here.
 """
+import base64
 import ctypes
 import hashlib
 import importlib.util
@@ -92,11 +93,17 @@ def assert_closed(directory, filename='deployment-runtime-native.json'):
 
 
 SECOND_REBOOT_ACTIVE_SHA = 'b820bfa60ec642b87c17a34fcbc527021164708a33df1227d7e19c39c4f8be8a'
+LOCAL_20261116_ACTIVE_SHA = '2cfea161077b52a2313177be2e2ce0ee9cb15682b7dd2d83c0df6539e30898a9'
+LOCAL_20261117_ACTIVE_SHA = '334255f21ce1dc1eed916c26e47cc70c535cb81654552b760743e0e1cec997fd'
 
 
 def local_reboot_policy(active_sha):
     # Each incident has its own reviewed policy and append-only proof/receipt.
-    if active_sha == SECOND_REBOOT_ACTIVE_SHA:
+    if active_sha == LOCAL_20261117_ACTIVE_SHA:
+        helper_name = 'local-native-reboot-20261117.py'
+        proof_name = 'deployment-runtime-recovery-host-proof-20261117.json'
+        receipt_name = 'deployment-runtime-abandonment-20261117.json'
+    elif active_sha == SECOND_REBOOT_ACTIVE_SHA:
         helper_name = 'local-native-reboot-440.py'
         proof_name = 'deployment-runtime-recovery-host-proof-440-retry.json'
         receipt_name = 'deployment-runtime-abandonment-440.json'
@@ -112,12 +119,7 @@ def local_reboot_policy(active_sha):
     return module, proof_name, receipt_name
 
 
-def assert_local_reboot_abandonment(directory, previous, previous_raw):
-    """Permit only a host-attested local reboot incident before a new owner.
-
-    The original ACTIVE bytes stay in history. This is not used by --assert-closed
-    or online admission and does not claim the old workers completed.
-    """
+def assert_local_reboot_environment():
     require(os.environ.get('NODE_ENV') == 'development'
             and os.environ.get('COMPOSE_PROJECT_NAME') == 'sabalanerp-local'
             and os.environ.get('BACKEND_RUNTIME_ROLE', 'standalone') == 'standalone'
@@ -130,6 +132,33 @@ def assert_local_reboot_abandonment(directory, previous, previous_raw):
             and os.environ.get('FRONTEND_URL', '').startswith('http://localhost:'))
     source = urlsplit(os.environ.get('DATABASE_URL', ''))
     require(source.hostname == 'postgres' and unquote(source.path[1:]) == 'sabalanerp')
+    return source
+
+
+def observe_previous_local_reboot(directory, active):
+    previous = active.get('previousSha256', '')
+    require(re.fullmatch(r'[a-f0-9]{64}', previous)
+            and previous == LOCAL_20261116_ACTIVE_SHA)
+    archived = directory / 'deployment-runtime-history' / (previous + '.json')
+    archived_raw = read_state(archived)[1]
+    receipt, receipt_raw = read_state(directory / 'deployment-runtime-abandonment-20261116.json')
+    proof_raw = read_state(directory / 'deployment-runtime-recovery-host-proof-20261116-retry.json')[1]
+    require(archived_raw is not None and receipt_raw is not None and proof_raw is not None)
+    require(hashlib.sha256(archived_raw).hexdigest() == previous
+            and hashlib.sha256(receipt_raw).hexdigest() == active.get('localAbandonmentSha256')
+            and receipt.get('activeSha256') == previous
+            and receipt.get('phase') == 'ABANDONED_ON_VM_REBOOT'
+            and receipt.get('hostProofSha256') == hashlib.sha256(proof_raw).hexdigest())
+    return dict(previousActiveSha256=previous, previousReceiptSha256=hashlib.sha256(receipt_raw).hexdigest())
+
+
+def assert_local_reboot_abandonment(directory, previous, previous_raw):
+    """Permit only a host-attested local reboot incident before a new owner.
+
+    The original ACTIVE bytes stay in history. This is not used by --assert-closed
+    or online admission and does not claim the old workers completed.
+    """
+    assert_local_reboot_environment()
     active_sha = hashlib.sha256(previous_raw).hexdigest()
     module, proof_name, receipt_name = local_reboot_policy(active_sha)
     proof, proof_raw = read_state(directory / proof_name)
@@ -167,6 +196,8 @@ def assert_local_reboot_abandonment(directory, previous, previous_raw):
                     priorReceiptSha256=hashlib.sha256(prior_receipt).hexdigest() if prior_receipt else None,
                     priorHostProofSha256=hashlib.sha256(prior_proof).hexdigest() if prior_proof else None,
                     failedHostProofSha256=hashlib.sha256(failed_proof).hexdigest() if failed_proof else None)
+    if active_sha == LOCAL_20261117_ACTIVE_SHA:
+        observed.update(observe_previous_local_reboot(directory, previous))
     require(module.valid_receipt(previous, active_sha, receipt, observed))
     return receipt
 
@@ -193,7 +224,7 @@ def acquire_local_reboot_advisory(pg_env):
     return advisory
 
 
-def reconcile_local_reboot(directory):
+def reconcile_local_reboot(directory, incoming_proof=None):
     """One-shot opt-in incident command under the existing FD9 control lock.
 
     The operator first checkpoints local data and verifies the existing Compose
@@ -208,11 +239,20 @@ def reconcile_local_reboot(directory):
             and os.environ.get('LOCAL_NATIVE_REBOOT_EXPECTED_OLD_BOOT_ID') == active['guardian']['bootId']
             and read_state(directory / receipt_name)[1] is None)
     proof, proof_raw = read_state(directory / proof_name)
+    if active_sha == LOCAL_20261117_ACTIVE_SHA:
+        require(incoming_proof is not None and 0 < len(incoming_proof) <= 16384
+                and proof_raw in (None, incoming_proof))
+        source = assert_local_reboot_environment()
+        proof_raw = incoming_proof
+        proof = json.loads(proof_raw)
+        require(isinstance(proof, dict))
+    else:
+        require(incoming_proof is None)
+        source = urlsplit(os.environ.get('DATABASE_URL', ''))
+        require(source.hostname == 'postgres' and unquote(source.path[1:]) == 'sabalanerp')
     require(proof_raw is not None and hashlib.sha256(proof_raw).hexdigest() ==
             os.environ.get('LOCAL_NATIVE_REBOOT_HOST_PROOF_SHA256'))
     require(proof.get('candidateImageId') == os.environ.get('LOCAL_NATIVE_REBOOT_IMAGE_ID'))
-    source = urlsplit(os.environ.get('DATABASE_URL', ''))
-    require(source.hostname == 'postgres' and unquote(source.path[1:]) == 'sabalanerp')
     pg_env = {key: value for key, value in os.environ.items() if not key.startswith('PG')}
     pg_env.update(PGHOST='postgres', PGPORT=str(source.port or 5432), PGDATABASE='postgres',
                   PGUSER=unquote(source.username or ''), PGPASSWORD=unquote(source.password or ''),
@@ -266,6 +306,8 @@ def reconcile_local_reboot(directory):
                     priorReceiptSha256=hashlib.sha256(prior_receipt).hexdigest() if prior_receipt else None,
                     priorHostProofSha256=hashlib.sha256(prior_proof).hexdigest() if prior_proof else None,
                     failedHostProofSha256=hashlib.sha256(failed_proof).hexdigest() if failed_proof else None)
+    if active_sha == LOCAL_20261117_ACTIVE_SHA:
+        observed.update(observe_previous_local_reboot(directory, active))
     receipt = module.reconcile(active, active_sha, observed)
     # These checks tie the local-only scope to the actual runtime environment.
     require(os.environ.get('PUBLIC_APP_URL', '').startswith('http://localhost:')
@@ -273,6 +315,9 @@ def reconcile_local_reboot(directory):
     require(advisory.poll() is None)
     archived_directory = directory / 'deployment-runtime-history'
     archived_directory.mkdir(mode=0o700, exist_ok=True)
+    history_stat = archived_directory.lstat()
+    require(archived_directory.resolve(strict=True) == archived_directory and stat.S_ISDIR(history_stat.st_mode)
+            and history_stat.st_uid == os.getuid() and not history_stat.st_mode & 0o077)
     archived = archived_directory / (active_sha + '.json')
     try:
         write_exclusive(archived, raw)
@@ -284,6 +329,18 @@ def reconcile_local_reboot(directory):
     finally:
         os.close(archive_fd)
     require(read_state(directory / 'deployment-runtime-native.json')[1] == raw)
+    if active_sha == LOCAL_20261117_ACTIVE_SHA:
+        require(observe_previous_local_reboot(directory, active) == {
+            'previousActiveSha256': observed['previousActiveSha256'],
+            'previousReceiptSha256': observed['previousReceiptSha256']})
+        require(advisory.poll() is None)
+        if read_state(directory / proof_name)[1] is None:
+            write_exclusive(directory / proof_name, proof_raw)
+        proof_directory_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            os.fsync(proof_directory_fd)
+        finally:
+            os.close(proof_directory_fd)
     require(read_state(directory / proof_name)[1] == proof_raw)
     if active_sha == SECOND_REBOOT_ACTIVE_SHA:
         require(hashlib.sha256(read_state(directory / 'deployment-runtime-abandonment.json')[1]).hexdigest()
@@ -414,9 +471,14 @@ def run():
         require(loaded is None)
         assert_closed(directory)
         return 0
-    if sys.argv[1:] == ['--reconcile-local-reboot']:
+    if sys.argv[1:] in (['--reconcile-local-reboot'], ['--reconcile-local-reboot-20261117']):
         require(loaded is None and os.environ.get('BACKEND_RUNTIME_ROLE', 'standalone') == 'standalone')
-        reconcile_local_reboot(directory)
+        proof = None
+        if sys.argv[1] == '--reconcile-local-reboot-20261117':
+            encoded = os.environ.get('LOCAL_NATIVE_REBOOT_20261117_HOST_PROOF_BASE64', '')
+            require(0 < len(encoded) <= 21848)
+            proof = base64.b64decode(encoded, validate=True)
+        reconcile_local_reboot(directory, proof)
         return 0
     role = os.environ.get('BACKEND_RUNTIME_ROLE', 'standalone')
     require(role in (['serving', 'control'] if loaded else ['standalone', 'control']))
@@ -519,6 +581,9 @@ def run():
                 and isinstance(result['prepared'], int) and result['prepared'] >= 0)
         return result
 
+    local_reboot_advisory = None
+    if local_abandonment is not None and local_abandonment['activeSha256'] == LOCAL_20261117_ACTIVE_SHA:
+        local_reboot_advisory = acquire_local_reboot_advisory(pg_env)
     initial = observation()
     # The protected preflight deliberately repairs an interrupted database
     # rename before the application pool opens. The current name may briefly
@@ -614,8 +679,13 @@ def run():
                 os.fsync(coordination_fd)
             finally:
                 os.close(coordination_fd)
+        require(local_reboot_advisory is None or local_reboot_advisory.poll() is None)
         os.replace(temporary, file)
         os.fsync(directory_fd)
+        if local_reboot_advisory is not None:
+            require(local_reboot_advisory.poll() is None)
+            local_reboot_advisory.stdin.close()
+            require(local_reboot_advisory.wait(timeout=5) == 0)
         active_stat = file.lstat()
         cancelled = False
 

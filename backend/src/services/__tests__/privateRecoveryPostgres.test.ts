@@ -53,7 +53,7 @@ async function fixture(options: { checksum?: string; uploadedSchema?: string } =
   vm.runInNewContext(ts.transpileModule(await fs.readFile(filename, 'utf8'), { compilerOptions: {
     target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, esModuleInterop: true,
   } }).outputText, { exports: exported, require: localRequire, Buffer, URL, setTimeout, console,
-    process: { platform: 'linux', getuid: () => 0, cwd: () => '/image/app', execPath: '/usr/bin/node',
+    clearTimeout, process: { platform: 'linux', getuid: () => 0, cwd: () => '/image/app', execPath: '/usr/bin/node',
       env: { DATABASE_URL: 'postgresql://owner:production-secret@production/live', SECRET: 'production-secret',
         SYSTEM_RECOVERY_POSTGRES_IMAGE_ID: imageId } } }, { filename });
   const run = () => exported.migrateRecoveryArchivePrivately({ sourceDump: '/private/upload.dump', workDirectory: '/private/job',

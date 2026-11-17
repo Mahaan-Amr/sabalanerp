@@ -1,15 +1,13 @@
 import type { Prisma } from '@prisma/client';
 import { AccountingCustomerTreasuryError } from './accountingCustomerTreasury';
 
-/** The customer source-share workflow is deferred from the protected candidate.
- * Every affected command checks this inside its transaction before mutation. */
-export type CustomerSourceShareOperation = 'grouped-allocation' | 'grouped-credit-reversal' | 'other';
+/** New customer source-share writes stay closed until protected runtime admission is wired. */
+export type CustomerSourceShareOperation = 'grouped-allocation' | 'other';
 
 export async function requireCustomerSourceSharesWithin(tx: Prisma.TransactionClient, operation: CustomerSourceShareOperation = 'other'): Promise<void> {
   if ('$transaction' in tx) throw new Error('CUSTOMER_SEMANTIC_TRANSACTION_REQUIRED');
   if (operation === 'grouped-allocation') {
-    // Lock in the posting transaction. A future controller must coordinate closure
-    // with this lock; the current migration makes ACTIVE structurally impossible.
+    // Use the same row lock that coordinates posting and protected closure.
     try {
       await tx.$queryRaw`SELECT state FROM customer_allocation_release_control
         WHERE id = 'grouped-allocation' FOR SHARE`;

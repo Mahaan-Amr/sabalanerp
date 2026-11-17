@@ -16,11 +16,12 @@ test('authenticated grouped allocation reserves, posts and recovers the same res
   const compatibilityPath = require.resolve('../customerSemanticCompatibility');
   const original = require(compatibilityPath);
   const entry = require.cache[compatibilityPath]!;
+  let admitPosting = true;
   entry.exports = { ...original, requireCustomerSourceSharesWithin: async (
     tx: import('@prisma/client').Prisma.TransactionClient,
     operation?: import('../customerSemanticCompatibility').CustomerSourceShareOperation,
   ) => {
-    if (operation !== 'grouped-allocation' && operation !== 'grouped-credit-reversal') {
+    if (operation !== 'grouped-allocation' || !admitPosting) {
       await original.requireCustomerSourceSharesWithin(tx, operation);
     }
   } };
@@ -80,6 +81,12 @@ test('authenticated grouped allocation reserves, posts and recovers the same res
     assert.equal(pending.result, null);
     // The HTTP harness owns this isolated database and simulates an admitted
     // release. Preserve all child lineage and financial constraints.
+    const [backstop] = await prisma.$queryRaw<Array<{ definition: string }>>`
+      SELECT pg_get_triggerdef(oid) AS definition FROM pg_trigger
+      WHERE tgrelid = 'public.accounting_settlement_allocations'::regclass
+        AND tgname = 'require_active_grouped_allocation_child'
+    `;
+    assert.ok(backstop?.definition);
     await prisma.$executeRawUnsafe('DROP TRIGGER require_active_grouped_allocation_child ON public.accounting_settlement_allocations');
     const posting = await send('');
     assert.equal(posting.status, 200);
@@ -90,6 +97,29 @@ test('authenticated grouped allocation reserves, posts and recovers the same res
     assert.equal((await send('', { ...body, reference: 'changed reference' })).status, 409);
     assert.equal(await prisma.accountingSettlementAllocation.count(), 2);
     assert.equal((await read()).debitOpenRials, 0n);
+    await prisma.$executeRawUnsafe(backstop.definition);
+    admitPosting = false;
+    const newPosting = await send('', { ...body, idempotencyKey: randomUUID() });
+    assert.equal(newPosting.status, 409);
+    assert.equal((await newPosting.json() as any).code, 'CUSTOMER_SOURCE_SHARES_CLOSED');
+    const creditShare = await prisma.accountingSettlementAllocation.findFirstOrThrow({ where: { creditItemId: credit.id } });
+    const { sourceAllocations: _sources, ...reversalBase } = body;
+    const reversal = { ...reversalBase, kind: 'REVERSE_ALLOCATION', allocationId: creditShare.id, idempotencyKey: randomUUID() };
+    const reversed = await send('', reversal);
+    assert.equal(reversed.status, 200, await reversed.clone().text());
+    const reversedResult = (await reversed.json() as any).data;
+    assert.equal(reversedResult.reversesId, creditShare.id);
+    const replay = await send('', reversal);
+    assert.equal(replay.status, 200);
+    assert.equal((await replay.json() as any).data.id, reversedResult.id);
+    const conflict = await send('', { ...reversal, reference: 'different evidence' });
+    assert.equal(conflict.status, 409);
+    assert.equal((await conflict.json() as any).code, 'ALLOCATION_REVERSAL_CONFLICT');
+    assert.equal(await prisma.accountingSettlementAllocation.count(), 3);
+    const corrected = await read();
+    assert.equal(corrected.debitOpenRials, 1n);
+    assert.equal(corrected.standaloneCreditRials, 1n);
+    assert.ok(corrected.creditAllocations[0]?.reversalVoucherId);
   } finally {
     if (server) { server.closeAllConnections(); await new Promise<void>((resolve, reject) => server!.close(error => error ? reject(error) : resolve())); }
     await prisma.$disconnect();

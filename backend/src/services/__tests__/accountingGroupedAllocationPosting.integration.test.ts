@@ -17,7 +17,7 @@ test('admitted grouped posting commits exact shares once and reverses independen
     tx: import('@prisma/client').Prisma.TransactionClient,
     operation?: import('../customerSemanticCompatibility').CustomerSourceShareOperation,
   ) => {
-    if (operation !== 'grouped-allocation' && operation !== 'grouped-credit-reversal') {
+    if (operation !== 'grouped-allocation') {
       await compatibility.requireCustomerSourceSharesWithin(tx, operation);
     }
   } };

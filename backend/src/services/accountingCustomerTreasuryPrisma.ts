@@ -979,25 +979,47 @@ export const reverseCustomerAllocationPrisma = async (database: Database, input:
     lines: true, transaction: { include: { profile: true } }, creditSource: { include: { profile: true } }, reversedBy: true,
   } });
   const profile = original?.transaction?.profile ?? original?.creditSource?.profile;
-  if (original && (original.creditItemId !== null || original.treasuryTransactionId === null)) {
-    const intent = original.parentCommandKey && profile ? await tx.accountingCustomerAllocationIntent.findFirst({
-      where: { idempotencyKey: original.parentCommandKey, profileId: profile.id,
-        commandHash: original.sourcePlanHash ?? '', state: 'COMMITTED' }, select: { result: true },
-    }) : null;
-    const result = intent?.result;
-    const grouped = result && typeof result === 'object' && !Array.isArray(result) &&
-      Array.isArray(result.allocationIds) && result.allocationIds.includes(original.id);
-    await requireCustomerSourceSharesWithin(tx, grouped ? 'grouped-credit-reversal' : 'other');
-  }
   if (!original || original.reversesId || !profile || profile.partySourceId !== lockedCustomer) throw new AccountingCustomerTreasuryError('ALLOCATION_NOT_FOUND', 'تخصیص پیدا نشد.', 404);
+  const groupedCredit = original.creditItemId !== null && original.treasuryTransactionId === null;
+  if (original.creditItemId !== null || original.treasuryTransactionId === null) {
+    // Admission for a new allocation is independent of the right to correct
+    // an already acknowledged allocation with immutable, matching lineage.
+    const [lineage] = await tx.$queryRaw<Array<{ committed: boolean }>>`
+      SELECT EXISTS (
+        SELECT 1 FROM public.accounting_customer_allocation_intents AS intent
+        JOIN public.accounting_customer_commands AS command
+          ON command."idempotencyKey" = intent."idempotencyKey" AND command.kind = 'ALLOCATION'
+          AND command."profileId" = intent."profileId" AND command."createdBy" = intent."ownerId"
+          AND command."commandHash" = intent."commandHash" AND command.result = intent.result
+        WHERE intent."idempotencyKey" = ${original.parentCommandKey}
+          AND intent."profileId" = ${profile.id} AND intent."commandHash" = ${original.sourcePlanHash}
+          AND intent.state = 'COMMITTED' AND intent."ownerId" = ${original.createdBy}
+          AND jsonb_typeof(intent.result -> 'allocationIds') = 'array'
+          AND intent.result -> 'allocationIds' @> jsonb_build_array(${original.id}::text)
+      ) AS committed
+    `;
+    if (!groupedCredit || !lineage?.committed) await requireCustomerSourceSharesWithin(tx);
+    if (input.actor.profile === 'VIEWER') throw new AccountingCustomerTreasuryError('ACCOUNTING_WRITE_FORBIDDEN', 'مجوز ثبت عملیات مالی ندارید.', 403);
+  }
   if (original.transaction && original.transaction.kind !== 'CUSTOMER_RECEIPT') throw new AccountingCustomerTreasuryError('REFUND_REVERSAL_REQUIRES_CORRECTION', 'اصلاح استرداد باید همراه با برگشت سند پرداخت انجام شود.', 409);
+  const payload = { reversesAllocationId: original.id, reason: input.reason.trim(), ...(input.reference ? { reference: input.reference.trim() } : {}), originalLines: original.lines.map((line) => ({ openItemId: line.openItemId, amountRials: line.amountRials.toString() })) };
+  const evidence = lineEvidence('SETTLEMENT_ALLOCATION_REVERSAL', original.id, 1, payload);
+  if (original.reversedBy && groupedCredit) {
+    const voucher = original.reversedBy.ledgerVoucherId ? await tx.accountingLedgerVoucher.findUnique({
+      where: { id: original.reversedBy.ledgerVoucherId },
+    }) : null;
+    if (original.reversedBy.idempotencyKey !== input.idempotencyKey || original.reversedBy.createdBy !== input.actor.id
+      || voucher?.status !== 'POSTED' || voucher.bookId !== input.bookId || voucher.fiscalYearId !== input.fiscalYearId
+      || voucher.periodId !== input.periodId || voucher.documentDate.getTime() !== input.documentDate.getTime()
+      || voucher.sourceHash !== evidence.hash) {
+      throw new AccountingCustomerTreasuryError('ALLOCATION_REVERSAL_CONFLICT', 'این تخصیص قبلاً با درخواست دیگری برگشت داده شده است.', 409);
+    }
+  }
   if (original.reversedBy) return original.reversedBy;
   await requireAllocationReservationWithin(tx, profile.id);
   await requireSettlementSource(tx, original.ledgerVoucherId, input.bookId, input.documentDate);
   await lockSettlementContracts(tx, original.lines.map(line => line.openItemId));
   const total = original.lines.reduce((sum, line) => sum + toBigInt(line.amountRials), 0n);
-  const payload = { reversesAllocationId: original.id, reason: input.reason.trim(), ...(input.reference ? { reference: input.reference.trim() } : {}), originalLines: original.lines.map((line) => ({ openItemId: line.openItemId, amountRials: line.amountRials.toString() })) };
-  const evidence = lineEvidence('SETTLEMENT_ALLOCATION_REVERSAL', original.id, 1, payload);
   const app = ledgerApp(tx, new Date());
   const draft = await app.createManualDraft({ bookId: input.bookId, fiscalYearId: input.fiscalYearId, periodId: input.periodId,
     idempotencyKey: input.idempotencyKey, correlationId: input.correlationId, description: 'برگشت تخصیص دریافت مشتری',

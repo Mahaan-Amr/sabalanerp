@@ -79,18 +79,6 @@ const main = async () => {
       throw new Error('DEPLOYMENT_DRILL_ROLE_TARGET_UNPROVEN');
     }
   }
-  const remoteKey = await readConfiguredFile('DEPLOYMENT_REMOTE_RECOVERY_PRIVATE_KEY');
-  const startedAt = new Date();
-  const operationId = `drill-${metadata.deploymentId}-${Date.now()}`;
-  if (await fs.promises.readFile(metadataPath, 'utf8') !== metadataBytes) throw new Error('DEPLOYMENT_DRILL_EVIDENCE_CHANGED');
-  // Withdraw old health before a new restore attempt. A failed or interrupted
-  // attempt leaves RUNNING/unknown evidence, never a stale HEALTHY replacement.
-  metadataBytes = `${JSON.stringify({ ...metadata, independentRestoreVerified: false, lastDrill: {
-    format: 'sabalan-independent-checkpoint-drill/v1', status: 'RUNNING', phase: 'RESTORING',
-    operationId, checkpointId: metadata.id, releaseId: metadata.releaseId, checksum: metadata.checksum,
-    size: metadata.size, startedAt: startedAt.toISOString(),
-  } }, null, 2)}\n`;
-  await fs.promises.writeFile(metadataPath, metadataBytes, { encoding: 'utf8', mode: 0o600 });
   const roleTarget = roleComponent ? await loadRoleDrillTarget(metadata, roleComponent.sha256, recoveryHost) : undefined;
   const protectedDatabaseRoles = roleTarget ? {
     source: roleTarget.plan.sourceDatabase.name,
@@ -117,6 +105,19 @@ const main = async () => {
     throw new Error('DEPLOYMENT_DRILL_ROLE_TARGET_UNPROVEN');
   }
   await assertRoleTarget();
+  const remoteKey = await readConfiguredFile('DEPLOYMENT_REMOTE_RECOVERY_PRIVATE_KEY');
+  const startedAt = new Date();
+  const operationId = `drill-${metadata.deploymentId}-${Date.now()}`;
+  if (await fs.promises.readFile(metadataPath, 'utf8') !== metadataBytes) throw new Error('DEPLOYMENT_DRILL_EVIDENCE_CHANGED');
+  // Withdraw old health before a new restore attempt. A failed or interrupted
+  // attempt leaves RUNNING/unknown evidence, never a stale HEALTHY replacement.
+  const runningMetadataBytes = `${JSON.stringify({ ...metadata, independentRestoreVerified: false, lastDrill: {
+    format: 'sabalan-independent-checkpoint-drill/v1', status: 'RUNNING', phase: 'RESTORING',
+    operationId, checkpointId: metadata.id, releaseId: metadata.releaseId, checksum: metadata.checksum,
+    size: metadata.size, startedAt: startedAt.toISOString(),
+  } }, null, 2)}\n`;
+  await fs.promises.writeFile(metadataPath, runningMetadataBytes, { encoding: 'utf8', mode: 0o600 });
+  metadataBytes = runningMetadataBytes;
   const validation = await validateRecoveryPackage({ sourcePath: metadata.remotePath, passphrase: remoteKey, prisma,
     verifyRestore: true, verifyApplicationPayloads: true, verifyBusinessData: true, protectedDatabaseRoles });
   if (protectedCheckpointRoleComponent(validation.manifest)?.sha256 !== roleComponent?.sha256) {

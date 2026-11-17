@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { withHealthyDrill } from './deploymentCheckpointDrill.fixture';
 import { test } from 'node:test';
 import { hasHealthyIndependentCheckpointDrill, planRemoteCheckpointRetention, PROTECTED_DATABASE_ROLE_COMPONENT } from '../deploymentCheckpointPolicy';
+import { assertRoleDrillDatabase, type RoleDrillTarget } from '../deploymentDrillRoleTarget';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -42,6 +43,26 @@ test('role-aware COMPLETE checkpoints require the exact role snapshot readback b
   assert.equal(hasHealthyIndependentCheckpointDrill({
     ...point, lastDrill: { ...point.lastDrill, verifiedDatabaseRoles: roleEvidence },
   }), true);
+});
+
+test('role-aware drill refuses a target that differs from the sealed PostgreSQL identity', () => {
+  const target = { name: 'drill', oid: '123', systemIdentifier: '555', owner: 'drill_owner' };
+  const plan: RoleDrillTarget = {
+    format: 'sabalan-independent-role-drill-target/v1', checkpointId: 'role-point',
+    ciphertextSha256: '1'.repeat(64), ciphertextSize: 1024, snapshotSha256: '2'.repeat(64),
+    sourceDatabase: { name: 'source', oid: '321', systemIdentifier: '444' },
+    recoveryHost: { machineUuidSha256: '3'.repeat(64), kernelBootIdSha256: '4'.repeat(64) },
+    targetDatabase: target,
+  };
+  const observed = { ...target, admitted: true, controlSchemaAvailable: true };
+  assert.doesNotThrow(() => assertRoleDrillDatabase(plan, observed));
+  const changes = [{ oid: '456' }, { systemIdentifier: '444' }, { owner: 'foreign' },
+    { name: 'source' }, { admitted: false }, { controlSchemaAvailable: false }];
+  for (const change of changes) {
+    assert.throws(() => assertRoleDrillDatabase(plan, { ...observed, ...change }), { code: 'DEPLOYMENT_DRILL_ROLE_TARGET_UNPROVEN' });
+  }
+  assert.throws(() => assertRoleDrillDatabase(plan, observed, true), { code: 'DEPLOYMENT_DRILL_ROLE_TARGET_UNPROVEN' });
+  assert.doesNotThrow(() => assertRoleDrillDatabase(plan, { ...observed, oid: '456' }, true));
 });
 
 test('new local-validation-only uploads cannot displace independently healthy recovery points', async () => {

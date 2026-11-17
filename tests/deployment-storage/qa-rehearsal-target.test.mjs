@@ -39,8 +39,8 @@ const qaEnvironment = {
   TAXPAYER_BROKER_URL: '',
 };
 
-function renderedConfig(overrides = {}) {
-  const output = execFileSync('docker', ['compose', '--profile', 'deployment', '-p', 'sabalanerp', '-f', 'docker-compose.rehearsal.yml', 'config', '--format', 'json'], {
+function renderedConfig(overrides = {}, compose = 'docker-compose.rehearsal.yml') {
+  const output = execFileSync('docker', ['compose', '--profile', 'deployment', '-p', 'sabalanerp', '-f', compose, 'config', '--format', 'json'], {
     cwd: repositoryRoot,
     env: { ...process.env, ...qaEnvironment, QA_REHEARSAL_FAIL_BACKEND_COMMIT: '',
       QA_REHEARSAL_FAIL_BACKEND_SOURCE_HASH: '', ...overrides, DEPLOYMENT_QA_REHEARSAL_PLAN_SHA256:'a'.repeat(64) },
@@ -58,6 +58,19 @@ test('real rehearsal Compose graph isolates business services and scopes ingress
   assert.deepEqual(config.networks.qa_ingress.driver_opts,
     { 'com.docker.network.bridge.enable_ip_masquerade': 'false' });
   assert.doesNotThrow(() => validateQaRenderedConfig(config));
+});
+
+test('scanner-free rehearsal has no scanner on the graph and still isolates application egress', () => {
+  const options = { scannerRetained: false };
+  const config = renderedConfig({}, 'docker-compose.rehearsal-scanner-free.yml');
+  assert.equal(config.services.clamav, undefined);
+  assert.equal(config.services.backend.depends_on?.clamav, undefined);
+  assert.equal(config.volumes.clamav_database, undefined);
+  assert.equal(config.services.deployment.volumes.some(volume => volume.target === '/app/recovery-sources/clamav'), false);
+  assert.doesNotThrow(() => validateQaRenderedConfig(config, undefined, options));
+  assert.throws(() => validateQaRenderedConfig(config));
+  config.services.backend.networks.qa_ingress = null;
+  assert.throws(() => validateQaRenderedConfig(config, undefined, options));
 });
 
 test('QA backend healthcheck uses real readiness except for the exact sealed candidate identity', async () => {
@@ -109,7 +122,7 @@ test('QA selector refuses a ClamAV host-gateway alias reintroduced by an overrid
   assert.throws(() => validateQaRenderedConfig(config));
 });
 
-test('real rehearsal graph binds every deployment recovery volume to the QA project', () => {
+test('real rehearsal graphs bind each deployment recovery volume to the QA project', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-real-mount-test-'));
   try {
     const qaRoot = path.join(root, 'qa');
@@ -119,23 +132,30 @@ test('real rehearsal graph binds every deployment recovery volume to the QA proj
     for (const dir of [qaRoot, secretDir, remoteDir, reportDir]) fs.mkdirSync(dir);
     const trust = path.join(secretDir, 'partner-release-trust-public.der');
     fs.writeFileSync(trust, 'QA-only public trust fixture');
-    const config = renderedConfig();
     const sources = {
       '/run/deployment-secrets/partner-release-trust-public.der': trust,
       '/run/deployment-secrets': secretDir,
       '/app/deployment-remote': remoteDir,
       '/app/deployment-reports': reportDir,
     };
-    for (const service of Object.values(config.services)) {
-      for (const volume of service.volumes ?? []) {
-        if (Object.hasOwn(sources, volume.target)) volume.source = sources[volume.target];
-      }
-    }
     const environment = { ...qaEnvironment, DEPLOYMENT_SECRET_DIR: secretDir,
       DEPLOYMENT_REMOTE_MOUNT_HOST: remoteDir, DEPLOYMENT_REPORT_DIR_HOST: reportDir };
-    assert.doesNotThrow(() => validateQaRenderedMounts(config, {
-      qaRoot, repositoryRoot, environment,
-    }));
+    for (const [compose, scannerRetained] of [
+      ['docker-compose.rehearsal.yml', true], ['docker-compose.rehearsal-scanner-free.yml', false],
+    ]) {
+      const config = renderedConfig({}, compose);
+      for (const service of Object.values(config.services)) {
+        for (const volume of service.volumes ?? []) {
+          if (Object.hasOwn(sources, volume.target)) volume.source = sources[volume.target];
+        }
+      }
+      assert.doesNotThrow(() => validateQaRenderedMounts(config, {
+        qaRoot, repositoryRoot, environment, scannerRetained,
+      }));
+      assert.throws(() => validateQaRenderedMounts(config, {
+        qaRoot, repositoryRoot, environment, scannerRetained: !scannerRetained,
+      }));
+    }
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

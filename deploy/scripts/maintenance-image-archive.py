@@ -29,7 +29,7 @@ def browser_from_layers(archive, graph, role):
                     if name in ('', '.'):
                         assert entry.isdir(), 'BROWSER_ROOT_ENTRY_INVALID'
                         continue
-                    assert not name.startswith('/') and not any(part in ('.', '..') for part in name.split('/')), 'BROWSER_LAYER_PATH_ALIAS'
+                    assert not name.startswith('/') and not any(part in ('', '.', '..') for part in name.split('/')), 'BROWSER_LAYER_PATH_ALIAS'
                     # Refuse ambiguous link/whiteout ancestry for identity files.
                     if any(target == name or target.startswith(name + '/') for target in wanted):
                         if name in wanted:

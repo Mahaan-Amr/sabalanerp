@@ -100,6 +100,7 @@ export async function prepareApplicationRecoveryStage(ownerUrl: string, stage: s
   // Credentials in query parameters must not override the disposable identity.
   loginUrl.searchParams.delete('user');
   loginUrl.searchParams.delete('password');
+  loginUrl.searchParams.set('connection_limit', '1');
   let created = false;
   let removed = false;
   const verifySchema = async () => {

@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { PrismaClient } from '@prisma/client';
+import type { RoleSnapshot } from './protectedDatabaseRoleRecovery';
 
 export type RecoveryRuntimeProof = { role: string; commit: string; releaseId: string; admitted: boolean; address?: string };
 type AuthorityRows = { control: any[]; audit: any[]; activation: any[] };
@@ -49,19 +50,51 @@ export function assertRecoveryAllocationContinuity(trusted: RecoveryAllocationAu
   if (JSON.stringify(actual) !== JSON.stringify(trusted)) throw rejected();
 }
 
-export function recoveryOwnerReceiptPath(deploymentId: string) {
+export function recoveryOwnerReceiptPath(deploymentId: string, rollback = false) {
   if (!/^deploy-[A-Za-z0-9_-]{1,120}$/.test(deploymentId)) throw rejected();
-  return path.join(process.env.DEPLOYMENT_REPORT_DIR || '/app/deployment-reports', `system-recovery-owner-${deploymentId}.completed.json`);
+  return path.join(process.env.DEPLOYMENT_REPORT_DIR || '/app/deployment-reports', `system-recovery-owner-${deploymentId}.${rollback ? 'rolledback' : 'completed'}.json`);
 }
 
-export async function readRecoveryOwnerReceipt(deploymentId: string) {
-  const file = recoveryOwnerReceiptPath(deploymentId);
+export type RecoveryOwnerPreparation = {
+  format: 'sabalan-system-recovery-owner-preparation/v1'; deploymentId: string; operationId: string;
+  leaseToken: string; checksum: string; checkpointChecksum: string; actorId: string; sourcePath: string;
+  sourceDatabase: string; allocation: RecoveryAllocationAuthority; roles: RoleSnapshot;
+};
+
+export async function writeRecoveryOwnerFile(file: string, value: unknown) {
+  const descriptor = await fs.open(file, 'wx', 0o400);
+  try { await descriptor.writeFile(JSON.stringify(value) + '\n'); await descriptor.sync(); }
+  finally { await descriptor.close(); }
+  const directory = await fs.open(path.dirname(file), 'r');
+  try { await directory.sync(); } finally { await directory.close(); }
+}
+
+export function recoveryOwnerPreparationPath(deploymentId: string) {
+  return recoveryOwnerReceiptPath(deploymentId).replace(/\.completed\.json$/, '.prepared.json');
+}
+
+export async function readRecoveryOwnerPreparation(deploymentId: string): Promise<RecoveryOwnerPreparation> {
+  const file = recoveryOwnerPreparationPath(deploymentId);
+  const stat = await fs.lstat(file);
+  if (!stat.isFile() || stat.uid !== 0 || stat.nlink !== 1 || (stat.mode & 0o777) !== 0o400
+    || stat.size > 16 * 1024 * 1024 || await fs.realpath(file) !== file) throw rejected();
+  const preparation = JSON.parse(await fs.readFile(file, 'utf8')) as RecoveryOwnerPreparation;
+  if (preparation.format !== 'sabalan-system-recovery-owner-preparation/v1' || preparation.deploymentId !== deploymentId
+    || !/^c[a-z0-9]{24}$/.test(preparation.operationId) || !/^[a-f0-9]{64}$/.test(preparation.checksum)
+    || !/^[a-f0-9]{64}$/.test(preparation.checkpointChecksum) || !preparation.leaseToken
+    || preparation.roles?.sourceDatabase !== preparation.sourceDatabase || !preparation.allocation?.sha256) throw rejected();
+  return preparation;
+}
+
+export async function readRecoveryOwnerReceipt(deploymentId: string, rollback = false) {
+  const file = recoveryOwnerReceiptPath(deploymentId, rollback);
   const stat = await fs.lstat(file);
   if (!stat.isFile() || stat.uid !== 0 || stat.nlink !== 1 || (stat.mode & 0o777) !== 0o400
     || stat.size > 32768 || await fs.realpath(file) !== file) throw rejected();
   const receipt = JSON.parse(await fs.readFile(file, 'utf8'));
   if (receipt.format !== 'sabalan-system-recovery-owner-completion/v1' || receipt.deploymentId !== deploymentId
     || !/^c[a-z0-9]{24}$/.test(receipt.operationId) || receipt.ownerCompleted !== true
+    || receipt.outcome !== (rollback ? 'ROLLED_BACK' : 'COMPLETED')
     || !/^[a-f0-9]{64}$/.test(receipt.allocation?.sha256 || '')) throw rejected();
   return receipt as { format: string; deploymentId: string; operationId: string; ownerCompleted: true; allocation: RecoveryAllocationAuthority };
 }

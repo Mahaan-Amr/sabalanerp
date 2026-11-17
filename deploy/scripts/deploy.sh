@@ -42,7 +42,6 @@ case "${1:-}" in
     shift
     set -- "$1" "$2"
     exec 8<&0 </dev/null
-    export COMPOSE_PROJECT_NAME=sabalanerp
     ;;
   --system-recovery-backup)
     [ "$#" -eq 3 ] || { echo 'Usage: deploy.sh --system-recovery-backup <env> <operation-id>' >&2; exit 1; }
@@ -55,7 +54,6 @@ case "${1:-}" in
     SYSTEM_RECOVERY_OPERATION_ID="$3"
     shift
     exec 8<&0 </dev/null
-    export COMPOSE_PROJECT_NAME=sabalanerp
     ;;
 esac
 CAPTURE_ONLY=0
@@ -94,7 +92,7 @@ esac
 CONFIGURATION_STATE="${REPO_ROOT}/.deploy-state/biometric-configuration.json"
 SYSTEM_RECOVERY_BACKUP_INTENT="${REPO_ROOT}/.deploy-state/system-recovery-backup-active.json"
 if [ "${SYSTEM_RECOVERY_BACKUP}" -eq 1 ]; then
-  [ "${DEPLOYMENT_MODE}" = release ] && [ -z "${DEPLOYMENT_CLAMAV_TARGET_IMAGE:-}${DEPLOYMENT_CUSTOMER_ALLOCATION_EVIDENCE_DIR:-}${DEPLOYMENT_QA_REHEARSAL_PLAN_FILE:-}${DEPLOYMENT_QA_REHEARSAL_PLAN_SHA256:-}" ] || {
+  [ "${DEPLOYMENT_MODE}" = release ] && [ -z "${DEPLOYMENT_CLAMAV_TARGET_IMAGE:-}${DEPLOYMENT_CUSTOMER_ALLOCATION_EVIDENCE_DIR:-}" ] || {
     echo 'System Recovery backup requires the unchanged canonical production release.' >&2
     exit 1
   }
@@ -1041,6 +1039,9 @@ if [ "${ROLE_CUTOVER}" -eq 1 ]; then
   DOCKER_HOST=unix:///var/run/docker.sock
   PROTECTED_BACKEND_NO_PULL=1
   export COMPOSE_PROJECT_NAME DOCKER_HOST PROTECTED_BACKEND_NO_PULL
+fi
+if [ "${SYSTEM_RECOVERY_BACKUP}" -eq 1 ] && [ "${COMPOSE_FILE}" = docker-compose.prod.yml ]; then
+  export COMPOSE_PROJECT_NAME=sabalanerp
 fi
 if [ "${PREBUILT_RELEASE}" -eq 1 ]; then
   # Select only the already-installed CONFIGs before taking the host/DB lease.

@@ -4,8 +4,14 @@
 protected_backend_run() {
   backend_pull_policy=""
   if [ "${SYSTEM_RECOVERY_BACKUP:-0}" -eq 1 ] || [ "${PROTECTED_BACKEND_NO_PULL:-0}" -eq 1 ]; then backend_pull_policy="--pull=never"; fi
+  owner_container_option=""
+  if [ "${SYSTEM_RECOVERY_OWNER_ACTION:-}" = RESTORE ] && [ "$#" -ge 4 ] \
+    && [ "$1" = sh ] && [ "$2" = scripts/with-backend-control-ownership.sh ] \
+    && [ "$3" = node ] && [ "$4" = dist/scripts/system-recovery-owner.js ]; then
+    owner_container_option="--name ${SYSTEM_RECOVERY_OWNER_CONTAINER}"
+  fi
   DEPLOYMENT_BACKEND_IMAGE="${DEPLOYMENT_TARGET_BACKEND_IMAGE}" BACKEND_DB_CONNECTION_LIMIT=2 DATABASE_APPLICATION_NAME=sabalanerp-deployment \
-    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" run -T --rm --no-deps ${backend_pull_policy} \
+    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" run -T --rm --no-deps ${backend_pull_policy} ${owner_container_option} \
       --label "io.sabalan.deployment.id=${DEPLOYMENT_ID}" \
       -e "BACKEND_RUNTIME_ROLE=control" \
       -e DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX \
@@ -24,6 +30,7 @@ protected_backend_run() {
       -e "DEPLOYMENT_RESULT=${DEPLOYMENT_RESULT:-}" \
       -e "DEPLOYMENT_ORIGINAL_RESULT=${DEPLOYMENT_ORIGINAL_RESULT:-}" \
       -e "DEPLOYMENT_GATE_MODE=${DEPLOYMENT_GATE_MODE:-}" \
+      -e "SYSTEM_RECOVERY_OPERATION_ID=${SYSTEM_RECOVERY_OPERATION_ID:-}" \
       -e "SYSTEM_RECOVERY_POSTGRES_IMAGE_ID=${DEPLOYMENT_PREVIOUS_POSTGRES_IMAGE}" \
       -e "SYSTEM_RECOVERY_RUNTIME_BEFORE=${SYSTEM_RECOVERY_RUNTIME_BEFORE:-}" \
       -e "SYSTEM_RECOVERY_RUNTIME_AFTER=${SYSTEM_RECOVERY_RUNTIME_AFTER:-}" \

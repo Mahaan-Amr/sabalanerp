@@ -24,7 +24,8 @@ const gateMode = process.env.DEPLOYMENT_GATE_MODE || 'RELEASE';
 const rolePhase = predecessorRoleGatePhase(gateMode);
 const rollbackMode = gateMode === 'ROLLBACK' || gateMode === predecessorRoleGateModes.rollback;
 const previousUnchangedMode = gateMode === 'PREVIOUS_UNCHANGED';
-const applicationRecoveryMode = gateMode === 'APPLICATION_RECOVERY';
+const applicationRecoveryRollbackMode = gateMode === 'APPLICATION_RECOVERY_ROLLBACK';
+const applicationRecoveryMode = gateMode === 'APPLICATION_RECOVERY' || applicationRecoveryRollbackMode;
 const releaseMode = !rollbackMode && !previousUnchangedMode;
 
 const httpGate = (url: string) => async () => {
@@ -136,7 +137,7 @@ const main = async () => {
         let recoveredRuntime: RecoveryRuntimeProof | undefined;
         if (applicationRecoveryMode) {
           if (expectedAllocation) throw new Error('Application recovery cannot publish new allocation authority.');
-          const receipt = await readRecoveryOwnerReceipt(deploymentId);
+          const receipt = await readRecoveryOwnerReceipt(deploymentId, applicationRecoveryRollbackMode);
           await verifyCustomerAllocationDatabaseProtections(prisma);
           recoveredRuntime = JSON.parse(process.env.SYSTEM_RECOVERY_RUNTIME_AFTER || 'null') as RecoveryRuntimeProof;
           assertRecoveryAllocationContinuity(receipt.allocation, await readRecoveryAllocationAuthority(prisma), recoveredRuntime);

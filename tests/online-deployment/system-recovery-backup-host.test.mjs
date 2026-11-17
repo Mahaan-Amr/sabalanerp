@@ -69,6 +69,9 @@ node() {
     *performance-deployment-environment.mjs*) printf 'release\n' ;;
     *'start-original'*) [ "$DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE" = clamav ]; echo 'start-original-six-services' ;;
     *'start-restored'*) [ "$DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE" = clamav ]; echo 'start-restored' ;;
+    *'start-rolled-back'*) echo 'start-rolled-back' ;;
+    *'within-budget'*) [ "$BACKUP_FIXTURE_FAILURE" != deadline ] ;;
+    *'stop-owner'*) echo 'owner-stop' ;;
     *' hold '*) echo 'persist-hold' ;;
     *' clear '*) echo 'complete-intent' ;;
     *'randomBytes'*) printf 'unique\n' ;;
@@ -86,26 +89,32 @@ run_backend() {
       IFS= read -r supplied || [ -n "$supplied" ]
       [ "$supplied" = 'synthetic1passphrase' ]
       echo 'owner'
-      [ "$BACKUP_FIXTURE_FAILURE" != owner ]
+      [ "$BACKUP_FIXTURE_FAILURE" != owner ] && [ "$BACKUP_FIXTURE_FAILURE" != promoted ] && [ "$BACKUP_FIXTURE_FAILURE" != rollback ]
       ;;
     *deployment-gates.js*)
-      if [ "$SYSTEM_RECOVERY_OWNER_ACTION" = RESTORE ]; then [ "$DEPLOYMENT_GATE_MODE" = APPLICATION_RECOVERY ]; else [ "$DEPLOYMENT_GATE_MODE" = PREVIOUS_UNCHANGED ]; fi
+      if [ "$SYSTEM_RECOVERY_OWNER_ACTION" = RESTORE ]; then case "$DEPLOYMENT_GATE_MODE" in APPLICATION_RECOVERY|APPLICATION_RECOVERY_ROLLBACK) ;; *) return 1;; esac; else [ "$DEPLOYMENT_GATE_MODE" = PREVIOUS_UNCHANGED ]; fi
       echo 'gates'
+      if [ "$BACKUP_FIXTURE_FAILURE" = gates-recover ] && [ "$DEPLOYMENT_GATE_MODE" = APPLICATION_RECOVERY ]; then return 1; fi
       [ "$BACKUP_FIXTURE_FAILURE" != gates ]
       ;;
     *deployment-checkpoint.js*) echo 'checkpoint'; [ "$BACKUP_FIXTURE_FAILURE" != checkpoint ] ;;
+    *system-recovery-owner-reconcile.js*) echo 'reconciled-owner' ;;
+    *system-recovery-rollback-receipt.js*) echo 'rollback-receipt' ;;
+    *deployment-rollback.js*) echo 'checkpoint-rollback'; [ "$BACKUP_FIXTURE_FAILURE" != rollback ] ;;
+    *deployment-finalize-recovery.js*) echo 'rollback-finalized' ;;
   esac
 }
 try_acquire_advisory() { echo 'advisory'; }
 assert_system_recovery_advisory() { echo 'advisory-verified'; }
-control() { echo "control $*"; }
+control() { echo "control $*"; if [ "$BACKUP_FIXTURE_FAILURE" = after-public ] && [ "$1" = finish ]; then return 1; fi; }
 session_value() { printf 'lease-token\n'; }
-phase() { echo "phase $*"; }
+phase() { DEPLOYMENT_PHASE="$1"; echo "phase $*"; }
 verify_public_maintenance() { echo 'public-503'; }
 drain_current_services() { echo 'drain'; }
 assert_original_legacy_still_stopped() { echo 'original-drained'; }
 assert_native_runtime_closed() { echo 'native-closed'; }
 verify_predecessor_database_roles() { echo 'roles-verified'; }
+drain_release_for_rollback() { echo 'rollback-drain'; }
 run_original_owned_with_heartbeat() { "$@"; }
 cleanup_locks() { echo 'cleanup'; }
 capture_clamav_checkpoint() { echo 'capture-scanner'; }
@@ -142,6 +151,32 @@ test('the predecessor requires the scanner and a prepared split and holds on dra
   assert.equal(drift.status, 1, drift.stderr);
   assert.doesNotMatch(drift.stdout, /owner\n|maintenance-off|complete-intent/);
   assert.match(drift.stderr, /held in maintenance/);
+});
+
+test('a fully reaped promoted owner failure restores the verified pre-request checkpoint before reopening', () => {
+  const result = runBackupFixture('promoted', 'RESTORE');
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /reconciled-owner[\s\S]*phase ROLLBACK_STARTED[\s\S]*checkpoint-rollback[\s\S]*rollback-finalized[\s\S]*rollback-receipt[\s\S]*start-rolled-back[\s\S]*gates[\s\S]*control maintenance-off[\s\S]*control finish/);
+});
+
+test('restore health failure or elapsed mutation deadline runs one checkpoint rollback, while a failed rollback stays closed', () => {
+  for (const failure of ['gates-recover', 'deadline']) {
+    const result = runBackupFixture(failure, 'RESTORE');
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal((result.stdout.match(/checkpoint-rollback/g) || []).length, 1);
+    assert.match(result.stdout, /phase ROLLBACK_STARTED[\s\S]*rollback-finalized[\s\S]*gates[\s\S]*control maintenance-off/);
+  }
+  const held = runBackupFixture('rollback', 'RESTORE');
+  assert.equal(held.status, 1);
+  assert.equal((held.stdout.match(/checkpoint-rollback/g) || []).length, 1);
+  assert.doesNotMatch(held.stdout, /maintenance-off|complete-intent/);
+});
+
+test('a failure after public reopening never rolls back newly acknowledged writes', () => {
+  const result = runBackupFixture('after-public', 'RESTORE');
+  assert.equal(result.status, 1);
+  assert.match(result.stdout, /control maintenance-off[\s\S]*control maintenance-on/);
+  assert.doesNotMatch(result.stdout, /checkpoint-rollback|phase ROLLBACK_STARTED/);
 });
 
 test('application restore requires independent checkpoint verification before mutation and all release gates before reopening', () => {

@@ -318,21 +318,20 @@ def public_inquiry_env_example(entry, expanded):
         '7559e1a51bd57102d70c79faddc066576518c8ef8f8db0f14a448cc1427a8bf2'
 
 
-def oci_proof(path, image):
-    root = Path(__file__).resolve().parents[2]
+def oci_proof(path, image, allow_config_identity=False):
     code = ("import {inspectPrivateDockerArchive} from './scripts/lib/private-docker-image-archive.mjs';"
-            "console.log(JSON.stringify(inspectPrivateDockerArchive(process.argv[1],process.argv[2])));")
-    proof = json.loads(run(['node', '--input-type=module', '-e', code, str(path), image], timeout=7200))
-    require(proof['index'] == image and proof['archiveSha256'] == full_hash(path), 'OCI_ARCHIVE_PROOF_MISMATCH')
+            "console.log(JSON.stringify(inspectPrivateDockerArchive(process.argv[1],process.argv[2],"
+            "{allowConfigIdentity:process.argv[3]==='config-or-index'})));")
+    identity_mode = 'config-or-index' if allow_config_identity else 'index'
+    proof = json.loads(run(['node', '--input-type=module', '-e', code, str(path), image, identity_mode], timeout=7200))
+    identity_matches = proof['index'] == image or (allow_config_identity and proof['config'] == image)
+    require(identity_matches and proof['archiveSha256'] == full_hash(path), 'OCI_ARCHIVE_PROOF_MISMATCH')
     with tarfile.open(path, 'r:') as archive:
         members = {entry.name: entry for entry in archive.getmembers()}
         def blob(digest):
             entry = members['blobs/sha256/' + digest[7:]]
             return archive.extractfile(entry)
-        index = json.load(blob(image))
-        platform = next(m for m in index['manifests'] if m.get('platform', {}).get('os') == 'linux'
-                        and m['platform'].get('architecture') == 'amd64')
-        manifest = json.load(blob(platform['digest']))
+        manifest = json.load(blob(proof['platform']))
         config = json.load(blob(manifest['config']['digest']))
         require(proof['rootfsDiffIds'] == config['rootfs']['diff_ids'], 'ROOTFS_CONFIG_MISMATCH')
         secret_name = re.compile(r'(PASSWORD|PASSWD|SECRET|TOKEN|PRIVATE_KEY|API_KEY|CREDENTIAL|DATABASE_URL|CONNECTION_STRING)', re.I)
@@ -441,7 +440,7 @@ def stream_one(stage, service, image, previous_bytes, plan=None):
         require(source['selected'] == image and source['before'] == source['after'], 'SOURCE_CENSUS_CHANGED')
         require(len(source['before']) == 6 and source['capacity'] >= source_reserve, 'SOURCE_CAPACITY_OR_CENSUS_INVALID')
         require(size > 1024 and full_hash(partial) == digest.hexdigest(), 'DESTINATION_READBACK_MISMATCH')
-        proof = oci_proof(partial, image)
+        proof = oci_proof(partial, image, allow_config_identity=plan is not None)
         require(proof['rootfsDiffIds'] == source['rootfsDiffIds'], 'ROOTFS_SOURCE_PROOF_MISMATCH')
         durable_rename(partial, final)
         require_efs(final)

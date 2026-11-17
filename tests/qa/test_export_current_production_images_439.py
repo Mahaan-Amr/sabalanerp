@@ -52,7 +52,7 @@ def pack(entries):
     return output.getvalue()
 
 
-def archive_fixture(diff_override=None, secret_path=False, layer_entries=None):
+def archive_fixture(diff_override=None, secret_path=False, layer_entries=None, config_layout=None):
     layer = pack(layer_entries or [('.env.prod' if secret_path else 'app/ready.txt', b'ready')])
     compressed = gzip.compress(layer, mtime=0)
     digest = lambda content: 'sha256:' + hashlib.sha256(content).hexdigest()
@@ -66,21 +66,52 @@ def archive_fixture(diff_override=None, secret_path=False, layer_entries=None):
                          'platform':{'os':'linux','architecture':'amd64'}}]}, separators=(',', ':')).encode()
     blob = lambda content: ('blobs/sha256/' + digest(content)[7:], content)
     compat = json.dumps([{'Config':blob(config)[0],'Layers':[blob(compressed)[0]]}]).encode()
-    return pack([blob(index), blob(manifest), blob(config), blob(compressed), ('manifest.json', compat)]), digest(index)
+    entries = [blob(index), blob(manifest), blob(config), blob(compressed), ('manifest.json', compat)]
+    if config_layout is None:
+        return pack(entries), digest(index)
+    document = index if config_layout == 'nested' else manifest
+    descriptor = {'digest': digest(document), 'size': len(document)}
+    roots = [descriptor, descriptor] if config_layout == 'ambiguous' else [descriptor]
+    if config_layout != 'unanchored':
+        entries.append(('index.json', json.dumps({'schemaVersion': 2, 'manifests': roots}).encode()))
+    return pack(entries), digest(config)
 
 
 class ExportProofTests(unittest.TestCase):
-    def proof(self, data, image):
+    def proof(self, data, image, allow_config_identity=False):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'image.docker.tar'
             path.write_bytes(data)
-            return EXPORT.oci_proof(path, image)
+            return EXPORT.oci_proof(path, image, allow_config_identity)
 
     def test_accepts_matching_full_oci_graph_and_expanded_layer(self):
         data, image = archive_fixture()
         proof = self.proof(data, image)
         self.assertEqual(proof['index'], image)
         self.assertEqual(proof['archiveSha256'], hashlib.sha256(data).hexdigest())
+
+    def test_reviewed_config_identity_handles_direct_and_nested_oci_manifests(self):
+        for layout in ('direct', 'nested'):
+            with self.subTest(layout=layout):
+                data, config = archive_fixture(config_layout=layout)
+                proof = self.proof(data, config, allow_config_identity=True)
+                self.assertEqual(proof['config'], config)
+                self.assertEqual(proof['index'] is None, layout == 'direct')
+                self.assertEqual(proof['archiveSha256'], hashlib.sha256(data).hexdigest())
+                with self.assertRaises(subprocess.CalledProcessError):
+                    self.proof(data, config)
+
+    def test_reviewed_config_identity_requires_one_anchored_manifest(self):
+        for layout in ('ambiguous', 'unanchored'):
+            with self.subTest(layout=layout):
+                data, config = archive_fixture(config_layout=layout)
+                with self.assertRaises(subprocess.CalledProcessError):
+                    self.proof(data, config, allow_config_identity=True)
+
+    def test_reviewed_config_identity_still_checks_expanded_layers(self):
+        data, config = archive_fixture('sha256:' + '0' * 64, config_layout='direct')
+        with self.assertRaisesRegex(EXPORT.ExportGuardError, 'ROOTFS_DIFF_ID_MISMATCH'):
+            self.proof(data, config, allow_config_identity=True)
 
     def test_rejects_false_rootfs_diff_id_even_with_valid_blob_hashes(self):
         data, image = archive_fixture('sha256:' + '0' * 64)

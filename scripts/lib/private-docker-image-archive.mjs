@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { createHash } from 'node:crypto';
 
-export function inspectPrivateDockerArchive(file, expectedIndex) {
-  assert.match(expectedIndex, /^sha256:[a-f0-9]{64}$/);
+export function inspectPrivateDockerArchive(file, expectedIdentity, { allowConfigIdentity = false } = {}) {
+  assert.match(expectedIdentity, /^sha256:[a-f0-9]{64}$/);
   assert.equal(fs.realpathSync(file), file);
   const descriptor = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
   try {
@@ -49,11 +49,46 @@ export function inspectPrivateDockerArchive(file, expectedIndex) {
       return JSON.parse(bytes.toString('utf8'));
     };
     const blob = value => { assert.match(value, /^sha256:[a-f0-9]{64}$/); return 'blobs/sha256/' + value.slice(7); };
-    const index = json(blob(expectedIndex)); assert.equal(index.schemaVersion, 2);
-    const platforms = index.manifests.filter(value => value.platform?.os === 'linux' && value.platform?.architecture === 'amd64');
-    assert.equal(platforms.length, 1);
-    const platform = json(blob(platforms[0].digest)); assert.equal(platform.schemaVersion, 2);
-    assert.equal(entries.get(blob(platforms[0].digest)).size, platforms[0].size);
+    const identityDocument = json(blob(expectedIdentity));
+    const isLinuxAmd64 = value => value?.os === 'linux' && value?.architecture === 'amd64';
+    const readDescriptor = descriptor => {
+      const name = blob(descriptor.digest);
+      const document = json(name);
+      assert.equal(entries.get(name).size, descriptor.size);
+      assert.equal(document.schemaVersion, 2);
+      return document;
+    };
+    let indexDigest = expectedIdentity;
+    let platformDescriptor;
+    if (Array.isArray(identityDocument.manifests)) {
+      assert.equal(identityDocument.schemaVersion, 2);
+      const platforms = identityDocument.manifests.filter(value => isLinuxAmd64(value.platform));
+      assert.equal(platforms.length, 1);
+      [platformDescriptor] = platforms;
+    } else {
+      assert.ok(allowConfigIdentity && isLinuxAmd64(identityDocument));
+      const layout = json('index.json');
+      assert.equal(layout.schemaVersion, 2);
+      assert.ok(Array.isArray(layout.manifests));
+      const matches = [];
+      for (const root of layout.manifests) {
+        if (root.platform && !isLinuxAmd64(root.platform)) continue;
+        const document = readDescriptor(root);
+        if (Array.isArray(document.manifests)) {
+          for (const candidate of document.manifests.filter(value => isLinuxAmd64(value.platform))) {
+            if (readDescriptor(candidate).config?.digest === expectedIdentity) {
+              matches.push({ index: root.digest, descriptor: candidate });
+            }
+          }
+        } else if (document.config?.digest === expectedIdentity) {
+          matches.push({ index: null, descriptor: root });
+        }
+      }
+      assert.equal(matches.length, 1);
+      indexDigest = matches[0].index;
+      platformDescriptor = matches[0].descriptor;
+    }
+    const platform = readDescriptor(platformDescriptor);
     const config = json(blob(platform.config.digest));
     assert.equal(entries.get(blob(platform.config.digest)).size, platform.config.size);
     assert.equal(config.os, 'linux'); assert.equal(config.architecture, 'amd64'); assert.equal(config.rootfs.type, 'layers');
@@ -68,7 +103,7 @@ export function inspectPrivateDockerArchive(file, expectedIndex) {
     const identity = value => [process.platform === 'win32' ? 0n : value.dev,
       value.ino, value.size, value.mtimeNs, value.ctimeNs, value.nlink].map(String).join(':');
     assert.equal(identity(before), identity(after)); assert.equal(identity(before), identity(named));
-    return { index: expectedIndex, platform: platforms[0].digest, config: platform.config.digest,
+    return { index: indexDigest, platform: platformDescriptor.digest, config: platform.config.digest,
       rootfsDiffIds: config.rootfs.diff_ids, blobs, archiveSha256, archiveBytes: length };
   } finally { fs.closeSync(descriptor); }
 }

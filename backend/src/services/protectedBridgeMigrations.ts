@@ -14,6 +14,7 @@ export const protectedBridgeMigrationNames: readonly string[] = Object.freeze(Ob
 const pickupSourceName = '20261116100000_customer_pickup_driver_source';
 const pickupDispatchName = '20261116100100_customer_pickup_dispatch';
 const retireAttachmentScanStatusName = '20261117120000_retire_attachment_scan_status';
+const partnerReadinessProjectionName = '20261117160000_partner_release_readiness_completed_projection';
 const allocationControllerTransitionName = '20261116133000_customer_allocation_controller_transition';
 const nextReleaseCatalog = {
   '20261116120000_customer_allocation_intents': {
@@ -63,6 +64,7 @@ const nextReleaseCatalog = {
     tables: ['customer_allocation_release_control', 'accounting_settlement_allocations'],
     functions: ['customer_allocation_runtime_admitted'],
   },
+  [partnerReadinessProjectionName]: { tables: [], functions: [] },
 };
 // This is the exact source delta from the retained 2026-11-12 production
 // release. It is intentionally separate from the frozen historical bootstrap.
@@ -104,10 +106,11 @@ const currentRelease = {
   '20261117130000_store_dispatch_exit_otp_code': ['375715f6a9930906e9cfae9b5bfbd59c4e4371d5d70587ec651de81afb7e2353', 1],
   '20261117140000_customer_allocation_controller_closure': ['3f063d8699ce903cecab90eb22dc1fa9f4bf3aeda8bd37176f9e2ea602efcb72', 6],
   '20261117150000_customer_allocation_runtime_admission': ['bf469b3fa2d29be6f5bc3cfa5a34c0851a6f14ec546d9560039aa52cc682e0b4', 6],
+  [partnerReadinessProjectionName]: ['76c5f34dc094e9c15b879cb6eda417e347fd1118864c5c6207070cc78c190fe0', 3],
 } as const;
 export const protectedCurrentReleaseNames: readonly string[] = Object.freeze(Object.keys(currentRelease));
 // Each release extends the ledger while preserving the prior release-set hashes.
-const protectedReleaseEpochEnds = Object.freeze([12, 22, 24, 25, 35, 36, 37]);
+const protectedReleaseEpochEnds = Object.freeze([12, 22, 24, 25, 35, 36, 37, 38]);
 const releaseSetSha256 = (files: CurrentFile[], index: number) => sha(files.slice(0,
   protectedReleaseEpochEnds.find(end => index < end)!).map(file => file.sha256).join('\n'));
 
@@ -249,7 +252,9 @@ async function assertLease(tx: Prisma.TransactionClient, owner: Owner, shareLock
   }
 }
 
-async function catalog(tx: Prisma.TransactionClient, input: { tables: string[]; functions: string[]; pickupSource?: boolean }) {
+async function catalog(tx: Prisma.TransactionClient, input: {
+  tables: string[]; functions: string[]; pickupSource?: boolean; partnerReadinessProjection?: boolean;
+}) {
   const tables = await tx.$queryRaw<Array<{ name: string; details: unknown }>>(Prisma.sql`
     SELECT c.relname AS name, jsonb_build_object('kind',c.relkind,'persistence',c.relpersistence,'owner',pg_get_userbyid(c.relowner),
       'rls',c.relrowsecurity,'forceRls',c.relforcerowsecurity,'replicaIdentity',c.relreplident,
@@ -285,7 +290,9 @@ async function catalog(tx: Prisma.TransactionClient, input: { tables: string[]; 
       AND p.proname IN (${Prisma.join(input.functions)}) ORDER BY p.proname`) : [];
   if (tables.length !== input.tables.length || functions.length !== input.functions.length) failure('PROTECTED_BRIDGE_SCHEMA_UNPROVEN');
   const pickupSource = input.pickupSource ? { pickupSource: await pickupSourceProof(tx, true) } : {};
-  return sha(JSON.stringify(canonical({ tables, functions, ...pickupSource })));
+  const partnerReadinessProjection = input.partnerReadinessProjection
+    ? { partnerReadinessProjection: await partnerReadinessProjectionProof(tx) } : {};
+  return sha(JSON.stringify(canonical({ tables, functions, ...pickupSource, ...partnerReadinessProjection })));
 }
 
 /** Also required when discovery finds no pending work. A successful no-op
@@ -349,7 +356,22 @@ function currentCatalogScope(files: CurrentFile[], through: number) {
   }
   return { tables: [...new Set(applied.flatMap(file => file.tables))].sort(),
     functions: [...functions].sort(),
-    pickupSource: applied.some(file => file.name === pickupSourceName) };
+    pickupSource: applied.some(file => file.name === pickupSourceName),
+    partnerReadinessProjection: applied.some(file => file.name === partnerReadinessProjectionName) };
+}
+
+async function partnerReadinessProjectionProof(tx: Prisma.TransactionClient) {
+  const [view] = await tx.$queryRaw<Array<{ definition: string; owner: string; options: string[] }>>`
+    SELECT pg_get_viewdef(relation.oid, false) AS definition, pg_get_userbyid(relation.relowner) AS owner,
+      relation.reloptions AS options
+    FROM pg_class relation
+    JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+    WHERE namespace.nspname = 'public' AND relation.relname = 'partner_release_readiness_completed'
+      AND relation.relkind = 'v' AND relation.relowner = (SELECT oid FROM pg_roles WHERE rolname = current_user)
+      AND relation.reloptions = ARRAY['security_barrier=true']
+  `;
+  if (!view?.definition) failure('PROTECTED_CURRENT_RELEASE_PARTNER_READINESS_VIEW_UNPROVEN');
+  return view;
 }
 
 async function pickupSourceProof(tx: Prisma.TransactionClient, after: boolean) {

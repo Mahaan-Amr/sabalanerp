@@ -39,6 +39,12 @@ import {
 } from "@/contexts/WorkspaceContext";
 import { operationalStatusLabel } from "@/features/dispatch/operationalStatusPresentation";
 import { userFacingError } from "@/features/dispatch/userFacingError";
+import CompanyPlateFields from "@/features/dispatch-master-data/CompanyPlateFields";
+import {
+  completeCompanyPlate,
+  emptyCompanyPlate,
+  formatCompanyPlate,
+} from "@/features/dispatch-master-data/companyVehicleEntry";
 
 const labelClass = erpFieldLabelClassName;
 
@@ -153,11 +159,11 @@ export default function SecurityVehiclesPage() {
   const [externalDriverId, setExternalDriverId] = useState("");
   const [externalVehicleId, setExternalVehicleId] = useState("");
   const [pickupVehicleType, setPickupVehicleType] = useState("");
-  const [pickupPlate, setPickupPlate] = useState("");
+  const [pickupPlate, setPickupPlate] = useState(emptyCompanyPlate);
   const [pickupPhone, setPickupPhone] = useState("");
   const admissionReady = admissionSource === "INTERNAL" ? Boolean(internalDriverId)
     : admissionSource === "EXTERNAL" ? Boolean(externalDriverId && externalVehicleId)
-    : Boolean(pickupVehicleType && pickupPlate.trim() && pickupPhone.trim());
+    : Boolean(pickupVehicleType && completeCompanyPlate(pickupPlate) && pickupPhone.trim());
   const [queueReason, setQueueReason] = useState("");
   const [voidTarget, setVoidTarget] = useState<any>(null);
   const [queueActionTarget, setQueueActionTarget] = useState<{
@@ -358,13 +364,13 @@ export default function SecurityVehiclesPage() {
     setError("");
     try {
       await securityAPI.admitCanonicalQueueTurn(admissionSource === "CUSTOMER_PICKUP"
-        ? { source: admissionSource, vehicleType: pickupVehicleType, plate: pickupPlate.trim(), phone: pickupPhone.trim() }
+        ? { source: admissionSource, vehicleType: pickupVehicleType, plate: formatCompanyPlate(pickupPlate), phone: pickupPhone.trim() }
         : { source: admissionSource, driverId, vehicleId });
       setInternalDriverId("");
       setExternalDriverId("");
       setExternalVehicleId("");
       setPickupVehicleType("");
-      setPickupPlate("");
+      setPickupPlate(emptyCompanyPlate);
       setPickupPhone("");
       setMessage("پذیرش راننده و خودرو در صف ثبت شد.");
       await loadData(true);
@@ -677,11 +683,11 @@ export default function SecurityVehiclesPage() {
                       <option value="وانت">وانت</option>
                     </ErpSelect>
                   </label>
-                  <label>
-                    <span className={labelClass}>شماره پلاک</span>
-                    <ErpInput value={pickupPlate} maxLength={40} placeholder="۱۲ ب ۳۴۵ ایران ۶۷"
-                      onChange={event => setPickupPlate(event.target.value)} />
-                  </label>
+                  <CompanyPlateFields
+                    label="شماره پلاک"
+                    value={pickupPlate}
+                    onChange={setPickupPlate}
+                  />
                   <label>
                     <span className={labelClass}>شماره همراه مشتری یا راننده</span>
                     <ErpInput type="tel" dir="ltr" value={pickupPhone} maxLength={20}

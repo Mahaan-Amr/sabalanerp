@@ -121,31 +121,59 @@ const productIdentityParts = (snapshot: any = {}) =>
     snapshot.preparedUnit ? `واحد ${snapshot.preparedUnit}` : "",
   ].filter(Boolean);
 
-const detailNames = (value: any, fallback: string) => {
-  if (!value) return [];
-  const values = Array.isArray(value) ? value : [value];
-  return values
-    .map(
-      (item) =>
-        item?.namePersian ||
-        item?.name ||
-        item?.title ||
-        item?.serviceName ||
-        item?.toolName ||
-        fallback,
-    )
-    .filter(Boolean);
+const asList = (value: any) => Array.isArray(value) ? value : value ? [value] : [];
+
+const detailName = (item: any): string => {
+  if (typeof item === "string") return item.trim();
+  return item?.namePersian || item?.name || item?.title || item?.serviceName || item?.toolName ||
+    item?.subService?.namePersian || item?.subService?.name || "";
 };
 
-const productDetailBadges = (snapshot: any = {}) =>
-  [
-    ...detailNames(snapshot.tools, "ابزار").map((name) => `ابزار: ${name}`),
-    ...detailNames(snapshot.services, "خدمات").map((name) => `خدمات: ${name}`),
-    snapshot.finishing
-      ? `پرداخت: ${snapshot.finishing?.namePersian || snapshot.finishing?.name || snapshot.finishingName || "انتخاب شده"}`
-      : "",
-    snapshot.description ? `توضیح: ${snapshot.description}` : "",
+const namedDetail = (category: string, detail: any) => {
+  const name = detailName(detail);
+  return name ? `${category}: ${name}` : category;
+};
+
+const productDetailBadges = (snapshot: any = {}) => {
+  const saved = snapshot.snapshot || {};
+  const tools = [...asList(snapshot.tools), ...asList(saved.tools), ...asList(saved.meta?.tools), ...asList(saved.selectedTools)];
+  const services = [...asList(snapshot.services), ...asList(saved.services), ...asList(saved.selectedServices), ...asList(saved.appliedSubServices)];
+  const finishings = [snapshot.finishing, snapshot.finishingName, saved.finishing, saved.stoneFinishing, saved.finishingName,
+    ...asList(saved.finishings)].filter(Boolean);
+  const cutNames: Record<string, string> = {
+    longitudinal: "برش طولی", cross: "برش عرضی", vertical: "برش عمودی", calibration: "کالیبراسیون",
+  };
+  const cuts = [...asList(saved.cuttingBreakdown), ...asList(saved.cutDetails), ...asList(snapshot.cuttingBreakdown)];
+  const layer = saved.layerTypeName || saved.meta?.layerInfo?.layerTypeName;
+  const details = [
+    ...tools.map(item => namedDetail("ابزار", item)),
+    ...services.map(item => {
+      const kind = item?.selectedEdges?.length || item?.edges?.length ? "ابزار" : "خدمات";
+      return namedDetail(kind, item);
+    }),
+    ...finishings.map(item => namedDetail("پرداخت", item)),
+    ...cuts.map(item => cutNames[item?.type] || "برش"),
+    layer ? `لایه: ${layer}` : "",
+    saved.isMandatory && Number(saved.mandatoryPercentage) > 0
+      ? `حکمی: ${numberFa(saved.mandatoryPercentage)}٪` : "",
   ].filter(Boolean);
+  return Array.from(new Set(details));
+};
+
+function LoadingProductDetails({ snapshot }: { snapshot: any }) {
+  const details = productDetailBadges(snapshot);
+  if (!details.length && !snapshot?.description) return null;
+  return (
+    <div className="mt-2 space-y-1">
+      {details.length > 0 && (
+        <div aria-label="خدمات ثبت‌شده" className="flex flex-wrap gap-1">
+          {details.map(detail => <ErpBadge key={detail} tone="info">{detail}</ErpBadge>)}
+        </div>
+      )}
+      {snapshot?.description && <p className="text-xs font-normal sds-text-secondary">{snapshot.description}</p>}
+    </div>
+  );
+}
 
 const sourceWithGroup = (source: any, group: any) => ({
   ...source,
@@ -1061,9 +1089,6 @@ export default function NewLoadingPage() {
                           const selected = selectedSourceIds.has(
                             source.contractItemId,
                           );
-                          const details = productDetailBadges(
-                            source.productSnapshot,
-                          );
                           return (
                             <tr
                               key={source.contractItemId}
@@ -1075,24 +1100,13 @@ export default function NewLoadingPage() {
                                 <p className="mt-1 text-xs font-normal leading-6 sds-text-secondary">{productIdentityParts(
                                   source.productSnapshot,
                                 ).join(" · ") || "بدون مشخصات"}</p>
-                                <div className="flex max-w-md flex-wrap gap-1">
-                                  {details.length ? (
-                                    details.slice(0, 5).map((detail) => (
-                                      <ErpBadge key={detail} tone="info">
-                                        {detail}
-                                      </ErpBadge>
-                                    ))
-                                  ) : (
-                                    <span className="text-xs text-[var(--sds-text-muted)]">
-                                      بدون جزئیات افزوده
-                                    </span>
-                                  )}
-                                </div>
+                                <LoadingProductDetails snapshot={source.productSnapshot} />
                               </td>
                               <td className="px-3 py-4 text-center">
                                 <ErpBadge tone="success">
-                                  {numberFa(source.remainingQuantity)}{" "}
-                                  {source.unitLabel}
+                                  <span className="whitespace-nowrap">
+                                    {numberFa(source.remainingQuantity)}{" "}{source.unitLabel}
+                                  </span>
                                 </ErpBadge>
                               </td>
                               <td className="px-3 py-4 text-left">
@@ -1242,6 +1256,7 @@ export default function NewLoadingPage() {
             {unitLabels[line.source.unit] || "واحد ثبت‌شده"}
           </ErpBadge>
         </div>
+        <LoadingProductDetails snapshot={line.source.productSnapshot} />
         {line.source.unit === "meter" && (
           <div className="mt-3">
             <ErpSegmentedControl<QuantityMode>

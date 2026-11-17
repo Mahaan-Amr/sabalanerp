@@ -52,6 +52,46 @@ test('Logistics dashboard preserves counts and HR surfaces across themes, mobile
   }
   await setViewportAndZoom(page, { width: 780, height: 900 }, 2);
   await assertNoHorizontalOverflow(page);
+  const status = main.getByText('پیش‌نویس', { exact: true });
+  expect(await status.evaluate(element => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    return range.getClientRects().length;
+  })).toBe(1);
+});
+
+test('Logistics contract selection keeps the remaining quantity and unit together on mobile', async ({ page }) => {
+  await loginAsAdmin(page);
+  await setViewportAndZoom(page, { width: 390, height: 900 });
+  await page.route('**/api/logistics/**', route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith(`/loadings/${loading.id}`)) return route.fulfill({ json: { success: true, data: {
+      ...loading, customerId: 'customer', projectId: 'project', lines: [],
+    } } });
+    if (path.endsWith('/remaining')) return route.fulfill({ json: { success: true, data: { groups: [{
+      groupKey: 'stone-group', displayName: 'سنگ آزمون', productSnapshot: { name: 'سنگ آزمون' },
+      sources: [{ contractId: 'contract', contractItemId: 'item', contractNumber: '9001', remainingQuantity: 30,
+        unit: 'meter', unitLabel: 'متر طول', productSnapshot: { name: 'سنگ آزمون', snapshot: {
+          appliedSubServices: [{ subService: { namePersian: 'پخ آزمون' }, selectedEdges: ['front'] }],
+          finishingName: 'ساب آزمون', cuttingBreakdown: [{ type: 'cross' }],
+        } } }],
+    }] } } });
+    if (path.endsWith('/drivers') || path.endsWith('/customers')) return route.fulfill({ json: { success: true, data: [] } });
+    return route.continue();
+  });
+  await page.goto(`/dashboard/logistics/loadings/new?draftId=${loading.id}`);
+  const remaining = page.getByRole('table').getByText('۳۰ متر طول', { exact: true });
+  await expect(remaining).toBeVisible();
+  expect(await remaining.evaluate(element => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    return new Set(Array.from(range.getClientRects(), rect => Math.round(rect.top))).size;
+  })).toBe(1);
+  await expect(page.getByText('ابزار: پخ آزمون', { exact: true })).toBeVisible();
+  await expect(page.getByText('پرداخت: ساب آزمون', { exact: true })).toBeVisible();
+  await expect(page.getByText('برش عرضی', { exact: true })).toBeVisible();
+  await expect(page.getByRole('checkbox', { name: /انتخاب سنگ آزمون/ })).toBeVisible();
+  await assertNoHorizontalOverflow(page);
 });
 
 test('Logistics cancellation keeps its required reason, focus, and pending protection in the workspace modal', async ({ page }, testInfo) => {
@@ -299,7 +339,8 @@ test('Logistics driver tabs retain both allocations across a draft save and revi
     { id: 'turn-b', firstName: 'رضا', lastName: 'محمدی', queueStatus: 'RESERVED', reservedLoading: { id: loading.id } },
   ];
   const draft = { ...loading, customerId: 'customer', projectId: 'project',
-    lines: [{ ...loading.lines[0], sourceContractId: 'contract', quantity: 30, sourceSnapshot: { contractNumber: '9001', contractedQuantity: 100, remainingQuantity: 100 } }],
+    lines: [{ ...loading.lines[0], sourceContractId: 'contract', quantity: 30,
+      productSnapshot: { ...loading.lines[0].productSnapshot, snapshot: { tools: [{ name: 'نیم‌لول آزمون' }], finishingName: 'صیقلی آزمون' } }, sourceSnapshot: { contractNumber: '9001', contractedQuantity: 100, remainingQuantity: 100 } }],
     guardQueueTurns: drivers.map(driver => ({ id: driver.id, status: 'RESERVED_FOR_LOADING', loadingId: loading.id })),
     canonicalAllocationDrafts: drivers.map((driver, i) => ({ queueTurnId: driver.id, lines: [{ sourceContractItemId: 'parity-source', quantity: (i + 1) * 10 }] })),
   };
@@ -323,6 +364,8 @@ test('Logistics driver tabs retain both allocations across a draft save and revi
   await page.goto(`/dashboard/logistics/loadings/new?draftId=${loading.id}`);
   const input = page.getByRole('textbox', { name: 'مقدار مستقیم', exact: true });
   await expect(input).toHaveValue('10');
+  await expect(page.getByText('ابزار: نیم‌لول آزمون', { exact: true })).toBeVisible();
+  await expect(page.getByText('پرداخت: صیقلی آزمون', { exact: true })).toBeVisible();
   await input.fill('۱5');
   await page.getByRole('button', { name: 'رضا محمدی', exact: true }).click();
   await expect(input).toHaveValue('20');

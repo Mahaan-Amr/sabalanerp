@@ -10,7 +10,6 @@ import router from '../accountingPeriodEnd';
 import { prisma } from '../../lib/prisma';
 
 // This test uses a named, disposable database within the existing local PostgreSQL.
-// A synthetic scanner accepts an existing file; no third-party scan is performed.
 test('asset upload retries preserve one evidence row and audit on real PostgreSQL', async () => {
   const db = new URL(process.env.DATABASE_URL || '');
   assert(['127.0.0.1', 'localhost'].includes(db.hostname) && db.port === '55432');
@@ -38,10 +37,13 @@ test('asset upload retries preserve one evidence row and audit on real PostgreSQ
   const layer = (router as any).stack.find((item: any) => item.route?.path === '/assets/:id/evidence' && item.route.methods.post);
   assert(layer, 'actual asset upload endpoint must be registered');
   app.post('/assets/:id/evidence', ...layer.route.stack.slice(-2).map((entry: any) => entry.handle));
+  const downloadRoute = '/assets/:id/evidence/:evidenceId/download';
+  const downloadLayer = (router as any).stack.find((item: any) => item.route?.path === downloadRoute && item.route.methods.get);
+  assert(downloadLayer, 'actual asset download endpoint must be registered');
+  app.get(downloadRoute, downloadLayer.route.stack.at(-1).handle);
   const server = app.listen(0, '127.0.0.1');
   await new Promise<void>(resolve => server.once('listening', resolve));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  const oldScanner = process.env.HR_HIRING_ANTIVIRUS_COMMAND;
   const key = `qa-key-${suffix}`;
   const send = (content: string, requestKey = key, dropResponse = false) => {
     const body = new FormData(); body.append('bookId', book.id); body.append('purpose', 'COST');
@@ -49,29 +51,31 @@ test('asset upload retries preserve one evidence row and audit on real PostgreSQ
     return fetch(`${base}/assets/${asset.id}/evidence`, { method: 'POST', headers: { 'x-idempotency-key': requestKey, ...(dropResponse ? { 'x-qa-drop-response': '1' } : {}) }, body });
   };
   try {
-    process.env.HR_HIRING_ANTIVIRUS_COMMAND = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'more.com');
     const responses = await Promise.all([send('%PDF-1.4\nqa-one'), send('%PDF-1.4\nqa-one')]);
     const json = await Promise.all(responses.map(response => response.json() as Promise<any>));
     assert.deepEqual(responses.map(response => response.status), [201, 201], JSON.stringify(json));
     assert.equal(json[0].data.id, json[1].data.id, 'concurrent identical command must replay its outcome');
+    assert.equal('malwareScanStatus' in json[0].data, false);
+    assert.equal('malwareScanAt' in json[0].data, false);
     const evidence = await prisma.accountingArchiveEvidence.findMany({ where: { sourceEntityId: asset.id } });
     assert.equal(evidence.length, 1);
+    const download = await fetch(`${base}/assets/${asset.id}/evidence/${evidence[0].id}/download?bookId=${book.id}`);
+    assert.equal(download.status, 200);
+    assert.equal(await download.text(), '%PDF-1.4\nqa-one');
     const audits = await prisma.accountingLedgerAuditEntry.findMany({ where: { entityId: evidence[0].id, action: 'ASSET_EVIDENCE_UPLOADED' } });
     assert.equal(audits.length, 1, 'one durable audit accompanies the single evidence row');
     const conflict = await send('%PDF-1.4\nqa-two');
     assert.notEqual(conflict.status, 201, 'same key with other bytes must fail closed');
     await prisma.accountingFixedAsset.update({ where: { id: asset.id }, data: { status: 'ACTIVE' } });
-    process.env.HR_HIRING_ANTIVIRUS_COMMAND = path.join(scratch, 'scanner-unavailable.exe');
     const recovered = await send('%PDF-1.4\nqa-one');
     const replay = await recovered.json() as any;
     assert.equal(recovered.status, 201, JSON.stringify(replay));
-    assert.equal(replay.data.id, evidence[0].id, 'lost response replay succeeds even after state change and scanner failure');
+    assert.equal(replay.data.id, evidence[0].id, 'lost response replay succeeds even after state change');
     assert.equal(await prisma.accountingArchiveEvidence.count({ where: { sourceEntityId: asset.id } }), 1);
     assert.equal(await prisma.accountingLedgerAuditEntry.count({ where: { entityId: evidence[0].id, action: 'ASSET_EVIDENCE_UPLOADED' } }), 1);
 
     // Force an actual client transport failure after a fresh command commits.
     await prisma.accountingFixedAsset.update({ where: { id: asset.id }, data: { status: 'UNDER_CONSTRUCTION' } });
-    process.env.HR_HIRING_ANTIVIRUS_COMMAND = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'more.com');
     const lostKey = `qa-response-loss-${suffix}`;
     await assert.rejects(send('%PDF-1.4\nqa-lost-response', lostKey, true), /fetch failed/i);
     const committed = await prisma.accountingArchiveEvidence.findMany({ where: { sourceEntityId: asset.id } });
@@ -79,7 +83,6 @@ test('asset upload retries preserve one evidence row and audit on real PostgreSQ
     const lostEvidence = committed.find(item => item.id !== evidence[0].id)!;
     assert(lostEvidence);
     await prisma.accountingFixedAsset.update({ where: { id: asset.id }, data: { status: 'ACTIVE' } });
-    process.env.HR_HIRING_ANTIVIRUS_COMMAND = path.join(scratch, 'scanner-unavailable.exe');
     const recoveredLost = await send('%PDF-1.4\nqa-lost-response', lostKey);
     const recoveredBody = await recoveredLost.json() as any;
     assert.equal(recoveredLost.status, 201, JSON.stringify(recoveredBody));
@@ -87,7 +90,6 @@ test('asset upload retries preserve one evidence row and audit on real PostgreSQ
     assert.equal(await prisma.accountingArchiveEvidence.count({ where: { sourceEntityId: asset.id } }), 2);
     assert.equal(await prisma.accountingLedgerAuditEntry.count({ where: { entityId: lostEvidence.id, action: 'ASSET_EVIDENCE_UPLOADED' } }), 1);
   } finally {
-    if (oldScanner === undefined) delete process.env.HR_HIRING_ANTIVIRUS_COMMAND; else process.env.HR_HIRING_ANTIVIRUS_COMMAND = oldScanner;
     server.closeAllConnections(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
     process.chdir(initialCwd); await fs.rm(scratch, { recursive: true, force: true }); await prisma.$disconnect();
   }

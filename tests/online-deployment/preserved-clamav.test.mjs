@@ -107,7 +107,7 @@ test('successful stdout-valued guard stays exact while real owned heartbeat JSON
   // Negative control runs only mocked backend/helper services and reproduces the old capture bug.
   const unsafeHeartbeat=heartbeat.replace('control heartbeat >&2','control heartbeat');assert.notEqual(unsafeHeartbeat,heartbeat);
   const negative=spawnSync(shell,['-c',code.replace(heartbeat,unsafeHeartbeat)],{encoding:'utf8',env:{...process.env,PRESERVATION_REAL_NODE:process.execPath.replaceAll('\\','/'),PRESERVATION_FIXTURE:fixtureFile.replaceAll('\\','/'),PRESERVATION_EVENTS:events.replaceAll('\\','/')}});
-  assert.equal(negative.status,0,negative.stderr);assert.notEqual(negative.stdout,payload);assert.match(negative.stdout,/\{"ok":true,"phase":"heartbeat"\}/);assert.ok(negative.stdout.endsWith(payload));
+  assert.equal(negative.status,0,negative.stderr);assert.notEqual(negative.stdout,payload);assert.match(negative.stdout,/\{"ok":true,"phase":"heartbeat"\}/);assert.ok(negative.stdout.includes(payload));
 
  }finally{assert.equal(path.dirname(directory),path.resolve(os.tmpdir()));assert.ok(path.basename(directory).startsWith('sabalan-preserved-stdout-'));fs.rmSync(directory,{recursive:true,force:true});}
 });

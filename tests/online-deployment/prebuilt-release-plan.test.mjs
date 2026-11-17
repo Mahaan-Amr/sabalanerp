@@ -78,3 +78,15 @@ test('real mutation boundary revalidates before MUTATION_STARTED and protected t
 test('production prebuilt entry refuses missing scanner selection instead of applying incidental Compose drift',()=>{
  const {plan}=fixture();assert.throws(()=>requirePrebuiltScannerSelection(plan),/PREBUILT_SCANNER_PRESERVATION_SELECTION_REQUIRED/);
 });
+
+test('the v2 plan binds a scanner-free backend without changing release admission',()=>{
+ const {plan,actual}=fixture();
+ plan.format='sabalan-prebuilt-protected-release-plan/v2';
+ assert.throws(()=>validatePrebuiltReleasePlan(plan,actual),/PREBUILT_UPLOAD_POLICY_CHANGED/);
+ actual.images.backend.Config.Labels['io.sabalan.release.upload-policy']='no-malware-scan';
+ const selected=validatePrebuiltReleasePlan(plan,actual);
+ assert.equal(selected.releaseAdmission,false);
+ assert.doesNotMatch(prebuiltReleaseExports(selected),/PRESERVED_CLAMAV/);
+ plan.preservedClamav={};
+ assert.throws(()=>validatePrebuiltReleasePlan(plan,actual),/PREBUILT_RETIRED_SCANNER_MUST_BE_ABSENT/);
+});

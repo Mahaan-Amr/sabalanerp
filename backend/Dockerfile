@@ -69,7 +69,6 @@ RUN printf 'Types: deb\nURIs: %s\nSuites: bookworm\nComponents: main\nSigned-By:
   && HTTP_PROXY= HTTPS_PROXY= http_proxy= https_proxy= \
   apt-get -o Acquire::ForceIPv4=true install -y --no-install-recommends \
   openssl \
-  clamdscan \
   ffmpeg \
   postgresql-client \
   util-linux \
@@ -125,12 +124,11 @@ COPY docs/qa/partner-sales/release/release-package.mjs ./partner-release-verifie
 COPY backend/src/documents/dispatch/__fixtures__/baselines ./dispatch-document-baselines
 COPY backend/excel ./excel
 
-RUN printf 'TCPSocket 3310\nTCPAddr clamav\n' > /etc/clamav/clamd-remote.conf \
-  && chmod +x /app/scripts/hr-clamdscan.sh \
-  && mkdir -p /app/storage/contracts /app/storage/hr-hiring /app/storage/accounting-contracts /app/storage/recovery /app/uploads /app/recovery-sources/inquiry /app/recovery-coordination
+RUN mkdir -p /app/storage/contracts /app/storage/hr-hiring /app/storage/accounting-contracts /app/storage/recovery /app/uploads /app/recovery-sources/inquiry /app/recovery-coordination
 
 ARG PERFORMANCE_SOURCE_COMMIT=unattested
 ARG PERFORMANCE_SOURCE_HASH=unattested
+LABEL io.sabalan.release.upload-policy=no-malware-scan
 LABEL io.sabalan.performance.source-commit=$PERFORMANCE_SOURCE_COMMIT \
   io.sabalan.performance.source-hash=$PERFORMANCE_SOURCE_HASH
 

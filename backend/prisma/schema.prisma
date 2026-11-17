@@ -573,7 +573,7 @@ model SupportTicketAttachment {
   sha256            String
   durationSeconds   Int?
   sensitive         Boolean                         @default(false)
-  malwareScanStatus String                          @default("PENDING")
+  malwareScanStatus String? @ignore
   retentionClass    String
   redactedAt        DateTime?
   redactionReason   String?
@@ -3863,6 +3863,7 @@ model DispatchOtpChallenge {
   id             String                      @id @default(cuid())
   sessionId      String
   digest         String
+  code           String?                     // Exact SMS code; older challenges only have a digest.
   expiresAt      DateTime
   resendAfter    DateTime
   incorrectCount Int                         @default(0)
@@ -5832,8 +5833,8 @@ model AccountingArchiveEvidence {
   storageKey        String
   mimeType          String
   sizeBytes         BigInt
-  malwareScanStatus String
-  malwareScanAt     DateTime?
+  malwareScanStatus String? @ignore
+  malwareScanAt DateTime? @ignore
   retentionPolicyId String
   retainUntil       DateTime?
   legalHold         Boolean   @default(false)
@@ -8837,7 +8838,7 @@ model HrPreIdentityChecklistItem {
   mimeType                   String?
   size                       Int?
   sha256                     String?
-  malwareScanStatus          String?
+  malwareScanStatus String? @ignore
   recordedBy                 String?
   recordedAt                 DateTime?
   createdBy                  String
@@ -8936,7 +8937,7 @@ model HrCompanyEvaluationOccurrence {
   resultMimeType          String?
   resultSize              Int?
   resultSha256            String?
-  resultMalwareScanStatus String?
+  resultMalwareScanStatus String? @ignore
   createdByUserId         String
   createdAt               DateTime                               @default(now())
   completedByUserId       String?
@@ -9164,7 +9165,7 @@ model HrHiringDocument {
   mimeType                      String?
   size                          Int?
   sha256                        String?
-  malwareScanStatus             String?
+  malwareScanStatus String? @ignore
   note                          String?
   uploadedBy                    String
   verifiedBy                    String?
@@ -9212,7 +9213,7 @@ model HrCollateralItem {
   mimeType                        String?
   size                            Int?
   sha256                          String?
-  malwareScanStatus               String?
+  malwareScanStatus String? @ignore
   note                            String?
   coordinationReason              String?
   recordedBy                      String
@@ -9227,7 +9228,7 @@ model HrCollateralItem {
   returnEvidenceMimeType          String?
   returnEvidenceSize              Int?
   returnEvidenceSha256            String?
-  returnEvidenceMalwareScanStatus String?
+  returnEvidenceMalwareScanStatus String? @ignore
   returnConfirmedBy               String?
   returnConfirmedAt               DateTime?
   createdAt                       DateTime                           @default(now())
@@ -9262,7 +9263,7 @@ model HrCollateralOriginalReturn {
   evidenceMimeType          String?
   evidenceSize              Int?
   evidenceSha256            String?
-  evidenceMalwareScanStatus String?
+  evidenceMalwareScanStatus String? @ignore
   confirmedBy               String?
   confirmedAt               DateTime?
   returnedReason            String?
@@ -9316,7 +9317,7 @@ model HrCandidateAssessment {
   mimeType               String?
   size                   Int?
   sha256                 String?
-  malwareScanStatus      String?
+  malwareScanStatus String? @ignore
   recordedBy             String
   recordedAt             DateTime         @default(now())
   version                Int              @default(1)
@@ -9399,7 +9400,7 @@ model HrEmploymentContractDocument {
   mimeType          String
   size              Int
   sha256            String
-  malwareScanStatus String
+  malwareScanStatus String? @ignore
   uploadedBy        String
   submittedBy       String?
   submittedAt       DateTime?
@@ -13084,7 +13085,7 @@ model PurchasingAttachment {
   sha256 String
   visibility String
   bytes Bytes @db.ByteA
-  scanStatus String
+  scanStatus String? @ignore
   createdBy String
   createdAt DateTime @default(now())
   document PurchasingDocument @relation(fields:[documentId],references:[id],onDelete:Restrict)

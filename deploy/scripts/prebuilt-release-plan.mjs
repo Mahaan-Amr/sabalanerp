@@ -15,7 +15,9 @@ const graphKeys=['index','platform','config','rootfsDiffIds','archiveSha256','ar
 export function requirePrebuiltScannerSelection(plan){assert.ok(plan.preservedClamav,'PREBUILT_SCANNER_PRESERVATION_SELECTION_REQUIRED');return validateSelection(plan.preservedClamav);}
 export function validatePrebuiltReleasePlan(plan,actual){
  keys(plan,['format','applicationCommit','applicationTree','applicationSourceHash','inquirySourceCommit','images','operations',...(Object.hasOwn(plan,'imageStore')?['imageStore']:[]),...(Object.hasOwn(plan,'preservedClamav')?['preservedClamav']:[])]);
- assert.equal(plan.format,'sabalan-prebuilt-protected-release-plan/v1');
+ assert.ok(['sabalan-prebuilt-protected-release-plan/v1','sabalan-prebuilt-protected-release-plan/v2'].includes(plan.format));
+ const retiredScanner=plan.format==='sabalan-prebuilt-protected-release-plan/v2';
+ if(retiredScanner)assert.ok(!Object.hasOwn(plan,'preservedClamav'),'PREBUILT_RETIRED_SCANNER_MUST_BE_ABSENT');
  if(plan.preservedClamav){validateSelection(plan.preservedClamav);for(const name of preservationSources)assert.match(plan.operations.files[name],digest);}
  const store=plan.imageStore??'classic';assert.ok(['classic','containerd'].includes(store));assert.equal(actual.imageStore??'classic',store,'PREBUILT_NATIVE_IMAGE_STORE_CHANGED');
  for(const key of ['applicationCommit','applicationTree','inquirySourceCommit'])assert.match(plan[key],commit);
@@ -39,6 +41,7 @@ export function validatePrebuiltReleasePlan(plan,actual){
   if(store==='containerd'){assert.equal(observed.Descriptor?.digest,graph.index);assert.ok(['application/vnd.oci.image.index.v1+json','application/vnd.docker.distribution.manifest.list.v2+json'].includes(observed.Descriptor?.mediaType));assert.ok(Number.isSafeInteger(observed.Descriptor.size)&&observed.Descriptor.size>0);}
   else assert.ok(!observed.Descriptor);
   if(role==='backend'){
+   if(retiredScanner)assert.equal(observed.Config.Labels['io.sabalan.release.upload-policy'],'no-malware-scan','PREBUILT_UPLOAD_POLICY_CHANGED');
    assert.equal(selected.sourceCommit,plan.applicationCommit);assert.equal(receipt.format,'sabalan-current-backend-image/v1');assert.equal(receipt.pass,true);assert.equal(receipt.sourceUnchanged,true);
    assert.equal(receipt.sourceCommit,plan.applicationCommit);assert.equal(receipt.image.id,graph.index);assert.equal(receipt.performanceSourceHash,plan.applicationSourceHash);
    assert.equal(receipt.image.labels['io.sabalan.performance.source-commit'],plan.applicationCommit);assert.equal(receipt.image.labels['io.sabalan.performance.source-hash'],plan.applicationSourceHash);
@@ -81,7 +84,9 @@ if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.ur
  assert.equal(process.platform,'linux');assert.equal(process.getuid(),0);assert.equal(process.argv.length,6);originalPipes();
  const [planFile,expected,repository,operationsRoot]=process.argv.slice(2);assert.equal(fs.realpathSync(repository),repository);assert.equal(fs.realpathSync(operationsRoot),operationsRoot);
  const plan=JSON.parse(read(planFile,expected,{privatePlan:true,maximum:8*1024**2})),actual={};
- assert.equal(plan.format,'sabalan-prebuilt-protected-release-plan/v1');requirePrebuiltScannerSelection(plan);keys(plan.images,roles);assert.ok(plan.operations?.files);
+ if(plan.format==='sabalan-prebuilt-protected-release-plan/v1')requirePrebuiltScannerSelection(plan);
+ else assert.equal(plan.format,'sabalan-prebuilt-protected-release-plan/v2');
+ keys(plan.images,roles);assert.ok(plan.operations?.files);
  for(const role of roles){assert.match(plan.images[role].image,image);assert.equal(plan.images[role].image,(plan.imageStore==='containerd'?plan.images[role].archiveGraph.index:plan.images[role].archiveGraph.config));}
  const git=(...args)=>command('git',args,repository).trim();actual.head=git('rev-parse','HEAD');actual.tree=git('rev-parse','HEAD^{tree}');actual.status=git('status','--porcelain','--untracked-files=all');actual.inquiryGitlink=git('rev-parse','HEAD:apps/sabalan-inquiry');actual.inquiryHead=git('-C','apps/sabalan-inquiry','rev-parse','HEAD');actual.inquiryStatus=git('-C','apps/sabalan-inquiry','status','--porcelain','--untracked-files=all');
  // Git tree identity and build-input byte identity are separate namespaces:

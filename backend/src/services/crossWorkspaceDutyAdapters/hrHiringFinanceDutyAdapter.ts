@@ -190,7 +190,7 @@ export const createHrHiringContractReviewDuty = async (database: any, input: {
 export const recordHrHiringCollateralReceipt = async (database: any, input: {
   dutyId: string; actorUserId: string; amountRials?: string | null; identifier?: string | null;
   issuerOrGuarantor?: string | null; receivedAt: Date; custodyLocation: string;
-  evidence: { storageName: string; originalName: string; mimeType: string; size: number; sha256: string; malwareScanStatus: string };
+  evidence: { storageName: string; originalName: string; mimeType: string; size: number; sha256: string };
   now?: Date;
 }) => {
   const now = input.now || new Date();
@@ -236,7 +236,7 @@ export const recordHrHiringCollateralReceipt = async (database: any, input: {
 
 export const recordHrHiringCollateralOriginalReturn = async (database: any, input: {
   dutyId: string; actorUserId: string; returnedTo: string; evidenceNote: string;
-  evidence: { storageName: string; originalName: string; mimeType: string; size: number; sha256: string; malwareScanStatus: string };
+  evidence: { storageName: string; originalName: string; mimeType: string; size: number; sha256: string };
   now?: Date;
 }) => {
   const now = input.now || new Date();
@@ -254,7 +254,6 @@ export const recordHrHiringCollateralOriginalReturn = async (database: any, inpu
     evidenceNote: input.evidenceNote, evidenceStorageName: input.evidence.storageName,
     evidenceOriginalName: input.evidence.originalName, evidenceMimeType: input.evidence.mimeType,
     evidenceSize: input.evidence.size, evidenceSha256: input.evidence.sha256,
-    evidenceMalwareScanStatus: input.evidence.malwareScanStatus,
   } });
   if (!changed.count) throw new Error('DUTY_SOURCE_CHANGED');
   const completed = await database.crossWorkspaceDuty.updateMany({
@@ -447,7 +446,6 @@ const respond: CrossWorkspaceDutySourceAdapter['respond'] = async (database, inp
         returnEvidenceNote: source.evidenceNote, returnEvidenceStorageName: source.evidenceStorageName,
         returnEvidenceOriginalName: source.evidenceOriginalName, returnEvidenceMimeType: source.evidenceMimeType,
         returnEvidenceSize: source.evidenceSize, returnEvidenceSha256: source.evidenceSha256,
-        returnEvidenceMalwareScanStatus: source.evidenceMalwareScanStatus,
         returnConfirmedBy: input.actorUserId, returnConfirmedAt: now,
       } });
       const application = await database.hrJobApplication.findUniqueOrThrow({

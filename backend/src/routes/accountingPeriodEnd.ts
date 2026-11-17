@@ -19,7 +19,7 @@ import {
 } from '../services/accountingPeriodEndPrismaRepository';
 import { createAccountingLedgerPrismaRepository } from '../services/accountingLedgerPrismaRepository';
 import { generatePdfBufferFromHtml } from '../utils/pdf';
-import { HR_HIRING_ALLOWED_MIME, scanHiringFile, sha256File, validateHiringFileSignature } from '../services/hrHiringFileStorage';
+import { HR_HIRING_ALLOWED_MIME, sha256File, validateHiringFileSignature } from '../services/hrHiringFileStorage';
 import { recordOperationalReconciliation } from '../services/accountingOperationalReconciliation';
 import { buildOfficialReportExportRows, officialReportPeriodLabels, officialReportPdfPageSize } from '../services/accountingOfficialReportExport';
 import { parseOfficialReportDate } from '../services/accountingOfficialReportDates';
@@ -261,9 +261,8 @@ router.post('/evidence', ...editAccess, run(async (req) => {
       const proof = await tx.accountingArchiveEvidence.findUnique({ where: { id: evidence.sourceId } });
       const requiredProofType = evidence.kind === 'ASSET_COST' ? 'ASSET_COST' : 'ASSET_READY_FOR_USE';
       if (!proof || proof.bookId !== asset.bookId || proof.sourceEntityType !== 'FIXED_ASSET'
-        || proof.sourceEntityId !== asset.id || proof.evidenceType !== requiredProofType
-        || proof.malwareScanStatus !== 'CLEAN' || !proof.malwareScanAt) {
-        throw new Error('مدرک معتبر و بررسی‌شدهٔ همین دارایی لازم است.');
+        || proof.sourceEntityId !== asset.id || proof.evidenceType !== requiredProofType) {
+        throw new Error('مدرک معتبر همین دارایی لازم است.');
       }
       const proofIds = evidence.kind === 'ASSET_COST' ? evidence.documentIds : [evidence.sourceId];
       const proofs = await tx.accountingArchiveEvidence.findMany({ where: { id: { in: proofIds } } });
@@ -946,7 +945,7 @@ router.post('/close-runs', ...managerAccess, run(async (req) => prisma.$transact
     tx.accountingTaxObligation.count({ where: { bookId: stored.bookId, dueAt: { lt: checkedAt }, status: { notIn: ['SETTLED', 'RECONCILED'] } } }),
     tx.accountingRecognitionSchedule.count({ where: { bookId: stored.bookId, status: 'ACTIVE', nextReviewAt: { lt: checkedAt } } }),
     tx.accountingOfficialReportSnapshot.findMany({ where: { bookId: stored.bookId, generatedAt: { gte: new Date(checkedAt.getTime() - 86_400_000) } }, select: { id: true, reportType: true, datasetHash: true, parameters: true, cutoffAt: true } }),
-    tx.accountingArchiveEvidence.findMany({ where: { bookId: stored.bookId, sourceEntityType: 'OFFICIAL_REPORT_SNAPSHOT', malwareScanStatus: 'CLEAN' }, select: { sourceEntityId: true, evidenceType: true, contentHash: true } }),
+    tx.accountingArchiveEvidence.findMany({ where: { bookId: stored.bookId, sourceEntityType: 'OFFICIAL_REPORT_SNAPSHOT' }, select: { sourceEntityId: true, evidenceType: true, contentHash: true } }),
     tx.accountingLedgerLine.aggregate({ where: { voucher: voucherScope }, _sum: { debitRials: true, creditRials: true } }),
     tx.accountingOperationalReconciliation.findMany({ where: { bookId: stored.bookId, fiscalYearId: stored.fiscalYearId, periodId: stored.periodId, reconciledAt: { gte: new Date(checkedAt.getTime() - 86_400_000) } } }),
     tx.accountingFixedAsset.findMany({ where: { bookId: stored.bookId, status: 'ACTIVE' }, select: { id: true, readyForUseAt: true, events: { select: { eventIdentity: true, sourceHash: true } } } }),
@@ -1203,9 +1202,7 @@ router.get('/assets/:id/evidence/:evidenceId/download', ...editAccess, async (re
       id: req.params.evidenceId, bookId, sourceEntityType: 'FIXED_ASSET', sourceEntityId: asset.id,
     } });
     if (!evidence) throw new Error('مدرک این دارایی پیدا نشد.');
-    if (evidence.malwareScanStatus !== 'CLEAN' || !evidence.malwareScanAt) {
-      throw new Error('مدرک تا پیش از تأیید بررسی بدافزار قابل دریافت نیست.');
-    }
+
     const filePath = await resolveArchiveReadPath(evidence.storageKey);
     const stat = await fs.promises.stat(filePath);
     if (!stat.isFile() || BigInt(stat.size) !== evidence.sizeBytes || await sha256File(filePath) !== evidence.contentHash) {
@@ -1270,7 +1267,7 @@ router.post('/assets/:id/evidence', ...editAccess, assetEvidenceUpload.single('f
       return publicEvidence;
     }
     validateHiringFileSignature(filePath, req.file!.mimetype);
-    if (await scanHiringFile(filePath) !== 'CLEAN') throw new Error('مدرک تا زمان تأیید بررسی بدافزار قابل ثبت نیست.');
+
     const stored = await prisma.$transaction(async tx => {
       // Serialize the same durable command identity, even across backend workers.
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${evidenceIdentity}, 0))`;
@@ -1297,7 +1294,7 @@ router.post('/assets/:id/evidence', ...editAccess, assetEvidenceUpload.single('f
         bookId: asset.bookId, evidenceIdentity,
         evidenceType, sourceEntityType: 'FIXED_ASSET', sourceEntityId: asset.id,
         contentHash, storageKey, mimeType: req.file!.mimetype, sizeBytes: BigInt(req.file!.size),
-        malwareScanStatus: 'CLEAN', malwareScanAt: new Date(), retentionPolicyId: 'ASSET_DOCUMENT_V1',
+        retentionPolicyId: 'ASSET_DOCUMENT_V1',
         uploadedBy: req.user!.id,
       } });
       await createAccountingLedgerPrismaRepository(tx, true).appendAudit({
@@ -1325,8 +1322,8 @@ router.post('/archive-evidence', ...managerAccess, run(async (req) => {
   const filePath = await resolveArchiveReadPath(storageKey);
   const stat = await fs.promises.stat(filePath).catch(() => null);
   if (!stat?.isFile()) throw new Error('فایل بایگانی در مخزن امن پیدا نشد.');
-  const [contentHash, malwareScanStatus] = await Promise.all([sha256File(filePath), scanHiringFile(filePath)]);
-  if (malwareScanStatus !== 'CLEAN') throw new Error('فایل بدون تأیید قطعی بررسی بدافزار قابل بایگانی نیست.');
+  const contentHash = await sha256File(filePath);
+
   if (req.body.contentHash && String(req.body.contentHash).toLowerCase() !== contentHash) throw new Error('اثر انگشت فایل بایگانی با شواهد ارسالی سازگار نیست.');
   if (req.body.sizeBytes != null && BigInt(req.body.sizeBytes) !== BigInt(stat.size)) throw new Error('اندازه فایل بایگانی با شواهد ارسالی سازگار نیست.');
   return prisma.accountingArchiveEvidence.create({ data: {
@@ -1339,8 +1336,6 @@ router.post('/archive-evidence', ...managerAccess, run(async (req) => {
     storageKey,
     mimeType: positiveText(req.body.mimeType, 'نوع فایل'),
     sizeBytes: BigInt(stat.size),
-    malwareScanStatus,
-    malwareScanAt: new Date(),
     retentionPolicyId: positiveText(req.body.retentionPolicyId, 'سیاست نگهداری'),
     retainUntil: req.body.retainUntil ? date(req.body.retainUntil, 'پایان نگهداری') : null,
     legalHold: Boolean(req.body.legalHold),
@@ -1351,7 +1346,7 @@ router.post('/archive-evidence', ...managerAccess, run(async (req) => {
 
 const accessArchiveEvidence = (action: 'VIEW' | 'DOWNLOAD') => run(async (req) => {
   const evidence = await prisma.accountingArchiveEvidence.findUniqueOrThrow({ where: { id: req.params.id } });
-  if (evidence.malwareScanStatus !== 'CLEAN' || !evidence.malwareScanAt) throw new Error('مدرک تا پیش از تأیید بررسی بدافزار قابل مشاهده یا دریافت نیست.');
+
   await createAccountingLedgerPrismaRepository(prisma).transaction((tx) => tx.appendAudit({
     action: `LEGAL_ARCHIVE_${action}`,
     result: 'SUCCEEDED',
@@ -1378,7 +1373,7 @@ router.post('/archive-evidence/:id/download', ...managerAccess, accessArchiveEvi
 router.get('/archive-evidence/:id/download', ...managerAccess, async (req: WorkspaceRequest, res: Response) => {
   try {
     const evidence = await prisma.accountingArchiveEvidence.findUniqueOrThrow({ where: { id: req.params.id } });
-    if (evidence.malwareScanStatus !== 'CLEAN' || !evidence.malwareScanAt) throw new Error('مدرک تا پیش از تأیید بررسی بدافزار قابل دریافت نیست.');
+
     const filePath = await resolveArchiveReadPath(evidence.storageKey);
     const contentHash = await sha256File(filePath);
     if (contentHash !== evidence.contentHash) throw new Error('تمامیت فایل بایگانی تأیید نشد.');

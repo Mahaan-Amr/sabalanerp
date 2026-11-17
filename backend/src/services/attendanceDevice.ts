@@ -155,7 +155,7 @@ export async function ingestPunch(db: DB, terminalId: string, input: PunchInput,
   }
   const previousRows = await db.$queryRaw<{ occurredAt: Date; correctedOccurredAt: Date | null }[]>`SELECT "occurredAt", "correctedOccurredAt" FROM attendance_punches WHERE "personnelId" = ${person.id} AND id <> ${punch.id} AND status IN ('APPLIED', 'CONFIRMED', 'LINKED') AND COALESCE("correctedOccurredAt", "occurredAt") <= ${at} ORDER BY COALESCE("correctedOccurredAt", "occurredAt") DESC LIMIT 1`;
   const previous = previousRows[0];
-  if (previous && securityDateKeyFromInstant(previous.correctedOccurredAt || previous.occurredAt) === dayKey && at.getTime() - (previous.correctedOccurredAt || previous.occurredAt).getTime() <= 10000) return set('DUPLICATE', 'اسکن تکراری احتمالی تا ۱۰ ثانیه');
+  if (previous && securityDateKeyFromInstant(previous.correctedOccurredAt || previous.occurredAt) === dayKey && at.getTime() - (previous.correctedOccurredAt || previous.occurredAt).getTime() <= 10000) return set('IGNORED', 'اسکن تکراری تا ۱۰ ثانیه؛ خودکار کنار گذاشته شد');
   if (await db.attendancePunch.findFirst({ where: { personnelId: person.id, id: { not: punch.id }, status: 'REVIEW', OR: [{ correctedOccurredAt: { gte: dayStart, lte: at } }, { correctedOccurredAt: null, occurredAt: { gte: dayStart, lte: at } }] } })) return set('REVIEW', 'تردد وابسته به ابهام قبلی');
   if (boundaries.some(b => b.at > at)) return set('REVIEW', 'رویداد دیررس؛ ترتیب یا ثبت دستی نیازمند بررسی');
   const priorOpen = rows.filter(i => !i.exitedAt && !i.exitUnknown && securityDateKeyFromInstant(i.enteredAt || i.observedInsideAt!) < dayKey);

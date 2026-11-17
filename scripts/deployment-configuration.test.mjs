@@ -25,7 +25,7 @@ function containers(coordination) {
   return records;
 }
 function fixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sabalan-config-release-'));
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sabalan-config-release-')));
   const coordination = path.join(root, 'coordination'); fs.mkdirSync(coordination);
   const environment = path.join(root, '.env.prod');
   const original = 'JWT_SECRET=secret-do-not-output\nBIOMETRIC_CONNECTOR_MODE=unconfigured\nBIOMETRIC_WORKSTATIONS_JSON={}\n';
@@ -117,8 +117,14 @@ test('provisioning rejects unsupported fields, injection and overwriting an exis
   } finally { dispose(f); }
 });
 
-for (const failure of ['storage', 'preflight', 'native-closure', 'checkpoint', 'after-mutation', 'success']) test(`configuration release retains gates and recovers failure at ${failure} without source fetch/build`, () => {
+for (const scenario of ['storage', 'preflight', 'native-closure', 'checkpoint', 'after-mutation', 'success', 'scanner-free']) test(`configuration release retains gates at ${scenario} without source fetch/build`, () => {
+  const scannerFree = scenario === 'scanner-free';
+  const failure = scannerFree ? 'success' : scenario;
   const f = fixture();
+  if (scannerFree) {
+    f.containers.pop();
+    f.containers[0].Config.Labels['io.sabalan.release.upload-policy'] = 'no-malware-scan';
+  }
   let originalFailure;
   try {
     fs.mkdirSync(path.join(f.root, '.git'));
@@ -133,7 +139,12 @@ for (const failure of ['storage', 'preflight', 'native-closure', 'checkpoint', '
     fs.copyFileSync(path.join(repository, 'scripts/performance-deployment-environment.mjs'), path.join(f.root, 'scripts/performance-deployment-environment.mjs'));
     fs.writeFileSync(f.environment, f.original + `DEPLOYMENT_SECRET_DIR=${secrets.replaceAll('\\', '/')}\nDEPLOYMENT_REMOTE_MOUNT_HOST=${remote.replaceAll('\\', '/')}\nDEPLOYMENT_REPORT_DIR_HOST=reports\nDEPLOYMENT_OWNER=test\n`);
     const before = fs.readFileSync(f.environment, 'utf8');
-    const recordsFile = path.join(f.root, 'containers.json'); fs.writeFileSync(recordsFile, JSON.stringify(f.containers));
+    const records = f.containers.map((row, index) => ({ ...row, Id: String(index + 1).repeat(64) }));
+    records[0].Mounts.push({
+      Type: 'volume', Destination: '/app/storage/dispatch-documents',
+      Name: 'sabalanerp_backend_storage_dispatch_documents', RW: true,
+    });
+    const recordsFile = path.join(f.root, 'containers.json'); fs.writeFileSync(recordsFile, JSON.stringify(records));
     const bin = path.join(f.root, 'bin'); fs.mkdirSync(bin);
     const log = path.join(f.root, 'commands.log');
     // This command harness substitutes only the fixed external backup-host
@@ -154,7 +165,7 @@ for (const failure of ['storage', 'preflight', 'native-closure', 'checkpoint', '
     fs.writeFileSync(fakeLegacySignal, `const fs=require('fs'),path=require('path'),assert=require('assert/strict');
 const a=process.argv.slice(2),[script,mode,compose,environment,image,plan,session]=a;
 assert.ok(script.endsWith('/deploy/scripts/legacy-backend-signal.py'));
-assert.ok(['--preflight','--forward','--assert-resolved'].includes(mode));
+assert.ok(['--preflight','--forward','--assert-resolved','--assert-current-stopped','--assert-unleased-drain-allowed'].includes(mode));
 assert.equal(compose,path.join(process.env.DEPLOYMENT_REPO_ROOT,'docker-compose.prod.yml').replaceAll(String.fromCharCode(92),'/'));
 assert.equal(environment,process.env.TEST_ENV);assert.match(image,/^sha256:[a-f0-9]{64}$/);
 assert.equal(image,JSON.parse(fs.readFileSync(process.env.TEST_CONTAINERS))[0].Image);
@@ -163,15 +174,15 @@ const marker=path.join(process.env.TEST_REPORTS,'fixture-legacy-preflight.json')
 fs.appendFileSync(process.env.TEST_LOG,JSON.stringify(['fixture-legacy-signal',mode])+'\\n');
 if(mode==='--preflight'){assert.equal(a.length,6);fs.writeFileSync(marker,JSON.stringify({image,plan}),{flag:'wx'});}
 else if(mode==='--forward'){assert.equal(a.length,7);assert.deepEqual(JSON.parse(fs.readFileSync(marker)),{image,plan});assert.equal(session,path.join(process.env.TEST_REPORTS,'active-deployment-session.json').replaceAll(String.fromCharCode(92),'/'));assert.equal(JSON.parse(fs.readFileSync(session)).phase,'TRAFFIC_BLOCKED');}
-else {assert.equal(a.length,6);if(fs.existsSync(marker))assert.deepEqual(JSON.parse(fs.readFileSync(marker)),{image,plan});}
+else {assert.equal(a.length,mode==='--assert-current-stopped'?7:6);if(fs.existsSync(marker))assert.deepEqual(JSON.parse(fs.readFileSync(marker)),{image,plan});}
 `);
     fs.writeFileSync(path.join(bin, 'python3'), `#!/bin/sh\ncase "$1" in */deploy/scripts/legacy-backend-signal.py) exec '${nodeBinary}' '${fakeLegacySignal.replaceAll('\\', '/')}' "$@";; *) echo 'fixture refuses unexpected python invocation' >&2; exit 99;; esac\n`, { mode: 0o755 });
     const fakeDocker = path.join(f.root, 'fake-docker.cjs');
     fs.writeFileSync(fakeDocker, `const fs=require('fs');const path=require('path');const a=process.argv.slice(2);fs.appendFileSync(process.env.TEST_LOG,JSON.stringify(a)+'\\n');const records=JSON.parse(fs.readFileSync(process.env.TEST_CONTAINERS));const env=k=>(a.find(v=>v.startsWith(k+'='))||'').slice(k.length+1);const session=path.join(process.env.TEST_REPORTS,'active-deployment-session.json');
-if(a[0]==='inspect' && a.includes('--format')){console.log(a.includes('{{.Image}}')?records.find(r=>r.Id===a.at(-1)).Image:'10.0.0.2');}
+if(a[0]==='inspect' && a.includes('--format')){console.log(a.includes('{{.Image}}')?records.find(r=>r.Id===a.at(-1)).Image:a.includes('{{.State.Health.Status}}')?'healthy':a.some(v=>v.includes('io.sabalan.release.upload-policy'))?(records[0].Config.Labels['io.sabalan.release.upload-policy']??''):'10.0.0.2');}
 else if(a[0]==='inspect'){console.log(JSON.stringify(records.filter(r=>a.slice(1).includes(r.Id))));}
-else if(a.includes('ps')){console.log(a.at(-1));}
-else if(a.includes('config')){console.log('services: {}');}
+else if(a.includes('ps')){console.log(records.find(r=>r.Config.Labels['com.docker.compose.service']===a.at(-1))?.Id??'');}
+else if(a.includes('config')){const source='backend_storage_dispatch_documents';console.log(JSON.stringify({services:{backend:{volumes:[{type:'volume',source,target:'/app/storage/dispatch-documents'}]}},volumes:{[source]:{name:'sabalanerp_'+source}}}));}
 else if(a.includes('dist/scripts/deployment-performance-identity.js')){fs.writeFileSync(require('path').join(process.env.TEST_REPORTS,'performance-database-'+a.find(v=>v.startsWith('DEPLOYMENT_ID=')).slice(14)+'.json'),JSON.stringify({schemaHash:'b'.repeat(64),policyHash:'b'.repeat(64)}));}
 else if(a.includes('dist/scripts/validate-production-environment.js')){if(process.env.TEST_FAILURE==='preflight')process.exit(42);}
 else if(a.includes('dist/scripts/deployment-control.js')){const c=a[a.indexOf('dist/scripts/deployment-control.js')+1];if(c==='prepare'){fs.writeFileSync(session,JSON.stringify({phase:'PREFLIGHT',leaseToken:'fixture-lease',rollbackPerformanceEnvironment:Object.fromEntries(records[0].Config.Env.filter(v=>v.startsWith('PERFORMANCE_')).map(v=>[v.split('=')[0],v.slice(v.indexOf('=')+1)]))}));}else if(c==='acquire'||c==='transition'){const s=JSON.parse(fs.readFileSync(session));s.phase=c==='acquire'?'LEASE_ACQUIRED':env('DEPLOYMENT_PHASE');fs.writeFileSync(session,JSON.stringify(s));}else if(c==='finish'||c==='cancel-preflight'){fs.rmSync(session,{force:true});}}
@@ -180,16 +191,16 @@ else if(a.includes('dist/scripts/deployment-checkpoint.js')){if(process.env.TEST
 else if(a.includes('sh')&&a.includes('-c')&&a.at(-1).includes('exec python3 - --assert-closed')){if(process.env.TEST_FAILURE==='native-closure')process.exit(46);}
 else if(a.includes('node_modules/prisma/build/index.js')&&a.includes('status')){if(process.env.TEST_FAILURE==='after-mutation')process.exit(44);}
 else if(a.includes('exec')){const text=a.at(-1);if(text.includes('pg_sleep(21600)')){fs.writeFileSync(path.join(process.env.DEPLOYMENT_REPO_ROOT,'fixture-advisory.pid'),String(process.pid));setInterval(()=>{},1000);}else if(text.includes('pg_locks'))console.log('1');else if(text.includes('pg_stat_activity WHERE client_addr'))console.log('0');else if(text.includes('round(100.0'))console.log('20');else if(text.includes('pg_database_size'))console.log('1000000');else if(text.includes('df -Pk'))console.log('6000000');}
-else if(a.includes('up')||a.includes('stop')||a.includes('dist/scripts/dry-run-contract-product-graph-migration.js')||a.includes('dist/scripts/audit-hr-onboarding-task-retirement.js')||a.includes('dist/scripts/migrate-all-contract-product-graphs.js')||a.includes('dist/scripts/reconcile-contract-financial-evidence.js')||a.includes('dist/scripts/deployment-drill-preflight.js')||a.includes('dist/scripts/deployment-notify.js')||a.includes('dist/scripts/deployment-gates.js')||a.includes('dist/scripts/deployment-rollback.js')||a.includes('dist/scripts/deployment-finalize-recovery.js')){}
+else if(a.includes('up')||a.includes('start')||a.includes('stop')||a.includes('dist/scripts/dry-run-contract-product-graph-migration.js')||a.includes('dist/scripts/audit-hr-onboarding-task-retirement.js')||a.includes('dist/scripts/migrate-all-contract-product-graphs.js')||a.includes('dist/scripts/reconcile-contract-financial-evidence.js')||a.includes('dist/scripts/deployment-drill-preflight.js')||a.includes('dist/scripts/deployment-notify.js')||a.includes('dist/scripts/deployment-gates.js')||a.includes('dist/scripts/deployment-rollback.js')||a.includes('dist/scripts/deployment-finalize-recovery.js')){}
 else{process.exit(99);}`);
-    fs.writeFileSync(path.join(bin, 'docker'), `#!/bin/sh\ncase "$*" in *pg_sleep*) exec /usr/bin/sleep 300;; esac\nexec node '${fakeDocker.replaceAll('\\', '/')}' "$@"\n`, { mode: 0o755 });
+    fs.writeFileSync(path.join(bin, 'docker'), `#!/bin/sh\ncase "$*" in *pg_sleep*) exec /bin/sleep 300;; esac\nexec node '${fakeDocker.replaceAll('\\', '/')}' "$@"\n`, { mode: 0o755 });
     fs.writeFileSync(path.join(bin, 'git'), `#!/bin/sh\nprintf '%s\\n' "$*" >> "$TEST_GIT_LOG"\ncase "$1" in diff) exit 0;; rev-parse) printf 'cccccccccccccccccccccccccccccccccccccccc\\n';; *) exit 99;; esac\n`, { mode: 0o755 });
     fs.writeFileSync(path.join(bin, 'flock'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
     // The controller fixture replaces external process ownership at its CLI
     // boundary; the legacy owner itself has its own Linux integration tests.
-    fs.writeFileSync(path.join(bin, 'sh'), '#!/bin/sh\ncase "$1" in */storage-preflight.sh) printf \'["storage-preflight"]\\n\' >> "$TEST_LOG"; [ "$TEST_FAILURE" != storage ] || exit 45; exit 0;; *) exec /usr/bin/sh "$@";; esac\n', { mode: 0o755 });
+    fs.writeFileSync(path.join(bin, 'sh'), '#!/bin/sh\ncase "$1" in */storage-preflight.sh) printf \'["storage-preflight"]\\n\' >> "$TEST_LOG"; [ "$TEST_FAILURE" != storage ] || exit 45; exit 0;; *) exec /bin/sh "$@";; esac\n', { mode: 0o755 });
     fs.writeFileSync(path.join(bin, 'curl'), '#!/bin/sh\nprintf 503\n', { mode: 0o755 });
-    fs.writeFileSync(path.join(bin, 'sleep'), '#!/bin/sh\nexec /usr/bin/sleep 0.02\n', { mode: 0o755 });
+    fs.writeFileSync(path.join(bin, 'sleep'), '#!/bin/sh\nexec /bin/sleep 0.02\n', { mode: 0o755 });
     const bash = process.platform === 'win32' ? 'C:/Program Files/Git/bin/bash.exe' : '/bin/sh';
     const shellBin = bin.replaceAll('\\', '/').replace(/^([A-Za-z]):/, '/$1');
     const result = spawnSync(bash, ['-c', 'export PATH="$TEST_BIN:$PATH"; exec sh "$TEST_SCRIPT" "$TEST_ENV"'], {
@@ -202,6 +213,10 @@ else{process.exit(99);}`);
     assert.ok(commands.includes('storage-preflight'));
     assert.equal(commands.includes('deployment-checkpoint.js'), !['storage', 'preflight', 'native-closure'].includes(failure));
     const rows=commands.trim().split(/\r?\n/).map(line=>JSON.parse(line));
+    if (scannerFree) {
+      assert.ok(!rows.some(row => row.includes('clamav') || row.includes('docker-compose.rollback-legacy.yml')));
+      assert.ok(!commands.includes('HR_HIRING_ANTIVIRUS_COMMAND'));
+    }
     const hostStage=stage=>rows.findIndex(row=>row[0]==='host-backup-retention'&&row.includes(stage));
     const checkpoint=rows.findIndex(row=>row.includes('dist/scripts/deployment-checkpoint.js'));
     const nativeClosure = rows.findIndex(row => row.includes('sh') && row.includes('-c') && row.at(-1).includes('exec python3 - --assert-closed'));
@@ -224,13 +239,13 @@ else{process.exit(99);}`);
     if (failure === 'after-mutation') assert.ok(commands.includes('deployment-rollback.js'));
     assert.ok(!/fetch|pull|checkout/.test(fs.readFileSync(path.join(f.root, 'git.log'), 'utf8')));
     if (failure === 'success') { assert.ok(fs.readFileSync(f.environment, 'utf8').includes('LAPTOP-01')); assert.ok(!commands.includes('deployment-rollback.js')); } else assert.equal(fs.readFileSync(f.environment, 'utf8'), before);
-    if (failure === 'native-closure') {
+    if (failure === 'native-closure' || failure === 'checkpoint') {
       assert.ok(fs.existsSync(path.join(f.root, '.deploy-state/biometric-configuration.json')), 'uncertain native work keeps recovery evidence');
       assert.ok(!commands.includes('maintenance-off'), 'failure before mutation cannot reopen an orphan runtime');
       assert.ok(!commands.includes('deployment-rollback.js'), 'uncertain native work cannot restore older data');
       const rows = commands.trim().split(/\r?\n/).map(line => JSON.parse(line));
       assert.ok(!rows.some(row => row.includes('up') && row.includes('backend')), 'uncertain native work cannot start the prior application');
-    } else assert.ok(!fs.existsSync(path.join(f.root, '.deploy-state/biometric-configuration.json')));
+    } else assert.ok(!fs.existsSync(path.join(f.root, '.deploy-state/biometric-configuration.json')), result.stdout + '\n' + result.stderr);
     assert.ok(!`${result.stdout}${result.stderr}`.includes(key));
   } catch (error) { originalFailure = error; throw error; }
   finally { try { dispose(f); } catch (error) { if (!originalFailure) throw error; } }

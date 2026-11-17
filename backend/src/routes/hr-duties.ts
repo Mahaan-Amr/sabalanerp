@@ -23,7 +23,7 @@ import {
   markCrossWorkspaceDutyAvailableSeen,
 } from '../services/crossWorkspaceDutyInbox';
 import {
-  HR_HIRING_ALLOWED_MIME, HR_HIRING_STORAGE_DIR, scanHiringFile,
+  HR_HIRING_ALLOWED_MIME, HR_HIRING_STORAGE_DIR,
   safeHiringStoragePath, sha256File, validateHiringFileSignature,
 } from '../services/hrHiringFileStorage';
 import {
@@ -251,7 +251,6 @@ router.post('/:id/hiring-finance/original-return', enforceMutationIdempotency, h
   try {
     if (!req.file) throw new Error('COLLATERAL_RETURN_PROOF_REQUIRED');
     validateHiringFileSignature(req.file.path, req.file.mimetype);
-    const scanStatus = await scanHiringFile(req.file.path);
     const digest = await sha256File(req.file.path);
     const returnedTo = String(req.body.returnedTo || '').trim();
     const evidenceNote = String(req.body.evidenceNote || '').trim();
@@ -261,7 +260,7 @@ router.post('/:id/hiring-finance/original-return', enforceMutationIdempotency, h
       dutyId: req.params.id, actorUserId: req.user!.id, returnedTo, evidenceNote,
       evidence: {
         storageName: req.file!.filename, originalName: req.file!.originalname,
-        mimeType: req.file!.mimetype, size: req.file!.size, sha256: digest, malwareScanStatus: scanStatus,
+        mimeType: req.file!.mimetype, size: req.file!.size, sha256: digest,
       },
     }), { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     res.status(201).json({ success: true, data: result });
@@ -272,7 +271,6 @@ router.post('/:id/hiring-finance/receipt', enforceMutationIdempotency, hiringFin
   try {
     if (!req.file) throw new Error('COLLATERAL_SCAN_REQUIRED');
     validateHiringFileSignature(req.file.path, req.file.mimetype);
-    const scanStatus = await scanHiringFile(req.file.path);
     const digest = await sha256File(req.file.path);
     const receivedAt = parseCollateralReceiptDate(req.body.receivedAt);
     const custodyLocation = String(req.body.custodyLocation || '').trim();
@@ -286,7 +284,7 @@ router.post('/:id/hiring-finance/receipt', enforceMutationIdempotency, hiringFin
       receivedAt, custodyLocation,
       evidence: {
         storageName: req.file!.filename, originalName: req.file!.originalname,
-        mimeType: req.file!.mimetype, size: req.file!.size, sha256: digest, malwareScanStatus: scanStatus,
+        mimeType: req.file!.mimetype, size: req.file!.size, sha256: digest,
       },
     }), { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     res.status(201).json({ success: true, data: result });

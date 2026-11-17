@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import { resolveArchiveReadPath, sha256ArchiveFile } from './accountingArchiveStorage';
 
 type Proof = { id: string; bookId: string; sourceEntityType: string; sourceEntityId: string;
-  evidenceType: string; malwareScanStatus: string; malwareScanAt: Date | null;
+  evidenceType: string;
   storageKey: string; sizeBytes: bigint; contentHash: string };
 export async function assertAssetEvidenceFiles(input: { proofs: Proof[]; proofIds: string[]; sourceId: string;
   assetId: string; bookId: string; evidenceType: string; applicationRoot?: string }) {
@@ -14,9 +14,8 @@ export async function assertAssetEvidenceFiles(input: { proofs: Proof[]; proofId
   }
   for (const item of input.proofs) {
     if (item.bookId !== input.bookId || item.sourceEntityType !== 'FIXED_ASSET'
-      || item.sourceEntityId !== input.assetId || item.evidenceType !== input.evidenceType
-      || item.malwareScanStatus !== 'CLEAN' || !item.malwareScanAt) {
-      throw new Error('مدرک معتبر و بررسی‌شدهٔ همین دارایی لازم است.');
+      || item.sourceEntityId !== input.assetId || item.evidenceType !== input.evidenceType) {
+      throw new Error('مدرک معتبر همین دارایی لازم است.');
     }
     const filePath = await resolveArchiveReadPath(item.storageKey, input.applicationRoot);
     const stat = await fs.stat(filePath);

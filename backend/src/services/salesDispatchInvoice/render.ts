@@ -64,7 +64,7 @@ export function renderSalesInvoice(snapshot: IssuedInvoiceSnapshot, voidReason?:
     const savedRows = snapshot.print?.rows[line.key] || [];
     const [saved, ...services] = savedRows;
     const allocated = splitApprovedGross(savedRows, snapshot.print?.contractedGross?.[line.key], gross);
-    const legacyDetails = !snapshot.print && line.details.length ? [{
+    const legacyDetails = !savedRows.length && line.details.length ? [{
       code: '', description: line.details.join('، '), category: 'توضیحات',
       length: '', width: '', count: '', linearMeasurement: '', squareMeasurement: '',
     }] : [];

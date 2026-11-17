@@ -247,6 +247,13 @@ for (const width of [1280, 390]) {
     await page.goto("/dashboard/accounting/dispatch");
     const table = page.getByRole("table");
     await expect(table.getByRole("row")).toHaveCount(3);
+    const status = table.getByText("پذیرفته‌شده", { exact: true }).first();
+    await expect(status).toBeVisible();
+    expect(await status.evaluate(element => {
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      return range.getClientRects().length;
+    })).toBe(1);
     await expect(table.getByRole("button", { name: /ابطال.*فاکتور فروش/ })).toHaveCount(0);
     const search = page.getByPlaceholder("شماره بارگیری، مشتری، پروژه، قرارداد، راننده، پلاک یا شماره بارنامه");
     await search.fill("راننده ۱");
@@ -439,4 +446,39 @@ test("Accounting verifies a customer pickup before issuing its waybill and sales
   await expect(issue).toBeEnabled();
   await issue.click();
   await expect(details.getByText("فاکتور ۲۲ · صادرشده", { exact: true })).toBeVisible();
+});
+
+test("Accounting shows the OTP controls after the biometric fallback starts", async ({ page }) => {
+  await loginAsAdmin(page);
+  const waybillId = "qa-fallback-waybill";
+  const sessionId = "qa-fallback-session";
+  await page.route("**/api/accounting/dispatch-candidates", route => reply(route, [{
+    id: "qa-fallback-candidate", loadingId: "qa-fallback-loading", status: "ACCEPTED", canManage: true,
+    summary: { loadingNumber: "15", driverName: "راننده نمونه", driverSource: "INTERNAL" },
+    waybills: [{ id: waybillId, number: "23", status: "ISSUED" }],
+  }]));
+  await page.route("**/api/dispatch-confirmation/capabilities", route => reply(route, {
+    canManageAccountingCandidates: true, canManageAccountingConfirmation: true,
+  }));
+  await page.route(`**/api/dispatch-confirmation/waybills/${waybillId}/sessions`, route => reply(route, {
+    id: sessionId, waybillId, driverSource: "INTERNAL", method: "INTERNAL_BIOMETRIC", status: "ACTIVE",
+  }));
+  await page.route(`**/api/dispatch-confirmation/sessions/${sessionId}/fallback`, route => reply(route, {
+    sessionId, method: "INTERNAL_FALLBACK",
+  }));
+  await page.route(`**/api/dispatch-confirmation/sessions/${sessionId}/otp/verify`, route => {
+    expect(route.request().postDataJSON()).toEqual({ code: "123456" });
+    return reply(route, { verifiedAt: new Date().toISOString() });
+  });
+  await page.goto("/dashboard/accounting/dispatch");
+  await page.getByRole("table").getByRole("button", { name: "تأیید هویت راننده" }).click();
+  const fallback = page.getByRole("button", { name: "استفاده از روش جایگزین" });
+  const code = page.getByRole("textbox", { name: "رمز یک‌بارمصرف راننده" });
+  await expect(code).toHaveCount(0);
+  await fallback.click();
+  await expect(code).toBeVisible();
+  await expect(fallback).toHaveCount(0);
+  await code.fill("123456");
+  await page.getByRole("button", { name: "تأیید رمز", exact: true }).click();
+  await expect(page.getByText("رمز راننده تأیید شد.", { exact: true })).toBeVisible();
 });

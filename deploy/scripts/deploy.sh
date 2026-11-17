@@ -63,6 +63,9 @@ fi
 DEPLOY_REMOTE="${DEPLOY_REMOTE:-origin}"
 DEPLOY_BRANCH="${DEPLOY_BRANCH:-main}"
 COMPOSE_FILE="docker-compose.prod.yml"
+LEGACY_SCANNER_COMPOSE="docker-compose.rollback-legacy.yml"
+LEGACY_RELEASE_GRAPH=0
+DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE=""
 ADVISORY_LOCK_KEY="741936425"
 LOCK_FILE="${REPO_ROOT}/.deploy-state/deployment.lock"
 ADVISORY_PID=""
@@ -124,7 +127,11 @@ compose() {
   if [ -n "${DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX:-}" ]; then
     preserved_clamav_guard compose "$@" || return 1
   fi
-  docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" "$@"
+  if [ "${LEGACY_RELEASE_GRAPH}" -eq 1 ] && [ "${COMPOSE_FILE}" = docker-compose.prod.yml ]; then
+    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" -f "${LEGACY_SCANNER_COMPOSE}" "$@"
+  else
+    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" "$@"
+  fi
 }
 
 verify_prebuilt_release() {
@@ -157,13 +164,25 @@ start_release_services() {
   fi
   if [ -n "${DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX:-}" ]; then
     preserved_clamav_guard health || return 1
-    compose up -d --no-deps --no-build --wait --wait-timeout "${wait_seconds}" postgres backend frontend inquiry nginx
+    compose up -d --no-deps --no-build --wait --wait-timeout "${wait_seconds}" postgres backend frontend inquiry nginx || return 1
   elif [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ] && [ "${MUTATION_STARTED}" -eq 0 ]; then
     # A failed preflight/checkpoint must restart the exact old container, never apply target config.
-    compose start clamav
-    compose up -d --no-deps --no-build --wait --wait-timeout "${wait_seconds}" postgres backend frontend inquiry nginx
+    compose start clamav || return 1
+    compose up -d --no-deps --no-build --wait --wait-timeout "${wait_seconds}" postgres backend frontend inquiry nginx || return 1
+  elif [ "${LEGACY_RELEASE_GRAPH}" -eq 1 ]; then
+    printf '%s\n' "${DEPLOYMENT_CLAMAV_IMAGE}" | grep -Eq '^sha256:[a-f0-9]{64}$' || return 1
+    if [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ]; then
+      compose up -d --no-build --wait --wait-timeout "${wait_seconds}" postgres clamav backend frontend inquiry nginx || return 1
+    else
+      # The scanner used by the retained release is never recreated here.
+      legacy_scanner_id="$(compose ps -a -q clamav)" || return 1
+      [ -n "${legacy_scanner_id}" ] || return 1
+      [ "$(docker inspect --format '{{.Image}}' "${legacy_scanner_id}")" = "${DEPLOYMENT_CLAMAV_IMAGE}" ] || return 1
+      compose start --wait --wait-timeout "${wait_seconds}" clamav || return 1
+      compose up -d --no-deps --no-build --wait --wait-timeout "${wait_seconds}" postgres backend frontend inquiry nginx || return 1
+    fi
   else
-    compose up -d --no-build --wait --wait-timeout "${wait_seconds}" postgres clamav backend frontend inquiry nginx
+    compose up -d --no-build --wait --wait-timeout "${wait_seconds}" postgres backend frontend inquiry nginx || return 1
   fi
   # Nginx resolves Compose service names when its workers start. Recreate it
   # after application containers have their final addresses so rollout and
@@ -172,8 +191,12 @@ start_release_services() {
 }
 
 run_backend() {
+  legacy_control_files=""
+  if [ "${COMPOSE_FILE}" = docker-compose.prod.yml ] && [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ]; then
+    legacy_control_files="-f ${LEGACY_SCANNER_COMPOSE}"
+  fi
   DEPLOYMENT_BACKEND_IMAGE="${DEPLOYMENT_TARGET_BACKEND_IMAGE}" BACKEND_DB_CONNECTION_LIMIT=2 DATABASE_APPLICATION_NAME=sabalanerp-deployment \
-    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" run -T --rm --no-deps \
+    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ${legacy_control_files} run -T --rm --no-deps \
       --label "io.sabalan.deployment.id=${DEPLOYMENT_ID}" \
       -e "BACKEND_RUNTIME_ROLE=control" \
       -e DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX \
@@ -243,11 +266,15 @@ assert_qa_remote_checkpoint_mount() {
 run_backend_timed() {
   duration="$1"
   shift
+  legacy_control_files=""
+  if [ "${COMPOSE_FILE}" = docker-compose.prod.yml ] && [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ]; then
+    legacy_control_files="-f ${LEGACY_SCANNER_COMPOSE}"
+  fi
   timeout "${duration}" env \
     DEPLOYMENT_BACKEND_IMAGE="${DEPLOYMENT_TARGET_BACKEND_IMAGE}" \
     BACKEND_DB_CONNECTION_LIMIT=2 \
     DATABASE_APPLICATION_NAME=sabalanerp-deployment \
-    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" run -T --rm --no-deps \
+    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ${legacy_control_files} run -T --rm --no-deps \
       --label "io.sabalan.deployment.id=${DEPLOYMENT_ID}" \
       -e "BACKEND_RUNTIME_ROLE=control" \
       -e DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX \
@@ -554,6 +581,8 @@ switch_to_previous_images() {
   DEPLOYMENT_NGINX_IMAGE="${DEPLOYMENT_PREVIOUS_NGINX_IMAGE}"
   DEPLOYMENT_POSTGRES_IMAGE="${DEPLOYMENT_PREVIOUS_POSTGRES_IMAGE}"
   DEPLOYMENT_CLAMAV_IMAGE="${DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE}"
+  LEGACY_RELEASE_GRAPH=0
+  [ -z "${DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE}" ] || LEGACY_RELEASE_GRAPH=1
   export DEPLOYMENT_BACKEND_IMAGE DEPLOYMENT_FRONTEND_IMAGE DEPLOYMENT_INQUIRY_IMAGE DEPLOYMENT_NGINX_IMAGE DEPLOYMENT_POSTGRES_IMAGE DEPLOYMENT_CLAMAV_IMAGE
   # Values are journaled before mutation and emitted only after strict hash/digest validation.
   rollback_runtime_exports="$(node scripts/performance-deployment-environment.mjs restore "${SESSION_HOST_PATH}")" || return 1
@@ -666,7 +695,9 @@ bind_host_backup_retention_receipt() {
 
 capture_only_services() {
   ids=""
-  for service in backend frontend inquiry nginx postgres clamav; do
+  set -- backend frontend inquiry nginx postgres
+  if [ "${LEGACY_RELEASE_GRAPH}" -eq 1 ]; then set -- "$@" clamav; fi
+  for service in "$@"; do
     id="$(compose ps -a -q "${service}")"; [ -n "${id}" ] || return 1
     ids="${ids} ${id}"
   done
@@ -1011,7 +1042,7 @@ if [ -f "${SESSION_HOST_PATH}" ]; then
   DEPLOYMENT_PREVIOUS_INQUIRY_IMAGE="$(session_value rollbackReleaseSet.inquiry)"
   DEPLOYMENT_PREVIOUS_NGINX_IMAGE="$(session_value rollbackReleaseSet.nginx)"
   DEPLOYMENT_PREVIOUS_POSTGRES_IMAGE="$(session_value rollbackReleaseSet.postgres)"
-  DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE="$(session_value rollbackReleaseSet.clamav)"
+  DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE="$(session_value rollbackReleaseSet.clamav || [ "$?" -eq 2 ])"
   bootstrap_value="$(session_value bootstrap)"
   [ "${bootstrap_value}" = "true" ] && BOOTSTRAP=1 || BOOTSTRAP=0
   export DEPLOYMENT_ID DEPLOYMENT_RELEASE_ID DEPLOYMENT_TARGET_COMMIT DEPLOYMENT_OWNER DEPLOYMENT_PHASE DEPLOYMENT_TARGET_BACKEND_IMAGE
@@ -1029,6 +1060,7 @@ if [ -f "${SESSION_HOST_PATH}" ]; then
   fi
   if [ -d "${REPO_ROOT}/.deploy-state/$(clamav_unit_name)" ] || docker cp "$(compose ps -aq backend):/app/recovery-coordination/$(clamav_unit_name)/unit.json" "${REPO_ROOT}/.deploy-state/clamav-resume-unit.json" 2>/dev/null; then
     DEPLOYMENT_CLAMAV_REPAIR=true
+    LEGACY_RELEASE_GRAPH=1
     export DEPLOYMENT_CLAMAV_REPAIR
   fi
   SESSION_PREPARED=1
@@ -1131,14 +1163,33 @@ DEPLOYMENT_PREVIOUS_FRONTEND_IMAGE="$(image_of_service frontend)"
 DEPLOYMENT_PREVIOUS_INQUIRY_IMAGE="$(image_of_service inquiry)"
 DEPLOYMENT_PREVIOUS_NGINX_IMAGE="$(image_of_service nginx)"
 DEPLOYMENT_PREVIOUS_POSTGRES_IMAGE="$(image_of_service postgres)"
-DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE="$(image_of_service clamav)"
+previous_backend_id="$(compose ps -q backend)"
+previous_upload_policy="$(docker inspect --format '{{index .Config.Labels "io.sabalan.release.upload-policy"}}' "${previous_backend_id}")"
+case "${previous_upload_policy}" in
+  no-malware-scan) ;;
+  ''|'<no value>')
+    LEGACY_RELEASE_GRAPH=1
+    DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE="$(image_of_service clamav)"
+    if [ "${DEPLOYMENT_CLAMAV_REPAIR}" != true ] && [ -z "${DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX:-}" ]; then
+      legacy_scanner_id="$(compose ps -q clamav)"
+      [ "$(docker inspect --format '{{.State.Health.Status}}' "${legacy_scanner_id}")" = healthy ] || {
+        echo 'The previous release cannot be qualified for rollback because its scanner is unhealthy.' >&2; exit 1;
+      }
+    fi
+    if [ "${DEPLOYMENT_MODE}" = release ] && [ "${CAPTURE_ONLY}" -eq 0 ] && [ "${DEPLOYMENT_CLAMAV_REPAIR}" = false ] \
+      && [ "${COMPOSE_FILE}" = docker-compose.prod.yml ] && [ -z "${DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX:-}" ]; then
+      LEGACY_RELEASE_GRAPH=0
+    fi
+    ;;
+  *) echo 'The previous release has an unknown upload policy.' >&2; exit 1 ;;
+esac
 export DEPLOYMENT_PREVIOUS_BACKEND_IMAGE DEPLOYMENT_PREVIOUS_FRONTEND_IMAGE DEPLOYMENT_PREVIOUS_INQUIRY_IMAGE DEPLOYMENT_PREVIOUS_NGINX_IMAGE DEPLOYMENT_PREVIOUS_POSTGRES_IMAGE DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE
 
 DEPLOYMENT_PREVIOUS_PERFORMANCE_ENVIRONMENT="$(docker inspect "$(compose ps -q backend)" | node scripts/performance-deployment-environment.mjs capture)"
 export DEPLOYMENT_PREVIOUS_PERFORMANCE_ENVIRONMENT
 
 if [ "${DEPLOYMENT_MODE}" = "configuration" ] || [ "${CAPTURE_ONLY}" -eq 1 ]; then
-  existing_exports="$(docker inspect "$(compose ps -q backend)" "$(compose ps -q frontend)" "$(compose ps -q inquiry)" "$(compose ps -q nginx)" "$(compose ps -q postgres)" "$(compose ps -q clamav)" | node "${OPERATIONS_ROOT}/scripts/deployment-existing-release.mjs")"
+  existing_exports="$(capture_only_services | node "${OPERATIONS_ROOT}/scripts/deployment-existing-release.mjs")"
   eval "${existing_exports}"
 fi
 DEPLOYMENT_RELEASE_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(printf '%s' "${DEPLOYMENT_TARGET_COMMIT}" | cut -c1-12)-${DEPLOYMENT_MODE}"
@@ -1282,6 +1333,13 @@ fi
 if [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ]; then
   DEPLOYMENT_CLAMAV_IMAGE="${DEPLOYMENT_CLAMAV_TARGET_IMAGE}"
   export DEPLOYMENT_CLAMAV_IMAGE
+fi
+if [ "${DEPLOYMENT_MODE}" = release ] && [ "${CAPTURE_ONLY}" -eq 0 ] \
+  && [ "${LEGACY_RELEASE_GRAPH}" -eq 0 ] && [ -z "${DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX:-}" ]; then
+  target_upload_policy="$(docker image inspect --format '{{index .Config.Labels "io.sabalan.release.upload-policy"}}' "${DEPLOYMENT_TARGET_BACKEND_IMAGE}")"
+  [ "${target_upload_policy}" = no-malware-scan ] || {
+    echo 'The candidate image does not attest to the scanner-free release graph.' >&2; exit 1;
+  }
 fi
 if [ "${CAPTURE_ONLY}" -eq 1 ]; then
   [ "${DEPLOYMENT_MODE}" = "release" ] || { echo "Capture-only requires the canonical release control image." >&2; exit 1; }
@@ -1579,16 +1637,18 @@ start_release_services "${remaining}"
 
 remaining="$(remaining_mutation_seconds)" || exit 1
 run_backend_timed "${remaining}" node dist/scripts/deployment-gates.js
-remaining="$(remaining_mutation_seconds)" || exit 1
-timeout "${remaining}" docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" exec -T backend sh -c '
-  set -eu
-  test "${HR_HIRING_ANTIVIRUS_COMMAND:-}" = "/app/scripts/hr-clamdscan.sh"
-  command -v clamdscan >/dev/null
-  test_file="/tmp/sabalanerp-antivirus-deployment-gate.txt"
-  printf "Sabalan ERP antivirus deployment gate\n" > "${test_file}"
-  "${HR_HIRING_ANTIVIRUS_COMMAND}" "${test_file}"
-  rm -f "${test_file}"
-'
+if [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ] || { [ "${DEPLOYMENT_MODE}" = configuration ] && [ "${LEGACY_RELEASE_GRAPH}" -eq 1 ]; }; then
+  remaining="$(remaining_mutation_seconds)" || exit 1
+  timeout "${remaining}" docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" exec -T backend sh -c '
+    set -eu
+    test "${HR_HIRING_ANTIVIRUS_COMMAND:-}" = "/app/scripts/hr-clamdscan.sh"
+    command -v clamdscan >/dev/null
+    test_file="/tmp/sabalanerp-antivirus-deployment-gate.txt"
+    printf "Sabalan ERP antivirus deployment gate\n" > "${test_file}"
+    "${HR_HIRING_ANTIVIRUS_COMMAND}" "${test_file}"
+    rm -f "${test_file}"
+  '
+fi
 remaining_mutation_seconds >/dev/null
 verify_clamav_repair_runtime
 remaining_mutation_seconds >/dev/null

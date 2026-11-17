@@ -27,7 +27,6 @@ import {
 import { publishNotificationEvent } from '../services/notificationService';
 import { resolveWorkspaceRecipientIds } from '../services/domainNotificationRecipients';
 import { buildSupportDiagnosticBundle } from '../services/supportDiagnosticBundle';
-import { scanHiringFile } from '../services/hrHiringFileStorage';
 import {
   addSupportMinutes,
   elapsedSupportMinutes,
@@ -120,7 +119,6 @@ type StagedAttachment = {
   durationSeconds: number | null;
   sensitive: boolean;
   transcript: string;
-  malwareScanStatus: string;
   expiresAt: number;
 };
 
@@ -484,7 +482,6 @@ router.post('/attachments/stage', stagedAttachmentUpload.single('file'), async (
       durationSeconds: durationSeconds ? Math.round(durationSeconds) : null,
       sensitive,
       transcript: policy.kind === 'AUDIO' ? String(req.body.transcript || '').trim().slice(0, 10_000) : '',
-      malwareScanStatus: await scanHiringFile(req.file.path),
       expiresAt: Date.now() + 30 * 60 * 1_000,
     };
     stagedAttachmentUpload.retain(req, req.file);
@@ -630,7 +627,6 @@ router.post(
             sha256: attachment.sha256,
             durationSeconds: attachment.durationSeconds,
             sensitive: attachment.sensitive,
-            malwareScanStatus: attachment.malwareScanStatus,
             retentionClass: restrictedIncident
               ? 'SECURITY_INCIDENT_ONE_YEAR'
               : attachment.sensitive ? 'SENSITIVE_90_DAYS' : 'ORDINARY_ONE_YEAR',
@@ -1129,7 +1125,6 @@ router.post('/:id/attachments', attachmentUpload.single('file'), async (req: Aut
       return res.status(409).json({ success: false, error: 'برای افزودن شاهد حساس، رضایت مربوطه باید هنگام ثبت تیکت فعال باشد.' });
     }
     const sha256 = crypto.createHash('sha256').update(fs.readFileSync(req.file.path)).digest('hex');
-    const malwareScanStatus = await scanHiringFile(req.file.path);
     const transcript = policy.kind === 'AUDIO' ? String(req.body.transcript || '').trim().slice(0, 10_000) : '';
     // SQL submission may commit even when its acknowledgment is lost.
     attachmentUpload.retain(req, req.file);
@@ -1160,7 +1155,6 @@ router.post('/:id/attachments', attachmentUpload.single('file'), async (req: Aut
           sha256,
           durationSeconds: durationSeconds ? Math.round(durationSeconds) : null,
           sensitive,
-          malwareScanStatus,
           retentionClass: ticket.restrictedIncident
             ? 'SECURITY_INCIDENT_ONE_YEAR'
             : sensitive ? 'SENSITIVE_90_DAYS' : 'ORDINARY_ONE_YEAR',

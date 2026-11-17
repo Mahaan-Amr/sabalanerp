@@ -1,7 +1,7 @@
 import { purchasingTaskPage } from '../purchasing/tasks';
 import { listCrossWorkspaceDuties } from '../crossWorkspaceDutyInbox';
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { PrismaClient, Prisma } from '@prisma/client';
 import { executePurchasingInTransaction as run } from '../purchasing/service';
 import { purchasingWorkspace, purchasingDetail, purchasingLookups, purchasingContractPage } from '../purchasing/read';
@@ -9,7 +9,7 @@ import {purchasingCatalog,quoteMatch} from '../purchasing/catalog';
 import {contractPurchaseSource} from '../purchasing/contractEntry';
 import {contractSource} from '../purchasing/source';
 import { accessFor, redact } from '../purchasing/access';
-import { asDoc, graph, document, createDocument } from '../purchasing/repository';
+import { asDoc, graph, document, createDocument, hash } from '../purchasing/repository';
 import { quantity, PurchasingError, receiptProgress, orderProgress, exchangeProgress } from '../purchasing/domain';
 import {purchasingLedgerFixture} from './support/purchasingLedgerFixture';
 import {SupplyChainAccountingError} from '../accountingSupplyChain';
@@ -360,15 +360,31 @@ async function execute() {
       const captured=await document(tx,historical.id);assert.equal(captured.data.captureOnly,true);assert.equal(captured.data.priorSystemRequest,false);assert.equal(captured.data.exception,'FINANCIAL_RECORD_MISSING_AT_CAPTURE');checks++;
       assert.equal(await tx.purchasingDocument.count({where:{kind:'REQUEST'}}),beforeHistorical);assert.equal(await tx.purchasingLink.count({where:{sourceId:historical.id}}),0);checks++;
       await expect(command('HISTORICAL_PURCHASE',{supplierId:supplier.supplier.id,stone:'QA',unit:'piece',quantity:'2',occurredAt:'2099-01-01'}),'FUTURE_HISTORICAL_DATE');
-      await expect(command('ATTACHMENT_UPLOAD',{documentId:request.id,bytes:{type:'Buffer',data:[1]},scanStatus:'CLEAN'}),'SCANNED_UPLOAD_REQUIRED');
+      await expect(command('ATTACHMENT_UPLOAD',{documentId:request.id,bytes:{type:'Buffer',data:[1]}}),'MULTIPART_UPLOAD_REQUIRED');
       const attachmentRequest=await document(tx,request.id),specFile=Buffer.from('%PDF-1.4\nQA specification\n');
-      await command('ATTACHMENT_UPLOAD',{documentId:request.id,expectedVersion:attachmentRequest.version,bytes:specFile,scanStatus:'CLEAN',mimeType:'application/pdf',originalName:'مشخصات سنگ.pdf',visibility:'SPECIFICATION'}, {id:user.id,role:user.role});
+      const attachmentActor = { id: user.id, role: user.role };
+      const attachmentType = 'ATTACHMENT_UPLOAD';
+      const attachmentInput = {
+        documentId: request.id, expectedVersion: attachmentRequest.version, visibility: 'SPECIFICATION',
+        originalName: 'مشخصات سنگ.pdf', mimeType: 'application/pdf',
+        sha256: createHash('sha256').update(specFile).digest('hex'), bytes: specFile,
+      };
+      const uploaded = await command(attachmentType, attachmentInput, attachmentActor);
+      const legacyKey = randomUUID();
+      await tx.purchasingCommand.create({
+        data: {
+          actorId: user.id, key: legacyKey, result: uploaded,
+          hash: hash({ type: attachmentType, input: { ...attachmentInput, bytes: undefined, scanStatus: 'CLEAN' } }),
+        },
+      });
+      assert.deepEqual(await command(attachmentType, attachmentInput, attachmentActor, legacyKey), uploaded);
+      checks++;
       const attachmentCurrent=await document(tx,request.id),privateFile=Buffer.from('%PDF-1.4\nQA commercial confidential\n');
-      await command('ATTACHMENT_UPLOAD',{documentId:request.id,expectedVersion:attachmentCurrent.version,bytes:privateFile,scanStatus:'CLEAN',mimeType:'application/pdf',originalName:'قیمت خصوصی.pdf',visibility:'COMMERCIAL'});
+      await command('ATTACHMENT_UPLOAD',{documentId:request.id,expectedVersion:attachmentCurrent.version,bytes:privateFile,mimeType:'application/pdf',originalName:'قیمت خصوصی.pdf',visibility:'COMMERCIAL'});
       const sellerAttachments=await purchasingDetail({id:user.id,role:user.role},request.id,tx) as any;
       assert.equal(sellerAttachments.attachments.length,1);assert(!JSON.stringify(sellerAttachments).includes('قیمت خصوصی'));checks++;
       assert.equal((await purchasingDetail(actor,request.id,tx) as any).attachments.length,2);checks++;
-      await expect(command('ATTACHMENT_UPLOAD',{documentId:request.id,expectedVersion:(await document(tx,request.id)).version,bytes:Buffer.from('not an image'),scanStatus:'CLEAN',mimeType:'image/png',originalName:'false.png'}),'INVALID_ATTACHMENT');
+      await expect(command('ATTACHMENT_UPLOAD',{documentId:request.id,expectedVersion:(await document(tx,request.id)).version,bytes:Buffer.from('not an image'),mimeType:'image/png',originalName:'false.png'}),'INVALID_ATTACHMENT');
       const ledger=await purchasingLedgerFixture(tx,actor.id);
       await command('ACCOUNTING_SUPPLIER_LINK',{supplierId:supplier.supplier.id,accountingPartyId:ledger.partyId});
       const cancelledHandoff=await command('ACCOUNTING_HANDOFF',{receiptId:received.id,quantity:'1'});

@@ -5,10 +5,11 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {spawn} from 'node:child_process';
+import {releaseServices} from '../../scripts/deployment-existing-release.mjs';
 const canonical=v=>Array.isArray(v)?v.map(canonical):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,canonical(v[k])])):v;
 const bytes=v=>Buffer.from(JSON.stringify(canonical(v))+'\n'),sha=raw=>createHash('sha256').update(raw).digest('hex');
 export function originalServiceConfiguration(rows){
- assert.ok(Array.isArray(rows)&&rows.length===6);const expected=['backend','frontend','inquiry','nginx','postgres','clamav'],out={};
+ assert.ok(Array.isArray(rows));const expected=releaseServices(rows.find(row=>row.Config?.Labels?.['com.docker.compose.service']==='backend')),out={};assert.equal(rows.length,expected.length);
  for(const row of rows){const service=row.Config?.Labels?.['com.docker.compose.service'];assert.ok(expected.includes(service)&&!out[service]&&row.Config.Labels['com.docker.compose.project']==='sabalanerp');assert.match(row.Id,/^[a-f0-9]{64}$/);assert.match(row.Image,/^sha256:[a-f0-9]{64}$/);
   const config=structuredClone(row.Config);delete config.Hostname;delete config.Image;config.Labels=Object.fromEntries(Object.entries(config.Labels).filter(([key])=>!key.startsWith('com.docker.compose.')||['com.docker.compose.project','com.docker.compose.service'].includes(key)));
   out[service]={image:row.Image,configSha256:sha(bytes(config)),hostConfigSha256:sha(bytes(row.HostConfig)),mounts:row.Mounts.map(m=>({type:m.Type,source:m.Source,destination:m.Destination,readWrite:m.RW,propagation:m.Propagation})).sort((a,b)=>a.destination.localeCompare(b.destination)),networks:Object.keys(row.NetworkSettings.Networks).sort()};
@@ -28,7 +29,7 @@ export async function startOriginalCaptureServices(snapshot,io,waitSeconds){
  assert.ok(snapshot.originalContainerIdentities,'CAPTURE_ORIGINAL_IDENTITIES_REQUIRED');assert.ok(Number.isFinite(io.overallDeadlineMs),'CAPTURE_ORIGINAL_GLOBAL_BUDGET_REQUIRED');const deadline=Math.min(io.now()+waitSeconds*1000,io.overallDeadlineMs);
  const inspect=async()=>{const rows=await io.inspect();verifyOriginalCaptureContainers(snapshot,rows,await io.bindings(rows));return rows;};
  const healthy=async roles=>{for(;;){const rows=await inspect();assert.ok(io.now()<deadline,'CAPTURE_ORIGINAL_HEALTH_BUDGET_EXCEEDED');if(rows.filter(row=>roles.includes(row.Config.Labels['com.docker.compose.service'])).every(row=>row.State.Running===true&&row.State.Health?.Status==='healthy'))return;await io.sleep(1000);}};
- const first=['postgres','clamav','backend','frontend','inquiry'];await inspect();
+ const first=['postgres',...(snapshot.services.clamav?['clamav']:[]),'backend','frontend','inquiry'];await inspect();
  assert.ok(io.now()<deadline,'CAPTURE_ORIGINAL_HEALTH_BUDGET_EXCEEDED');await io.start(first.map(role=>snapshot.originalContainerIdentities[role].id));await healthy(first);
  await inspect();assert.ok(io.now()<deadline,'CAPTURE_ORIGINAL_HEALTH_BUDGET_EXCEEDED');
  // Re-resolve current application addresses without changing nginx Config,
@@ -98,8 +99,9 @@ async function startPinned(file,environmentFile,composeFile,waitSeconds,startedN
   const result=await observeOriginalCaptureChild(child,{now,deadline:Math.min(deadline,now()+45000),isInterrupted:()=>interrupted,onHeld:row=>hold({...row,nativeCompletionUnknown:true}),onClosed:row=>{receipts.push({...row,mutating});activeChild=null;}});
   lock();assert.ok(!interrupted&&!auditFailed);return result;
  };
- const roles=['backend','frontend','inquiry','nginx','postgres','clamav'],ids=roles.map(role=>snapshot.originalContainerIdentities?.[role]?.id);for(const id of ids)assert.match(id,/^[a-f0-9]{64}$/);assert.equal(new Set(ids).size,6);
- const base=['compose','--env-file',environmentFile,'-f',composeFile,'-p','sabalanerp'];
+ const roles=['backend','frontend','inquiry','nginx','postgres',...(snapshot.services.clamav?['clamav']:[])],ids=roles.map(role=>snapshot.originalContainerIdentities?.[role]?.id);for(const id of ids)assert.match(id,/^[a-f0-9]{64}$/);assert.equal(new Set(ids).size,roles.length);
+ const legacyFiles=snapshot.services.clamav&&path.basename(composeFile)==='docker-compose.prod.yml'?['-f',fs.realpathSync(path.join(path.dirname(composeFile),'docker-compose.rollback-legacy.yml'))]:[];
+ const base=['compose','--env-file',environmentFile,'-f',composeFile,...legacyFiles,'-p','sabalanerp'];
  const guard=async()=>{const actual=(await execute([...base,'ps','--all','--quiet',...roles])).toString().trim().split(/\s+/);assert.deepEqual(actual.sort(),[...ids].sort(),'CAPTURE_COMPOSE_CONTAINER_REPLACED');assert.ok(read(file).equals(snapshotRaw));};
  const boundary=async()=>{
   const session=JSON.parse(read(sessionFile,0o600));for(const key of ['deploymentId','releaseId','leaseToken','phase'])assert.match(session[key],/^[A-Za-z0-9_-]{8,160}$/);

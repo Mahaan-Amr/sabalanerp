@@ -331,7 +331,12 @@ export async function executePurchasingInTransaction(tx: Tx, actor: Actor, key: 
     const a = await accessFor(tx, actor);
     if (!prior && (['ACCEPT', 'REJECT', 'RETURN', 'RETURN_ACCEPTED', 'EXCHANGE', 'ASSIGN', 'QUOTE', 'PRICE', 'CANCEL', 'CLOSE_REMAINDER', 'RESOLVE_CHANGE', 'LINK_EXISTING'].includes(type) || type === 'REQUEST' && input.documentId) && (!Number.isInteger(input.expectedVersion) || input.expectedVersion < 1)) throw new PurchasingError('VERSION_REQUIRED', 'نسخه پرونده مشخص نیست؛ اطلاعات تازه را دریافت و دوباره ثبت کنید.', 409);
     if (prior) {
-      if (prior.hash !== commandHash) throw new PurchasingError('IDEMPOTENCY_CONFLICT', 'این شناسه قبلاً برای اطلاعات دیگری استفاده شده است؛ نتیجه ثبت قبلی را بررسی کنید.');
+      if (prior.hash !== commandHash) {
+        // Previously accepted multipart uploads included the scanner result in their command hash.
+        const matchesLegacyUpload = type === 'ATTACHMENT_UPLOAD' && Buffer.isBuffer(input.bytes)
+          && prior.hash === hash({ type, input: { ...input, bytes: undefined, scanStatus: 'CLEAN' } });
+        if (!matchesLegacyUpload) throw new PurchasingError('IDEMPOTENCY_CONFLICT', 'این شناسه قبلاً برای اطلاعات دیگری استفاده شده است؛ نتیجه ثبت قبلی را بررسی کنید.');
+      }
       const result=prior.result as JsonObject;
       if(result.supplier)assertCapability(a.buyer);
       if(result.id)assertCapability(await canReadDocument(tx,a,await document(tx,result.id)));

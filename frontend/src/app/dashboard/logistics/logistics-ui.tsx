@@ -31,7 +31,7 @@ export const dateFa = (value?: string | Date | null) => {
 
 export const StatusBadge = ({ status }: { status: string }) => {
   const tone = status === 'FINALIZED' ? 'success' : status === 'CANCELLED' ? 'danger' : 'warning';
-  return <ErpBadge tone={tone}>{statusLabels[status] || operationalStatusLabel(status)}</ErpBadge>;
+  return <ErpBadge tone={tone}><span className="whitespace-nowrap">{statusLabels[status] || operationalStatusLabel(status)}</span></ErpBadge>;
 };
 
 export const driverName = (snapshot: any) => {

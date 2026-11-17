@@ -26,7 +26,6 @@ import {
   HR_HIRING_ALLOWED_MIME,
   HR_HIRING_STORAGE_DIR,
   safeHiringStoragePath,
-  scanHiringFile,
   sha256File,
   validateHiringFileSignature
 } from '../services/hrHiringFileStorage';
@@ -998,8 +997,7 @@ router.post('/public/application/formal-assessments/:kind/evidence', applicantSe
     const stored: Array<{ id: string; originalName: string | null; mimeType: string | null; size: number | null }> = [];
     for (const file of files) {
       validateHiringFileSignature(file.path, file.mimetype);
-      const [scanStatus, digest, aggregate] = await Promise.all([
-        scanHiringFile(file.path),
+      const [digest, aggregate] = await Promise.all([
         sha256File(file.path),
         prisma.hrHiringDocument.aggregate({
           where: { applicationId, category: 'FORMAL_ASSESSMENT', side: kind, customTitle: file.originalname },
@@ -1019,7 +1017,6 @@ router.post('/public/application/formal-assessments/:kind/evidence', applicantSe
         mimeType: file.mimetype,
         size: file.size,
         sha256: digest,
-        malwareScanStatus: scanStatus,
         uploadedBy: `APPLICANT:${applicationId}`,
         formalAssessmentEvidenceLinks: { create: {
           stableKey: `formal-assessment-evidence:${attempt.id}:${crypto.randomUUID()}`,
@@ -1590,11 +1587,10 @@ router.post('/applications/:id/company-evaluations/:occurrenceId/result', requir
   try {
     const current = await prisma.hrCompanyEvaluationOccurrence.findFirstOrThrow({ where: { id: req.params.occurrenceId, applicationId: req.params.id } });
     const resultPolicy = validateCompanyEvaluationResult({ evidencePolicy: current.evidencePolicy, scorePolicy: current.scorePolicy, score: req.body.score, effect: String(req.body.effect || ''), explanation: req.body.explanation, hasFile: Boolean(req.file) });
-    let scanStatus: string | null = null;
     let digest: string | null = null;
     if (req.file) {
       validateHiringFileSignature(req.file.path, req.file.mimetype);
-      [scanStatus, digest] = await Promise.all([scanHiringFile(req.file.path), sha256File(req.file.path)]);
+      digest = await sha256File(req.file.path);
     }
     upload.retain(req, req.file);
     const row = await prisma.$transaction(async (tx) => {
@@ -1604,7 +1600,7 @@ router.post('/applications/:id/company-evaluations/:occurrenceId/result', requir
           status: 'COMPLETED', resultEffect: String(req.body.effect), resultScore: resultPolicy.score, resultExplanation: String(req.body.explanation || '').trim() || null,
           resultStorageName: req.file?.filename || null, resultOriginalName: req.file?.originalname || null,
           resultMimeType: req.file?.mimetype || null, resultSize: req.file?.size || null,
-          resultSha256: digest, resultMalwareScanStatus: scanStatus,
+          resultSha256: digest,
           completedByUserId: actorId(req), completedAt: new Date(),
         },
       });
@@ -2118,7 +2114,7 @@ router.get('/applications/:id', asyncHandler(async (req: AuthRequest, res: Respo
     data.hiringDecisions = data.hiringDecisions.map(({ kind, outcome, version, decidedAt }: any) => ({ kind, outcome, version, decidedAt }));
     data.preIdentityChecklistItems = data.preIdentityChecklistItems.map(({ id, title, status, dueAt, managementResolution }: any) => ({ id, title, status, dueAt, managementResolution }));
   } else if (!canSeeHrSensitive) {
-    data.preIdentityChecklistItems = data.preIdentityChecklistItems.map(({ storageName: _storageName, sha256: _sha256, malwareScanStatus: _scan, ...item }: any) => item);
+    data.preIdentityChecklistItems = data.preIdentityChecklistItems.map(({ storageName: _storageName, sha256: _sha256, ...item }: any) => item);
   }
   if (!actionPermissions.has('RECORD_INITIAL_INTERVIEW')) data.initialInterviewDraft = null;
   else if (data.initialInterviewDraft && initialInterviewCriteriaVersion) {
@@ -2767,7 +2763,6 @@ router.post('/applications/:id/documents', requireActionPermission('REVIEW_IDENT
     if (copyReceived && !req.file) throw new Error('فایل کپی دریافت‌شده الزامی است.');
     if (!copyReceived && req.file) throw new Error('برای ثبت مشاهده اصل نباید فایل بارگذاری شود.');
     if (req.file) validateHiringFileSignature(req.file.path, req.file.mimetype);
-    const scanStatus = req.file ? await scanHiringFile(req.file.path) : null;
     const digest = req.file ? await sha256File(req.file.path) : null;
     const aggregate = await prisma.hrHiringDocument.aggregate({ where: { applicationId: req.params.id, category: req.body.category, side: req.body.side || null, customTitle }, _max: { version: true } });
     upload.retain(req, req.file);
@@ -2775,7 +2770,7 @@ router.post('/applications/:id/documents', requireActionPermission('REVIEW_IDENT
       applicationId: req.params.id, category: req.body.category, side: req.body.side || null, customTitle,
       version: (aggregate._max.version || 0) + 1, inspectionSource: req.body.inspectionSource,
       storageName: req.file?.filename || null, originalName: req.file?.originalname || null, mimeType: req.file?.mimetype || null, size: req.file?.size || null,
-      sha256: digest, malwareScanStatus: scanStatus, note: req.body.note || null, uploadedBy: actorId(req)
+      sha256: digest, note: req.body.note || null, uploadedBy: actorId(req)
     }});
     await audit(req.params.id, copyReceived ? 'IDENTITY_DOCUMENT_UPLOADED' : 'IDENTITY_DOCUMENT_ORIGINAL_INSPECTED', req, { documentId: row.id, category: row.category, customTitle: row.customTitle, version: row.version });
     await syncAutomaticHiringWorkItems();
@@ -3276,8 +3271,7 @@ router.post('/applications/:id/formal-assessments/:kind/evidence', requireAction
     const stored: Array<{ id: string; originalName: string | null; mimeType: string | null; size: number | null }> = [];
     for (const file of files) {
       validateHiringFileSignature(file.path, file.mimetype);
-      const [scanStatus, digest, aggregate] = await Promise.all([
-        scanHiringFile(file.path),
+      const [digest, aggregate] = await Promise.all([
         sha256File(file.path),
         prisma.hrHiringDocument.aggregate({
           where: { applicationId, category: 'FORMAL_ASSESSMENT', side: kind, customTitle: file.originalname },
@@ -3297,7 +3291,6 @@ router.post('/applications/:id/formal-assessments/:kind/evidence', requireAction
         mimeType: file.mimetype,
         size: file.size,
         sha256: digest,
-        malwareScanStatus: scanStatus,
         uploadedBy: actorId(req),
         formalAssessmentEvidenceLinks: { create: {
           stableKey: `formal-assessment-evidence:${attempt.id}:${crypto.randomUUID()}`,
@@ -3381,7 +3374,6 @@ router.post('/applications/:id/assessments', requireActionPermission('MANAGE_REC
     }
     const resultJson = normalizeCandidateAssessmentResult(req.body.assessmentType, submittedResult);
     if (req.file) validateHiringFileSignature(req.file.path, req.file.mimetype);
-    const scanStatus = req.file ? await scanHiringFile(req.file.path) : undefined;
     const digest = req.file ? await sha256File(req.file.path) : undefined;
     const [version, hasOffer] = await Promise.all([
       prisma.hrCandidateAssessment.aggregate({
@@ -3394,7 +3386,7 @@ router.post('/applications/:id/assessments', requireActionPermission('MANAGE_REC
     const row = await prisma.hrCandidateAssessment.create({ data: {
       applicationId: req.params.id, assessmentType: req.body.assessmentType, resultJson,
       storageName: req.file?.filename, originalName: req.file?.originalname, mimeType: req.file?.mimetype,
-      size: req.file?.size, sha256: digest, malwareScanStatus: scanStatus, recordedBy: actorId(req),
+      size: req.file?.size, sha256: digest, recordedBy: actorId(req),
       version: (version._max.version || 0) + 1
     }});
     await prisma.hrJobApplication.update({
@@ -3450,7 +3442,6 @@ router.post('/applications/:id/assessments/:assessmentId/revise', requireActionP
         mimeType: previous.mimeType,
         size: previous.size,
         sha256: previous.sha256,
-        malwareScanStatus: previous.malwareScanStatus,
         recordedBy: actorId(req),
         version: previous.version + 1,
         supersedesAssessmentId: previous.id
@@ -3844,8 +3835,7 @@ router.put('/applications/:id/pre-identity/items/:itemId/result', requireActionP
     let fileData: any = {};
     if (req.file) {
       await validateHiringFileSignature(req.file.path, req.file.mimetype);
-      const scanStatus = await scanHiringFile(req.file.path);
-      fileData = { storageName: path.basename(req.file.path), originalName: req.file.originalname, mimeType: req.file.mimetype, size: req.file.size, sha256: await sha256File(req.file.path), malwareScanStatus: scanStatus };
+      fileData = { storageName: path.basename(req.file.path), originalName: req.file.originalname, mimeType: req.file.mimetype, size: req.file.size, sha256: await sha256File(req.file.path) };
     }
     upload.retain(req, req.file);
     const row = await prisma.$transaction(async (tx) => {
@@ -4162,14 +4152,12 @@ router.post('/applications/:id/collateral/apply-template', requireActionPermissi
 }));
 
 router.post('/applications/:id/collateral', requireActionPermission('RECORD_COLLATERAL_CUSTODY'), upload.single('file'), asyncHandler(async (req: AuthRequest, res: Response) => {
-  let scanStatus: string | undefined;
   let digest: string | undefined;
   try {
     if (!COLLATERAL_TYPES.has(req.body.type)) throw new Error('نوع وثیقه نامعتبر است.');
     if (!req.file || !req.body.receivedAt || !String(req.body.custodyLocation || '').trim()) throw new Error('اسکن، تاریخ دریافت و محل نگهداری اصل وثیقه الزامی است.');
     if (req.file) {
       validateHiringFileSignature(req.file.path, req.file.mimetype);
-      scanStatus = await scanHiringFile(req.file.path);
       digest = await sha256File(req.file.path);
     }
     const itemData = {
@@ -4178,7 +4166,7 @@ router.post('/applications/:id/collateral', requireActionPermission('RECORD_COLL
       issuerOrGuarantor: req.body.issuerOrGuarantor || null, receivedAt: req.body.receivedAt ? parseDate(req.body.receivedAt, 'تاریخ دریافت') : null,
       custodyLocation: req.body.custodyLocation || null, status: 'RECEIVED' as const,
       storageName: req.file?.filename, originalName: req.file?.originalname, mimeType: req.file?.mimetype, size: req.file?.size,
-      sha256: digest, malwareScanStatus: scanStatus, note: req.body.note || null, recordedBy: actorId(req)
+      sha256: digest, note: req.body.note || null, recordedBy: actorId(req)
     };
     upload.retain(req, req.file);
     const row = await prisma.$transaction(async (tx) => {
@@ -4274,13 +4262,12 @@ router.put('/applications/:id/collateral/:itemId/return', requireActionPermissio
     if (!req.file || !String(req.body.returnedTo || '').trim() || !String(req.body.returnEvidenceNote || '').trim()) throw new Error('تحویل‌گیرنده، شرح و فایل مدرک تحویل الزامی است.');
     const item = await prisma.hrCollateralItem.findFirstOrThrow({ where: { id: req.params.itemId, applicationId: req.params.id } });
     validateHiringFileSignature(req.file.path, req.file.mimetype);
-    const scanStatus = await scanHiringFile(req.file.path);
     const digest = await sha256File(req.file.path);
     upload.retain(req, req.file);
     const row = await prisma.hrCollateralItem.update({ where: { id: item.id }, data: {
       returnedAt: parseDate(req.body.returnedAt || new Date(), 'تاریخ بازگشت'), returnedTo: req.body.returnedTo, returnedBy: actorId(req), returnEvidenceNote: req.body.returnEvidenceNote,
       returnEvidenceStorageName: req.file.filename, returnEvidenceOriginalName: req.file.originalname, returnEvidenceMimeType: req.file.mimetype,
-      returnEvidenceSize: req.file.size, returnEvidenceSha256: digest, returnEvidenceMalwareScanStatus: scanStatus,
+      returnEvidenceSize: req.file.size, returnEvidenceSha256: digest,
       returnConfirmedBy: null, returnConfirmedAt: null
     }});
     await audit(req.params.id, 'COLLATERAL_RETURNED', req, { itemId: row.id, returnedTo: row.returnedTo });
@@ -4415,7 +4402,6 @@ router.post('/applications/:id/contracts', requireActionPermission('RECORD_SIGNE
       hasFile: Boolean(req.file) || canReusePaperContractStoredEvidence(latestContract),
     });
     if (req.file) validateHiringFileSignature(req.file.path, req.file.mimetype);
-    const scanStatus = req.file ? await scanHiringFile(req.file.path) : null;
     const digest = req.file ? await sha256File(req.file.path) : null;
     upload.retain(req, req.file);
     const row = await prisma.$transaction(async (tx) => {
@@ -4467,7 +4453,6 @@ router.post('/applications/:id/contracts', requireActionPermission('RECORD_SIGNE
         mimeType: req.file?.mimetype || reusedEvidence!.mimeType,
         size: req.file?.size || reusedEvidence!.size,
         sha256: digest || reusedEvidence!.sha256,
-        malwareScanStatus: scanStatus || reusedEvidence!.malwareScanStatus,
         uploadedBy: actorId(req), note: req.body.note || null
       }});
       await tx.hrJobApplication.update({ where: { id: req.params.id }, data: { contractClearance: 'IN_PROGRESS' } });

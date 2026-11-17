@@ -1,5 +1,5 @@
 # Opt-in #432 rehearsal graph. The six service definitions remain inherited
-# from the protected production graph; only the QA network boundary differs.
+# from production and its legacy rollback overlay, with private QA networking.
 # The protected controller must select this file from a reviewed QA-only plan.
 services:
   postgres:
@@ -8,7 +8,7 @@ services:
       service: postgres
   clamav:
     extends:
-      file: docker-compose.prod.yml
+      file: docker-compose.rollback-legacy.yml
       service: clamav
     # The native QA daemon has no default bridge/host-gateway address. ClamAV
     # gets its updater route from the separate private-namespace egress bridge.
@@ -23,7 +23,12 @@ services:
     # The sealed QA plan may deliberately fail only the candidate's readiness
     # check for the separate rollback rehearsal. Empty values preserve the
     # real /api/ready check; the retained old image never matches the target.
+    depends_on:
+      clamav:
+        condition: service_healthy
     environment:
+      HR_HIRING_ANTIVIRUS_COMMAND: /app/scripts/hr-clamdscan.sh
+      ALLOW_UNSCANNED_HR_FILES: "false"
       QA_REHEARSAL_FAIL_BACKEND_COMMIT: ${QA_REHEARSAL_FAIL_BACKEND_COMMIT:-}
       QA_REHEARSAL_FAIL_BACKEND_SOURCE_HASH: ${QA_REHEARSAL_FAIL_BACKEND_SOURCE_HASH:-}
     healthcheck:
@@ -35,6 +40,8 @@ services:
     extends:
       file: docker-compose.prod.yml
       service: deployment
+    volumes:
+      - clamav_database:/app/recovery-sources/clamav
     environment:
       SABALAN_BACKUP_TARGET: qa
       SABALAN_QA_PLAN_SHA256: ${DEPLOYMENT_QA_REHEARSAL_PLAN_SHA256:?QA plan hash required}

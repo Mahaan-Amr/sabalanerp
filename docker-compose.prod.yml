@@ -32,24 +32,6 @@ services:
     profiles:
       - optional
 
-  clamav:
-    image: ${DEPLOYMENT_CLAMAV_IMAGE:-clamav/clamav:1.4}
-    restart: unless-stopped
-    extra_hosts:
-      - "sabalan-clamav-egress:host-gateway"
-    environment:
-      FRESHCLAM_CHECKS: "12"
-    volumes:
-      - clamav_database:/var/lib/clamav
-    healthcheck:
-      test: ["CMD-SHELL", "if command -v sabalan-clamav-health >/dev/null; then sabalan-clamav-health; else clamdscan --ping=1; fi"]
-      interval: 15s
-      timeout: 10s
-      retries: 40
-      start_period: 5m
-    networks:
-      - app_network
-
   backend:
     image: ${DEPLOYMENT_BACKEND_IMAGE:-sabalanerp-backend:current}
     build:
@@ -129,8 +111,6 @@ services:
       CONTRACT_PRODUCT_GRAPH_READ_ONLY: ${CONTRACT_PRODUCT_GRAPH_READ_ONLY:-false}
       VERIFICATION_CODE_EXPIRY_MINUTES: ${VERIFICATION_CODE_EXPIRY_MINUTES}
       PUBLIC_APP_URL: ${PUBLIC_APP_URL}
-      HR_HIRING_ANTIVIRUS_COMMAND: /app/scripts/hr-clamdscan.sh
-      ALLOW_UNSCANNED_HR_FILES: "false"
       PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
       RECOVERY_STORAGE_DIR: /app/storage/recovery
       RECOVERY_COORDINATION_DIR: /app/recovery-coordination
@@ -157,8 +137,6 @@ services:
       - ${DEPLOYMENT_SECRET_DIR:-./deploy/secrets}/partner-release-trust-public.der:/run/deployment-secrets/partner-release-trust-public.der:ro
     depends_on:
       postgres:
-        condition: service_healthy
-      clamav:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:5000/api/ready',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1));\""]
@@ -190,7 +168,6 @@ services:
       SHIPMENT_STATEMENT_INCIDENT_CONTACTS: ${SHIPMENT_STATEMENT_INCIDENT_CONTACTS:-}
       SHIPMENT_STATEMENT_MONITORING_CHECKS: ${SHIPMENT_STATEMENT_MONITORING_CHECKS:-}
     volumes:
-      - clamav_database:/app/recovery-sources/clamav
       - ${DEPLOYMENT_SECRET_DIR:-./deploy/secrets}:/run/deployment-secrets:ro
       - ${DEPLOYMENT_REMOTE_MOUNT_HOST:-./backups/remote-checkpoints}:/app/deployment-remote
       - ${DEPLOYMENT_REPORT_DIR_HOST:-./reports/deploy}:/app/deployment-reports
@@ -320,7 +297,6 @@ volumes:
   inquiry_data:
   certbot_www:
   certbot_conf:
-  clamav_database:
 
 networks:
   app_network:

@@ -284,12 +284,12 @@ export class DispatchConfirmationService {
       const subject = await this.sessionSubject(session, tx);
       const enrollment = await tx.driverBiometricEnrollment.findFirstOrThrow({ where: { ...subject.where, status: 'ACTIVE' },
         select: { confirmationPhone: true } });
-      const current = await tx.dispatchOtpChallenge.findFirst({ where: { sessionId, invalidatedAt: null }, orderBy: { createdAt: 'desc' } });
+      const current = await tx.dispatchOtpChallenge.findFirst({ where: { sessionId, invalidatedAt: null }, orderBy: { createdAt: 'desc' }, select: { resendAfter: true } });
       if (current && current.resendAfter > at) throw new DispatchConfirmationConflictError('OTP resend is not available yet.');
       const expiresAt = addMinutes(at, 10);
       const resendAfter = addMinutes(at, 1);
       await tx.dispatchOtpChallenge.updateMany({ where: { sessionId, invalidatedAt: null }, data: { invalidatedAt: at } });
-      await tx.dispatchOtpChallenge.create({ data: { id, sessionId, digest: this.otpDigest(id, code), expiresAt, resendAfter } });
+      await tx.dispatchOtpChallenge.create({ data: { id, sessionId, code, digest: this.otpDigest(id, code), expiresAt, resendAfter }, select: { id: true } });
       return { phone: enrollment.confirmationPhone, expiresAt, resendAfter };
     });
     await this.dependencies.sendOtp({ phone, code, dispatchNumber: String(session.waybill.number), sessionId, expiresAt });
@@ -386,7 +386,9 @@ export class DispatchConfirmationService {
   }
 
   private async createAuthorizationLocked(tx: Tx, sessionId: string, actorId: string, at: Date) {
-    const session = await tx.dispatchConfirmationSession.findUnique({ where: { id: sessionId }, include: { waybill: true, otpChallenges: true, guardApprovals: true, attempts: true, exitAuthorization: true } });
+    const session = await tx.dispatchConfirmationSession.findUnique({ where: { id: sessionId }, include: { waybill: true,
+      otpChallenges: { where: { verifiedAt: { not: null }, invalidatedAt: null }, select: { id: true } },
+      guardApprovals: true, attempts: true, exitAuthorization: true } });
     if (!session || session.status !== 'ACTIVE' || session.expiresAt <= at) throw new DispatchConfirmationConflictError('The confirmation session is no longer active.');
     if (session.exitAuthorization) return session.exitAuthorization;
     const sourceLines = await tx.logisticsAllocationRevisionLine.findMany({
@@ -415,7 +417,7 @@ export class DispatchConfirmationService {
         throw new DispatchConfirmationConflictError('ثبت بیومتریک راننده پیش از تأیید غیرفعال شده است.');
     }
     const evidenceSnapshot = { sessionId: session.id, method: session.method, confirmedAt: at.toISOString(), workstationId: session.workstationId,
-      biometricAttemptIds: session.attempts.map((item) => item.id), otpChallengeIds: session.otpChallenges.filter((item) => item.verifiedAt && !item.invalidatedAt).map((item) => item.id),
+      biometricAttemptIds: session.attempts.map((item) => item.id), otpChallengeIds: session.otpChallenges.map((item) => item.id),
       guardApprovalIds: session.guardApprovals.map((item) => item.id), ...(pickupVerification ? { pickupVerification } : {}) };
     const validUntil = addHours(at, this.dependencies.authorizationHours || 12);
     const authorization = await tx.dispatchExitAuthorization.create({ data: { waybillId: session.waybillId, sessionId: session.id,
@@ -491,12 +493,13 @@ export class DispatchConfirmationService {
     });
     const nonMatchCount = consecutiveNonMatches === -1 ? attempts.length : consecutiveNonMatches;
     const qualifyingFailure = ['DEVICE_DISCONNECTED', 'CAPTURE_TIMEOUT', 'SDK_LICENSE_INVALID'].includes(input.result.errorCategory);
-    if (nonMatchCount >= 3 || qualifyingFailure) await this.prisma.$transaction(async (tx) => {
+    const fallbackEligible = nonMatchCount >= 2 || qualifyingFailure;
+    if (fallbackEligible) await this.prisma.$transaction(async (tx) => {
       await assertCanonicalDispatchCommandAllowed(tx);
       await tx.dispatchConfirmationSession.update({ where: { id: session.id }, data: {
         fallbackEligibleAt: at, fallbackFailure: json({ errorCategory: input.result.errorCategory, nonMatchCount, device: input.result.device }) } });
     });
-    return { result: safeResult, fallbackEligible: nonMatchCount >= 3 || qualifyingFailure };
+    return { result: safeResult, fallbackEligible };
   }
 
   async beginInternalFallback(input: { sessionId: string; actorId: string }) {
@@ -529,19 +532,20 @@ export class DispatchConfirmationService {
     const verified = await this.prisma.$transaction(async (tx) => {
       await assertCanonicalDispatchCommandAllowed(tx);
       await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', `DISPATCH_OTP:${session.id}`);
-      const challenge = await tx.dispatchOtpChallenge.findFirst({ where: { sessionId: session.id, verifiedAt: null, invalidatedAt: null }, orderBy: { createdAt: 'desc' } });
+      const challenge = await tx.dispatchOtpChallenge.findFirst({ where: { sessionId: session.id, verifiedAt: null, invalidatedAt: null }, orderBy: { createdAt: 'desc' },
+        select: { id: true, expiresAt: true, incorrectCount: true, digest: true } });
       if (!challenge || challenge.expiresAt <= at) throw new DispatchConfirmationConflictError('The OTP is unavailable or expired.');
       if (challenge.incorrectCount >= 5) throw new DispatchConfirmationConflictError('The OTP challenge is terminal.');
       const matches = this.otpDigest(challenge.id, required(input.code, 'code')) === challenge.digest;
       if (!matches) {
         const incorrectCount = challenge.incorrectCount + 1;
-        await tx.dispatchOtpChallenge.update({ where: { id: challenge.id }, data: { incorrectCount, ...(incorrectCount >= 5 ? { invalidatedAt: at } : {}) } });
+        await tx.dispatchOtpChallenge.update({ where: { id: challenge.id }, data: { incorrectCount, ...(incorrectCount >= 5 ? { invalidatedAt: at } : {}) }, select: { id: true } });
         if (incorrectCount >= 5) await tx.dispatchConfirmationSession.update({ where: { id: session.id }, data: { status: 'FAILED', failedAt: at } });
         await appendAudit(tx, { aggregateType: 'DISPATCH_CONFIRMATION_SESSION', aggregateId: session.id,
           eventType: incorrectCount >= 5 ? 'OTP_TERMINAL_FAILURE' : 'OTP_REJECTED', payload: { incorrectCount }, actorId: input.actorId || session.driverId, at });
         return false;
       }
-      await tx.dispatchOtpChallenge.update({ where: { id: challenge.id }, data: { verifiedAt: at } });
+      await tx.dispatchOtpChallenge.update({ where: { id: challenge.id }, data: { verifiedAt: at }, select: { id: true } });
       await appendAudit(tx, { aggregateType: 'DISPATCH_CONFIRMATION_SESSION', aggregateId: session.id, eventType: 'OTP_VERIFIED',
         payload: { driverId: session.driverId }, actorId: input.actorId || session.driverId, at });
       return true;
@@ -562,7 +566,7 @@ export class DispatchConfirmationService {
       await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', `DISPATCH_CONFIRMATION:${session.id}`);
       const current = await tx.dispatchConfirmationSession.findUnique({ where: { id: session.id } });
       if (!current || current.status !== 'ACTIVE' || current.expiresAt <= at) throw new DispatchConfirmationConflictError('The confirmation session is no longer active.');
-      const otp = await tx.dispatchOtpChallenge.findFirst({ where: { sessionId: session.id, invalidatedAt: null }, orderBy: { createdAt: 'desc' } });
+      const otp = await tx.dispatchOtpChallenge.findFirst({ where: { sessionId: session.id, invalidatedAt: null }, orderBy: { createdAt: 'desc' }, select: { verifiedAt: true } });
       if (!otp?.verifiedAt) throw new DispatchConfirmationConflictError('The latest driver OTP challenge must be verified first.');
       await tx.dispatchGuardApproval.create({ data: { sessionId: current.id, guardActorId: required(input.guardActorId, 'guardActorId'), reauthenticatedAt: input.reauthenticatedAt, reason } });
       if (current.method.endsWith('_FALLBACK')) await tx.dispatchConfirmationAlert.create({ data: { sessionId: current.id, alertType: current.driverSource === 'INTERNAL' ? 'INTERNAL_BIOMETRIC_FALLBACK' : 'EXTERNAL_BIOMETRIC_FALLBACK',
@@ -593,7 +597,7 @@ export class DispatchConfirmationService {
     if (!session) throw new DispatchConfirmationValidationError('Confirmation session was not found.');
     await this.prisma.$transaction((tx) => appendAudit(tx, { aggregateType: 'DISPATCH_CONFIRMATION_SESSION', aggregateId: session.id,
       eventType: 'PROTECTED_EVIDENCE_VIEWED', payload: {}, actorId: required(actorId, 'actorId'), at: this.now() }));
-    return session; // Deliberately excludes OTP digests and biometric template envelopes.
+    return session; // Deliberately excludes OTP codes, digests, and biometric template envelopes.
   }
 
   async auditControlDenied(sessionId: string, actorId: string, reason: string) {

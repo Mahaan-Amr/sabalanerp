@@ -8,6 +8,7 @@ import {createHash} from 'node:crypto';
 import {createRequire} from 'node:module';
 import {validatePrebuiltReleasePlan} from '../../deploy/scripts/prebuilt-release-plan.mjs';
 import {productionImageStore} from '../../deploy/scripts/production-image-execution-binding.mjs';
+import {releaseServices} from '../../scripts/deployment-existing-release.mjs';
 const ts=createRequire(import.meta.url)('../../backend/node_modules/typescript');
 const source=fs.readFileSync(new URL('../../deploy/scripts/online-owner-install-guard.mjs',import.meta.url),'utf8');
 const tree=ts.createSourceFile('guard.mjs',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.JS);
@@ -29,6 +30,10 @@ function fixture(options={}){
  const config={format:'sabalan-online-original-launcher/v1',repositoryRoot:repository,environmentFile:repository+'/deploy/.env.prod',sessionFile:repository+'/reports/deploy/active-deployment-session.json',controllerConfig:{project:'sabalanerp',composeFile:repository+'/docker-compose.prod.yml'},prebuiltReleasePlan:planRef,hostPackReceiptSha256:receiptRef.sha256,databaseUrl:'postgresql://fixture:fixture@127.0.0.1:5432/fixture_database?connection_limit=1&pool_timeout=10'};
  const configRef=put(configurationFile,config),lock=stat(),directory=stat(true);
  const containers=['backend','frontend','inquiry','nginx','postgres','clamav','other-one','other-two'].map((name,i)=>({Id:String(i+1).repeat(64),Image:'sha256:'+String(i+1).repeat(64),RestartCount:0,State:{Running:true,StartedAt:'2026-10-21T00:00:00Z',Health:{Status:'healthy'}},Config:{Labels:{'com.docker.compose.project':i<6?'sabalanerp':'foreign','com.docker.compose.service':name}},Mounts:name==='backend'?[{Type:'volume',Destination:'/app/recovery-coordination',Source:'/var/lib/docker/volumes/coordination/_data'}]:[]}));
+ if(options.scannerFree){
+  containers[0].Config.Labels['io.sabalan.release.upload-policy']='no-malware-scan';
+  containers.splice(5,1);
+ }
  if(options.birthChanged)containers[7].State.StartedAt='2026-10-21T01:00:00Z';
  if(options.healthChanged)containers[0].State.Health.Status='unhealthy';
  const native=(exe,args)=>{
@@ -58,7 +63,7 @@ function fixture(options={}){
  }
  const read=(file,digest)=>{assert.ok(files.has(file),'unexpected private I/O path');const raw=files.get(file);assert.equal(sha(raw),digest);return raw;};
  const ownerProcess={platform:'linux',getuid:()=>0,env:options.env??{},on:(name,fn)=>listeners.set(name,fn),off:name=>listeners.delete(name)};
- const observe=new Function('assert','fs','path','root','process','spawn','require','read','validatePrebuiltReleasePlan','productionImageStore','createHash','URL',variables.join(';')+';'+declaration('absent')+';return '+declaration('observeOriginalOwnerInstall'))(assert,fakeFs,path.posix,pack,ownerProcess,spawn,()=>({PrismaClient}),read,validatePrebuiltReleasePlan,productionImageStore,createHash,URL);
+ const observe=new Function('assert','fs','path','root','process','spawn','require','read','validatePrebuiltReleasePlan','productionImageStore','releaseServices','createHash','URL',variables.join(';')+';'+declaration('absent')+';return '+declaration('observeOriginalOwnerInstall'))(assert,fakeFs,path.posix,pack,ownerProcess,spawn,()=>({PrismaClient}),read,validatePrebuiltReleasePlan,productionImageStore,releaseServices,createHash,URL);
  return{run:()=>observe(configurationFile,configRef.sha256),calls,queries,containers,listeners,get disconnects(){return disconnects;},get constructed(){return constructed;}};
 }
 test('actual install guard validates canonical prebuilt content, uses only fixed read-only argv and inherits FD9 in every original child',async()=>{
@@ -80,4 +85,11 @@ test('ambient daemon, Git, loader and preload selectors refuse before the first 
 
 test('cancellation, marker reappearance and changed original FD9 during actual awaited disconnect cannot publish a positive baseline',async()=>{
  for(const option of ['signalDuringDisconnect','markerDuringDisconnect','lockChangedDuringDisconnect']){const f=fixture({[option]:true});await assert.rejects(f.run());assert.equal(f.disconnects,1);assert.equal(f.listeners.size,0);}
+});
+
+test('read-only guard accepts the five-service graph without scanner evidence',async()=>{
+ const result=await fixture({scannerFree:true}).run();
+ assert.equal(result.productionAdmission,false);
+ assert.equal(result.baseline.containers.filter(row=>row.project==='sabalanerp').length,5);
+ assert.ok(!result.baseline.containers.some(row=>row.service==='clamav'));
 });

@@ -466,6 +466,29 @@ async function run() {
         assert.match(invoiceHtml, /برش طولی[\s\S]*۳۰ \/ متر طول/);
         assert.match(invoiceHtml, /ساب آزمون[\s\S]*۲۰ \/ متر مربع/);
         assert.match(invoiceHtml, /امضای تحویل‌گیرنده/);
+        const record = await tx.salesDispatchInvoice.findUniqueOrThrow({ where: { id: issued.id } });
+        const { print: _print, ...legacySnapshot } = record.snapshot as Prisma.JsonObject;
+        const legacyBytes = Buffer.from("legacy invoice artifact");
+        const legacyClient = new Proxy(client, {
+          get(target, key, receiver) {
+            if (key === "salesDispatchInvoice") return {
+              findFirst: async () => ({ ...record, snapshot: legacySnapshot, pdf: legacyBytes, pdfSha256: bytesHash(legacyBytes) }),
+            };
+            return Reflect.get(target, key, receiver);
+          },
+        });
+        const legacyService = createSalesInvoiceService(new Proxy(wrapped, {
+          get(target, key, receiver) {
+            if (key === "$transaction") return async (work: (database: PrismaClient) => Promise<unknown>) => work(legacyClient);
+            return Reflect.get(target, key, receiver);
+          },
+        }), async (snapshot, reason) => Buffer.from(renderSalesInvoice(snapshot, reason)));
+        const refreshed = await legacyService.download(ctx, loading.id, issued.id);
+        assert.equal(refreshed.number, issued.number);
+        assert.match(Buffer.from(refreshed.bytes).toString(), /ابزار نیم‌لول[\s\S]*۴۰ \/ متر طول/);
+        assert.match(Buffer.from(refreshed.bytes).toString(), /بلوار دکتر حسابی/);
+        assert.equal(bytesHash((await legacyService.download(ctx, loading.id, issued.id, false, true)).bytes), bytesHash(legacyBytes));
+        assert.equal((await tx.salesDispatchInvoice.findUniqueOrThrow({ where: { id: issued.id } })).pdfSha256, record.pdfSha256);
         assert.equal(
           (await service.list(ctx, loading.id)).invoices[0].status,
           "ISSUED",

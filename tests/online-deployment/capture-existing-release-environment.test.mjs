@@ -10,8 +10,9 @@ import {releaseEnvironmentKeys} from '../../scripts/performance-deployment-envir
 const repository=fileURLToPath(new URL('../../',import.meta.url));
 const shell=process.platform==='win32'?'C:/Program Files/Git/bin/bash.exe':'/bin/sh';
 const deployment=fs.readFileSync(path.join(repository,'deploy/scripts/deploy.sh'),'utf8');
-const exportLine=deployment.indexOf('  existing_exports="$(docker inspect ');
+const exportLine=deployment.indexOf('  existing_exports="$(capture_only_services | node ');
 assert.ok(exportLine>0);
+const captureFunction=deployment.match(/capture_only_services\(\) \{[\s\S]*?\n\}/)[0];
 const block=deployment.slice(deployment.lastIndexOf('\nif ',exportLine)+1,deployment.indexOf('\nfi',exportLine)+3);
 const roles=['backend','frontend','inquiry','nginx','postgres','clamav'];
 const images=Object.fromEntries(roles.map((role,index)=>[role,'sha256:'+String(index+1).repeat(64)]));
@@ -23,10 +24,10 @@ function execute(rows,{mode='release',capture='1'}={}){
  try{
   const input=path.join(directory,'containers.json'),docker=path.join(directory,'inspect.cjs');
   fs.writeFileSync(input,JSON.stringify(rows));
-  fs.writeFileSync(docker,"const fs=require('node:fs'),assert=require('node:assert/strict');assert.deepEqual(process.argv.slice(2),['inspect','backend','frontend','inquiry','nginx','postgres','clamav']);process.stdout.write(fs.readFileSync(process.env.INSPECTION_INPUT));");
-  const environment={...process.env,DEPLOYMENT_MODE:mode,CAPTURE_ONLY:capture,OPERATIONS_ROOT:repository.replaceAll('\\','/'),NODE_BINARY:process.execPath.replaceAll('\\','/'),INSPECTION_INPUT:input,INSPECTION_PROGRAM:docker.replaceAll('\\','/')};
+  fs.writeFileSync(docker,"const fs=require('node:fs'),assert=require('node:assert/strict');assert.deepEqual(process.argv.slice(2),['inspect','backend','frontend','inquiry','nginx','postgres',...(process.env.LEGACY_RELEASE_GRAPH==='1'?['clamav']:[])]);process.stdout.write(fs.readFileSync(process.env.INSPECTION_INPUT));");
+  const environment={...process.env,DEPLOYMENT_MODE:mode,CAPTURE_ONLY:capture,LEGACY_RELEASE_GRAPH:rows[0].Config.Labels['io.sabalan.release.upload-policy']==='no-malware-scan'?'0':'1',OPERATIONS_ROOT:repository.replaceAll('\\','/'),NODE_BINARY:process.execPath.replaceAll('\\','/'),INSPECTION_INPUT:input,INSPECTION_PROGRAM:docker.replaceAll('\\','/')};
   for(const key of [...releaseEnvironmentKeys,...roles.map(role=>'DEPLOYMENT_'+role.toUpperCase()+'_IMAGE'),'DEPLOYMENT_TARGET_COMMIT'])delete environment[key];
-  const script='set -eu\ncompose(){ test "$1" = ps; test "$2" = -q; printf "%s\\n" "$3"; }\ndocker(){ "$NODE_BINARY" "$INSPECTION_PROGRAM" "$@"; }\n'+block+'\n"$NODE_BINARY" -e \'const keys=JSON.parse(process.argv[1]);console.log(JSON.stringify(Object.fromEntries(keys.map(k=>[k,process.env[k]??null]))));\' '+"'"+JSON.stringify([...releaseEnvironmentKeys,'DEPLOYMENT_TARGET_COMMIT',...roles.map(role=>'DEPLOYMENT_'+role.toUpperCase()+'_IMAGE')])+"'";
+  const script='set -eu\ncompose(){ test "$1" = ps; test "$2" = -a; test "$3" = -q; printf "%s\\n" "$4"; }\ndocker(){ "$NODE_BINARY" "$INSPECTION_PROGRAM" "$@"; }\n'+captureFunction+'\n'+block+'\n"$NODE_BINARY" -e \'const keys=JSON.parse(process.argv[1]);console.log(JSON.stringify(Object.fromEntries(keys.map(k=>[k,process.env[k]??null]))));\' '+"'"+JSON.stringify([...releaseEnvironmentKeys,'DEPLOYMENT_TARGET_COMMIT',...roles.map(role=>'DEPLOYMENT_'+role.toUpperCase()+'_IMAGE')])+"'";
   return spawnSync(shell,['-c',script],{cwd:repository,env:environment,encoding:'utf8',timeout:15000});
  }finally{for(const name of fs.readdirSync(directory))fs.unlinkSync(path.join(directory,name));fs.rmdirSync(directory);}
 }
@@ -43,4 +44,14 @@ test('actual capture shell imports complete running release identity without sel
 test('capture shell refuses incomplete, unhealthy or image-inconsistent original release before exporting identity',()=>{
  const cases=[rows=>rows.pop(),rows=>{rows[3].State.Running=false;},rows=>{rows[4].State.Health.Status='unhealthy';},rows=>{rows[0].Config.Env=rows[0].Config.Env.filter(value=>!value.startsWith('PERFORMANCE_RELEASE_SOURCE_HASH='));},rows=>{rows[1].Image='sha256:'+'f'.repeat(64);},rows=>{rows[0].Config.Env=rows[0].Config.Env.map(value=>value.startsWith('PERFORMANCE_RELEASE_COMMIT=')?'PERFORMANCE_RELEASE_COMMIT=invalid':value);}];
  for(const mutate of cases){const rows=containers();mutate(rows);const result=execute(rows);assert.notEqual(result.status,0);assert.equal(result.stdout,'');}
+});
+
+test('capture and configuration use only five services for a scanner-free backend',()=>{
+ const rows=containers().slice(0,-1);rows[0].Config.Labels['io.sabalan.release.upload-policy']='no-malware-scan';
+ for(const options of [{},{mode:'configuration',capture:'0'}]){
+  const result=execute(rows,options);assert.equal(result.status,0,result.stderr);const exported=JSON.parse(result.stdout);
+  assert.equal(exported.DEPLOYMENT_CLAMAV_IMAGE,null);
+  for(const role of roles.slice(0,-1))assert.equal(exported['DEPLOYMENT_'+role.toUpperCase()+'_IMAGE'],images[role]);
+ }
+ rows[0].Config.Labels['io.sabalan.release.upload-policy']='unknown';assert.notEqual(execute(rows).status,0);
 });

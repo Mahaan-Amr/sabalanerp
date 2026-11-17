@@ -10,7 +10,6 @@ RUN printf 'Types: deb\nURIs: %s\nSuites: bookworm\nComponents: main\nSigned-By:
   && apt-get -o Acquire::ForceIPv4=true update \
   && apt-get -o Acquire::ForceIPv4=true install -y --no-install-recommends \
   openssl \
-  clamdscan \
   chromium \
   poppler-utils \
   python3 \
@@ -42,8 +41,6 @@ COPY backend/scripts ./scripts
 COPY backend/excel ./excel
 
 RUN npx prisma generate \
-  && printf 'TCPSocket 3310\nTCPAddr clamav\n' > /etc/clamav/clamd-remote.conf \
-  && chmod +x /app/scripts/hr-clamdscan.sh \
   && mkdir -p /app/storage/contracts /app/storage/hr-hiring /app/uploads
 
 ENV NODE_ENV=development

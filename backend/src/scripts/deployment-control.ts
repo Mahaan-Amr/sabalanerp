@@ -38,7 +38,7 @@ type Session = {
   preservedClamav?: PreservedClamavBinding;
   clamavOperation?: 'repair' | 'incident-recovery';
   clamavIncidentSnapshotSha256?: string;
-  rollbackReleaseSet: Record<'backend' | 'frontend' | 'inquiry' | 'nginx' | 'postgres' | 'clamav', string>;
+  rollbackReleaseSet: Record<'backend' | 'frontend' | 'inquiry' | 'nginx' | 'postgres', string> & { clamav?: string };
   rollbackPerformanceEnvironment?: Record<string, string>;
 };
 
@@ -134,7 +134,7 @@ const prepare = async () => {
       inquiry: required('DEPLOYMENT_PREVIOUS_INQUIRY_IMAGE'),
       nginx: required('DEPLOYMENT_PREVIOUS_NGINX_IMAGE'),
       postgres: required('DEPLOYMENT_PREVIOUS_POSTGRES_IMAGE'),
-      clamav: required('DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE'),
+      ...(process.env.DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE ? { clamav: required('DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE') } : {}),
     },
   };
   if (preservedClamav) {

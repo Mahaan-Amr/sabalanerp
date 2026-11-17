@@ -9,6 +9,7 @@ import {fileURLToPath} from 'node:url';
 import {spawn} from 'node:child_process';
 import {validatePrebuiltReleasePlan} from './prebuilt-release-plan.mjs';
 import {productionImageStore} from './production-image-execution-binding.mjs';
+import {releaseServices} from '../../scripts/deployment-existing-release.mjs';
 
 const require=createRequire(import.meta.url),root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
 const canonical=value=>value instanceof Date?value.toISOString():Array.isArray(value)?value.map(canonical):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonical(value[key])])):value;
@@ -80,10 +81,10 @@ export async function observeOriginalOwnerInstall(configurationFile,configuratio
   validatePrebuiltReleasePlan(plan,actual);
   const ids=(await docker(['ps','--all','--no-trunc','--format','{{.ID}}'])).trim().split('\n').filter(Boolean).sort();assert.ok(ids.length>0&&ids.length<=1024);for(const id of ids)assert.match(id,/^[a-f0-9]{64}$/);
   const containers=JSON.parse(await docker(['inspect',...ids]));assert.equal(containers.length,ids.length);
-  const mains=['backend','frontend','inquiry','nginx','postgres','clamav'];
+  const backend=containers.find(row=>row.Config.Labels?.['com.docker.compose.project']==='sabalanerp'&&row.Config.Labels?.['com.docker.compose.service']==='backend'&&row.State.Running);
+  const mains=releaseServices(backend);
   for(const name of mains){const rows=containers.filter(row=>row.Config.Labels?.['com.docker.compose.project']==='sabalanerp'&&row.Config.Labels?.['com.docker.compose.service']===name&&row.State.Running);
    assert.equal(rows.length,1);assert.equal(rows[0].State.Health?.Status,'healthy');}
-  const backend=containers.find(row=>row.Config.Labels?.['com.docker.compose.project']==='sabalanerp'&&row.Config.Labels?.['com.docker.compose.service']==='backend'&&row.State.Running);
   const coordination=backend.Mounts.filter(row=>row.Type==='volume'&&row.Destination==='/app/recovery-coordination');assert.equal(coordination.length,1);
   const coordinationRoot=coordination[0].Source;assert.equal(fs.realpathSync(coordinationRoot),coordinationRoot);const directory=fs.lstatSync(coordinationRoot,{bigint:true});assert.ok(directory.isDirectory()&&directory.uid===0n&&!(directory.mode&0o022n));
   absent(path.join(coordinationRoot,'deployment-maintenance.json'));

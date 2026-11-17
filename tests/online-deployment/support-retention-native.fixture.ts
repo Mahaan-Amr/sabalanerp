@@ -86,7 +86,7 @@ export async function qualifySupportRetention(input: {
       } });
       const attachment = await db.supportTicketAttachment.create({ data: {
         ticketId: ticket.id, storageName, originalName: storageName, mimeType: 'text/plain', kind: 'DOCUMENT',
-        size: bytes.length, sha256, retentionClass: 'ORDINARY_ONE_YEAR', malwareScanStatus: 'CLEAN',
+        size: bytes.length, sha256, retentionClass: 'ORDINARY_ONE_YEAR',
       } });
       const phase = mode.startsWith('phase-a') ? 1 : 2;
       const fault = mode === 'normal' ? undefined : faultAtTransaction(db, phase, mode.endsWith('rollback') ? 'rollback' : 'lost-ack');
@@ -183,7 +183,7 @@ export async function qualifySupportRetention(input: {
     } });
     const stagedAttachment = await db.supportTicketAttachment.create({ data: {
       ticketId: stagedTicket.id, storageName: stagedName, originalName: stagedName, mimeType: 'text/plain', kind: 'DOCUMENT',
-      size: stagedBytes.length, sha256: stagedHash, retentionClass: 'ORDINARY_ONE_YEAR', malwareScanStatus: 'CLEAN',
+      size: stagedBytes.length, sha256: stagedHash, retentionClass: 'ORDINARY_ONE_YEAR',
     } });
     let holdId = '';
     const holdAfterLogicalCommit = faultAtTransaction(db, 1, 'lost-ack', () => db.$transaction(async tx => {

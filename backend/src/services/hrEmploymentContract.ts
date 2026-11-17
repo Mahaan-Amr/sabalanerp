@@ -72,7 +72,6 @@ export const canReusePaperContractStoredEvidence = (
     mimeType?: string | null;
     size?: number | null;
     sha256?: string | null;
-    malwareScanStatus?: string | null;
   }) | null | undefined,
 ) => Boolean(
   contract &&
@@ -82,8 +81,7 @@ export const canReusePaperContractStoredEvidence = (
   contract.mimeType &&
   contract.size !== null &&
   contract.size !== undefined &&
-  contract.sha256 &&
-  contract.malwareScanStatus,
+  contract.sha256,
 );
 
 export const projectPaperContractWorkflowCapabilities = (input: {

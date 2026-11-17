@@ -41,7 +41,7 @@
 
 ## فایل‌های خصوصی
 
-فایل‌ها در `storage/hr-hiring` با نام تصادفی نگهداری و فقط از endpoint مجاز تحویل داده می‌شوند. MIMEهای نسخه اول PDF، JPEG و PNG و سقف هر فایل ۱۵MB است. در Production باید `HR_HIRING_ANTIVIRUS_COMMAND` تنظیم شود؛ بدون آن بارگذاری رد می‌شود مگر override صریح `ALLOW_UNSCANNED_HR_FILES=true` فعال باشد.
+فایل‌ها در `storage/hr-hiring` با نام تصادفی نگهداری و فقط از endpoint مجاز تحویل داده می‌شوند. MIMEهای نسخه اول PDF، JPEG و PNG و سقف هر فایل ۱۵MB است.
 
 ## SMS
 

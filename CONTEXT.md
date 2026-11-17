@@ -3408,6 +3408,10 @@ _Avoid_: editing an approved request in place, deleting approved leave or its op
 The operational staffing and attendance effect that Security derives automatically from an approved Leave Request. The approved result is shared data, not itself a Cross-Workspace Duty; only a concrete coverage gap creates a structured Security duty to arrange replacement coverage.
 _Avoid_: letting Security own the Leave Request or its HR approval policy, creating a duty for every approved leave, or leaving a real coverage gap without an accountable action
 
+**Repeated Attendance Scan**:
+A second device scan attributed to the same person shortly after an accepted scan in the same attendance day. Its source evidence is retained without recording another entry or exit.
+_Avoid_: treating a repeated scan as another movement or deleting its source evidence
+
 **Attendance Exception**:
 An operational discrepancy or correction concerning recorded presence, such as a missing entry, late arrival, early departure, or absence correction. It is distinct from a Leave Request even when approved leave explains the discrepancy.
 _Avoid_: using Attendance Exception as an umbrella term for leave policy

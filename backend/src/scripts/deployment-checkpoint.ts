@@ -155,7 +155,7 @@ const main = async () => {
       inquiry: required('DEPLOYMENT_PREVIOUS_INQUIRY_IMAGE'),
       nginx: required('DEPLOYMENT_PREVIOUS_NGINX_IMAGE'),
       postgres: required('DEPLOYMENT_PREVIOUS_POSTGRES_IMAGE'),
-      clamav: required('DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE'),
+      ...(process.env.DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE ? { clamav: required('DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE') } : {}),
     },
   };
 

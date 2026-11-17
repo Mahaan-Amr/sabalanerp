@@ -66,7 +66,7 @@ export function AccountingFixedAssetsPanel({ book, years, policies, assets, acce
   const targetPolicy = policies.find((row: any) => row.id === target?.classPolicyId);
   const proofType = sheet === 'cost' ? 'ASSET_COST' : 'ASSET_READY_FOR_USE';
   const validProofs = proofs.filter((row: any) => row.sourceEntityId === targetId
-    && row.evidenceType === proofType && row.malwareScanStatus === 'CLEAN');
+    && row.evidenceType === proofType);
   const targetArchive = validProofs.find((row: any) => row.id === archiveId);
   const selectedPolicy = policies.find((row: any) => row.id === asset.classPolicyId);
   const componentTotalValid = useMemo(() => {

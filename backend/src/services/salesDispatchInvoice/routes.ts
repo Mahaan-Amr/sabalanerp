@@ -49,6 +49,8 @@ export function createSalesInvoiceRouter(input: {
         context(req),
         req.params.loadingId,
         req.params.invoiceId,
+        false,
+        req.query.original === "true",
       );
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader(

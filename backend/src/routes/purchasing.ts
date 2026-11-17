@@ -16,7 +16,7 @@ import { generatePdfBufferFromHtml } from '../utils/pdf';
 import { accessFor, assertCapability, purchasingSections } from '../services/purchasing/access';
 import { SupplyChainAccountingError } from '../services/accountingSupplyChain';
 import {AccountingLedgerError} from '../services/accountingLedgerFoundation';
-import {scanPurchaseAttachment,validatePurchaseAttachment} from '../services/purchasing/attachments';
+import {validatePurchaseAttachment} from '../services/purchasing/attachments';
 import {canReadDocument} from '../services/purchasing/access';
 const router = express.Router();
 router.use(protect);
@@ -54,9 +54,8 @@ router.post('/documents/:id/attachments',async(req:AuthRequest,res,next)=>{
 },handle(async(req,res)=>{
   if(!req.file)throw new PurchasingError('FILE_REQUIRED','فایل تصویر یا PDF را انتخاب کنید.',400,'file');
   validatePurchaseAttachment(req.file.buffer,req.file.mimetype);
-  const scanStatus=await scanPurchaseAttachment(req.file.buffer);
   if(req.aborted||res.destroyed)return;
-  const data=await executePurchasing(actor(req),String(req.get('Idempotency-Key')||''),'ATTACHMENT_UPLOAD',{documentId:req.params.id,expectedVersion:Number(req.body.expectedVersion),visibility:req.body.visibility,originalName:req.file.originalname,mimeType:req.file.mimetype,sha256:createHash('sha256').update(req.file.buffer).digest('hex'),bytes:req.file.buffer,scanStatus});
+  const data=await executePurchasing(actor(req),String(req.get('Idempotency-Key')||''),'ATTACHMENT_UPLOAD',{documentId:req.params.id,expectedVersion:Number(req.body.expectedVersion),visibility:req.body.visibility,originalName:req.file.originalname,mimeType:req.file.mimetype,sha256:createHash('sha256').update(req.file.buffer).digest('hex'),bytes:req.file.buffer});
   return res.json({success:true,data});
 }));
 router.get('/attachments/:id',handle(async(req,res)=>{

@@ -7,14 +7,21 @@ import {EventEmitter} from 'node:events';
 import {PassThrough} from 'node:stream';
 import {originalServiceConfiguration,originalContainerIdentities,startOriginalCaptureServices,observeOriginalCaptureChild} from '../../deploy/scripts/capture-only-release.mjs';
 const roles=['backend','frontend','inquiry','nginx','postgres','clamav'];
-function fixture(){
- const rows=roles.map((role,i)=>({Id:String(i+1).repeat(64),Created:'2026-10-19T00:00:00Z',Image:'sha256:'+'a'.repeat(64),Config:{Hostname:String(i+1).repeat(12),Image:'original-reference',Env:['FIRST=1','SECOND=2'],Labels:{'com.docker.compose.project':'sabalanerp','com.docker.compose.service':role}},HostConfig:{Binds:['/one:/one','/two:/two']},Mounts:[],NetworkSettings:{Networks:{sabalanerp:{}}},State:{Running:false,Health:{Status:'unhealthy'},StartedAt:'before-stop'}}));
+function fixture(scannerFree=false){
+ const rows=(scannerFree?roles.slice(0,-1):roles).map((role,i)=>({Id:String(i+1).repeat(64),Created:'2026-10-19T00:00:00Z',Image:'sha256:'+'a'.repeat(64),Config:{Hostname:String(i+1).repeat(12),Image:'original-reference',Env:['FIRST=1','SECOND=2'],Labels:{'com.docker.compose.project':'sabalanerp','com.docker.compose.service':role}},HostConfig:{Binds:['/one:/one','/two:/two']},Mounts:[],NetworkSettings:{Networks:{sabalanerp:{}}},State:{Running:false,Health:{Status:'unhealthy'},StartedAt:'before-stop'}}));
+ if(scannerFree)rows[0].Config.Labels['io.sabalan.release.upload-policy']='no-malware-scan';
  const snapshot={services:originalServiceConfiguration(rows),originalContainerIdentities:originalContainerIdentities(rows),configurationBytes:{env:{sha256:'original',bytes:10}}};let now=0;const events=[];
  const io={now:()=>now,overallDeadlineMs:600000,sleep:async ms=>{now+=ms;},bindings:async()=>snapshot.configurationBytes,inspect:async()=>structuredClone(rows),start:async ids=>{events.push(['start',...ids]);for(const row of rows.filter(row=>ids.includes(row.Id))){row.State={Running:true,Health:{Status:'healthy'},StartedAt:'original-container-started'};}},restart:async id=>{events.push(['restart',id]);const row=rows.find(row=>row.Id===id);row.State={Running:true,Health:{Status:'healthy'},StartedAt:'nginx-restarted'};}};
  return {rows,snapshot,io,events};
 }
 test('actual capture start orchestration starts original IDs and restarts original nginx without changing any configuration bytes',async()=>{
  const f=fixture();await startOriginalCaptureServices(f.snapshot,f.io,30);assert.deepEqual(f.events,[['start',...['postgres','clamav','backend','frontend','inquiry'].map(role=>f.snapshot.originalContainerIdentities[role].id)],['restart',f.snapshot.originalContainerIdentities.nginx.id]]);assert.deepEqual(originalServiceConfiguration(f.rows),f.snapshot.services);assert.deepEqual(originalContainerIdentities(f.rows),f.snapshot.originalContainerIdentities);
+});
+test('capture starts the same five recorded containers for a scanner-free release',async()=>{
+ const f=fixture(true);
+ await startOriginalCaptureServices(f.snapshot,f.io,30);
+ const ids=f.snapshot.originalContainerIdentities;
+ assert.deepEqual(f.events,[['start',ids.postgres.id,ids.backend.id,ids.frontend.id,ids.inquiry.id],['restart',ids.nginx.id]]);
 });
 test('missing original IDs, same-image replacement, Env reordering and changed config binds refuse before starting',async()=>{
  for(const mutate of [f=>delete f.snapshot.originalContainerIdentities,f=>f.rows[0].Id='f'.repeat(64),f=>f.rows[0].Created='2026-10-20T00:00:00Z',f=>f.rows[0].Config.Env.reverse(),f=>f.io.bindings=async()=>({changed:true})]){const f=fixture();mutate(f);await assert.rejects(startOriginalCaptureServices(f.snapshot,f.io,30));assert.deepEqual(f.events,[]);}
@@ -36,6 +43,25 @@ test('signal during original start retains its native observer through natural c
 });
 test('actual shell capture completion and pre-mutation failure share pinned start; ordinary release retains compose path',()=>{
  const source=fs.readFileSync(new URL('../../deploy/scripts/deploy.sh',import.meta.url),'utf8').replaceAll('\r\n','\n'),begin=source.indexOf('start_release_services() {'),end=source.indexOf('\n}\n',begin)+3,body=source.slice(begin,end),shell=process.platform==='win32'?path.resolve(spawnSync('git',['--exec-path'],{encoding:'utf8'}).stdout.trim(),'../../../usr/bin/sh.exe'):'/bin/sh';
- for(const capture of [0,1]){const script=['set -eu',`CAPTURE_ONLY=${capture}; MUTATION_STARTED=0; MAINTENANCE_ACTIVE=1; DB_LEASE_ACQUIRED=1; capture_pause_started=123`, 'SESSION_HOST_PATH=/private/original-session; CAPTURE_ONLY_SNAPSHOT=/private/snapshot; ENV_FILE=deploy/.env.prod; REPO_ROOT=/opt/sabalanerp; OPERATIONS_ROOT=/private/ops; COMPOSE_FILE=docker-compose.prod.yml','DEPLOYMENT_CLAMAV_OPERATION=repair; DEPLOYMENT_CLAMAV_REPAIR=false; DEPLOYMENT_PHASE=REMOTE_CHECKPOINT_VERIFIED','capture_remaining_seconds(){ echo 19; }','node(){ printf "PINNED:%s:%s:%s:%s:%s:%s\\n" "$2" "$3" "$4" "$5" "$6" "$7"; }','run_original_owned_with_heartbeat(){ echo HEARTBEAT_OWNER; "$@"; }','compose(){ echo COMPOSE:$*; }',body,'start_release_services 30'].join('\n');const result=spawnSync(shell,['-c',script],{encoding:'utf8'});assert.equal(result.status,0,result.stderr);if(capture){assert.match(result.stdout,/HEARTBEAT_OWNER/);assert.match(result.stdout,/PINNED:start-original:\/private\/snapshot:deploy\/\.env.prod:\/opt\/sabalanerp\/docker-compose.prod.yml:19:123/);assert.doesNotMatch(result.stdout,/COMPOSE:/);}else{assert.match(result.stdout,/COMPOSE:up -d --no-build/);assert.match(result.stdout,/force-recreate/);assert.doesNotMatch(result.stdout,/PINNED:/);}}
+ for(const capture of [0,1]){const script=['set -eu',`CAPTURE_ONLY=${capture}; MUTATION_STARTED=0; MAINTENANCE_ACTIVE=1; DB_LEASE_ACQUIRED=1; capture_pause_started=123`, 'SESSION_HOST_PATH=/private/original-session; CAPTURE_ONLY_SNAPSHOT=/private/snapshot; ENV_FILE=deploy/.env.prod; REPO_ROOT=/opt/sabalanerp; OPERATIONS_ROOT=/private/ops; COMPOSE_FILE=docker-compose.prod.yml','LEGACY_RELEASE_GRAPH=0; DEPLOYMENT_CLAMAV_OPERATION=repair; DEPLOYMENT_CLAMAV_REPAIR=false; DEPLOYMENT_PHASE=REMOTE_CHECKPOINT_VERIFIED','capture_remaining_seconds(){ echo 19; }','node(){ printf "PINNED:%s:%s:%s:%s:%s:%s\\n" "$2" "$3" "$4" "$5" "$6" "$7"; }','run_original_owned_with_heartbeat(){ echo HEARTBEAT_OWNER; "$@"; }','compose(){ echo COMPOSE:$*; }',body,'start_release_services 30'].join('\n');const result=spawnSync(shell,['-c',script],{encoding:'utf8'});assert.equal(result.status,0,result.stderr);if(capture){assert.match(result.stdout,/HEARTBEAT_OWNER/);assert.match(result.stdout,/PINNED:start-original:\/private\/snapshot:deploy\/\.env.prod:\/opt\/sabalanerp\/docker-compose.prod.yml:19:123/);assert.doesNotMatch(result.stdout,/COMPOSE:/);}else{assert.match(result.stdout,/COMPOSE:up -d --no-build/);assert.doesNotMatch(result.stdout,/clamav/);assert.match(result.stdout,/force-recreate/);assert.doesNotMatch(result.stdout,/PINNED:/);}}
  for(const name of ['complete_capture_only() {','recover_failure() {']){const from=source.indexOf(name);assert.ok(source.indexOf('start_release_services 300',from)>from);}
+});
+
+test('legacy rollback checks the pinned scanner image and keeps the existing container',()=>{
+ const source=fs.readFileSync(new URL('../../deploy/scripts/deploy.sh',import.meta.url),'utf8').replaceAll('\r\n','\n');
+ const body=source.match(/start_release_services\(\) \{[\s\S]*?\n\}/)[0];
+ const pinned='sha256:'+'1'.repeat(64);
+ for(const observed of [pinned,'sha256:'+'2'.repeat(64)]){
+  const result=spawnSync('/bin/sh',['-c',
+   'set -eu; CAPTURE_ONLY=0; LEGACY_RELEASE_GRAPH=1; DEPLOYMENT_PHASE=ROLLBACK_STARTED; DEPLOYMENT_CLAMAV_OPERATION=repair; DEPLOYMENT_CLAMAV_REPAIR=false; '
+   + `DEPLOYMENT_CLAMAV_IMAGE=${pinned}; docker(){ echo '${observed}'; }; `
+   + 'compose(){ if [ "$1" = ps ]; then echo existing-scanner; else printf "%s\\n" "$*"; fi; };\n'
+   + body+'\nstart_release_services 30'],
+  {encoding:'utf8'});
+  assert.equal(result.status,observed===pinned?0:1,result.stderr);
+  if(observed===pinned){
+   assert.match(result.stdout,/^start --wait --wait-timeout 30 clamav$/m);
+   assert.match(result.stdout,/^up -d --no-deps --no-build --wait --wait-timeout 30 postgres backend frontend inquiry nginx$/m);
+  }else assert.equal(result.stdout,'');
+ }
 });

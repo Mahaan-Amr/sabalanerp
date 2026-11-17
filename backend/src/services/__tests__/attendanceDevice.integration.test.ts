@@ -77,9 +77,42 @@ test('replayed source is idempotent and 10-second repeated scan does not change 
   const first = await f.punch('08:00');
   const replay = await f.punch('08:00'); assert.equal(first.id, replay.id);
   const second = await ingestPunch(db, f.terminal.id, { deviceCode: '1', occurredAt: new Date(at('08:00').getTime() + 10000).toISOString(), verifyMode: 1, inOutRaw: 255 }, now);
-  assert.equal(second.status, 'DUPLICATE'); assert.equal(second.direction, null);
+  assert.equal(second.status, 'IGNORED');
+  assert.equal(second.direction, null);
+  assert.equal(second.intervalId, null);
+  assert.equal(second.reviewedBy, null);
+  assert.equal(await db.attendancePunch.count({ where: { terminalId: f.terminal.id } }), 2);
+  await confirmIntervals(db, [{ id: first.intervalId!, revision: 1 }], f.actor.id);
   const next = await ingestPunch(db, f.terminal.id, { deviceCode: '1', occurredAt: new Date(at('08:00').getTime() + 11000).toISOString(), verifyMode: 1, inOutRaw: 255 }, now);
   assert.equal(next.direction, 'EXIT');
+}));
+test('the same terminal applies the ten-second window separately for each person', () => fixture(async (db, f) => {
+  const otherPerson = await db.personnel.create({ data: { firstName: 'پرسنل', lastName: randomUUID() } });
+  await db.attendanceTerminalMapping.create({
+    data: {
+      terminalId: f.terminal.id, deviceCode: '2', personnelId: otherPerson.id,
+      nameSnapshot: 'پرسنل دوم آزمون', initialState: 'OUTSIDE',
+      effectiveFrom: at('06:00'), createdBy: f.actor.id,
+    },
+  });
+  await db.securityAttendanceRosterMembership.create({
+    data: { personnelId: otherPerson.id, effectiveFrom: day, createdBy: f.actor.id },
+  });
+
+  const scan = (deviceCode: string, seconds: number) => ingestPunch(db, f.terminal.id, {
+    deviceCode, occurredAt: new Date(at('08:00').getTime() + seconds * 1000).toISOString(),
+    verifyMode: 1, inOutRaw: 255,
+  }, now);
+
+  const first = await scan('1', 0);
+  const second = await scan('2', 5);
+  assert.equal(first.status, 'APPLIED');
+  assert.equal(second.status, 'APPLIED');
+  assert.equal(second.direction, 'ENTRY');
+  assert.equal(second.personnelId, otherPerson.id);
+  assert.notEqual(first.intervalId, second.intervalId);
+  assert.equal((await scan('1', 10)).status, 'IGNORED');
+  assert.equal((await scan('2', 15)).status, 'IGNORED');
 }));
 test('yesterday 09 -> today 07 enters the new day and leaves an audited unknown exit, with no fabricated human signature', () => fixture(async (db, f) => {
   const first = await f.punch('09:00');
@@ -282,14 +315,16 @@ test('unknown entry retains null time and cannot be bulk confirmed or silently c
 }));
 
 
-test('a duplicate with corrected time inside an interval blocks bulk confirmation', () => fixture(async (db, f) => {
+test('a legacy duplicate with corrected time inside an interval blocks bulk confirmation', () => fixture(async (db, f) => {
   const received = new Date(at('08:00').getTime() + 35000);
   await recordDeviceClockSample(db, f.terminal.id, f.actor.id, { offsetMs: 35000, uncertaintyMs: 1000, measuredAt: received.toISOString() }, received);
   const input = { deviceCode: '1', occurredAt: at('08:00').toISOString(), verifyMode: 1, inOutRaw: 255 };
   const first = await ingestRaw(db, f.terminal.id, input, received);
   const duplicate = await ingestRaw(db, f.terminal.id, { ...input, occurredAt: new Date(at('08:00').getTime() + 5000).toISOString() }, new Date(received.getTime() + 5000));
-  assert.equal(duplicate.status, 'DUPLICATE');
+  await db.attendancePunch.update({ where: { id: duplicate.id }, data: { status: 'DUPLICATE' } });
   await assert.rejects(confirmIntervals(db, [{ id: first.intervalId!, revision: 1 }], f.actor.id), /تردد مبهم/);
+  await resolvePunch(db, duplicate.id, { action: 'DISMISS', reason: 'اسکن دوم پس از بررسی تکراری تشخیص داده شد' }, f.actor.id);
+  await confirmIntervals(db, [{ id: first.intervalId!, revision: 1 }], f.actor.id);
 }));
 
 

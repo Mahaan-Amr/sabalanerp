@@ -13,7 +13,7 @@ type CheckpointMetadata = {
   checksum: string;
   localVerified: boolean;
   remoteVerified: boolean;
-  rollbackReleaseSet: Record<'backend' | 'frontend' | 'inquiry' | 'nginx' | 'postgres' | 'clamav', string>;
+  rollbackReleaseSet: Record<'backend' | 'frontend' | 'inquiry' | 'nginx' | 'postgres', string> & { clamav?: string };
 };
 
 const main = async () => {

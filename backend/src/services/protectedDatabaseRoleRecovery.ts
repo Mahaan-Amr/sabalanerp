@@ -309,7 +309,7 @@ export async function assertProtectedRoleCheckpointBoundary(input: {
   prisma: PrismaClient;
   coordinationDir: string;
   id: string;
-  phase: 'SERVICES_DRAINED' | 'ROLLBACK_STARTED';
+  phase: 'SERVICES_DRAINED' | 'ROLLBACK_STARTED' | 'MUTATION_STARTED';
   checksum?: string;
 }) {
   const { id, phase, checksum } = input;
@@ -320,7 +320,7 @@ export async function assertProtectedRoleCheckpointBoundary(input: {
   if (!token || process.env.DEPLOYMENT_ID !== id || session.deploymentId !== id
     || session.leaseToken !== token || session.phase !== phase || maintenance?.deploymentId !== id
     || maintenance.releaseId !== session.releaseId
-    || (phase === 'ROLLBACK_STARTED' && !/^[a-f0-9]{64}$/.test(checksum || ''))) {
+    || (phase !== 'SERVICES_DRAINED' && !/^[a-f0-9]{64}$/.test(checksum || ''))) {
     return fail('The protected role checkpoint requires the owned maintenance session and deployment lease.');
   }
   const active = await input.prisma.$queryRaw<Array<{ id: string }>>`

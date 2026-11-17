@@ -79,7 +79,12 @@ const main = async () => {
       run: async () => {
         const result = await execFileAsync('npx', ['prisma', 'migrate', 'status'], { env: process.env, timeout: 60_000, windowsHide: true });
         if (!/up to date/i.test(`${result.stdout}\n${result.stderr}`)) throw new Error('Prisma migration history is not up to date.');
-        return { status: 'up-to-date', ...await verifyCustomerAllocationDeploymentState(prisma) };
+        const manifestSha256 = process.env.DEPLOYMENT_CUSTOMER_ALLOCATION_MANIFEST_SHA256;
+        const expectedAllocation = manifestSha256 === undefined ? undefined : {
+          manifestSha256, deploymentId, releaseId: process.env.DEPLOYMENT_RELEASE_ID ?? '',
+          targetCommit: process.env.DEPLOYMENT_TARGET_COMMIT ?? '', leaseToken: process.env.DEPLOYMENT_LEASE_TOKEN ?? '',
+        };
+        return { status: 'up-to-date', ...await verifyCustomerAllocationDeploymentState(prisma, expectedAllocation) };
       },
     }, {
       name: 'shipment-statement-runtime-state',

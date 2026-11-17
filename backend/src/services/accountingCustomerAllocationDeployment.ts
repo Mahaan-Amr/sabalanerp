@@ -1,7 +1,13 @@
 import type { PrismaClient } from '@prisma/client';
 
+type ExpectedAllocationActivation = {
+  deploymentId: string; releaseId: string; targetCommit: string; leaseToken: string; manifestSha256: string;
+};
+
 /** Read-only verification of the database protections installed by migration. */
-export async function verifyCustomerAllocationDeploymentState(database: Pick<PrismaClient, '$queryRaw'>) {
+export async function verifyCustomerAllocationDeploymentState(
+  database: Pick<PrismaClient, '$queryRaw'>, expected?: ExpectedAllocationActivation,
+) {
   const [state] = await database.$queryRaw<Array<{
     triggersReady: boolean; pendingIndexReady: boolean; fencesReady: boolean;
   }>>`
@@ -78,6 +84,37 @@ export async function verifyCustomerAllocationDeploymentState(database: Pick<Pri
   `;
   if (!state?.triggersReady || !state.pendingIndexReady || !state.fencesReady) {
     throw new Error('Customer allocation database protections are incomplete.');
+  }
+  if (expected) {
+    if (!expected.deploymentId || !expected.releaseId || !expected.leaseToken
+      || !/^[0-9a-f]{40}$/.test(expected.targetCommit) || !/^[0-9a-f]{64}$/.test(expected.manifestSha256)) {
+      throw new Error('Customer allocation release evidence is incomplete.');
+    }
+    const [receipt] = await database.$queryRaw<Array<{ ready: boolean }>>`
+      SELECT EXISTS (
+        SELECT 1 FROM public.customer_allocation_release_control AS control
+        JOIN public.deployment_operations AS deployment ON deployment.id = control.deployment_id
+        JOIN public.customer_allocation_release_audit AS audit
+          ON audit.deployment_id = control.deployment_id AND audit.release_id = control.release_id
+          AND audit.manifest_sha256 = control.manifest_sha256 AND audit.event = 'ACTIVATED'
+        WHERE control.id = 'grouped-allocation' AND control.state = 'ACTIVE'
+          AND control.release_id = ${expected.releaseId} AND control.manifest_sha256 = ${expected.manifestSha256}
+          AND audit.recorded_at = control.activated_at
+          AND deployment.id = ${expected.deploymentId} AND deployment."releaseId" = control.release_id
+          AND deployment."targetCommit" = ${expected.targetCommit} AND deployment."leaseToken" = ${expected.leaseToken}
+          AND deployment."activeKey" = 'production' AND deployment.phase = 'RELEASE_STARTED'
+          AND deployment."leaseExpiresAt" > clock_timestamp() + interval '20 seconds'
+          AND deployment."checkpointJson" ->> 'deploymentId' = deployment.id
+          AND deployment."checkpointJson" ->> 'releaseId' = deployment."releaseId"
+          AND deployment."checkpointJson" -> 'localVerified' = 'true'::jsonb
+          AND deployment."checkpointJson" -> 'remoteVerified' = 'true'::jsonb
+          AND deployment."checkpointJson" -> 'restoreVerified' = 'true'::jsonb
+          AND deployment."checkpointJson" -> 'manifestReadable' = 'true'::jsonb
+          AND deployment."checkpointJson" ->> 'checksum' ~ '^[0-9a-f]{64}$'
+      ) AS ready
+    `;
+    if (!receipt?.ready) throw new Error('Customer allocation activation receipt did not match the protected release.');
+    return { customerAllocationDatabaseProtections: 'verified', customerAllocationActivation: 'verified' };
   }
   const [control] = await database.$queryRaw<Array<{ closed: boolean }>>`
     SELECT count(*) = 1 AND bool_and(id = 'grouped-allocation' AND state = 'CLOSED') AS closed

@@ -100,6 +100,21 @@ test('controller session authorization can activate once under a live locked dep
 
     const closureId = `${deploymentId}-close`;
     const closureLease = `${leaseToken}-close`;
+    const expectedActivation = { deploymentId, releaseId: 'release-456', targetCommit: 'a'.repeat(40),
+      leaseToken, manifestSha256: 'b'.repeat(64) };
+    await assert.rejects(verifyCustomerAllocationDeploymentState(db), /not closed/);
+    await assert.rejects(verifyCustomerAllocationDeploymentState(db, expectedActivation), /did not match/);
+    await db.deploymentOperation.update({ where: { id: deploymentId }, data: {
+      phase: 'RELEASE_STARTED', checkpointJson: { deploymentId, releaseId: 'release-456', localVerified: true,
+        remoteVerified: true, restoreVerified: true, manifestReadable: true, checksum: 'c'.repeat(64) },
+    } });
+    assert.deepEqual(await verifyCustomerAllocationDeploymentState(db, expectedActivation), {
+      customerAllocationDatabaseProtections: 'verified', customerAllocationActivation: 'verified',
+    });
+    await assert.rejects(verifyCustomerAllocationDeploymentState(db, { ...expectedActivation, manifestSha256: 'e'.repeat(64) }), /did not match/);
+    await assert.rejects(verifyCustomerAllocationDeploymentState(db, { ...expectedActivation, targetCommit: 'e'.repeat(40) }), /did not match/);
+    await assert.rejects(verifyCustomerAllocationDeploymentState(db, { ...expectedActivation, leaseToken: 'wrong-lease' }), /did not match/);
+    assert.equal(await runtimeAdmission('a'.repeat(40), 'release-456'), false, 'pre-traffic health does not grant posting');
     await db.deploymentOperation.update({ where: { id: deploymentId }, data: { activeKey: null, phase: 'COMPLETED' } });
     assert.equal(await runtimeAdmission('a'.repeat(40), 'release-456'), true);
     assert.equal(await runtimeAdmission('f'.repeat(40), 'release-456'), false);

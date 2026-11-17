@@ -18,11 +18,11 @@ test('the predecessor gate inspects the actual PostgreSQL runtime principal and 
     const localRoot = process.env.SABALAN_LOCAL_REPOSITORY_ROOT || repositoryRoot;
     const compose = ['compose', '-f', path.join(localRoot, 'docker-compose.local.yml')];
     assertSabalanerpLocalPostgresTarget(execFileSync('docker', [...compose, 'ps', '--format', 'json', 'postgres'], { encoding: 'utf8' }));
+    const { Client } = createRequire(path.join(repositoryRoot, 'package.json'))('pg');
     const fixture = await createTemporaryConcurrencyDatabase({ repositoryRoot, sourceDatabaseUrl: source!, migrateEmptySchema: true });
     const control = fixture.client();
     const lockDatabase = new URL(fixture.databaseUrl);
     lockDatabase.pathname = '/postgres';
-    const { Client } = createRequire(path.join(repositoryRoot, 'package.json'))('pg');
     const lockClient = new Client({ connectionString: lockDatabase.href });
     const password = randomBytes(32).toString('hex');
     const expires = new Date(Date.now() + 90_000).toISOString();

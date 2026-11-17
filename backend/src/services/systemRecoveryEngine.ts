@@ -14,7 +14,7 @@ import { publishNotificationEvent } from './notificationService';
 import { decryptPerformanceExportArtifact, encryptPerformanceExportArtifact, performanceExportKeyFromEnvironment, performanceExportStorageDirectory } from './personnelPerformanceDisclosureStore';
 import { verifyRestoredFiles } from './deploymentRestoreEvidence';
 import { verifyRecoveredApplicationPayloads } from './deploymentDrillApplicationKeys';
-import { PROTECTED_DATABASE_ROLE_COMPONENT, applyProtectedDatabaseRoles, captureProtectedDatabaseRoles, promoteProtectedDatabaseStage,
+import { PROTECTED_DATABASE_ROLE_COMPONENT, applyProtectedDatabaseRoles, captureProtectedDatabaseRoles, promoteProtectedDatabaseStage, verifyPromotedProtectedDatabaseRoles,
   type ProtectedDatabaseRoleRecovery, type RoleSnapshot } from './protectedDatabaseRoleRecovery';
 import { captureRecoveryBusinessProof, type RecoveryBusinessTableProof } from './deploymentRecoveryDataProof';
 import { adoptRecoveryStagedInquiry, captureInquiryBusinessProof, verifyInquiryTransformation,
@@ -1099,7 +1099,11 @@ export const stageAndPromoteRecovery = async (input: {
       await fs.promises.rm(SANITIZED_MARKER_PATH, { force: true });
     }
     await input.onProgress(90);
-    return { promoted: true, journal };
+      const protectedScope = input.protectedDatabaseRoles;
+    return { promoted: true, journal, ...(protectedRoles && protectedScope ? {
+      verifyPromotedRoles: () => verifyPromotedProtectedDatabaseRoles(
+        process.env.DATABASE_URL || '', protectedScope.roles, protectedRoles, protectedScope.source),
+    } : {}) };
   } catch (error) {
     const currentJournal = fs.existsSync(RESTORE_JOURNAL_PATH)
       ? JSON.parse(await fs.promises.readFile(RESTORE_JOURNAL_PATH, 'utf8')) as RestoreJournal

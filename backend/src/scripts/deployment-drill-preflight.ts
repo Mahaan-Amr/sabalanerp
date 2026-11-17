@@ -1,5 +1,5 @@
 import { recoveryDrillFreshness, recoveryRehearsalFreshness } from '../services/deploymentDrillPolicy';
-import { readDeploymentDrillMetadata } from '../services/deploymentDrillMetadata';
+import { hasCurrentDrillEvidence, readDeploymentDrillMetadata } from '../services/deploymentDrillMetadata';
 
 const main = async () => {
   const root = String(process.env.DEPLOYMENT_REMOTE_MOUNT || '').trim();
@@ -13,7 +13,7 @@ const main = async () => {
   }
   const firstCheckpointAt = new Date(metadata[metadata.length - 1].createdAt);
   const healthyDrillTimes = metadata
-    .filter((item) => item.lastDrill?.status === 'HEALTHY' && item.lastDrill.completedAt)
+    .filter(hasCurrentDrillEvidence)
     .map((item) => new Date(item.lastDrill!.completedAt!))
     .filter((item) => Number.isFinite(item.getTime()));
   const lastHealthyDrillAt = healthyDrillTimes.sort((left, right) => right.getTime() - left.getTime())[0];

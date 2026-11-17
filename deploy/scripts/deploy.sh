@@ -343,6 +343,10 @@ run_backend() {
     && [ "$3" = node ] && [ "$4" = dist/scripts/system-recovery-owner.js ]; then
     owner_container_option="--name ${SYSTEM_RECOVERY_OWNER_CONTAINER}"
   fi
+  if [ "${SYSTEM_RECOVERY_OWNER_ACTION:-}" = RESTORE ] && [ "${DEPLOYMENT_GATE_MODE:-}" = APPLICATION_RECOVERY ] \
+    && [ "$#" -eq 2 ] && [ "$1" = node ] && [ "$2" = dist/scripts/deployment-gates.js ]; then
+    owner_container_option="--name ${SYSTEM_RECOVERY_GATES_CONTAINER}"
+  fi
   DEPLOYMENT_BACKEND_IMAGE="${DEPLOYMENT_TARGET_BACKEND_IMAGE}" BACKEND_DB_CONNECTION_LIMIT=2 DATABASE_APPLICATION_NAME=sabalanerp-deployment \
     docker compose --env-file "${ENV_FILE}" -f "$(runtime_compose_file)" ${legacy_control_files} run -T --rm --no-deps ${backend_pull_policy} ${owner_container_option} \
       --label "io.sabalan.deployment.id=${DEPLOYMENT_ID}" \
@@ -382,6 +386,7 @@ run_backend() {
       -e "DEPLOYMENT_REMOTE_RETENTION_RECEIPT=${DEPLOYMENT_REMOTE_RETENTION_RECEIPT:-}" \
       -e "DEPLOYMENT_REMOTE_RETENTION_RECEIPT_SHA256=${DEPLOYMENT_REMOTE_RETENTION_RECEIPT_SHA256:-}" \
       -e "INQUIRY_ALREADY_DRAINED=true" \
+      -e "SYSTEM_RECOVERY_MUTATION_STARTED_NS=${SYSTEM_RECOVERY_MUTATION_STARTED_NS:-}" \
       deployment "$@"
 }
 

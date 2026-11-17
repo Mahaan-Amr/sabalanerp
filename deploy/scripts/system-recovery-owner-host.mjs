@@ -15,21 +15,22 @@ export function recoveryMutationWithinBudget(started, now = process.hrtime.bigin
 }
 
 export function assertOwnedRecoveryContainer(container, expected) {
+  const command = expected.command === 'gates' ? ['node', 'dist/scripts/deployment-gates.js']
+    : ['sh', 'scripts/with-backend-control-ownership.sh', 'node', 'dist/scripts/system-recovery-owner.js', '--sealed', expected.operationId, 'RESTORE'];
   if (!/^[a-f0-9]{64}$/.test(container?.Id || '') || container.Name !== '/' + expected.name || container.Image !== expected.image
     || container.Config?.Labels?.['com.docker.compose.project'] !== 'sabalanerp'
     || container.Config.Labels['com.docker.compose.service'] !== 'deployment'
     || container.Config.Labels['io.sabalan.deployment.id'] !== expected.deploymentId
-    || JSON.stringify(container.Config.Cmd) !== JSON.stringify(['sh', 'scripts/with-backend-control-ownership.sh',
-      'node', 'dist/scripts/system-recovery-owner.js', '--sealed', expected.operationId, 'RESTORE'])) throw rejected();
+    || JSON.stringify(container.Config.Cmd) !== JSON.stringify(command)) throw rejected();
   return container.Id;
 }
 
-function stopOwnedContainer(name, image, deploymentId, id) {
+function stopOwnedContainer(name, image, deploymentId, id, command = 'owner') {
   requireNativeRoot();
   if (!/^[a-zA-Z0-9_-]+$/.test(name) || !/^sha256:[a-f0-9]{64}$/.test(image)
     || !/^deploy-[A-Za-z0-9_-]{1,120}$/.test(deploymentId) || !operationId.test(id)) throw rejected();
   const [container] = JSON.parse(execFileSync('docker', ['inspect', name], { encoding: 'utf8', timeout: 10000 }));
-  const exact = assertOwnedRecoveryContainer(container, { name, image, deploymentId, operationId: id });
+  const exact = assertOwnedRecoveryContainer(container, { name, image, deploymentId, operationId: id, command });
   // A timeout is unknown completion, never permission to roll back. The caller
   // must additionally reap Compose and prove native runtime closure.
   execFileSync('docker', ['stop', '--time', '30', exact], { timeout: 45000, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -178,6 +179,7 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
     if (command === 'provision' && args.length === 1) provision(args[0]);
     else if (command === 'within-budget' && args.length === 1) process.exitCode = recoveryMutationWithinBudget(BigInt(args[0])) ? 0 : 1;
     else if (command === 'stop-owner' && args.length === 4) stopOwnedContainer(...args);
+    else if (command === 'stop-gates' && args.length === 4) stopOwnedContainer(...args, 'gates');
     else if (command === 'install' && args.length === 2) install(...args);
     else if (command === 'verify' && args.length === 2) verify(...args);
     else if (command === 'consume' && (args.length === 2 || (args.length === 3 && args[2] === '--watch'))) await consume(args[0], args[1], args[2] === '--watch');

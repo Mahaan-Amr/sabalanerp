@@ -61,7 +61,8 @@ node() {
       ;;
     *performance-deployment-environment.mjs*) printf 'release\n' ;;
     *'start-original'*) echo 'start-original' ;;
-    *'start-restored'*) echo 'start-restored' ;;
+    *'start-restored'*) echo 'start-restored'; case "$BACKUP_FIXTURE_FAILURE" in startup-known|startup-unknown) return 1;; esac ;;
+    *'verify-startup-closed'*) [ "$BACKUP_FIXTURE_FAILURE" != startup-unknown ] ;;
     *'start-rolled-back'*) echo 'start-rolled-back' ;;
     *'within-budget'*) [ "$BACKUP_FIXTURE_FAILURE" != deadline ] ;;
     *'stop-owner'*) echo 'owner-stop' ;;
@@ -138,6 +139,49 @@ test('a fully reaped promoted owner failure restores the verified pre-request ch
   const result = runBackupFixture('promoted', 'RESTORE');
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /reconciled-owner[\s\S]*phase ROLLBACK_STARTED[\s\S]*checkpoint-rollback[\s\S]*rollback-finalized[\s\S]*rollback-receipt[\s\S]*start-rolled-back[\s\S]*gates[\s\S]*control maintenance-off[\s\S]*control finish/);
+});
+
+test('a definitely closed startup failure rolls back while unknown original native completion stays held', () => {
+  const known = runBackupFixture('startup-known', 'RESTORE');
+  assert.equal(known.status, 0, known.stderr);
+  assert.match(known.stdout, /start-restored[\s\S]*checkpoint-rollback[\s\S]*start-rolled-back[\s\S]*control maintenance-off/);
+  const unknown = runBackupFixture('startup-unknown', 'RESTORE');
+  assert.equal(unknown.status, 1, unknown.stderr);
+  assert.doesNotMatch(unknown.stdout, /checkpoint-rollback|maintenance-off/);
+});
+
+test('post-owner deadline fences gates, stops only their owned container and reaps before returning', () => {
+  const script = String.raw`set -eu
+. "$1"
+SYSTEM_RECOVERY_OWNER_ACTION=RESTORE
+OPERATIONS_ROOT=/fake
+restore_mutation_started=0
+DEPLOYMENT_GATE_MODE=APPLICATION_RECOVERY
+SYSTEM_RECOVERY_GATES_CONTAINER=exact-gates
+DEPLOYMENT_TARGET_BACKEND_IMAGE=exact-image
+DEPLOYMENT_ID=deploy-current
+SYSTEM_RECOVERY_OPERATION_ID=operation-current
+checks=0
+gate_marker="$(mktemp)"
+rm "$gate_marker"
+trap 'rm -f "$gate_marker"' EXIT
+node() {
+ case "$*" in
+  *within-budget*) checks=$((checks+1)); [ "$checks" -lt 2 ]; ;;
+  *stop-gates*) echo "stop $*"; : > "$gate_marker";;
+ esac
+}
+phase() { echo "phase $*"; }
+sleep() { command sleep 0.01; }
+gates() { while [ ! -e "$gate_marker" ]; do sleep; done; echo 'original-child-closed'; }
+status=0
+run_system_recovery_postowner gates || status=$?
+echo "returned $status"
+`;
+  const result = runShell(['-c', script, 'sh', backupRunner], { encoding: 'utf8', timeout: 15000 });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stderr, /phase ROLLBACK_STARTED/);
+  assert.match(result.stdout, /stop .*stop-gates exact-gates exact-image deploy-current operation-current[\s\S]*original-child-closed[\s\S]*returned 124/);
 });
 
 test('restore health failure or elapsed mutation deadline runs one checkpoint rollback, while a failed rollback stays closed', () => {

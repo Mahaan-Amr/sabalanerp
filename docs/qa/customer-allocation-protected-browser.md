@@ -4,7 +4,9 @@ Run this scenario on the authorized isolated Linux QA host, inside the protected
 
 Run Playwright with an installed Chromium and a trusted QA certificate. The test fixes the application origin to `https://erp.qa.test` and requires that the name resolve to loopback. Trust the QA CA through the host Chromium trust store and, if required for forwarding the intercepted request, through `NODE_EXTRA_CA_CERTS` set before launching Node. Keep the private network boundary in place.
 
-Provision a dedicated synthetic Accounting login with treasury edit authority and a fresh synthetic customer within the private QA database. The customer's displayed company name must match the supplied marker exactly. In its accounting profile, post one standalone debt of **30 rials**, one standalone credit of **10 rials**, and one confirmed cash receipt with **20 rials** of unapplied balance. Use distinct descriptions for the debt and independent credit. The account must have no contracts, prior allocations, refunds or pending allocation requests. The Tehran date on the run must fall in an open financial period with an effective customer posting rule that the Accounting form can select by default. No other operator or process should use the fixture during this test.
+Provision a dedicated synthetic Accounting login with treasury edit authority and a fresh synthetic customer within the private QA database. The customer's displayed company name must match the supplied marker exactly. In its accounting profile, post one standalone debt of **30 rials**, one standalone credit of **10 rials**, and one confirmed bank receipt (`componentKind: BANK`) with **20 rials** of unapplied balance. Use distinct descriptions for the debt and independent credit. The account must have no contracts, prior allocations, refunds or pending allocation requests. The Tehran date on the run must fall in an open financial period with an effective customer posting rule that the Accounting form can select by default. No other operator or process should use the fixture during this test.
+
+Create the financial fixture through the normal authenticated Accounting APIs. For the receipt, use the existing flat `RECEIPT` request with `financialAccountId` pointing to an active IRR `BANK` financial account in the customer's legal entity and `bankLedgerId` pointing to its effective asset ledger account; omit `parts` and `sourceAllocations`. Seed only the dedicated login/customer identities if necessary. Receipt parts and non-bank components invoke a separate source-share admission path that remains closed under grouped-allocation GO. Do not substitute admission, insert financial rows directly, or change application images to prepare this fixture.
 
 Provide the following variables in the private shell. Load the password from the operator's private credential store or input without shell echo.
 
@@ -17,6 +19,8 @@ Provide the following variables in the private shell. Load the password from the
 | `SABALAN_ALLOCATION_QA_MARKER` | Exact company display name with a `QA-459-` prefix and lowercase ASCII letters, digits or hyphens after it |
 | `SABALAN_ALLOCATION_QA_PROFILE_ID` | Accounting profile ID for that synthetic customer |
 | `SABALAN_ALLOCATION_QA_CUSTOMER_ID` | CRM customer ID for that same synthetic customer |
+
+The scenario and its locked Playwright dependencies may run from a reviewed operations checkout separate from the immutable application-image checkout. Verify that its frontend source is identical to the served candidate's source and record both checkout commits alongside the served image identities. The fixture correction changes only the QA precondition and bank receipt selector; the real browser, exact balances, lost-response recovery, intent ownership and reversal assertions remain required.
 
 From the checkout containing the scenario and its locked Playwright dependencies, run:
 

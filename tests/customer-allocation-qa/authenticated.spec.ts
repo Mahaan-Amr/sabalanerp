@@ -125,7 +125,7 @@ test('real grouped allocation cancels an unposted intent, recovers a committed r
   expect(before).toMatchObject({
     displayName: marker, customerId, profile: { id: profileId }, capabilities: { canManageTreasury: true },
     contracts: [], debitOpenRials: '30', standaloneCreditRials: '10', netBalanceRials: '0',
-    receipts: [{ componentKind: 'CASH', remainingRials: '20', allocatedRials: '0', allocations: [] }],
+    receipts: [{ componentKind: 'BANK', remainingRials: '20', allocatedRials: '0', allocations: [] }],
     creditAllocations: [], refunds: [],
   });
   expect(before.openItems).toHaveLength(2);
@@ -141,7 +141,7 @@ test('real grouped allocation cancels an unposted intent, recovers a committed r
 
   const submit = async () => {
     const workspace = await openAllocation(page);
-    await workspace.getByRole('checkbox', { name: /^نقدی ·/ }).check();
+    await workspace.getByRole('checkbox', { name: /^بانکی ·/ }).check();
     await workspace.getByRole('checkbox', { name: `بستانکاری · ${credit.invoiceNumber}`, exact: true }).check();
     await workspace.getByRole('checkbox', { name: `انتخاب ${debt.invoiceNumber}`, exact: true }).check();
     await workspace.getByRole('button', { name: 'تکمیل مانده انتخاب‌شده', exact: true }).click();

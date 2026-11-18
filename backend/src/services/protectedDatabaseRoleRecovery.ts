@@ -360,7 +360,7 @@ type CutoverCatalog = {
 };
 const cutoverRoles = { runtime: 'sabalan_application_runtime', controller: 'sabalan_allocation_controller' };
 const sha256 = (content: string | Buffer) => createHash('sha256').update(content).digest('hex');
-const cutoverCatalogSha256 = '88d1a3381641dbae0c3223f3c343eb43b23730cde98519cd8923c8361851cbfa';
+const cutoverCatalogSha256 = '84791a48ad007025f12c58cd36e3498f36ca7aca882490d13e624cd8e00f3df6';
 
 async function verifyCutoverMigrationLedger(client: Client, directory: string, expectedDigest: string) {
   const names = (await fs.readdir(directory, { withFileTypes: true }))

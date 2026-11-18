@@ -1,5 +1,5 @@
 {
-  "migrationSha256": "36820749e21953145d75fff0941673831996a90f318e7fc65e9cda242888d070",
+  "migrationSha256": "394eef12319ac5c1fdf2316d66a51826d0207fcf9916e8281bb160f1f40aba39",
   "tables": {
     "NONE": [
       "_prisma_migrations",

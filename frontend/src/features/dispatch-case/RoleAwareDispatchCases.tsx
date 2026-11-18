@@ -37,7 +37,7 @@ export default function RoleAwareDispatchCases({ workspace, subjectId, loadingId
   const { user, loading: authLoading } = useAuth();
   const storagePrefix = `dispatch-cases:last-success:${user?.id || 'anonymous'}:${workspace}:${subjectId || loadingId || 'all'}`;
   const [cases, setCases] = useState<DispatchCaseRow[]>([]);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<DispatchCaseRow | null>(null);
   const [timeline, setTimeline] = useState<any>(null);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [technicalDetailsVisible, setTechnicalDetailsVisible] = useState(false);
@@ -97,9 +97,12 @@ export default function RoleAwareDispatchCases({ workspace, subjectId, loadingId
   useEffect(() => {
     if (!selected || !storageKey) return;
     const saved = readSaved(storageKey);
-    if (saved.timeline?.case?.id === selected) setTimeline(saved.timeline); else setTimeline(null);
+    const selectedLoadingId = workspace === 'accounting' ? selected.loadingId ?? filters.loadingId : filters.loadingId;
+    const savedMatchesSelection = saved.timeline?.case?.id === selected.id
+      && (!selectedLoadingId || saved.timeline?.case?.loadingId === selectedLoadingId);
+    if (savedMatchesSelection) setTimeline(saved.timeline); else setTimeline(null);
     let active = true;
-    dispatchCasesAPI.detail(workspace, selected, filters).then((response) => {
+    dispatchCasesAPI.detail(workspace, selected.id, { ...filters, loadingId: selectedLoadingId }).then((response) => {
       if (!active) return;
       setTimeline(response.data.data); updateStale(false); save({ timeline: response.data.data });
     }).catch((error) => {
@@ -109,8 +112,8 @@ export default function RoleAwareDispatchCases({ workspace, subjectId, loadingId
         clearAuthorizedCaches(); setAccessScope(null); setAuthorizedUserId(null); setCases([]); setSelected(null); setTimeline(null); setDenied(true); updateStale(false);
       } else if (!status || status >= 500) {
         updateStale(true);
-        if (saved.timeline?.case?.id === selected) setTimeline(saved.timeline);
-        else setTimeline({ case: { id: selected }, currentAction: 'LAST_SUCCESS_UNAVAILABLE', recovery: 'RETRY_WHEN_ONLINE', events: [] });
+        if (savedMatchesSelection) setTimeline(saved.timeline);
+        else setTimeline({ case: { id: selected.id, loadingId: selectedLoadingId }, currentAction: 'LAST_SUCCESS_UNAVAILABLE', recovery: 'RETRY_WHEN_ONLINE', events: [] });
       } else { setSelected(null); setTimeline(null); }
     });
     return () => { active = false; };
@@ -139,13 +142,13 @@ export default function RoleAwareDispatchCases({ workspace, subjectId, loadingId
         { id: 'status', header: 'وضعیت', cell: item => <ErpBadge tone={item.status === 'EXIT_RECORDED' ? 'success' : 'info'}>{dispatchStatusLabel(item.status)}</ErpBadge> },
       ]}
       rowActions={item => [
-        { label: 'مشاهده مراحل ارسال', icon: FaListAlt, onClick: () => setSelected(item.id) },
+        { label: 'مشاهده مراحل ارسال', icon: FaListAlt, onClick: () => setSelected(item) },
         ...(tableRowActions?.(item) ?? []),
       ]}
       isLoading={loading && !visibleCases.length}
       emptyState={!denied && <ErpEmptyState title={visibleCases.length ? 'پرونده‌ای مطابق جست‌وجو پیدا نشد' : 'پرونده ارسالی در این دامنه وجود ندارد'} />}
     /> : loading && !visibleCases.length ? <ErpLoading /> : visibleCases.length ? <div className="mt-3 grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-      {visibleCases.map((item) => <ErpCard key={item.id} className="min-w-0 p-4"><div className="flex flex-wrap items-start justify-between gap-2"><div className="min-w-0"><strong className="block truncate">{dispatchDriverName(item.driverName)}</strong><span className="text-xs sds-text-secondary">{dispatchCaseReference(item.loadingNumber)}</span></div><ErpBadge tone={item.status === 'EXIT_RECORDED' ? 'success' : 'info'}>{dispatchStatusLabel(item.status)}</ErpBadge></div><div className="mt-3"><ErpButton label="مشاهده مراحل ارسال" variant="ghost" onClick={() => setSelected(item.id)} /></div></ErpCard>)}
+      {visibleCases.map((item) => <ErpCard key={item.id} className="min-w-0 p-4"><div className="flex flex-wrap items-start justify-between gap-2"><div className="min-w-0"><strong className="block truncate">{dispatchDriverName(item.driverName)}</strong><span className="text-xs sds-text-secondary">{dispatchCaseReference(item.loadingNumber)}</span></div><ErpBadge tone={item.status === 'EXIT_RECORDED' ? 'success' : 'info'}>{dispatchStatusLabel(item.status)}</ErpBadge></div><div className="mt-3"><ErpButton label="مشاهده مراحل ارسال" variant="ghost" onClick={() => setSelected(item)} /></div></ErpCard>)}
     </div> : !denied && <ErpEmptyState title="پرونده ارسالی در این دامنه وجود ندارد" />}
     <ErpSheet open={authorized && Boolean(selected)} onClose={() => { setSelected(null); setTimeline(null); setSelectedEventId(null); setTechnicalDetailsVisible(false); }} title="مراحل ارسال" presentation={workspace === "accounting" ? "modal" : "sheet"}>
       {!timeline ? <ErpLoading /> : <div className="space-y-3" dir="rtl">

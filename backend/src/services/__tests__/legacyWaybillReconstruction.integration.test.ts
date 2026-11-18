@@ -151,6 +151,15 @@ async function run() {
     const reservation = await reserveGuardQueueTurn(db, nextLoading);
     assert.equal(reservation.loadingId, nextLoading.loadingId);
     assert.equal(reservation.status, 'RESERVED_FOR_LOADING');
+    const accountingScope = { workspace: 'accounting', permission: 'edit' };
+    const cancelledCase = (await listDispatchCases(db, accountingScope)).find(item => item.id === originalTurn.id);
+    assert.equal(cancelledCase?.loadingId, cancelledLoading.id);
+    assert.equal(cancelledCase?.loadingNumber, cancelledLoading.loadingNumber);
+    assert.equal(cancelledCase?.status, 'CANCELLED');
+    assert.equal(await getDispatchCaseTimeline(db, originalTurn.id, accountingScope, { loadingId: nextLoading.loadingId }), null);
+    const cancelledTimeline = await getDispatchCaseTimeline(db, originalTurn.id, accountingScope, { loadingId: cancelledLoading.id });
+    assert.equal(cancelledTimeline?.case.status, 'CANCELLED');
+    assert.equal(cancelledTimeline?.currentAction, 'COMPLETE');
     const logisticsScope = { workspace: 'logistics', permission: 'edit' };
     const oldCases = await listDispatchCases(db, logisticsScope, { loadingId: cancelInput.loadingId });
     assert.equal(oldCases[0]?.loadingId, cancelInput.loadingId);

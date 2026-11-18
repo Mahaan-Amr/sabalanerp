@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { invoiceDraftApprovalCommand } from '../invoiceDraftApproval.ts';
+import { invoiceDraftApprovalCommand } from '../invoiceDraftApproval';
 
 test('invoice approval keeps both identities for a retry and rotates them when details change', () => {
   const ids = ['request-1', 'trace-1', 'request-2', 'trace-2'];

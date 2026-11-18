@@ -13,14 +13,14 @@ async function run() {
   assert.match(url.pathname, /^\/sabalanerp_(concurrency|dispatchdocs)_[a-f0-9]{16}$/);
   const ordinary = process.env.PERSONAL_ORDINARY_FIXTURE
     ? JSON.parse(process.env.PERSONAL_ORDINARY_FIXTURE) as {
-      actorId: string; contractNumber: string; loadingId: string; itemId: string; unrelatedNumber: string;
+      actorId: string; contractNumber: string; loadingId: string; itemId: string; unrelatedNumber: string; cancellableId: string;
     } : null;
   const logisticsId = ordinary?.actorId || process.env.PARTNER_TEST_ACTOR_ID!;
   const accountantId = ordinary ? randomUUID() : process.env.PARTNER_TEST_ACCOUNTANT_ID!;
   const expected = ordinary ? undefined : JSON.parse(process.env.PARTNER_TEST_OWNER!);
   const sandbox = await mkdtemp(path.join(tmpdir(), 'partner-personal-pickup-'));
   const originalCwd = process.cwd();
-  await symlink(path.resolve(__dirname, '../../../public'), path.join(sandbox, 'public'), 'dir');
+  await symlink(path.resolve(__dirname, '../../../public'), path.join(sandbox, 'public'), process.platform === 'win32' ? 'junction' : 'dir');
   process.chdir(sandbox);
   process.env.BIOMETRIC_TEMPLATE_KEY_BASE64 = randomBytes(32).toString('base64');
   process.env.DISPATCH_CONFIRMATION_OTP_SECRET = randomUUID();
@@ -100,6 +100,18 @@ async function run() {
       let loadingId: string;
       if (ordinary) {
         ({ contractNumber, loadingId } = ordinary);
+        const cancelPath = `/logistics/loadings/${ordinary.cancellableId}`;
+        const reserved = (await request(loader.token, `${cancelPath}/transport`, 200, { mode: 'PERSONAL' }, 'PUT')).data.turn;
+        await request(loader.token, `${cancelPath}/canonical-allocations/${reserved.id}`, 200, {
+          reason, lines: [{ sourceContractItemId: ordinary.itemId, quantity: '1', unit: 'count' }],
+        }, 'PUT');
+        const cancelled = (await request(loader.token, `${cancelPath}/cancel`, 200, { reason })).data;
+        assert.equal(cancelled.status, 'CANCELLED');
+        assert.equal(cancelled.cancellationReason, reason);
+        const closed = cancelled.guardQueueTurns.find((turn: { id: string }) => turn.id === reserved.id);
+        assert.equal(closed?.status, 'CLOSED_WITHOUT_LOADING');
+        assert.equal(closed.closureReason, reason);
+        assert.deepEqual(cancelled.canonicalAllocationDrafts, []);
       } else {
         const selectedCase = await prisma.partnerSaleCase.findUniqueOrThrow({ where: { id: expected.caseId },
           include: { customerContract: true, profile: { include: { user: true } } } });

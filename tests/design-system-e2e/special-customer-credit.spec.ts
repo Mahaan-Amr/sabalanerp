@@ -57,8 +57,7 @@ for (const width of [1280, 390]) {
             lengthUnit: 'm', widthUnit: 'cm', isMandatory: false, mandatoryPercentage: 0, meta: { isLayer: false },
             remainingStones: [], cutDetails: [], appliedSubServices: [] }], serviceRows: [], deliveries: [],
           payment: { payments: [], currency: 'تومان', totalContractAmount: 1000 }, discount: null, signature: null,
-        } }));
-      }, { customerId, lastName });
+        } });
       await scopeContractNavigationFixture(page);
       await page.goto('/dashboard/sales/contracts/create?fresh=1&returnTo=contract&step=7');
       await page.locator('main.sds-workspace').getByRole('button', { name: /^افزودن پرداخت/ }).click();

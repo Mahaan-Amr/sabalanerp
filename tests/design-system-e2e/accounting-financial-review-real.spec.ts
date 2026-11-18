@@ -1,17 +1,17 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 
-const directory = process.env.ACCOUNTING_REAL_100999_QA_DIR;
-const staleRecordId = 'partner-accounting:5a11d03abd0ece495a335b337d94b2b8d9d726b73715abeff6c3e6b3592f2c52:replacement:2d8dadce-7015-40e3-a14d-ed45b0f11fe8';
-const caseId = 'partner-recovery-2d9483cb-f2f8-40e2-b3b5-189136c98fe4';
-const contractPath = `/dashboard/accounting/contracts/partner/${caseId}`;
+const directory = process.env.ACCOUNTING_REAL_REVIEW_QA_DIR;
 
 
-test('real copied contract 100999 opens through authenticated APIs without financial mutations', async ({ page }, testInfo) => {
+test('a copied contract opens through authenticated APIs without financial mutations', async ({ page }) => {
   test.skip(!directory, 'Requires the private restored production copy in the existing local Compose project.');
   test.setTimeout(240_000);
   const expected = JSON.parse(readFileSync(`${directory}/expected-record.json`, 'utf8'));
-  const recordId = expected.id;
+  const { id: recordId, caseId, staleRecordId } = expected;
+  for (const id of [recordId, caseId, staleRecordId]) expect(typeof id === 'string' && id.length > 0).toBe(true);
+  expect(staleRecordId).not.toBe(recordId);
+  const contractPath = `/dashboard/accounting/contracts/partner/${encodeURIComponent(caseId)}`;
   const reviewPath = `/dashboard/accounting/invoice-candidates/${encodeURIComponent(recordId)}`;
   const login = JSON.parse(readFileSync(`${directory}/login.private.json`, 'utf8'));
   const reads: Array<{ path: string; id: string | null; status: number; milliseconds: number }> = [];
@@ -66,6 +66,6 @@ test('real copied contract 100999 opens through authenticated APIs without finan
   expect(reads.filter(row => row.id !== null && row.id !== staleRecordId).every(row => row.id === recordId && row.status === 200)).toBe(true);
   expect(reads.filter(row => row.id === recordId && row.path.endsWith('/audit')).length).toBeGreaterThanOrEqual(3);
   expect(financialWrites).toEqual([]);
-  await page.screenshot({ path: testInfo.outputPath('real-contract-100999-review.png'), fullPage: true });
+  await page.screenshot({ path: `${directory}/real-contract-review.png`, fullPage: true });
   writeFileSync(`${directory}/browser-result.json`, JSON.stringify({ success: true, mockRoutes: false, staleRecordRefused: true, direct: true, refresh: true, contractLink: true, financialWrites, reads, record: { id: body.data.items[0].id, status: body.data.items[0].status, amount: body.data.items[0].amount, currency: body.data.items[0].currency } }, null, 2), { mode: 0o600 });
 });

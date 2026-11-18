@@ -1470,7 +1470,7 @@ export default function NewLoadingPage() {
       title="انتخاب رانندگان آماده بارگیری"
     >
       <div className="mb-4 flex flex-wrap gap-3">
-        <ErpButton label="راننده شخصی" variant={personalPickup ? "solid" : "outline"} disabled={saving}
+        <ErpButton label="راننده شخصی" variant={personalPickup ? "solid" : "outline"} aria-pressed={personalPickup} disabled={saving}
           onClick={() => void changeTransport(personalPickup ? "DRIVERS" : "PERSONAL")} />
       </div>
       <div className="grid grid-cols-1 items-end gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">

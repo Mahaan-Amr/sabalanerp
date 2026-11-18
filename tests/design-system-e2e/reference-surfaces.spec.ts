@@ -1170,8 +1170,8 @@ test('Contract Creation keeps early and consequential steps accessible and respo
         discount: null,
         signature: null
       }
-    }));
-  });
+    };
+  }));
   await scopeContractNavigationFixture(page);
   await page.goto('/dashboard/sales/contracts/create?fresh=1&returnTo=contract&step=7');
 
@@ -1216,7 +1216,6 @@ test('Contract payment converts the active percentage range to a toman cap', asy
         payment: { payments: [], currency: 'تومان', totalContractAmount: 0 },
         discount: null, signature: null
       }
-    }));
   });
   await scopeContractNavigationFixture(page);
   await page.goto('/dashboard/sales/contracts/create?fresh=1&returnTo=contract&step=7');
@@ -1378,8 +1377,8 @@ test('Contract submission preserves input across an invalid response, succeeds o
         discount: null,
         signature: null
       }
-    }));
-  });
+    };
+  }));
   await scopeContractNavigationFixture(page);
   await page.goto('/dashboard/sales/contracts/create?fresh=1&returnTo=contract&step=8', { waitUntil: 'domcontentloaded' });
 

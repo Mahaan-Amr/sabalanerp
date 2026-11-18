@@ -51,7 +51,10 @@ test('personal pickup selects a passenger car without manual identity and clears
     return route.continue();
   });
   await page.goto(`/dashboard/logistics/loadings/new?draftId=${draft.id}`);
-  await page.getByRole('button', { name: 'راننده شخصی', exact: true }).click();
+  const personalButton = page.getByRole('button', { name: 'راننده شخصی', exact: true });
+  await expect(personalButton).toHaveAttribute('aria-pressed', 'false');
+  await personalButton.click();
+  await expect(personalButton).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('main').last()).toContainText('سواری');
   await expect(page.getByRole('button', { name: 'رانندگان دیگر', exact: true })).toHaveCount(0);
   await expect(page.getByRole('textbox', { name: /پلاک|کد ملی|شماره همراه/ })).toHaveCount(0);
@@ -61,7 +64,42 @@ test('personal pickup selects a passenger car without manual identity and clears
   await page.screenshot({ path: testInfo.outputPath("personal-pickup-mobile.png"), fullPage: true });
   await page.getByRole('button', { name: /راننده عادی آزمون/ }).click();
   await expect(page.locator('main').last()).not.toContainText('سواری');
-  await expect(page.getByRole('button', { name: 'راننده شخصی', exact: true })).toBeEnabled();
+  await expect(personalButton).toBeEnabled();
+  await expect(personalButton).toHaveAttribute('aria-pressed', 'false');
+});
+
+test('Partner loading reports finalization after losing the successful response', async ({ page }) => {
+  await mockUiIdentity(page);
+  await loginAsAdmin(page);
+  const id = 'partner-pickup-finalize';
+  const turnId = 'partner-pickup-turn';
+  const draft = {
+    loadingId: id, loadingNumber: '9002', contractNumber: 'fixture-contract', status: 'DRAFT', personalTurnId: turnId,
+    source: {
+      sourceKind: 'PARTNER_CASE',
+      owner: { caseId: 'fixture-case', revision: 1, integrityHash: 'fixture-hash' },
+      recipient: { displayName: 'مشتری نمونه', destination: 'نشانی نمونه' },
+      rows: [{ productRowId: 'fixture-row', description: 'سنگ نمونه', unit: 'count', plannedQuantity: '2' }],
+    },
+    allocations: [{ queueTurnId: turnId, reservationActive: true, lines: [{ productRowId: 'fixture-row', quantity: '1' }] }],
+  };
+  let finalized = false;
+  await page.route('**/api/logistics/**', route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith(`/loadings/${id}`)) return route.fulfill({ json: { success: true,
+      data: { ...draft, status: finalized ? 'FINALIZED' : 'DRAFT' } } });
+    if (path.endsWith('/drivers')) return route.fulfill({ json: { success: true, data: [] } });
+    if (path.endsWith(`/canonical-allocations/${turnId}`)) return route.fulfill({ status: finalized ? 409 : 200,
+      json: { success: !finalized } });
+    if (path.endsWith(`/loadings/${id}/finalize`)) {
+      finalized = true;
+      return route.abort('connectionreset');
+    }
+    return route.fallback();
+  });
+  await page.goto(`/dashboard/logistics/loadings/new?draftId=${id}`);
+  await page.getByRole('button', { name: 'نهایی‌سازی بارگیری', exact: true }).click();
+  await expect(page.getByText('بارگیری نهایی شد.', { exact: true })).toBeVisible();
 });
 
 test('personal pickup Guard exit shows selected customer, Partner and contract without a plate or admission', async ({ page }, testInfo) => {

@@ -49,29 +49,47 @@ const workspaceWhere = (workspace: string, filters: { subjectId?: string; loadin
   if (filters.loadingId) scope.push({ OR: [{ loadingId: filters.loadingId }, { allocationRevisions: { some: { loadingId: filters.loadingId } } }] });
   if (filters.subjectId) scope.push({ OR: [{ internalDriver: { personnelId: filters.subjectId } }, { internalDriverId: filters.subjectId }, { externalDriverId: filters.subjectId }] });
   if (workspace === 'logistics' && !filters.loadingId) scope.push({ OR: [{ loadingId: { not: null } }, { allocationRevisions: { some: {} } }] });
-  if (workspace === 'accounting') scope.push({ allocationRevisions: { some: { candidate: { isNot: null } } } });
+  if (workspace === 'accounting') scope.push({
+    allocationRevisions: { some: { loadingId: filters.loadingId, candidate: { isNot: null } } },
+  });
   return { AND: scope };
 };
 
 export const listDispatchCases = async (prisma: PrismaClient, access: { workspace: string; permission: string },
   filters: { subjectId?: string; loadingId?: string } = {}) => {
+  const accounting = access.workspace === 'accounting';
   const turns = await prisma.guardDriverQueueTurn.findMany({
     where: workspaceWhere(access.workspace, filters),
     select: { id: true, status: true, admittedAt: true, updatedAt: true, loadingId: true, admissionSnapshot: true,
       internalDriver: { select: { personnelId: true } },
       loading: { select: { id: true, loadingNumber: true } },
-      allocationRevisions: { where: { loadingId: filters.loadingId }, select: { loadingId: true, loading: { select: { loadingNumber: true } }, candidate: { select: { status: true, waybills: { select: { number: true, status: true }, orderBy: { issuedAt: 'desc' }, take: 1 } } } }, orderBy: [{ finalizedAt: 'desc' }, { revisionNumber: 'desc' }], take: 1 },
+      allocationRevisions: {
+        where: { loadingId: filters.loadingId, candidate: accounting ? { isNot: null } : undefined },
+        select: { loadingId: true, loading: { select: { loadingNumber: true, status: true } },
+          candidate: { select: { status: true, waybills: { select: { number: true, status: true }, orderBy: { issuedAt: 'desc' }, take: 1 } } } },
+        orderBy: [{ finalizedAt: 'desc' }, { revisionNumber: 'desc' }], take: 1,
+      },
     },
     orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }], take: 100,
   });
-  return turns.map((turn) => ({ id: turn.id, status: turn.status, admittedAt: turn.admittedAt, updatedAt: turn.updatedAt,
-    loadingId: filters.loadingId ?? turn.loadingId ?? (access.workspace === 'accounting' ? turn.allocationRevisions[0]?.loadingId ?? null : null),
-    loadingNumber: (filters.loadingId === undefined || filters.loadingId === turn.loadingId ? turn.loading?.loadingNumber : null)
-      || turn.allocationRevisions[0]?.loading.loadingNumber || null,
-    subjectId: turn.internalDriver?.personnelId || null, driverName: access.permission === 'view' ? 'Redacted' : snapshotName(turn.admissionSnapshot),
-    accountingStatus: turn.allocationRevisions[0]?.candidate?.status || null,
-    waybill: turn.allocationRevisions[0]?.candidate?.waybills[0] ? { ...turn.allocationRevisions[0].candidate.waybills[0], number: turn.allocationRevisions[0].candidate.waybills[0].number.toString() } : null,
-    capabilities: { canMutateTimeline: false, viewOnly: access.permission === 'view' } }));
+  return turns.map(turn => {
+    const revision = turn.allocationRevisions[0];
+    const waybill = revision?.candidate?.waybills[0];
+    const currentLoadingNumber = !filters.loadingId || filters.loadingId === turn.loadingId ? turn.loading?.loadingNumber : null;
+    return {
+      id: turn.id,
+      status: accounting && revision?.loading.status === 'CANCELLED' ? 'CANCELLED' : turn.status,
+      admittedAt: turn.admittedAt,
+      updatedAt: turn.updatedAt,
+      loadingId: accounting ? revision?.loadingId ?? null : filters.loadingId ?? turn.loadingId,
+      loadingNumber: accounting ? revision?.loading.loadingNumber ?? null : currentLoadingNumber || revision?.loading.loadingNumber || null,
+      subjectId: turn.internalDriver?.personnelId || null,
+      driverName: access.permission === 'view' ? 'Redacted' : snapshotName(turn.admissionSnapshot),
+      accountingStatus: revision?.candidate?.status || null,
+      waybill: waybill ? { ...waybill, number: waybill.number.toString() } : null,
+      capabilities: { canMutateTimeline: false, viewOnly: access.permission === 'view' },
+    };
+  });
 };
 
 export const getDispatchCaseTimeline = async (prisma: PrismaClient, queueTurnId: string,
@@ -130,7 +148,8 @@ export const getDispatchCaseTimeline = async (prisma: PrismaClient, queueTurnId:
   for (const audit of audits) events.push({ id: `audit:${audit.id}`, station: 'AUDIT', eventType: audit.eventType,
     occurredAt: audit.recordedAt.toISOString(), actorId: audit.actorId, detail: { aggregateType: audit.aggregateType, ...(audit.payload as any) } });
   const loadingCancelled = queueEvents.some(event => event.eventType === 'FINALIZED_LOADING_CANCELLED');
-  return { case: { id: turn.id, status: turn.status, loadingId: filters.loadingId ?? turn.loadingId, admittedAt: turn.admittedAt },
+  const status = access.workspace === 'accounting' && filters.loadingId && loadingCancelled ? 'CANCELLED' : turn.status;
+  return { case: { id: turn.id, status, loadingId: filters.loadingId ?? turn.loadingId, admittedAt: turn.admittedAt },
     currentAction: (loadingCancelled && (Boolean(filters.loadingId) || turn.status === 'VOIDED'))
       || turn.status === 'EXIT_RECORDED' || turn.status === 'CLOSED_WITHOUT_LOADING' ? 'COMPLETE' : 'REVIEW_CURRENT_STATION',
     recovery: turn.status === 'VOIDED' && !loadingCancelled ? 'FOLLOW_REPLACEMENT' : null, ...projectDispatchCaseTimeline(events, access) };

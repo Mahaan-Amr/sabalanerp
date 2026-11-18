@@ -577,7 +577,7 @@ router.get('/dispatch-candidates', accountingDispatchView, async (req: AuthReque
         id: true, status: true, createdAt: true, dispositionAt: true, dispositionReason: true,
         pickupVerification: { select: { verifiedAt: true } },
         allocationRevision: { select: { snapshot: true, loadingId: true,
-          loading: { select: { sepidarLoadingReference: true } },
+          loading: { select: { sepidarLoadingReference: true, status: true } },
           lines: { select: { snapshot: true, quantity: true, unit: true } } } },
         waybills: { orderBy: { issuedAt: 'asc' }, select: { id: true, number: true, status: true,
           issuedAt: true, voidedAt: true, replacesWaybillId: true,
@@ -596,6 +596,17 @@ router.get('/dispatch-candidates', accountingDispatchView, async (req: AuthReque
         _max: { issuedAt: true, voidedAt: true },
       });
       const invoiceActivityByLoading = new Map(invoiceActivity.map(invoice => [invoice.loadingId, invoice._max]));
+      const referenceHistory = await tx.accountingAuditLog.findMany({ where: {
+        entityType: 'LogisticsLoading', entityId: { in: [...new Set(candidates.map(candidate => candidate.allocationRevision.loadingId))] },
+        action: { in: ['REGISTER_SEPIDAR_LOADING_REFERENCE', 'CORRECT_SEPIDAR_LOADING_REFERENCE'] },
+      }, select: { entityId: true, beforeState: true, afterState: true, actorId: true, createdAt: true, note: true },
+      orderBy: { createdAt: 'desc' } });
+      const historyByLoading = new Map<string, typeof referenceHistory>();
+      for (const entry of referenceHistory) {
+        const entries = historyByLoading.get(entry.entityId!) ?? [];
+        entries.push(entry);
+        historyByLoading.set(entry.entityId!, entries);
+      }
       const time = (value?: Date | null) => value?.getTime() ?? 0;
       const ownerById = new Map(owners.map(owner => [owner.id, owner.allocationRevision]));
       return { manage, candidates: candidates.map(candidate => {
@@ -608,6 +619,8 @@ router.get('/dispatch-candidates', accountingDispatchView, async (req: AuthReque
           ))));
         return { ...candidateData, lastActivityAt, currentSalesInvoice: currentInvoiceByLoading.get(allocationRevision.loadingId) ?? null, loadingId: allocationRevision.loadingId,
           sepidarLoadingReference: allocationRevision.loading.sepidarLoadingReference,
+          loadingStatus: allocationRevision.loading.status,
+          sepidarLoadingReferenceHistory: historyByLoading.get(allocationRevision.loadingId) ?? [],
           summary: projectAccountingDispatchCandidateSummary(allocationRevision.snapshot),
           lines: owner?.sourceKind === 'SALES_CONTRACT' ? projectAccountingDispatchLines(allocationRevision.lines) : [],
           canManage: manage.allowed && Boolean(owner && (owner.sourceKind === 'SALES_CONTRACT'
@@ -623,10 +636,17 @@ router.get('/dispatch-candidates', accountingDispatchView, async (req: AuthReque
 
 router.post('/loadings/:loadingId/sepidar-reference', accountingDispatchEdit, async (req: WorkspaceRequest & FeatureRequest, res: Response) => {
   const raw = req.body?.value;
-  if (typeof raw !== 'string') return res.status(400).json({ success: false, error: 'شماره بارگیری سپیدار را وارد کنید.' });
-  const value = raw.trim().replace(/[۰-۹]/g, digit => String(digit.charCodeAt(0) - 1776))
+  if (raw !== null && typeof raw !== 'string') return res.status(400).json({ success: false, error: 'شماره بارگیری سپیدار را وارد کنید.' });
+  const value = raw === null ? null : raw.trim().replace(/[۰-۹]/g, digit => String(digit.charCodeAt(0) - 1776))
     .replace(/[٠-٩]/g, digit => String(digit.charCodeAt(0) - 1632));
-  if (!/^[0-9]{1,64}$/.test(value)) return res.status(400).json({ success: false, error: 'شماره بارگیری سپیدار باید فقط رقم باشد.' });
+  if (value !== null && value !== '' && !/^[0-9]{1,64}$/.test(value)) return res.status(400).json({ success: false, error: 'شماره بارگیری سپیدار باید فقط رقم باشد.' });
+  const expectedValue = req.body?.expectedValue;
+  if (expectedValue !== undefined && expectedValue !== null && (typeof expectedValue !== 'string' || !/^[0-9]{1,64}$/.test(expectedValue)))
+    return res.status(400).json({ success: false, error: 'شماره قبلی معتبر نیست.' });
+  const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
+  if (reason.length > 200) return res.status(400).json({ success: false, error: 'دلیل باید کوتاه باشد.' });
+  if (expectedValue !== undefined && expectedValue !== null && !reason)
+    return res.status(400).json({ success: false, error: 'دلیل اصلاح شماره بارگیری سپیدار الزامی است.' });
   try {
     const result = await prisma.$transaction(async tx => {
       const loading = await tx.logisticsLoading.findUnique({ where: { id: req.params.loadingId },
@@ -653,19 +673,30 @@ router.post('/loadings/:loadingId/sepidar-reference', accountingDispatchEdit, as
       }
       if (!await readPartnerDispatchAccountingCapability(tx, req.user!.id)) return 'missing' as const;
       if (loading.status !== 'FINALIZED') return 'not-finalized' as const;
-      if (loading.sepidarLoadingReference !== null) return 'already-set' as const;
-      const updated = await tx.logisticsLoading.updateMany({ where: { id: loading.id, sepidarLoadingReference: null },
-        data: { sepidarLoadingReference: value } });
-      if (!updated.count) return 'already-set' as const;
-      await tx.accountingAuditLog.create({ data: { action: 'REGISTER_SEPIDAR_LOADING_REFERENCE', actorId: req.user!.id,
-        entityType: 'LogisticsLoading', entityId: loading.id, beforeState: { sepidarLoadingReference: null },
-        afterState: { sepidarLoadingReference: value }, note: `شماره بارگیری سپیدار: ${value}` } });
-      return 'saved' as const;
+      const before = loading.sepidarLoadingReference;
+      const priorReference = before === null && await tx.accountingAuditLog.findFirst({ where: {
+        entityType: 'LogisticsLoading', entityId: loading.id,
+        action: { in: ['REGISTER_SEPIDAR_LOADING_REFERENCE', 'CORRECT_SEPIDAR_LOADING_REFERENCE'] },
+      }, select: { id: true } });
+      if (expectedValue === undefined ? before !== null : before !== expectedValue) return 'stale' as const;
+      if (before === null && !value) return 'empty' as const;
+      if ((before !== null || priorReference) && !reason) return 'reason-required' as const;
+      if (before === value) return 'unchanged' as const;
+      const updated = await tx.logisticsLoading.updateMany({ where: { id: loading.id, sepidarLoadingReference: before },
+        data: { sepidarLoadingReference: value || null } });
+      if (!updated.count) return 'stale' as const;
+      await tx.accountingAuditLog.create({ data: { action: before === null && !priorReference ? 'REGISTER_SEPIDAR_LOADING_REFERENCE' : 'CORRECT_SEPIDAR_LOADING_REFERENCE', actorId: req.user!.id,
+        entityType: 'LogisticsLoading', entityId: loading.id, beforeState: { sepidarLoadingReference: before },
+        afterState: { sepidarLoadingReference: value || null }, note: before === null && !priorReference ? `شماره بارگیری سپیدار: ${value}` : reason } });
+      return before === null && !priorReference ? 'registered' as const : 'corrected' as const;
     });
     if (result === 'missing') return res.sendStatus(404);
     if (result === 'not-finalized') return res.status(409).json({ success: false, error: 'بارگیری نهایی نشده است.' });
-    if (result === 'already-set') return res.status(409).json({ success: false, error: 'شماره این بارگیری قبلاً ثبت شده است. صفحه را به‌روز کنید.' });
-    return res.status(201).json({ success: true, data: { value } });
+    if (result === 'stale') return res.status(409).json({ success: false, error: 'شماره این بارگیری تغییر کرده است. صفحه را به‌روز کنید.' });
+    if (result === 'empty') return res.status(400).json({ success: false, error: 'شماره بارگیری سپیدار را وارد کنید.' });
+    if (result === 'reason-required') return res.status(400).json({ success: false, error: 'دلیل اصلاح شماره بارگیری سپیدار الزامی است.' });
+    if (result === 'unchanged') return res.status(400).json({ success: false, error: 'شماره تغییری نکرده است.' });
+    return res.status(result === 'registered' ? 201 : 200).json({ success: true, data: { value: value || null } });
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')
       return res.status(409).json({ success: false, error: 'این شماره برای بارگیری دیگری ثبت شده است.' });

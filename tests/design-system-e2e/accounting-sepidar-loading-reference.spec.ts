@@ -11,7 +11,7 @@ test('accountant registers a loading reference and finds every driver row by it'
   let partnerWritable = false;
   let failNextSave = true;
   const rows = ['driver-a', 'driver-b', 'driver-c'].map(id => ({ id, loadingId: id === 'driver-c' ? 'loading-2' : 'loading-1',
-    status: 'PENDING', canManage: true, sepidarLoadingReference: reference,
+    status: 'PENDING', loadingStatus: 'FINALIZED', canManage: true, sepidarLoadingReference: reference,
     summary: { loadingNumber: '42', driverName: id, plate: '۱۲۳', customerName: 'مشتری' },
     waybills: id === 'driver-a' ? [{ id: 'waybill-a', status: 'ISSUED', number: '1' }] : [] }));
   await page.route('**/api/dispatch-confirmation/capabilities', route => route.fulfill({ json: { success: true,
@@ -37,7 +37,7 @@ test('accountant registers a loading reference and finds every driver row by it'
   await expect(page.getByRole('row').filter({ hasText: 'driver-a' }).getByRole('cell').nth(1)).toHaveText('—');
   await expect(page.getByRole('row').filter({ hasText: 'driver-a' }).getByRole('button', { name: 'ثبت شماره بارگیری سپیدار' })).toHaveCount(0);
   partnerWritable = true;
-  await page.getByRole('button', { name: 'به‌روزرسانی' }).click();
+  await page.getByRole('button', { name: 'به‌روزرسانی', exact: true }).click();
   await page.getByRole('row').filter({ hasText: 'driver-a' }).getByRole('button', { name: 'ثبت شماره بارگیری سپیدار' }).click();
   await page.getByRole('textbox', { name: 'شماره بارگیری سپیدار' }).fill(' ۰۰۱۲۳ ');
   await page.getByRole('button', { name: 'ثبت شماره', exact: true }).click();
@@ -60,4 +60,68 @@ test('accountant registers a loading reference and finds every driver row by it'
   await expect(page.getByRole('row').filter({ hasText: 'driver-a' })).toContainText('00123');
   await expect(page.getByRole('row').filter({ hasText: 'driver-c' }).getByRole('cell').nth(1)).toHaveText('—');
   await expect(page.getByRole('button', { name: 'ثبت شماره بارگیری سپیدار' })).toHaveCount(0);
+});
+
+test('accountant corrects and clears a saved reference with a reason and can review its history', async ({ page }) => {
+  await page.goto('/login');
+  await page.locator('input[name="identifier"]').fill(process.env.DESIGN_SYSTEM_E2E_ADMIN_USERNAME || 'admin');
+  await page.locator('input[name="password"]').fill(process.env.DESIGN_SYSTEM_E2E_ADMIN_PASSWORD || 'admin123');
+  await page.locator('form').getByRole('button', { name: 'ورود' }).click();
+  await expect(page).toHaveURL(/\/dashboard$/, { timeout: 60_000 });
+  let reference: string | null = '00123';
+  let loadingStatus = 'FINALIZED';
+  let history = [{ actorId: 'accountant', createdAt: '2026-11-18T10:00:00Z',
+    beforeState: { sepidarLoadingReference: null }, afterState: { sepidarLoadingReference: '00123' }, note: 'شماره بارگیری سپیدار: 00123' }];
+  let fail = true;
+  await page.route('**/api/dispatch-confirmation/capabilities', route => route.fulfill({ json: { success: true,
+    data: { canManageAccountingCandidates: true, canManageAccountingConfirmation: false } } }));
+  await page.route('**/api/accounting/dispatch-candidates', route => route.fulfill({ json: { success: true, data: [
+    { id: 'driver-a', loadingId: 'loading-1', status: 'RETURNED', loadingStatus, canManage: true,
+      sepidarLoadingReference: reference, sepidarLoadingReferenceHistory: history,
+      summary: { loadingNumber: '42', driverName: 'driver-a' }, waybills: [] },
+  ] } }));
+  await page.route('**/api/accounting/loadings/loading-1/sepidar-reference', async route => {
+    const body = route.request().postDataJSON();
+    expect(body.expectedValue).toBe(reference);
+    if (fail) { fail = false; await route.fulfill({ status: 409, json: { success: false,
+      error: 'شماره این بارگیری تغییر کرده است. صفحه را به‌روز کنید.' } }); return; }
+    history = [{ actorId: 'accountant', createdAt: '2026-11-18T11:00:00Z',
+      beforeState: { sepidarLoadingReference: reference }, afterState: { sepidarLoadingReference: body.value },
+      note: body.reason }, ...history];
+    reference = body.value;
+    await route.fulfill({ json: { success: true, data: { value: reference } } });
+  });
+  await page.goto('/dashboard/accounting/dispatch');
+  await page.getByRole('button', { name: 'اصلاح شماره بارگیری سپیدار' }).click();
+  await expect(page.getByRole('textbox', { name: 'شماره بارگیری سپیدار' })).toHaveValue('00123');
+  await page.getByRole('textbox', { name: 'شماره بارگیری سپیدار' }).fill('00456');
+  await expect(page.getByRole('button', { name: 'ذخیره شماره' })).toBeDisabled();
+  await page.getByRole('textbox', { name: 'دلیل اصلاح' }).fill('اشتباه تایپی');
+  await page.getByRole('button', { name: 'ذخیره شماره' }).click();
+  await expect(page.getByText('شماره این بارگیری تغییر کرده است. صفحه را به‌روز کنید.')).toBeVisible();
+  await expect(page.getByRole('textbox', { name: 'شماره بارگیری سپیدار' })).toHaveValue('00456');
+  await expect(page.getByRole('textbox', { name: 'دلیل اصلاح' })).toHaveValue('اشتباه تایپی');
+  await page.getByRole('button', { name: 'ذخیره شماره' }).click();
+  await expect(page.getByRole('row').filter({ hasText: 'driver-a' })).toContainText('00456');
+  await page.getByRole('button', { name: 'جزئیات اقلام و اسناد بارگیری' }).click();
+  await page.getByRole('button', { name: 'سابقه شماره بارگیری سپیدار' }).click();
+  await expect(page.getByText('اشتباه تایپی')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'اصلاح شماره بارگیری سپیدار' }).click();
+  await page.getByRole('textbox', { name: 'شماره بارگیری سپیدار' }).fill('');
+  await page.getByRole('textbox', { name: 'دلیل اصلاح' }).fill('مرجع نادرست بود');
+  await page.getByRole('button', { name: 'پاک‌کردن شماره' }).click();
+  await expect(page.getByRole('row').filter({ hasText: 'driver-a' }).getByRole('cell').nth(1)).toHaveText('—');
+  await page.getByRole('button', { name: 'جزئیات اقلام و اسناد بارگیری' }).click();
+  await page.getByRole('button', { name: 'سابقه شماره بارگیری سپیدار' }).click();
+  await expect(page.getByText('مرجع نادرست بود')).toBeVisible();
+  await page.keyboard.press('Escape');
+  reference = '321';
+  loadingStatus = 'CANCELLED';
+  await page.getByRole('button', { name: 'به‌روزرسانی', exact: true }).click();
+  await expect(page.getByRole('row').filter({ hasText: 'driver-a' })).toContainText('321');
+  await expect(page.getByRole('button', { name: 'اصلاح شماره بارگیری سپیدار' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'جزئیات اقلام و اسناد بارگیری' }).click();
+  await expect(page.getByText('بارگیری لغوشده')).toBeVisible();
+  await expect(page.getByText('شماره بارگیری سپیدار: 321')).toBeVisible();
 });

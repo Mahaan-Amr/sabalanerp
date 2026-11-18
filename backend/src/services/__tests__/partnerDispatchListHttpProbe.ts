@@ -30,6 +30,11 @@ async function main() {
     const register = (id: string, value: string) => fetch(`${base}/loadings/${id}/sepidar-reference`, {
       method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ value }),
     });
+    const correct = (id: string, value: string | null, expectedValue: string | null, reason: string) =>
+      fetch(`${base}/loadings/${id}/sepidar-reference`, { method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value, expectedValue, reason }),
+      });
     let waiting: ReturnType<typeof fetchCandidates> | undefined;
     await prisma.$transaction(async tx => {
       await tx.$queryRaw`SELECT id FROM partner_operations_controls WHERE id = 'partner-operations' FOR UPDATE`;
@@ -86,9 +91,27 @@ async function main() {
     const stale = await register(loadingId, '999');
     assert.equal(stale.status, 409);
     await stale.body?.cancel();
-    const duplicate = await register(otherLoadingId, '00123');
+    const unexplained = await correct(loadingId, '999', '00123', '  ');
+    assert.equal(unexplained.status, 400);
+    await unexplained.body?.cancel();
+    const corrected = await correct(loadingId, '999', '00123', 'اصلاح اشتباه تایپی');
+    assert.equal(corrected.status, 200);
+    assert.equal((await corrected.json() as any).data.value, '999');
+    const concurrent = await correct(loadingId, '777', '00123', 'نسخه قدیمی');
+    assert.equal(concurrent.status, 409);
+    await concurrent.body?.cancel();
+    const duplicate = await register(otherLoadingId, '999');
     assert.equal(duplicate.status, 409);
     await duplicate.body?.cancel();
+    const cleared = await correct(loadingId, null, '999', 'شماره نامعتبر بود');
+    assert.equal(cleared.status, 200);
+    assert.equal((await cleared.json() as any).data.value, null);
+    const afterClear = await (await fetchCandidates()).json() as any;
+    assert.equal(afterClear.data.find((row: any) => row.id === expected.ordinary)?.sepidarLoadingReference, null);
+    assert.equal(afterClear.data.find((row: any) => row.id === expected.allowed)?.sepidarLoadingReference, null);
+    const unexplainedReentry = await register(loadingId, '321');
+    assert.equal(unexplainedReentry.status, 400, 'a cleared reference retains its correction history');
+    await unexplainedReentry.body?.cancel();
     const other = await register(otherLoadingId, '456');
     assert.equal(other.status, 201);
     await other.body?.cancel();
@@ -97,16 +120,34 @@ async function main() {
     const history = await audit.json() as any;
     assert.ok(history.data.items.some((item: any) => item.entityId === loadingId && item.actorId === actorId
       && item.note.includes('00123') && item.createdAt));
+    const changes = afterClear.data.find((row: any) => row.id === expected.ordinary)
+      ?.sepidarLoadingReferenceHistory || [];
+    assert.ok(changes.some((item: any) => item.beforeState?.sepidarLoadingReference === '00123'
+      && item.afterState?.sepidarLoadingReference === '999' && item.note.includes('اصلاح اشتباه تایپی')));
+    assert.ok(changes.some((item: any) => item.beforeState?.sepidarLoadingReference === '999'
+      && item.afterState?.sepidarLoadingReference === null && item.note.includes('شماره نامعتبر بود')));
     await prisma.featurePermission.update({ where: { userId_workspace_feature: { userId: actorId,
       workspace: 'accounting', feature: 'accounting_dispatch_candidates_manage' } }, data: { isActive: false } });
     const viewOnly = await (await fetchCandidates()).json() as any;
-    assert.equal(viewOnly.data.find((row: any) => row.id === expected.ordinary)?.sepidarLoadingReference, '00123');
+    assert.equal(viewOnly.data.find((row: any) => row.id === expected.ordinary)?.sepidarLoadingReference, null);
     assert.equal(viewOnly.data.find((row: any) => row.id === expected.ordinary)?.canManage, false);
     const viewOnlyWrite = await register(otherLoadingId, '789');
     assert.equal(viewOnlyWrite.status, 403);
     await viewOnlyWrite.body?.cancel();
     await prisma.featurePermission.update({ where: { userId_workspace_feature: { userId: actorId,
       workspace: 'accounting', feature: 'accounting_dispatch_candidates_manage' } }, data: { isActive: true } });
+    const reentered = await correct(loadingId, '321', null, 'ثبت دوباره پس از بررسی');
+    assert.equal(reentered.status, 200);
+    await reentered.body?.cancel();
+    await prisma.logisticsLoading.update({ where: { id: loadingId }, data: { status: 'CANCELLED', cancelledAt: new Date() } });
+    const cancelled = await (await fetchCandidates()).json() as any;
+    const cancelledRow = cancelled.data.find((row: any) => row.id === expected.ordinary);
+    assert.equal(cancelledRow.loadingStatus, 'CANCELLED');
+    assert.equal(cancelledRow.sepidarLoadingReference, '321');
+    assert.ok(cancelledRow.sepidarLoadingReferenceHistory.some((item: any) => item.note === 'ثبت دوباره پس از بررسی'));
+    const cancelledWrite = await correct(loadingId, '789', '321', 'بعد از لغو');
+    assert.equal(cancelledWrite.status, 409);
+    await cancelledWrite.body?.cancel();
   } finally {
     server.closeAllConnections();
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));

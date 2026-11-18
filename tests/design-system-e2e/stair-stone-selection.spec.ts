@@ -30,7 +30,7 @@ for (const width of [1280, 390]) {
         selectedProductTypeForAddition: null, products: [], serviceRows: [], deliveries: [],
         payment: { payments: [], currency: 'تومان', totalContractAmount: 0 }, discount: null, signature: null
       }
-    })));
+    });
     await scopeContractNavigationFixture(page);
     await page.goto('/dashboard/sales/contracts/create?fresh=1&returnTo=contract&step=4');
     await page.getByRole('tab', { name: 'پله', exact: true }).click();

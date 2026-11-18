@@ -19,11 +19,13 @@ test('maintenance entry publishes unique operation identities that fit PostgreSQ
     script.indexOf('SYSTEM_RECOVERY_BACKUP_HOST='),
     script.indexOf('\ncd "${REPO_ROOT}"'),
   );
-  const before = '  eval "${customer_allocation_predecessor}"\nfi\n';
+  const before = 'if [ "${MAINTENANCE_IMAGE_SELECTION}" -eq 1 ]; then\n  # PostgreSQL keeps 63 application_name bytes;';
+  const after = 'export DEPLOYMENT_TARGET_COMMIT DEPLOYMENT_RELEASE_ID DEPLOYMENT_ID DEPLOYMENT_OWNER APP_COMMIT';
   assert.ok(script.includes(before));
+  assert.ok(script.indexOf(after, script.indexOf(before)) > script.indexOf(before));
   const identity = script.slice(
-    script.indexOf(before) + before.length,
-    script.indexOf('\ndatabase_role_pin="$(database_role_pin_path)"'),
+    script.indexOf(before),
+    script.indexOf(after, script.indexOf(before)) + after.length,
   );
   assert.ok(entry.length > 0 && identity.length > 0);
 
@@ -100,15 +102,6 @@ test('maintenance entry publishes unique operation identities that fit PostgreSQ
       name: 'scanner repair',
       args: ['/private/env'],
       environment: { DEPLOYMENT_CLAMAV_TARGET_IMAGE: 'sha256:' + 'b'.repeat(64) },
-      mode: 'release',
-    },
-    {
-      name: 'customer allocation current data rollback',
-      args: ['--customer-allocation-current-data-rollback', '/private/env', '/private/evidence'],
-      environment: {
-        DEPLOYMENT_CUSTOMER_ALLOCATION_AUTHORITY_DIR: '/private/authority',
-        DEPLOYMENT_CUSTOMER_ALLOCATION_APPROVER_SHA256: 'c'.repeat(64),
-      },
       mode: 'release',
     },
   ];

@@ -85,7 +85,7 @@ import { renderDispatchDocumentPdf } from '../documents/dispatch/dispatchDocumen
 import { versionedDispatchDocumentFiles } from '../services/dispatchFileRuntime';
 import { getStatementAdjustmentArtifactPreparer } from '../services/statementAdjustmentRuntime';
 import { resolveNarrowFeatureAccess } from '../services/narrowFeatureAccess';
-import { ContractLifecycleRequestKind } from '@prisma/client';
+import { ContractLifecycleRequestKind, Prisma } from '@prisma/client';
 import { mayDirectlyPerformContractLifecycleAction, type ContractLifecycleAction } from '../services/contractLifecyclePolicy';
 import {
   ContractLifecycleBlockedError,
@@ -576,7 +576,9 @@ router.get('/dispatch-candidates', accountingDispatchView, async (req: AuthReque
       const candidates = await tx.accountingDispatchCandidate.findMany({ where: { id: { in: allowedIds } }, select: {
         id: true, status: true, createdAt: true, dispositionAt: true, dispositionReason: true,
         pickupVerification: { select: { verifiedAt: true } },
-        allocationRevision: { select: { snapshot: true, loadingId: true, lines: { select: { snapshot: true, quantity: true, unit: true } } } },
+        allocationRevision: { select: { snapshot: true, loadingId: true,
+          loading: { select: { sepidarLoadingReference: true } },
+          lines: { select: { snapshot: true, quantity: true, unit: true } } } },
         waybills: { orderBy: { issuedAt: 'asc' }, select: { id: true, number: true, status: true,
           issuedAt: true, voidedAt: true, replacesWaybillId: true,
           legacyReconstruction: { select: { id: true, createdAt: true } },
@@ -604,7 +606,9 @@ router.get('/dispatch-candidates', accountingDispatchView, async (req: AuthReque
           time(invoice?.issuedAt), time(invoice?.voidedAt), ...candidate.waybills.map(waybill => Math.max(
             time(waybill.issuedAt), time(waybill.voidedAt), time(waybill.legacyReconstruction?.createdAt), time(waybill.physicalExit?.recordedAt),
           ))));
-        return { ...candidateData, lastActivityAt, currentSalesInvoice: currentInvoiceByLoading.get(allocationRevision.loadingId) ?? null, loadingId: allocationRevision.loadingId, summary: projectAccountingDispatchCandidateSummary(allocationRevision.snapshot),
+        return { ...candidateData, lastActivityAt, currentSalesInvoice: currentInvoiceByLoading.get(allocationRevision.loadingId) ?? null, loadingId: allocationRevision.loadingId,
+          sepidarLoadingReference: allocationRevision.loading.sepidarLoadingReference,
+          summary: projectAccountingDispatchCandidateSummary(allocationRevision.snapshot),
           lines: owner?.sourceKind === 'SALES_CONTRACT' ? projectAccountingDispatchLines(allocationRevision.lines) : [],
           canManage: manage.allowed && Boolean(owner && (owner.sourceKind === 'SALES_CONTRACT'
           || (owner.sourceKind === 'PARTNER_CASE' && owner.partnerCaseId && writablePartnerCases.has(owner.partnerCaseId)))) };
@@ -615,6 +619,58 @@ router.get('/dispatch-candidates', accountingDispatchView, async (req: AuthReque
     return res.json({ success: true, data: candidates.map((candidate) => ({ ...candidate,
       waybills: candidate.waybills.map((waybill) => ({ ...waybill, number: waybill.number.toString() })) })) });
   } catch (error) { return dispatchError(res, error); }
+});
+
+router.post('/loadings/:loadingId/sepidar-reference', accountingDispatchEdit, async (req: WorkspaceRequest & FeatureRequest, res: Response) => {
+  const raw = req.body?.value;
+  if (typeof raw !== 'string') return res.status(400).json({ success: false, error: 'شماره بارگیری سپیدار را وارد کنید.' });
+  const value = raw.trim().replace(/[۰-۹]/g, digit => String(digit.charCodeAt(0) - 1776))
+    .replace(/[٠-٩]/g, digit => String(digit.charCodeAt(0) - 1632));
+  if (!/^[0-9]{1,64}$/.test(value)) return res.status(400).json({ success: false, error: 'شماره بارگیری سپیدار باید فقط رقم باشد.' });
+  try {
+    const result = await prisma.$transaction(async tx => {
+      const loading = await tx.logisticsLoading.findUnique({ where: { id: req.params.loadingId },
+        select: { id: true, status: true, sepidarLoadingReference: true } });
+      if (!loading) return 'missing' as const;
+      const candidates = await tx.accountingDispatchCandidate.findMany({
+        where: { allocationRevision: { loadingId: loading.id } },
+        select: { allocationRevision: { select: { sourceKind: true, partnerCaseId: true } } },
+      });
+      if (!candidates.length) return 'missing' as const;
+      const partnerCases = [...new Set(candidates.flatMap(candidate => candidate.allocationRevision.sourceKind === 'PARTNER_CASE'
+        ? candidate.allocationRevision.partnerCaseId ? [candidate.allocationRevision.partnerCaseId] : [''] : []))].sort();
+      if (partnerCases.length) {
+        if (partnerCases.includes('')) return 'missing' as const;
+        const authority = createAuditedPartnerAuthorization(tx, { actorId: req.user!.id, purpose: 'ACCOUNTING', channel: 'API' }, {
+          correlationId: String(req.get('X-Correlation-Id') || randomUUID()), reason: 'ثبت شماره بارگیری سپیدار',
+        });
+        for (const caseId of partnerCases) {
+          if (!(await authority.authorize('ACCOUNTING_WRITE', { kind: 'CASE', id: caseId })).ok) return 'missing' as const;
+        }
+      } else {
+        await tx.$queryRaw`SELECT id FROM users WHERE id = ${req.user!.id} FOR UPDATE`;
+        await tx.$queryRaw`SELECT revision FROM effective_authorization_state WHERE id = 1 FOR UPDATE`;
+      }
+      if (!await readPartnerDispatchAccountingCapability(tx, req.user!.id)) return 'missing' as const;
+      if (loading.status !== 'FINALIZED') return 'not-finalized' as const;
+      if (loading.sepidarLoadingReference !== null) return 'already-set' as const;
+      const updated = await tx.logisticsLoading.updateMany({ where: { id: loading.id, sepidarLoadingReference: null },
+        data: { sepidarLoadingReference: value } });
+      if (!updated.count) return 'already-set' as const;
+      await tx.accountingAuditLog.create({ data: { action: 'REGISTER_SEPIDAR_LOADING_REFERENCE', actorId: req.user!.id,
+        entityType: 'LogisticsLoading', entityId: loading.id, beforeState: { sepidarLoadingReference: null },
+        afterState: { sepidarLoadingReference: value }, note: `شماره بارگیری سپیدار: ${value}` } });
+      return 'saved' as const;
+    });
+    if (result === 'missing') return res.sendStatus(404);
+    if (result === 'not-finalized') return res.status(409).json({ success: false, error: 'بارگیری نهایی نشده است.' });
+    if (result === 'already-set') return res.status(409).json({ success: false, error: 'شماره این بارگیری قبلاً ثبت شده است. صفحه را به‌روز کنید.' });
+    return res.status(201).json({ success: true, data: { value } });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')
+      return res.status(409).json({ success: false, error: 'این شماره برای بارگیری دیگری ثبت شده است.' });
+    return dispatchError(res, error);
+  }
 });
 
 router.post('/dispatch-candidates/:id/pickup-verification/:command', accountingDispatchEdit, async (req: WorkspaceRequest & FeatureRequest, res: Response) => {

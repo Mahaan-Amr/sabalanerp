@@ -3090,6 +3090,7 @@ model LogisticsLoading {
   cancelledAt                  DateTime?
   cancelledBy                  String?
   cancellationReason           String?
+  sepidarLoadingReference      String?                            @unique
   createdBy                    String
   createdAt                    DateTime                           @default(now())
   updatedAt                    DateTime                           @updatedAt

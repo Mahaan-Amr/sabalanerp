@@ -53,6 +53,9 @@ export default function AccountingDispatchPage() {
   const [search, setSearch] = useState("");
   const [voidInvoiceLoadingId, setVoidInvoiceLoadingId] = useState<string | null>(null);
   const [detailCandidateId, setDetailCandidateId] = useState<string | null>(null);
+  const [referenceLoadingId, setReferenceLoadingId] = useState<string | null>(null);
+  const [referenceInput, setReferenceInput] = useState("");
+  const [referenceError, setReferenceError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [dispatchCandidates, setDispatchCandidates] = useState<any[]>([]);
   const [dispatchDetails, setDispatchDetails] = useState<Record<string, DispatchDocumentCase>>({});
@@ -260,7 +263,7 @@ export default function AccountingDispatchPage() {
   const filteredCandidates = dispatchCandidates.filter(candidate => {
     if (!query) return true;
     const detail = dispatchDetails[candidate.id];
-    const values = [candidate.summary?.loadingNumber, candidate.summary?.driverName, candidate.summary?.plate,
+    const values = [candidate.summary?.loadingNumber, candidate.sepidarLoadingReference, candidate.summary?.driverName, candidate.summary?.plate,
       candidate.summary?.customerName, candidate.summary?.projectName, candidate.summary?.projectAddress,
       ...(candidate.waybills || []).map((waybill: any) => waybill.number),
       ...(candidate.lines || []).map((line: any) => line.contractNumber),
@@ -309,6 +312,10 @@ export default function AccountingDispatchPage() {
     const actions: ErpAction[] = [
       { label: "جزئیات اقلام و اسناد بارگیری", icon: FaFileAlt, onClick: () => showCandidate(candidate.id) },
     ];
+    if (candidate.loadingId && canManage && !candidate.sepidarLoadingReference) actions.push({
+      label: "ثبت شماره بارگیری سپیدار", icon: FaFileAlt, disabled: actionsBlocked,
+      onClick: () => { setReferenceLoadingId(candidate.loadingId); setReferenceInput(""); setReferenceError(null); },
+    });
     if (["REJECTED", "RETURNED"].includes(candidate.status) && candidate.loadingId) {
       actions.push({ label: "پیگیری بارگیری در لجستیک", icon: FaTruck, href: `/dashboard/logistics/loadings/${encodeURIComponent(candidate.loadingId)}` });
     }
@@ -387,7 +394,7 @@ export default function AccountingDispatchPage() {
       filters={section !== "confirmation" ? [{
         id: "dispatch-search", type: "search", label: "جست‌وجو", value: search, onChange: setSearch,
         placeholder: section === "candidates"
-          ? "شماره بارگیری، مشتری، پروژه، قرارداد، راننده، پلاک یا شماره بارنامه"
+          ? "شماره بارگیری، شماره بارگیری سپیدار، مشتری، پروژه، قرارداد، راننده، پلاک یا شماره بارنامه"
           : "شماره بارگیری، راننده یا وضعیت",
       }] : []}
       isLoading={section === "candidates" && loading}
@@ -396,6 +403,7 @@ export default function AccountingDispatchPage() {
       rowKey={candidate => candidate.id}
       columns={[
         { id: "loading", header: "بارگیری", priority: "primary", cell: candidate => candidate.summary?.loadingNumber ? dispatchCaseReference(candidate.summary.loadingNumber) : "—" },
+        { id: "sepidar", header: "شماره بارگیری سپیدار", cell: candidate => candidate.sepidarLoadingReference || "—" },
         { id: "driver", header: "راننده و پلاک", cell: candidate => <><strong>{candidate.summary?.driverName || "راننده نامشخص"}</strong><div className="sds-text-secondary">{candidate.summary?.plate || "—"}</div></> },
         { id: "customer", header: "مشتری و پروژه", cell: candidate => <><div>{candidate.summary?.customerName || "—"}</div><div className="sds-text-secondary">{candidate.summary?.projectName || "—"}</div></> },
         { id: "status", header: "وضعیت", cell: candidate => <ErpBadge tone={candidate.status === "ACCEPTED" ? "success" : ["REJECTED", "RETURNED"].includes(candidate.status) ? "danger" : "warning"}>{dispatchStatusLabels[candidate.status] || operationalStatusLabel(candidate.status)}</ErpBadge> },
@@ -417,6 +425,8 @@ export default function AccountingDispatchPage() {
           dispatchCapabilities.canManageAccountingConfirmation && (
             <ErpCard className="p-4">
               <strong>تأیید هویت راننده</strong>
+              <p className="mt-1 text-sm sds-text-secondary">شماره بارگیری سپیدار: <bdi>{dispatchCandidates.find(candidate =>
+                candidate.waybills?.some((waybill: any) => waybill.id === confirmation.waybillId))?.sepidarLoadingReference || "—"}</bdi></p>
               {confirmationActions.biometric && <p className="mt-1 text-sm sds-text-muted">
                 یک انگشت ثبت‌شده را انتخاب کنید و تا پایان بررسی روی حسگر نگه
                 دارید.
@@ -552,6 +562,7 @@ export default function AccountingDispatchPage() {
       <ErpSheet open={Boolean(selectedCandidate)} onClose={() => setDetailCandidateId(null)} title="جزئیات اقلام و اسناد بارگیری" presentation="modal" size="wide">
         {selectedCandidate && <>
           <strong>{selectedCandidate.summary?.driverName || "راننده نامشخص"}</strong>
+          <p className="text-sm sds-text-secondary">شماره بارگیری سپیدار: <bdi>{selectedCandidate.sepidarLoadingReference || "—"}</bdi></p>
           {selectedCandidate.summary?.driverSource === "CUSTOMER_PICKUP" && (
             <div className="mt-3 space-y-2">
               <p className="text-sm sds-text-secondary">پلاک {selectedCandidate.summary.plate}</p>
@@ -632,6 +643,33 @@ export default function AccountingDispatchPage() {
             }}
             refreshKey={dispatchCandidates}/>}
         </>}
+      </ErpSheet>
+      <ErpSheet open={Boolean(referenceLoadingId)} title="ثبت شماره بارگیری سپیدار" presentation="modal"
+        pending={dispatchPending} onClose={() => { if (!dispatchPending) setReferenceLoadingId(null); }}
+        footer={<div className="flex justify-end gap-2">
+          <ErpButton label="انصراف" variant="ghost" disabled={dispatchPending} onClick={() => setReferenceLoadingId(null)} />
+          <ErpButton label="ثبت شماره" disabled={dispatchPending || !referenceInput.trim()} onClick={async () => {
+            if (!referenceLoadingId) return;
+            setDispatchPending(true); setReferenceError(null);
+            try {
+              const saved = await accountingAPI.registerSepidarLoadingReference(referenceLoadingId, referenceInput);
+              setDispatchCandidates(current => current.map(candidate => candidate.loadingId === referenceLoadingId
+                ? { ...candidate, sepidarLoadingReference: saved.data.data.value } : candidate));
+              setReferenceLoadingId(null);
+              setDispatchNotice({ kind: "success", text: "شماره بارگیری سپیدار ثبت شد." });
+              try {
+                const refreshed = await accountingAPI.getDispatchCandidates();
+                setDispatchCandidates(refreshed.data.data || []);
+              } catch { setDispatchNotice({ kind: "success", text: "شماره ثبت شد؛ تازه‌سازی فهرست انجام نشد." }); }
+            } catch (error) { setReferenceError(userFacingError(error, "ثبت شماره بارگیری سپیدار انجام نشد.")); }
+            finally { setDispatchPending(false); }
+          }} />
+        </div>}>
+        <div className="space-y-3">
+          {referenceError && <ErpInlineState kind="error" title={referenceError} />}
+          <ErpInput aria-label="شماره بارگیری سپیدار" dir="ltr" inputMode="numeric" value={referenceInput}
+            onChange={event => { setReferenceInput(event.target.value); setReferenceError(null); }} />
+        </div>
       </ErpSheet>
       {voidInvoiceLoadingId && <SalesDispatchInvoices key={voidInvoiceLoadingId}
         loadingId={voidInvoiceLoadingId} workspace="accounting"

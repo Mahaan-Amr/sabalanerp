@@ -13,6 +13,8 @@ const known = {
 export const protectedBridgeMigrationNames: readonly string[] = Object.freeze(Object.keys(known));
 const pickupSourceName = '20261116100000_customer_pickup_driver_source';
 const pickupDispatchName = '20261116100100_customer_pickup_dispatch';
+const personalPickupSourceName = '20261118120000_personal_pickup_source';
+const personalPickupDispatchName = '20261118120100_personal_pickup_dispatch';
 const retireAttachmentScanStatusName = '20261117120000_retire_attachment_scan_status';
 const partnerReadinessProjectionName = '20261117160000_partner_release_readiness_completed_projection';
 const allocationControllerTransitionName = '20261116133000_customer_allocation_controller_transition';
@@ -107,10 +109,13 @@ const currentRelease = {
   '20261117140000_customer_allocation_controller_closure': ['3f063d8699ce903cecab90eb22dc1fa9f4bf3aeda8bd37176f9e2ea602efcb72', 6],
   '20261117150000_customer_allocation_runtime_admission': ['bf469b3fa2d29be6f5bc3cfa5a34c0851a6f14ec546d9560039aa52cc682e0b4', 6],
   [partnerReadinessProjectionName]: ['76c5f34dc094e9c15b879cb6eda417e347fd1118864c5c6207070cc78c190fe0', 3],
+  '20261118100000_sepidar_loading_reference': ['a117dd1bbb05c3d4ad96edc5204864f36b4617328ff68d671b9a4b0d7360e757', 2],
+  [personalPickupSourceName]: ['02d234097b5a2d70cbfeebbf36a9bc0dedbfe3a316ef936c38d0160eca15286f', 1],
+  [personalPickupDispatchName]: ['acbf6c974b30a77cfb0131d30fd3d960e0523053ee21a7d777ca759ea7539a3d', 5],
 } as const;
 export const protectedCurrentReleaseNames: readonly string[] = Object.freeze(Object.keys(currentRelease));
 // Each release extends the ledger while preserving the prior release-set hashes.
-const protectedReleaseEpochEnds = Object.freeze([12, 22, 24, 25, 35, 36, 37, 38]);
+const protectedReleaseEpochEnds = Object.freeze([12, 22, 24, 25, 35, 36, 37, 38, 41]);
 const releaseSetSha256 = (files: CurrentFile[], index: number) => sha(files.slice(0,
   protectedReleaseEpochEnds.find(end => index < end)!).map(file => file.sha256).join('\n'));
 
@@ -253,7 +258,7 @@ async function assertLease(tx: Prisma.TransactionClient, owner: Owner, shareLock
 }
 
 async function catalog(tx: Prisma.TransactionClient, input: {
-  tables: string[]; functions: string[]; pickupSource?: boolean; partnerReadinessProjection?: boolean;
+  tables: string[]; functions: string[]; pickupSource?: boolean; personalPickupSource?: boolean; partnerReadinessProjection?: boolean;
 }) {
   const tables = await tx.$queryRaw<Array<{ name: string; details: unknown }>>(Prisma.sql`
     SELECT c.relname AS name, jsonb_build_object('kind',c.relkind,'persistence',c.relpersistence,'owner',pg_get_userbyid(c.relowner),
@@ -289,7 +294,8 @@ async function catalog(tx: Prisma.TransactionClient, input: {
     FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public'
       AND p.proname IN (${Prisma.join(input.functions)}) ORDER BY p.proname`) : [];
   if (tables.length !== input.tables.length || functions.length !== input.functions.length) failure('PROTECTED_BRIDGE_SCHEMA_UNPROVEN');
-  const pickupSource = input.pickupSource ? { pickupSource: await pickupSourceProof(tx, true) } : {};
+  const pickupSource = input.pickupSource
+    ? { pickupSource: await pickupSourceProof(tx, input.personalPickupSource ? 'PERSONAL_PICKUP' : 'CUSTOMER_PICKUP') } : {};
   const partnerReadinessProjection = input.partnerReadinessProjection
     ? { partnerReadinessProjection: await partnerReadinessProjectionProof(tx) } : {};
   return sha(JSON.stringify(canonical({ tables, functions, ...pickupSource, ...partnerReadinessProjection })));
@@ -357,6 +363,7 @@ function currentCatalogScope(files: CurrentFile[], through: number) {
   return { tables: [...new Set(applied.flatMap(file => file.tables))].sort(),
     functions: [...functions].sort(),
     pickupSource: applied.some(file => file.name === pickupSourceName),
+    personalPickupSource: applied.some(file => file.name === personalPickupSourceName),
     partnerReadinessProjection: applied.some(file => file.name === partnerReadinessProjectionName) };
 }
 
@@ -374,13 +381,14 @@ async function partnerReadinessProjectionProof(tx: Prisma.TransactionClient) {
   return view;
 }
 
-async function pickupSourceProof(tx: Prisma.TransactionClient, after: boolean) {
+async function pickupSourceProof(tx: Prisma.TransactionClient, lastLabel: 'EXTERNAL' | 'CUSTOMER_PICKUP' | 'PERSONAL_PICKUP') {
   const rows = await tx.$queryRaw<Array<{ label: string }>>`
     SELECT e.enumlabel::text AS label FROM pg_enum e JOIN pg_type t ON t.oid=e.enumtypid
     JOIN pg_namespace n ON n.oid=t.typnamespace
     WHERE n.nspname='public' AND t.typname='GuardDriverSource' ORDER BY e.enumsortorder`;
   const labels = rows.map(row => row.label);
-  const expected = after ? ['INTERNAL', 'EXTERNAL', 'CUSTOMER_PICKUP'] : ['INTERNAL', 'EXTERNAL'];
+  const orderedLabels = ['INTERNAL', 'EXTERNAL', 'CUSTOMER_PICKUP', 'PERSONAL_PICKUP'];
+  const expected = orderedLabels.slice(0, orderedLabels.indexOf(lastLabel) + 1);
   if (labels.length !== expected.length || labels.some((label, index) => label !== expected[index])) {
     failure('PROTECTED_CURRENT_RELEASE_PICKUP_SOURCE_UNPROVEN');
   }
@@ -463,12 +471,12 @@ async function sequenceProof(tx: Prisma.TransactionClient, after: boolean) {
 }
 
 type RetryProof = { quantityProofSha256: string | null; dutyRows: string | null; sequenceProofSha256: string | null;
-  pickupDispatchRows?: string };
+  pickupDispatchRows?: string; personalPickupDispatchRows?: string };
 export function assertProtectedCurrentReleaseRetryEvidence(receipt: any, owner: Owner, observed: RetryProof) {
   if (typeof receipt?.deploymentId !== 'string' || !receipt.deploymentId
     || typeof receipt.releaseId !== 'string' || !receipt.releaseId) failure('PROTECTED_CURRENT_RELEASE_HISTORY_UNPROVEN');
   if (receipt.deploymentId !== owner.deploymentId || receipt.releaseId !== owner.releaseId) return;
-  for (const key of ['quantityProofSha256', 'dutyRows', 'sequenceProofSha256', 'pickupDispatchRows'] as const) {
+  for (const key of ['quantityProofSha256', 'dutyRows', 'sequenceProofSha256', 'pickupDispatchRows', 'personalPickupDispatchRows'] as const) {
     if (receipt[key] !== observed[key]) failure('PROTECTED_CURRENT_RELEASE_RETRY_DATA_DRIFT');
   }
 }
@@ -500,7 +508,9 @@ export async function applyProtectedCurrentRelease(database: PrismaClient, input
       if (receipt?.format !== 'sabalan-protected-current-release/v1' || receipt.sqlSha256 !== file.sha256
         || receipt.order !== files.indexOf(file) || receipt.releaseSetSha256 !== releaseSetSha256(files, files.indexOf(file))
         || (file.name === pickupDispatchName && (typeof receipt.pickupDispatchRows !== 'string'
-          || !/^\d+:\d+$/.test(receipt.pickupDispatchRows)))) {
+          || !/^\d+:\d+$/.test(receipt.pickupDispatchRows)))
+        || (file.name === personalPickupDispatchName && (typeof receipt.personalPickupDispatchRows !== 'string'
+          || !/^\d+:\d+$/.test(receipt.personalPickupDispatchRows)))) {
         failure('PROTECTED_CURRENT_RELEASE_HISTORY_UNPROVEN');
       }
       const sameOperation = receipt.deploymentId === owner.deploymentId && receipt.releaseId === owner.releaseId;
@@ -512,6 +522,9 @@ export async function applyProtectedCurrentRelease(database: PrismaClient, input
       if (sameOperation && file.name === pickupDispatchName) {
         observed.pickupDispatchRows = await pickupDispatchRows(tx);
         await assertPickupDispatchSchema(tx);
+      }
+      if (sameOperation && file.name === personalPickupDispatchName) {
+        observed.personalPickupDispatchRows = await pickupDispatchRows(tx);
       }
       assertProtectedCurrentReleaseRetryEvidence(receipt, owner, observed);
       if (file === files[completed - 1] && receipt.catalogSha256 !== await catalog(tx, currentCatalogScope(files, completed - 1))) {
@@ -536,15 +549,18 @@ export async function applyProtectedCurrentRelease(database: PrismaClient, input
       const beforeDuty = file.name === dutyName ? await dutyProof(tx, false) : null;
       if (file.name === waybillName) await sequenceProof(tx, false);
       // PostgreSQL permits use of an added enum label only after its DDL has
-      // committed. The two pinned pickup files use the ordinary per-file commits.
-      if (file.name === pickupSourceName) await pickupSourceProof(tx, false);
-      const beforePickup = file.name === pickupDispatchName ? await pickupDispatchRows(tx) : null;
+      // committed. Each pinned pickup pair uses the ordinary per-file commits.
+      if (file.name === pickupSourceName) await pickupSourceProof(tx, 'EXTERNAL');
+      if (file.name === personalPickupSourceName) await pickupSourceProof(tx, 'CUSTOMER_PICKUP');
+      const pickupDispatch = file.name === pickupDispatchName;
+      const personalPickupDispatch = file.name === personalPickupDispatchName;
+      const beforePickup = pickupDispatch || personalPickupDispatch ? await pickupDispatchRows(tx) : null;
       for (const statement of file.statements) { assertBoundary(); await tx.$executeRawUnsafe(statement); }
       if (beforeQuantity && beforeQuantity !== await quantityProof(tx, file, false)) failure('PROTECTED_CURRENT_RELEASE_QUANTITY_CHANGED');
       if (beforeDuty !== null && beforeDuty !== await dutyProof(tx, true)) failure('PROTECTED_CURRENT_RELEASE_DUTY_ROWS_CHANGED');
       if (beforePickup !== null) {
         if (beforePickup !== await pickupDispatchRows(tx)) failure('PROTECTED_CURRENT_RELEASE_PICKUP_ROWS_CHANGED');
-        await assertPickupDispatchSchema(tx);
+        if (pickupDispatch) await assertPickupDispatchSchema(tx);
       }
       const sequenceProofSha256 = file.name === waybillName ? await sequenceProof(tx, true) : null;
       const catalogSha256 = await catalog(tx, currentCatalogScope(files, index));
@@ -553,7 +569,8 @@ export async function applyProtectedCurrentRelease(database: PrismaClient, input
         releaseSetSha256: releaseSetSha256(files, index), order: index, catalogSha256,
         deploymentId: owner.deploymentId, releaseId: owner.releaseId,
         quantityProofSha256: beforeQuantity, dutyRows: beforeDuty, sequenceProofSha256,
-        ...(beforePickup !== null && { pickupDispatchRows: beforePickup }) });
+        ...(pickupDispatch && { pickupDispatchRows: beforePickup }),
+        ...(personalPickupDispatch && { personalPickupDispatchRows: beforePickup }) });
       await tx.$executeRaw`INSERT INTO public._prisma_migrations (id,checksum,finished_at,migration_name,logs,started_at,applied_steps_count)
         VALUES (${randomUUID()},${file.sha256},clock_timestamp(),${file.name},${receipt},clock_timestamp(),1)`;
       assertBoundary();

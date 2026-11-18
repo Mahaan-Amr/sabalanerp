@@ -9,8 +9,8 @@ import { compileProtectedBridgeMigration, compileProtectedCurrentRelease,
 test('same-operation retry rejects changed quantity, duty, waybill, or pickup evidence', () => {
   const owner = { deploymentId: 'operation-1', releaseId: 'release-1', leaseToken: 'lease-1' };
   const receipt = { deploymentId: owner.deploymentId, releaseId: owner.releaseId,
-    quantityProofSha256: 'q', dutyRows: '437', sequenceProofSha256: 's', pickupDispatchRows: '19:41' };
-  const observed = { quantityProofSha256: 'q', dutyRows: '437', sequenceProofSha256: 's', pickupDispatchRows: '19:41' };
+    quantityProofSha256: 'q', dutyRows: '437', sequenceProofSha256: 's', pickupDispatchRows: '19:41', personalPickupDispatchRows: '19:41' };
+  const observed = { quantityProofSha256: 'q', dutyRows: '437', sequenceProofSha256: 's', pickupDispatchRows: '19:41', personalPickupDispatchRows: '19:41' };
   assert.doesNotThrow(() => assertProtectedCurrentReleaseRetryEvidence(receipt, owner, observed));
   for (const key of Object.keys(observed) as Array<keyof typeof observed>) {
     assert.throws(() => assertProtectedCurrentReleaseRetryEvidence(receipt, owner,
@@ -63,6 +63,9 @@ test('the complete current release is admitted only with its reviewed ordered SQ
     '20261117140000_customer_allocation_controller_closure',
     '20261117150000_customer_allocation_runtime_admission',
     '20261117160000_partner_release_readiness_completed_projection',
+    '20261118100000_sepidar_loading_reference',
+    '20261118120000_personal_pickup_source',
+    '20261118120100_personal_pickup_dispatch',
   ];
   const files = names.map(name => [name, fs.readFileSync(path.join(directory, name, 'migration.sql'))] as const);
   const release = compileProtectedCurrentRelease(files);
@@ -87,6 +90,12 @@ test('the complete current release is admitted only with its reviewed ordered SQ
   assert.deepEqual(release[32].functions, ['require_active_grouped_allocation_child']);
   assert.equal(release[24].statements.length, 5);
   assert.ok(release[24].statements.every(sql => /^ALTER TABLE/.test(sql)));
+  const [sepidarReference, personalPickupSource, personalPickupDispatch] = release.slice(-3);
+  assert.equal(sepidarReference.statements.length, 2);
+  assert.deepEqual(sepidarReference.tables, ['logistics_loadings']);
+  assert.deepEqual(personalPickupSource.statements, [`ALTER TYPE "GuardDriverSource" ADD VALUE 'PERSONAL_PICKUP';`]);
+  assert.equal(personalPickupDispatch.statements.length, 5);
+  assert.deepEqual(personalPickupDispatch.tables.sort(), ['dispatch_confirmation_sessions', 'guard_driver_queue_turns']);
   for (let migrationIndex = 22; migrationIndex < files.length; migrationIndex++) {
     const changedMigration = files.map(([name, bytes], index) => index === migrationIndex
       ? [name, Buffer.concat([bytes, Buffer.from('\n-- drift')])] as const : [name, bytes] as const);

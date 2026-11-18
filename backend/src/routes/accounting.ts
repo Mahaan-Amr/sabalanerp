@@ -339,9 +339,9 @@ router.get('/dispatch-waybills/:waybillId/reconstruction/pdf', accountingDispatc
       select: { candidate: { select: { allocationRevision: { select: { loadingId: true } } } } } });
     if (!waybill) throw new LegacyWaybillReconstructionError('بارنامه پیدا نشد.');
     await createSalesInvoiceService(prisma).list({ actorId: req.user!.id, workspace: 'accounting' }, waybill.candidate.allocationRevision.loadingId);
-    const document = await readLegacyWaybillReconstruction(prisma, req.params.waybillId);
+    const document = await readLegacyWaybillReconstruction(prisma, req.params.waybillId, req.query.original === 'true');
     const record = (status: 'SUCCEEDED' | 'FAILED') => recordLegacyReconstructionHandoff(prisma,
-      { waybillId: req.params.waybillId, reconstructionId: document.id, actorId: req.user!.id, status });
+      { waybillId: req.params.waybillId, reconstructionId: document.id, actorId: req.user!.id, status, pdfSha256: document.pdfSha256 });
     bindPrintHandoffCompletion(res, { succeeded: () => record('SUCCEEDED'), failed: () => record('FAILED') });
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'inline; filename="reconstructed-waybill.pdf"');
@@ -430,7 +430,7 @@ router.post('/loadings/:loadingId/issue-dispatch-documents', accountingDispatchE
 
 router.post('/loadings/:loadingId/print-documents', accountingDispatchView, async (req: WorkspaceRequest & FeatureRequest, res: Response) => {
   const handoffs: Array<Awaited<ReturnType<typeof dispatchDocuments.printHandoff>>> = [];
-  const legacyHandoffs: Array<{ waybillId: string; reconstructionId: string }> = [];
+  const legacyHandoffs: Array<{ waybillId: string; reconstructionId: string; pdfSha256: string }> = [];
   try {
     const loadingId = req.params.loadingId;
     const context = { actorId: req.user!.id, workspace: 'accounting' as const };
@@ -454,7 +454,7 @@ router.post('/loadings/:loadingId/print-documents', accountingDispatchView, asyn
       const waybill = revision.candidate!.waybills[0];
       if (waybill.legacyReconstruction) {
         const document = await readLegacyWaybillReconstruction(prisma, waybill.id);
-        legacyHandoffs.push({ waybillId: waybill.id, reconstructionId: document.id });
+        legacyHandoffs.push({ waybillId: waybill.id, reconstructionId: document.id, pdfSha256: document.pdfSha256 });
         waybillBytes.push(document.bytes);
       } else {
         const handoff = await dispatchDocuments.printHandoff({ waybillId: waybill.id,

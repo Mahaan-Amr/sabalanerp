@@ -35,6 +35,8 @@ import { StatusBadge, dateFa, loadingDriversName } from "../logistics-ui";
 import { dispatchCaseReference } from "@/features/dispatch-case/dispatchCasePresentation";
 import { userFacingError } from "@/features/dispatch/userFacingError";
 
+const loadingHref = (row: { id: string; sourceKind?: string }, edit = false) => (row.sourceKind === "PARTNER_CASE" || edit) ? `/dashboard/logistics/loadings/new?draftId=${encodeURIComponent(row.id)}` : `/dashboard/logistics/loadings/${encodeURIComponent(row.id)}`;
+
 const actionLabel = (action: "finalize" | "delete" | "cancel" | "print") =>
   ({
     finalize: "نهایی‌سازی",
@@ -67,10 +69,10 @@ export default function LogisticsLoadingsPage() {
   const mutationLock = useRef(false);
   const may = (action: string) => actionAvailability[action]?.enabled === true;
   const canFinalize = (row: any) =>
-    may("FINALIZE_LOADING") && row.status === "DRAFT";
-  const canDelete = (row: any) => may("EDIT_LOADING") && row.status === "DRAFT";
+    row.sourceKind !== "PARTNER_CASE" && may("FINALIZE_LOADING") && row.status === "DRAFT";
+  const canDelete = (row: any) => row.sourceKind !== "PARTNER_CASE" && may("EDIT_LOADING") && row.status === "DRAFT";
   const canCancel = (row: any) =>
-    may("CANCEL_LOADING") && row.status !== "CANCELLED";
+    row.sourceKind !== "PARTNER_CASE" && may("CANCEL_LOADING") && row.status !== "CANCELLED";
   const canEdit = (row: any) => may("EDIT_LOADING") && row.status === "DRAFT";
 
   const load = async () => {
@@ -421,7 +423,7 @@ export default function LogisticsLoadingsPage() {
               {filteredRows.map(row => <tr key={row.id} className={`grid grid-cols-[44px_minmax(0,1fr)] items-start gap-y-3 p-3 md:grid-cols-[44px_minmax(0,1fr)_auto] lg:table-row lg:p-0 ${selectedIds.includes(row.id) ? 'bg-[var(--sds-accent-soft)]' : ''}`}>
                 <td className="block lg:table-cell lg:px-3 lg:py-3"><label className="inline-flex min-h-11 min-w-11 items-center justify-center"><ErpCheckboxControl aria-label={`انتخاب ${dispatchCaseReference(row.loadingNumber)}`} checked={selectedIds.includes(row.id)} onChange={() => toggleSelected(row.id)} /></label></td>
                 <td className="block min-w-0 lg:table-cell lg:px-3 lg:py-3">
-                  <ErpButton label={dispatchCaseReference(row.loadingNumber)} href={`/dashboard/logistics/loadings/${row.id}`} variant="ghost" className="max-w-full whitespace-normal text-right" />
+                  <ErpButton label={dispatchCaseReference(row.loadingNumber)} href={loadingHref(row)} variant="ghost" className="max-w-full whitespace-normal text-right" />
                   <p className="mt-1 text-base font-bold sds-text-primary">{row.customerName || 'مشتری ثبت نشده'}</p>
                   <p className="mt-1 text-sm sds-text-secondary">پروژه: {row.projectName || 'ثبت نشده'}</p>
                   <div className="mt-1 flex flex-wrap items-center gap-2 text-xs sds-text-secondary">{(row.lineCount || 0).toLocaleString('fa-IR')} ردیف {row.correctionCount > 0 && <ErpBadge tone="warning">{row.correctionCount.toLocaleString('fa-IR')} اصلاح</ErpBadge>}</div>
@@ -431,7 +433,7 @@ export default function LogisticsLoadingsPage() {
                 <td className="col-span-2 block text-xs sds-text-secondary md:col-span-1 md:text-left lg:table-cell lg:text-right lg:px-3 lg:py-3">{dateFa(row.loadingDate)}</td>
                 <td className="col-span-2 block w-full md:col-span-3 lg:table-cell lg:w-auto lg:min-w-44 lg:px-3 lg:py-3">
                   <div className="flex items-center justify-between gap-3">
-                    <ErpButton label={canEdit(row) ? 'ادامه' : 'مشاهده'} href={canEdit(row) ? `/dashboard/logistics/loadings/new?draftId=${row.id}` : `/dashboard/logistics/loadings/${row.id}`} variant="outline" />
+                    <ErpButton label={canEdit(row) ? 'ادامه' : 'مشاهده'} href={loadingHref(row, canEdit(row))} variant="outline" />
                         <ErpActionMenu
                           portal
                           label="اقدامات بیشتر"

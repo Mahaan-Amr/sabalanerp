@@ -105,7 +105,7 @@ router.get('/canonical-driver-queue', protect, guardView, async (req: WorkspaceR
     const history = req.query.history === 'true';
     const turns = await withPartnerGuardReadScope(prisma, { actorId: req.user!.id, correlationId: randomUUID() }, async scope => {
     const rows = await scope.database.guardDriverQueueTurn.findMany({
-      where: history ? undefined : { status: { in: ['WAITING_AT_GATE', 'AVAILABLE_FOR_LOADING', 'RESERVED_FOR_LOADING', 'LOADING_FINALIZED'] } },
+      where: { driverSource: { not: 'PERSONAL_PICKUP' }, ...(history ? {} : { status: { in: ['WAITING_AT_GATE', 'AVAILABLE_FOR_LOADING', 'RESERVED_FOR_LOADING', 'LOADING_FINALIZED'] } }) },
       include: { events: { orderBy: [{ recordedAt: 'asc' }, { id: 'asc' }] } },
       orderBy: history ? [{ admittedAt: 'desc' }, { id: 'desc' }] : [{ admittedAt: 'asc' }, { id: 'asc' }],
       take: history ? 250 : undefined,
@@ -132,7 +132,7 @@ router.get('/canonical-driver-queue/admission-options', protect, guardEdit, asyn
 router.post('/canonical-driver-queue', protect, guardEdit, async (req: AuthRequest, res) => {
   try {
     const source = String(req.body.source || '') as GuardDriverSource;
-    if (!Object.values(GuardDriverSource).includes(source)) return res.status(400).json({ success: false, error: 'A valid driver source is required.' });
+    if (source !== 'INTERNAL' && source !== 'EXTERNAL' && source !== 'CUSTOMER_PICKUP') return res.status(400).json({ success: false, error: 'A valid driver source is required.' });
     const driverId = String(req.body.driverId || '').trim();
     if (source !== 'CUSTOMER_PICKUP' && !driverId) return res.status(400).json({ success: false, error: 'driverId is required.' });
     const actorId = req.user!.id;

@@ -1121,6 +1121,16 @@ test('real-schema loading source selects canonical delivery evidence without cha
   const ids = idsFor(`partner-delivery-source-${temporary.runId}`);
   const actorId = `${ids.caseId}-manager`;
   try {
+    if (process.env.PERSONAL_PICKUP_ACCEPTANCE === '1') {
+      const types = await database.$queryRaw<Array<{ enumlabel: string }>>`SELECT enumlabel FROM pg_enum WHERE enumtypid = '"GuardDriverSource"'::regtype`;
+      if (!types.some(row => row.enumlabel === 'PERSONAL_PICKUP')) {
+        const { readFile } = await import('node:fs/promises');
+        for (const name of ['20261118120000_personal_pickup_source', '20261118120100_personal_pickup_dispatch']) {
+          const sql = await readFile(`backend/prisma/migrations/${name}/migration.sql`, 'utf8');
+          for (const statement of sql.split(';').map(part => part.trim()).filter(Boolean)) await database.$executeRawUnsafe(statement);
+        }
+      }
+    }
     await database.effectiveAuthorizationState.create({ data: { id: 1, revision: 1 } });
     const expected = await database.$transaction(async tx => {
       const owner = await seedCase(tx, ids, false, false, [
@@ -1252,13 +1262,18 @@ test('real-schema loading source selects canonical delivery evidence without cha
       assert.equal(concurrent.ok ? null : concurrent.error.code, 'FORBIDDEN',
         'a workspace downgrade committed while loading waits must invalidate its earlier authorization snapshot');
     } finally { await waiting; }
-    await promisify(execFile)(process.execPath, ['backend/node_modules/tsx/dist/cli.mjs',
+    if (process.env.PERSONAL_PICKUP_ACCEPTANCE !== '1') await promisify(execFile)(process.execPath, ['backend/node_modules/tsx/dist/cli.mjs',
       'backend/src/services/__tests__/partnerLoadingHttpProbe.ts'], { timeout: 120_000, env: { ...process.env,
         DATABASE_URL: temporary.databaseUrl, PARTNER_TEST_ACTOR_ID: actorId, PARTNER_TEST_OWNER: JSON.stringify(expected) } });
     const accountantId = `${ids.caseId}-dispatch-accountant`;
     await database.$transaction(async tx => {
       await tx.user.create({ data: { id: accountantId, username: accountantId,
         email: `${accountantId}@example.invalid`, password: 'not-a-login', firstName: 'Dispatch', lastName: 'Accountant' } });
+      if (process.env.PERSONAL_PICKUP_ACCEPTANCE === '1') {
+        await tx.workspacePermission.create({ data: { userId: accountantId, workspace: 'accounting', permissionLevel: 'edit', grantedBy: actorId } });
+        await tx.featurePermission.create({ data: { userId: accountantId, workspace: 'accounting',
+          feature: 'accounting_invoice_candidates_manage', permissionLevel: 'edit', grantedBy: actorId } });
+      }
       for (const action of ['ACCOUNTING_READ', 'ACCOUNTING_WRITE']) await tx.effectiveActionGrant.create({ data: {
         id: `${accountantId}-${action}`, principalKind: 'USER', principalId: accountantId, subjectUserId: accountantId,
         domain: 'PARTNER', action, rootKind: 'CASE', purpose: 'ACCOUNTING', scope: 'PURPOSE_BOUND',
@@ -1276,7 +1291,7 @@ test('real-schema loading source selects canonical delivery evidence without cha
       actorId: accountantId, correlationId: `${accountantId}-queue` })).enqueueCommitted(accountingView, commitment);
     assert.equal(queued.ok, true, JSON.stringify(queued));
     const invoice = await database.accountingFinancialRecord.findFirstOrThrow({ where: { sourceId: ids.internalId } });
-    await promisify(execFile)(process.execPath, ['backend/node_modules/tsx/dist/cli.mjs',
+    if (process.env.PERSONAL_PICKUP_ACCEPTANCE !== '1') await promisify(execFile)(process.execPath, ['backend/node_modules/tsx/dist/cli.mjs',
       'backend/src/services/__tests__/partnerFinancialApprovalProbe.ts'], { timeout: 120_000, env: { ...process.env,
         DATABASE_URL: temporary.databaseUrl, PARTNER_TEST_INVOICE_ID: invoice.id, PARTNER_TEST_ACTOR_ID: accountantId } });
     for (const [feature, permissionLevel] of [['accounting_dispatch_candidates_view', 'view'],
@@ -1284,11 +1299,22 @@ test('real-schema loading source selects canonical delivery evidence without cha
       await database.featurePermission.create({ data: { userId: accountantId, workspace: 'accounting', feature,
         permissionLevel, grantedBy: accountantId } });
     }
-    await promisify(execFile)(process.execPath, ['backend/node_modules/tsx/dist/cli.mjs',
-      'backend/src/services/__tests__/partnerFinalizationHttpProbe.ts'], { timeout: 180_000, env: { ...process.env,
+    const probe = process.env.PERSONAL_PICKUP_ACCEPTANCE === '1' ? 'personalPickupHttpProbe' : 'partnerFinalizationHttpProbe';
+    const result = await promisify(execFile)(process.execPath, ['backend/node_modules/tsx/dist/cli.mjs',
+      `backend/src/services/__tests__/${probe}.ts`], { timeout: 180_000, env: { ...process.env,
         DATABASE_URL: temporary.databaseUrl, PARTNER_TEST_ACTOR_ID: actorId, PARTNER_TEST_ACCOUNTANT_ID: accountantId,
         PARTNER_TEST_OWNER: JSON.stringify(expected) } });
-  } finally { await database.$disconnect(); await temporary.cleanup(); }
+    if (process.env.PERSONAL_PICKUP_ACCEPTANCE === '1') console.log(result.stdout.trim());
+  } finally {
+    await database.$disconnect();
+    for (let attempt = 0; ; attempt++) {
+      try { await temporary.cleanup(); break; }
+      catch (error) {
+        if (attempt >= 8 || !(error instanceof Error) || !error.message.includes('still has sessions')) throw error;
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    }
+  }
 });
 
 test('real-schema correction HTTP dispatch approves a requested retail correction, saves once and confirms its successor', async () => {

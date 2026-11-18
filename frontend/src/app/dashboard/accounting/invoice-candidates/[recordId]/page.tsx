@@ -9,7 +9,7 @@ import { accountingFailureMessage, type FinancialInvoiceApprovalPayload } from '
 import { AccountingFinancialRecordReview, type FinancialRecordForReview } from '@/features/accounting/AccountingFinancialRecordReview';
 import { financialEvidenceReviewFromConflict } from '@/features/accounting/financialEvidenceReview';
 import { submitFinancialApproval } from '@/features/accounting/submitFinancialApproval';
-import { accountingReviewReturn } from '@/features/accounting/financialRecordReviewHref';
+import { accountingReviewReturn, financialRecordReviewId } from '@/features/accounting/financialRecordReviewHref';
 import { FinancialReviewRequestGuard, loadFinancialReview, canSubmitFinancialReview } from '@/features/accounting/financialReviewRequestGuard';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -23,10 +23,11 @@ type FinancialReviewResponse = {
 };
 
 export default function AccountingFinancialRecordDetailPage({ params }: { params: Promise<{ recordId: string }> }) {
-  const { recordId } = use(params);
+  const { recordId: recordSegment } = use(params);
+  const recordId = financialRecordReviewId(recordSegment);
   const searchParams = useSearchParams();
   const { user } = useAuth();
-  const owner = JSON.stringify([user?.id ?? null, recordId]);
+  const owner = JSON.stringify([user?.id ?? null, recordSegment]);
   const guard = useRef(new FinancialReviewRequestGuard()).current;
   guard.select(owner);
   const [review, setReview] = useState<FinancialReviewResponse | null>(null);
@@ -52,6 +53,10 @@ export default function AccountingFinancialRecordDetailPage({ params }: { params
     setAuditPermissionDenied(false);
     setAuditLoadError(false);
     try {
+      if (!recordId) {
+        setError('شناسهٔ رکورد مالی در نشانی معتبر نیست. از پروندهٔ حسابداری دوباره وارد شوید.');
+        return;
+      }
       const result = await loadFinancialReview<FinancialRecordForReview>({ owner, recordId, epoch, guard,
         fetchRecord: () => accountingAPI.getFinancialRecords({ kind: 'INVOICE_CANDIDATE', recordId, page: 1, pageSize: 1 }),
         fetchAudit: () => accountingAPI.getAuditLogs({ recordId, page: 1, pageSize: 100 }) });
@@ -99,7 +104,7 @@ export default function AccountingFinancialRecordDetailPage({ params }: { params
   };
 
   const approve = async (payload: FinancialInvoiceApprovalPayload) => {
-    if (!canSubmitFinancialReview({ loading, busy, owner, recordId, payloadId: payload.invoiceId, review })) return;
+    if (!recordId || !canSubmitFinancialReview({ loading, busy, owner, recordId, payloadId: payload.invoiceId, review })) return;
     const epoch = guard.begin(owner);
     if (epoch === null) return;
     setBusy(true);

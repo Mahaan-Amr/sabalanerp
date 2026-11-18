@@ -887,6 +887,7 @@ enum GuardDriverSource {
   INTERNAL
   EXTERNAL
   CUSTOMER_PICKUP
+  PERSONAL_PICKUP
 }
 
 enum GuardDriverQueueTurnStatus {

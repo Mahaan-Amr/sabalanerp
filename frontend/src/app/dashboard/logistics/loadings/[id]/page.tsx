@@ -96,14 +96,21 @@ export default function LoadingDetailPage() {
         logisticsAPI.getLoading(params.id),
         dashboardAPI.getActionAvailability("logistics"),
       ]);
-      if (response.data.success) setLoading(response.data.data);
+      if (response.data.success) {
+        const record = response.data.data;
+        if (record.source?.sourceKind === "PARTNER_CASE") {
+          router.replace(`/dashboard/logistics/loadings/new?draftId=${encodeURIComponent(params.id)}`);
+          return;
+        }
+        setLoading(record);
+      }
       setActionAvailability(availability.data.data || {});
     } catch (error: any) {
       setActionError(userFacingError(error, "اطلاعات بارگیری دریافت نشد."));
     } finally {
       setIsLoading(false);
     }
-  }, [params.id]);
+  }, [params.id, router]);
 
   useEffect(() => {
     void load();

@@ -1,0 +1,25 @@
+Mac local backend ownership recovery — 2026-11-18
+
+Scope
+Only the existing sabalanerp-local Compose backend was replaced. No production deployment, restart, migration or write was performed. The production database was accessed only by read-only queries and pg_dump for isolated local acceptance. Coworker production release is outside this local incident and must use the protected deployment handoff/gates.
+This report supersedes the storage prerequisite proposed in local-native-recovery-macos-preflight-20261118.txt. The November 12 Windows two-filesystem protocol remains unchanged and cannot admit this Mac incident.
+
+Cause and recovery
+Docker VM reboot invalidated the original ACTIVE guardian's native identity. Existing ownership gate correctly refused the stale owner with exit75. The new incident policy is pinned to the exact old ACTIVE hash, old container/image, PostgreSQL identity, current VM boot and verified checkpoint manifest. Production, other projects, old incidents, live tagged sessions, prepared transactions, configured external credentials and public ingress are rejected.
+Original ACTIVE bytes were preserved in immutable history. A distinct ABANDONED_ON_VM_REBOOT receipt states nativeReaped=false and externalEffectsCompleted=false; no QUIESCENT completion was forged. Fresh FD9/advisory/database checks remain mandatory before publishing a new owner. Existing Windows/production admission logic was retained.
+
+Checkpoint and migration preservation
+Private checkpoint outside Git contains original ACTIVE, five container inventories, original backend rootfs, PostgreSQL dump, eleven volume archives, consistent SQLite and Redis snapshots. PostgreSQL restore, business fingerprints and SQLite/Redis integrity were verified. This is one internal-host checkpoint: independentBackup=false, productionAdmission=false; it is not a production recovery qualification.
+The development source already contains 47 orphan CRM card rows. Faithful temporary restore preserved them rather than repairing/deleting source rows; trigger suspension was confined to the temporary restored DB and all triggers reenabled.
+All465 candidate migration SQL files equal the checkpointed original backend files. Seven pre-existing applied checksum mismatches were retained unchanged, explicitly reported, and not called clean. Complete _prisma_migrations COPY rows match the checkpoint before/after startup. No pending/unresolved migration was admitted. Normal prisma migrate deploy was rehearsed against a faithful temporary restored DB in the existing PG service; it succeeded with the entire ledger unchanged. The rehearsal database was dropped.
+Candidate archive identity follows verified OCI descriptor/blob SHA256 chains. Relevant whiteouts, ancestor replacement and nonregular SQL/link entries fail closed. Concurrent unrelated personal-pickup migrations in the mutable checkout were not included or applied.
+
+Observed result
+Exact candidate image sha256:ba973ee14301362e80284b812f21532863dd9af44d31fef2a92195a31d5a177e became healthy on loopback127.0.0.1:5001 (host5000 belongs to AirPlay). Other service IDs and all original volume identities stayed unchanged. Ten source business/history table fingerprints and the complete migration ledger were unchanged after startup. No force kill, lock deletion, native-state reset or data rollback was used.
+Subsequent switch to the temporary real-data QA database used ordinary SIGTERM and waited for QUIESCENT/nativeReaped/databaseQuiet plus zero tagged sessions before replacing the same backend service.
+
+Validation
+Mac incident/evidence tests8 passed. Existing November17 tests6, original reboot tests5 and #440 tests6 passed. Native Linux FD9/advisory/exclusive tests3 passed inside the existing Inquiry service (macOS cannot supply Linux /proc/FD9 behavior). Database architecture ownership check passed. Independent Spec and Standards reviews accepted the narrowly pinned local preservation policy after corrections.
+Private proof, database copies and credentials remain outside Git. Browser acceptance and final original-database restoration are recorded in the accounting report when complete.
+
+Final closure: real copied-contract browser test passed; eight QA financial/contract/history fingerprints remained equal. QA runtime drained normally, original local database restored healthy with ten-table and migration ledger equality, then only the owned temporary QA database was dropped. Final five-service health is good. A concurrent frontend recreation was observed after browser acceptance; unchanged-other-container identity claims above apply to the incident recovery step, not later external activity.

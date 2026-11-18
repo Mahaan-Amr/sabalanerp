@@ -478,7 +478,14 @@ test("Accounting shows the OTP controls after the biometric fallback starts", as
   await fallback.click();
   await expect(code).toBeVisible();
   await expect(fallback).toHaveCount(0);
-  await code.fill("123456");
-  await page.getByRole("button", { name: "تأیید رمز", exact: true }).click();
-  await expect(page.getByText("رمز راننده تأیید شد.", { exact: true })).toBeVisible();
+  const verify = page.getByRole("button", { name: "تأیید رمز", exact: true });
+  await expect(verify).toBeDisabled();
+  await code.fill("۰۱۲۳");
+  await expect(code).toHaveValue("0123");
+  await expect(verify).toBeDisabled();
+  await code.fill("۱۲٣۴۵۶");
+  await expect(code).toHaveValue("123456");
+  await expect(verify).toBeEnabled();
+  await code.press("Enter");
+  await expect(page.getByText("رمز راننده تأیید شد. تأیید نهایی را سرپرست گارد تکمیل می‌کند.", { exact: true })).toBeVisible();
 });

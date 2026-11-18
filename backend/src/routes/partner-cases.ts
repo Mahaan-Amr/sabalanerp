@@ -8,6 +8,7 @@ import { PARTNER_CREATION_TRANSACTION_OPTIONS } from '../services/partnerSales/c
 import { technicalTransportFailure, type TechnicalFailureDiagnostic } from './partnerTechnicalFailure';
 import { previewPartnerWholesaleRows } from '../services/partnerSales/inquiries/wholesalePricing';
 import { canManageCommercialSettings } from '../services/ordinaryContractLifecycle';
+import { validateContractAccess } from '../services/salesContractAccess';
 import { appendPartnerCommercialEvent } from '../services/partnerSales/cases/commercialEvents';
 import { partnerContractCanRenew, renewPartnerContract, approvePartnerCommercialSales, readPartnerCommercialDetails, readPartnerCommercialEditingDetails, readPartnerCommercialState, resetPartnerCommercialApprovals, lockPartnerCommercialContract, assertPartnerCommercialAvailable } from '../services/partnerSales/cases/commercialLifecycle';
 import { casePdfAvailability, resolveCasePdfSnapshot } from '../services/partnerSales/customerOutput/casePdf';
@@ -72,7 +73,7 @@ function normalizeCustomerRecipient(value: string) {
   return `+98${digits}`;
 }
 
-function respond(response: Response, result: Result<unknown>, supportReference = randomUUID()) {
+function respond(response: Response, result: Result<unknown>, supportReference: string = randomUUID()) {
   response.setHeader('Cache-Control', 'private, no-store');
   response.setHeader('X-Content-Type-Options', 'nosniff');
   if (result.ok) { response.json({ success: true, data: result.value }); return; }
@@ -908,7 +909,7 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
             ...(editableRecovery ? { editRecovery: { recoveryId: editableRecovery.draftId,
               baseRevision: editableRecovery.baseRevision } } : {}),
             actions: { canContinue,
-              canRenew: !!row.customerContract && partnerContractCanRenew(row.customerContract, row.state) && await canManageCommercialSettings(tx, request.user!),
+              canRenew: !actorProfile && !!row.customerContract && partnerContractCanRenew(row.customerContract, row.state) && await canManageCommercialSettings(tx, request.user!),
               canApproveSales: commit && commercialWritable && view.data.preparationCompleted !== false && !commercial?.salesApproved,
               canRejectDraft: edit && commercialWritable && commercial?.status !== 'FINAL' && !commercial?.firstFinancialRecordAt && !!commercial?.salesApproved,
               ...casePdfAvailability({ authorized: output, state: row.state, commercialFlow: !!commercial && commercial.status !== 'EXPIRED' && commercial.status !== 'CANCELLED', hasContent: Boolean(customerOutput?.success), hasSnapshot: Boolean(row.outputs[0]) }),
@@ -968,14 +969,24 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
     if (!parsed.success || (parsed.data.action !== 'APPROVE_SALES' && !parsed.data.reason)) {
       respond(response, { ok: false, error: partnerError('INVALID_PAYLOAD') }); return;
     }
+    const renewal = parsed.data.action === 'RENEW';
+    const correlationId = correlation(request);
     try {
-      await prisma.$transaction(async tx => {
+      const denial = await prisma.$transaction(async tx => {
         await lockPartnerOperationsControl(tx);
-        const allowed = await createAuditedPartnerAuthorization(tx, { actorId: request.user!.id, purpose: 'PARTNER', channel: 'API' },
-          { correlationId: correlation(request), reason: parsed.data.reason }).authorize(
-            parsed.data.action === 'APPROVE_SALES' ? 'CASE_COMMIT' : 'CASE_DRAFT_WRITE', { kind: 'CASE', id: request.params.caseId });
-        if (!allowed.ok) throw Object.assign(new Error(allowed.error.message), { result: allowed });
+        const allowed = await createAuditedPartnerAuthorization(tx, {
+          actorId: request.user!.id, purpose: renewal ? 'MANAGEMENT' : 'PARTNER', channel: 'API',
+        }, { correlationId, reason: parsed.data.reason }).authorize(
+          renewal ? 'CASE_COMMERCIAL_RENEW' : parsed.data.action === 'APPROVE_SALES' ? 'CASE_COMMIT' : 'CASE_DRAFT_WRITE',
+          { kind: 'CASE', id: request.params.caseId });
+        if (!allowed.ok) {
+          if (renewal) return allowed;
+          throw Object.assign(new Error(allowed.error.message), { result: allowed });
+        }
         const { root, contract } = await lockPartnerCommercialContract(tx, request.params.caseId);
+        if (renewal && !validateContractAccess(contract, request.user!)) {
+          throw new Error('اجازه انجام این اقدام را ندارید؛ به صفحه قبل برگردید.');
+        }
         if (contract.commercialRevision !== parsed.data.revision) throw new Error('قرارداد تغییر کرده است؛ صفحه را تازه‌سازی کنید.');
         if (parsed.data.action === 'RENEW') {
           if (!await canManageCommercialSettings(tx, request.user!)) throw new Error('تمدید فقط در اختیار مدیر فروش است.');
@@ -995,6 +1006,7 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
           await resetPartnerCommercialApprovals(tx, request.params.caseId, request.user!.id, parsed.data.reason);
         }
       });
+      if (denial) { respond(response, denial, correlationId); return; }
       response.setHeader('Cache-Control', 'private, no-store'); response.json({ success: true });
     } catch (error) { response.status(409).json({ success: false, error: error instanceof Error ? error.message : 'تغییر وضعیت انجام نشد.' }); }
   });

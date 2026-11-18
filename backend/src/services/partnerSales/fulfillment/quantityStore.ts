@@ -9,6 +9,18 @@ const object = (value: unknown): Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 const conflict = (): never => { throw new Error('Partner shipment quantity evidence integrity conflict'); };
 
+const matchesPartnerEvidenceHash = (fact: PartnerPersistedShipmentEvidence) => {
+  if (fact.integrityHash === shipmentQuantityEvidenceIntegrityHash(fact)) return true;
+  // The original allocation writer hashed these fields in insertion order.
+  // PostgreSQL jsonb can return the same fields in a different order.
+  if (fact.sourceType !== 'PARTNER_LOGISTICS_ALLOCATION_REVISION' || fact.kind !== 'ALLOCATION_FINALIZED') return false;
+  const { loadingId, revisionId, deliveryId, ...other } = fact.metadata ?? {};
+  if (!loadingId || !revisionId || !deliveryId || Object.keys(other).length) return false;
+  return fact.integrityHash === shipmentQuantityEvidenceIntegrityHash({
+    ...fact, metadata: { loadingId, revisionId, deliveryId },
+  });
+};
+
 /** Commercial corrections share the physical floor used by reviewed Logistics
  * corrections. Caller holds the Case lock; repeat at finality because stock can
  * be reserved while a corrected Contract awaits its approvals. */
@@ -119,7 +131,7 @@ export async function readPartnerShipmentQuantityProjection(tx: Prisma.Transacti
       guardReturnMovementId: row.guardReturnMovementId ?? undefined, returnEvidenceId: row.returnEvidenceId ?? undefined,
       dispatchEvidenceId: row.dispatchEvidenceId ?? undefined };
     const returnFailure = guardReturnValidationFailure(row, rows);
-    const invalid = fact.integrityHash !== shipmentQuantityEvidenceIntegrityHash(fact) || returnFailure;
+    const invalid = !matchesPartnerEvidenceHash(fact) || returnFailure;
     const { contractId: _contract, contractItemId: _item, partnerCaseId, partnerLineageId,
       partnerCaseRevision: _revision, partnerIntegrityHash: _hash, ...common } = fact;
     evidence.push({ ...common, caseId: partnerCaseId, lineageId: partnerLineageId,

@@ -1,3 +1,4 @@
+import { projectAccountingDispatchCandidateSummary } from './accountingDispatchCandidatePresentation';
 import { exactQuantityText } from './exactQuantity';
 import { assertLoadingSalesInvoice } from './salesDispatchInvoice/service';
 import { SalesInvoiceError } from './salesDispatchInvoice/source';
@@ -82,6 +83,9 @@ export class PhysicalGateExitService {
     return authorizations.filter((_authorization, index) => eligible[index]).map((authorization) => ({ id: authorization.id, waybillId: authorization.waybillId,
       dispatchNumber: authorization.waybill.number.toString(), validUntil: authorization.validUntil,
       method: authorization.method, queueTurnId: authorization.waybill.candidate.allocationRevision.queueTurnId,
+      ...(authorization.driverSource === 'PERSONAL_PICKUP' ? {
+        summary: projectAccountingDispatchCandidateSummary(authorization.waybill.candidate.allocationRevision.snapshot),
+      } : {}),
       admissionSnapshot: authorization.waybill.candidate.allocationRevision.queueTurn.admissionSnapshot }));
   }
 
@@ -177,8 +181,8 @@ export class PhysicalGateExitService {
         toStatus: GuardDriverQueueTurnStatus.EXIT_RECORDED, actorId, payload: { physicalExitId: exitId, authorizationId: authorization.id, waybillId: waybill.id } });
       const smsIntent = await tx.dispatchBuyerSmsIntent.create({ data: { physicalExitId: exitId, idempotencyKey: `BUYER_EXIT:${exitId}`,
         sessionId: authorization.sessionId,
-        phoneNumber, dispatchNumber: waybill.number.toString(), vehiclePlate: plate,
-        payload: json({ dispatchNumber: waybill.number.toString(), vehiclePlate: plate }), status: phoneNumber ? 'PENDING' : 'NEEDS_ATTENTION', availableAt: at } });
+        phoneNumber, dispatchNumber: waybill.number.toString(), vehiclePlate: turn.driverSource === 'PERSONAL_PICKUP' ? 'سواری شخصی' : plate,
+        payload: json({ dispatchNumber: waybill.number.toString(), vehiclePlate: turn.driverSource === 'PERSONAL_PICKUP' ? 'سواری شخصی' : plate }), status: phoneNumber ? 'PENDING' : 'NEEDS_ATTENTION', availableAt: at } });
       if (!phoneNumber) await tx.dispatchConfirmationAlert.create({ data: { sessionId: authorization.sessionId,
         alertType: 'BUYER_EXIT_SMS_NEEDS_ATTENTION', payload: json({ physicalExitId: exitId, smsIntentId: smsIntent.id,
           dispatchNumber: waybill.number.toString(), status: 'NEEDS_ATTENTION', detail: 'No confirmed buyer notification phone was snapshotted.' }) } });

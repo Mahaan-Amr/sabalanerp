@@ -1,6 +1,39 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { financialRecordReviewHref, accountingReviewReturn } from '../financialRecordReviewHref';
+import { financialRecordReviewHref, financialRecordReviewId, accountingReviewReturn } from '../financialRecordReviewHref';
+import { FinancialReviewRequestGuard, loadFinancialReview, canSubmitFinancialReview } from '../financialReviewRequestGuard';
+
+test('contract 100999 review uses its persisted identity for reads, audit and approval', async () => {
+  const id = 'partner-accounting:5a11d03abd0ece495a335b337d94b2b8d9d726b73715abeff6c3e6b3592f2c52:replacement:2d8dadce-7015-40e3-a14d-ed45b0f11fe8';
+  const url = new URL(financialRecordReviewHref(id, '/dashboard/accounting/contracts/partner/case-100999'), 'https://example.test');
+  const segment = url.pathname.split('/').at(-1)!;
+  const recordId = financialRecordReviewId(segment)!;
+  const guard = new FinancialReviewRequestGuard(); guard.select('reviewer:100999');
+  let auditReads = 0;
+  const result = await loadFinancialReview({ owner: 'reviewer:100999', recordId,
+    epoch: guard.begin('reviewer:100999')!, guard,
+    fetchRecord: async () => {
+      const query = new URLSearchParams({ recordId });
+      assert(!query.toString().includes('%253A'), 'API request must not encode the colon twice');
+      return { data: { success: true, data: { items: query.get('recordId') === id ? [{ id }] : [], actionAvailability: { approve: true } } } };
+    },
+    fetchAudit: async () => { assert.equal(recordId, id); auditReads++; return { data: { success: true, data: { items: [], total: 0 } } }; },
+  });
+  assert.equal(result?.kind, 'loaded', 'the real record/audit chain must not report the existing record as missing');
+  assert.equal(auditReads, 1);
+  assert(canSubmitFinancialReview({ owner: 'reviewer:100999', recordId, payloadId: id, loading: false, busy: false,
+    review: { owner: 'reviewer:100999', record: { id }, canApprove: true } }));
+  assert(!canSubmitFinancialReview({ owner: 'reviewer:100999', recordId, payloadId: segment, loading: false, busy: false,
+    review: { owner: 'reviewer:100999', record: { id }, canApprove: true } }));
+});
+
+test('route decoding preserves distinct stored IDs and rejects malformed escapes', () => {
+  for (const id of ['ordinary-123', 'partner-accounting:original', 'record/1', 'literal%3Aidentity', 'percent%value', 'شناسه']) {
+    assert.equal(financialRecordReviewId(encodeURIComponent(id)), id);
+  }
+  assert.equal(financialRecordReviewId('literal%253Aidentity'), 'literal%3Aidentity', 'decode once, never recursively');
+  for (const invalid of ['', '%', '%GG', '%E0%A4%A']) assert.equal(financialRecordReviewId(invalid), null);
+});
 
 test('financial review links preserve the exact record and accounting return query', () => {
   const href = financialRecordReviewHref('record/1', '/dashboard/accounting/contracts?view=reviewable');

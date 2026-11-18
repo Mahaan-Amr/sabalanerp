@@ -1,0 +1,69 @@
+COMPLETED REAL-RUNTIME ADDENDUM BELOW supersedes the earlier environment blockers.
+
+Accounting financial review — contract 100999 — 2026-11-18
+
+Authorized scope
+Fix identifier encoding and exact-record Accounting read latency locally. Preserve persisted identities, financial values, historical evidence and authorization. No production deployment. The owner selected focused-record remediation; unrelated register/report behavior remains governed by its existing complete-population checks.
+
+Implementation
+1. The review page decodes the Next route segment exactly once before record lookup, audit lookup, record comparison or approval identity checks. Malformed segments display an error without an API read. Literal percent sequences retain their persisted meaning; the API itself still compares identifiers exactly and does not recursively decode them.
+2. Financial-record and audit queries with recordId now select a focused authorized snapshot. Relational source IDs and referenced financial entities resolve the relevant Partner Cases inside that same transaction. The ID prefix and arbitrary metadata do not grant authority.
+3. Per-Case live authority, audited decisions, locks, repeatable-read and retry behavior remain in the existing read boundary. All financial evidence and descendants of the relevant Case are validated. Unrelated Cases are not authorized or reconstructed merely to open one record.
+4. Audit entity references resolve through financial records, receivables, payments, tax records, corrections and flags. Existing global provenance and hidden-owner predicates remain; private JSON witness validation is not bypassed. Legacy unmarked unknown audit references retain their existing behavior.
+5. No migration or financial writer was changed. Root CONTEXT.md clarifies the existing distinction between a new draft after deletion and correction of an approved invoice. This reversible implementation fix does not introduce a new architectural/domain decision requiring an ADR.
+
+Red/green verification
+The new identifier regression was run with the original non-decoding behavior: it failed with “API request must not encode the colon twice”. The focused database regression was run with the original full-scope service calls: it failed on the unrelated Case's deliberately corrupt evidence with INTEGRITY_CONFLICT. Both current fixes were restored byte-for-byte afterwards and the tests pass.
+Baseline output: /tmp/sabalan-review-red-identifier.log and /tmp/sabalan-review-red-focused-read.log.
+
+Checks passed
+- 21 frontend behavior tests: exact identifier, malformed escapes, literal percent IDs, stale/other-owner response rejection, independent currencies, historical display, audit denial/failure and approval retry identity.
+- 1 focused exact-schema integration test on the existing sabalanerp-local PostgreSQL service, with 43 Partner Cases. Record plus audit reads completed in 138 ms in the recorded local fixture run. This is a fixture measurement, not a production SLA.
+- The focused test checks canonical ID and customer contract number 100999, excludes disguised/orphan private records, validates history ownership, preserves ordinary source provenance and nested payment currency, rejects corrupt current evidence and wrong nested witnesses, and rejects newly revoked authority.
+- Before/after serialized snapshots cover Cases, contracts, internal records, financial records, invoice items, revisions, payment plans, receivables, payments, tax records and Accounting audit logs. Read operations did not change them. Existing authorization-decision audit appends remain intentional.
+- 4 compatibility/scale integration tests: historical v3/v4 and writer-bound v4/v5 payment-plan evidence; ADMIN and scoped USER reads; per-Case decisions, concurrent reads and writer/revocation fencing. Full-scope fixture read measurements were 324 ms ADMIN and 214 ms USER; paired concurrent reads 342/331 ms.
+- 3 Playwright browser tests against the existing local Compose frontend: direct entry, refresh and client navigation using the exact affected record ID; wrong-record response suppression; literal percent identity preservation. No financial write was issued by these UI tests.
+- Frontend production build passed, with existing unrelated lint warnings.
+- Backend TypeScript/cutover builds passed.
+- architecture:check passed.
+- design-system:check passed; 25 foundation and 14 adoption tests passed.
+- git diff --check passed.
+
+Environment and limits
+The affected production record's technical ID and contract number were reproduced in synthetic fixtures. Backend tests use isolated temporary databases inside the existing sabalanerp-local PostgreSQL service, not another Docker project or PostgreSQL container. Fixture clients disconnect and temporary databases are dropped by the existing harness.
+The browser tests use fixture responses produced by the real updated backend service test, with authentication/navigation fixtures intercepted by Playwright. They do not assert a working live production or end-to-end local backend session.
+The existing local backend was already restarting with RUNTIME_NATIVE_AUTHORITY_UNPROVEN / exit 75 after Docker resumed. Its ownership gate was not bypassed. Other existing local services remained healthy.
+The docker:verify command was mistakenly treated as observational; it starts builds and Compose up. It was interrupted during build (exit 130). All existing containers were checked afterwards and retain their original creation dates/images; none was recreated. Local build/cache/tag artifacts may have changed. No data volume, checkpoint or protected identity was removed. Therefore docker:verify did not pass and full-stack readiness is not claimed.
+Only the two changed frontend source files were copied into the already running local dev frontend to exercise the current code. No replacement runtime stack was started.
+No SSH connection, publication, restart, migration, financial approval or production-data change was performed in this implementation turn.
+
+Reproduction from repository root (set the existing local PostgreSQL test URL in the environment)
+./backend/node_modules/.bin/tsx --test backend/src/services/__tests__/accountingFinancialReviewFocused.integration.test.ts
+./backend/node_modules/.bin/tsx --test backend/src/services/__tests__/partnerAccountingHistoricalRead.integration.test.ts backend/src/services/__tests__/accountingScopeScale.integration.test.ts
+For browser tests, set ACCOUNTING_REVIEW_FIXTURE_OUTPUT to the same temporary JSON path during the focused DB test and Playwright run:
+./node_modules/.bin/playwright test --config playwright.design-system.config.ts tests/design-system-e2e/accounting-financial-review-identity.spec.ts --retries=0
+Frontend behavior tests run from frontend/ so tsconfig aliases resolve:
+./node_modules/.bin/tsx --test src/features/accounting/__tests__/financialRecordReviewHref.test.ts src/features/accounting/__tests__/financialReviewRequestGuard.test.ts src/features/accounting/__tests__/submitFinancialApproval.test.ts src/features/accounting/__tests__/AccountingFinancialRecordReview.test.tsx
+
+No commit, push or deployment was made. Unrelated pre-existing working-tree changes remain intact.
+
+
+Completed real-runtime acceptance — 2026-11-18
+The Mac ownership incident was recovered without resetting ACTIVE or weakening production admission; see local-native-recovery-macos-20261118.txt. Actual read-only production pg_dump was restored into an isolated temporary database in the existing PostgreSQL service. The SAME existing Compose backend service was moved to this copy only after ordinary SIGTERM, verified QUIESCENT/nativeReaped/databaseQuiet and zero tagged sessions. No parallel stack/service was started. QA login changes were confined to the copied database.
+
+The current production snapshot has contract100999 (sales ID b1309794-ebd1-42d0-9d36-ff9fbbaf2507), linked to partner-recovery-2d9483cb-f2f8-40e2-b3b5-189136c98fe4. The user's original replacement:2d8dadce-7015-40e3-a14d-ed45b0f11fe8 financial row is already absent from this snapshot. Current DRAFT is replacement:8a8cf5c2-4dd6-450f-8ed3-2b049688f4f1, amount1470000000 IRT. This differs from the earlier observed1400000000 IRT draft BEFORE our local acceptance; this work did not replace/renumber/change either financial record.
+
+Unmocked Playwright real-service test passed (15.6s test,16.6s total): normal authenticated login, old deleted URL refuses display, current exact encoded URL opens, refresh opens, financial-tab review link from the actual contract opens. Financial-record and audit APIs returned200 with the canonical current ID; record DRAFT/source Case/currency/amount match the copied source. No accounting write request was issued. Observed local target record reads59–635ms and audit59–403ms (browser observations, not production SLA).
+Test: tests/design-system-e2e/accounting-financial-review-real-100999.spec.ts. It is opt-in via ACCOUNTING_REAL_100999_QA_DIR and uses no route interception/mocks. Private login and expected-record input remain outside Git.
+
+After testing, ordinary SIGTERM again proved complete native closure. Full row-count/content fingerprints of all eight copied business/history tables (sales_contracts, accounting_financial_records, accounting_audit_logs, accounting_receivables, accounting_payment_statuses, accounting_tax_records, partner_sale_cases, partner_case_revisions) exactly equal their pre-start source-copy values. Original local database ten-table fingerprints and complete migration ledger also stayed equal to the verified checkpoint. The backend was returned to original sabalanerp database and is healthy on loopback5001. The original local database does not contain100999; real acceptance was on the isolated production copy, not fabricated data inserted into it.
+Architecture/design-system checks and git diff --check passed after the final changes. All source fixes remain uncommitted; no push or production deployment was performed. Other concurrent personal-pickup source/migration work was preserved and not applied to the original local database.
+
+Cleanup: the owned temporary contract100999 QA database was dropped after verified ordinary drain and original-database restoration. Private read-only source dump, checkpoint and acceptance evidence are retained outside Git. Final existing five services are healthy. The frontend container was independently recreated during concurrent workspace activity after the recorded test; this task issued no frontend recreation command. The accepted browser result describes its recorded runtime, not qualification of later unrelated changes.
+
+Completed draft-to-approval browser acceptance
+The archived read-only production snapshot was restored twice into disposable databases in the existing local PostgreSQL service. The existing backend was switched only after its regular native drain and ownership checks. A private login was configured in each copy.
+The first browser attempt successfully deleted the pre-existing draft in the first copy. The test then looked for the registration control on the financial tab. Registration belongs to the Summary tab after deletion. The resumed run registered and approved successfully. A second, fresh restore passed the complete browser test in one run (11.5 seconds) after correcting the tab selection.
+The second run used the actual UI and API with no mocked routes. It deleted the pre-existing draft in the copy, went to Summary, registered a new draft with a distinct ID, opened financial review from the contract, and submitted an isolated test invoice number with the exact amount. Each of the three writes returned HTTP 200. The issued row persisted with financial approval time, correct invoice number and matching Sepidar and invoice amounts of 1,470,000,000 IRT (14,700,000,000 IRR).
+The database confirmed one approval audit entry and one audit entry for deletion of the earlier draft. Sales contracts, partner cases, partner case revisions, receivables and payment statuses in the copy retained their before-test row hashes. No additional product fix was needed for this run. The regression test is tests/design-system-e2e/accounting-financial-lifecycle-real-100999.spec.ts and checks that the native owner is attached to the named local QA database before any browser action.
+After ordinary native drain, the existing backend returned to the original local database and became healthy. The ten original business/history table fingerprints and complete migration ledger still matched the original checkpoint. Both owned QA databases and their temporary login files were removed after confirming there were no active connections. No production connection, mutation or deployment was made in this follow-up.

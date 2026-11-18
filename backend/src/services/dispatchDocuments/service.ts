@@ -18,6 +18,11 @@ export class DispatchDocumentAuthorizationError extends Error {}
 export class DispatchDocumentConflictError extends Error {}
 export class DispatchDocumentEvidenceConflictError extends DispatchDocumentConflictError {}
 export class DispatchDocumentIntegrityError extends Error {}
+class DispatchWaybillReprintError extends DispatchDocumentConflictError {
+  constructor(readonly cause: unknown) {
+    super('نسخهٔ بازچاپ بارنامه آماده نشد.');
+  }
+}
 export class DispatchDocumentNotAvailableError extends Error {
   constructor() { super('Dispatch document is not available.'); }
 }
@@ -29,6 +34,7 @@ type Dependencies = {
   publisher: DispatchArtifactPublisher;
   access: DispatchDocumentAccessPolicy;
   incidents: DispatchIntegrityIncidentReporter;
+  reprintWaybill?: (artifact: PublishedDispatchArtifact) => Promise<Uint8Array | undefined>;
   id?: () => string;
   now?: () => Date;
 };
@@ -253,6 +259,17 @@ export const createDispatchDocuments = (dependencies: Dependencies) => {
     }
     return bytes;
   };
+  const handoffDocument = async (artifact: PublishedDispatchArtifact, original = false) => {
+    const bytes = await verifiedBytes(artifact);
+    if (original || artifact.kind !== 'WAYBILL' || !dependencies.reprintWaybill) return { artifact, bytes };
+    try {
+      const rendered = await dependencies.reprintWaybill(artifact);
+      if (!rendered) return { artifact, bytes };
+      return { artifact: { ...artifact, byteLength: rendered.byteLength, sha256: digest(rendered) }, bytes: rendered };
+    } catch (error) {
+      throw new DispatchWaybillReprintError(error);
+    }
+  };
 
   // Internal integrity checks do not represent a document handoff to a user.
   const verifyArtifactForIssuance = async (input: { artifactId: string; waybillId: string; actorId: string; correlationId: string }) => {
@@ -275,12 +292,13 @@ export const createDispatchDocuments = (dependencies: Dependencies) => {
     }
   };
 
-  const retrieveArtifact = async (input: { artifactId: string; waybillId: string; actorId: string; correlationId: string }) => {
+  const retrieveArtifact = async (input: { artifactId: string; waybillId: string; actorId: string; correlationId: string; original?: boolean }) => {
     await assertAccess(required(input.actorId, 'actorId'), required(input.waybillId, 'waybillId'));
-    const retrievalFingerprint = intentFingerprint({ command: 'RETRIEVE', waybillId: input.waybillId, artifactId: input.artifactId });
+    const retrievalFingerprint = intentFingerprint({ command: 'RETRIEVE', waybillId: input.waybillId,
+      artifactId: input.artifactId, ...(input.original ? { original: true } : {}) });
     const attemptId = id();
-    const artifact = await dependencies.repository.getArtifact({ artifactId: required(input.artifactId, 'artifactId'), waybillId: input.waybillId });
-    if (!artifact) {
+    const stored = await dependencies.repository.getArtifact({ artifactId: required(input.artifactId, 'artifactId'), waybillId: input.waybillId });
+    if (!stored) {
       await dependencies.repository.recordRetrieval({ waybillId: input.waybillId, artifact: null,
         requestedArtifactId: input.artifactId, attemptId,
         actorId: input.actorId, correlationId: input.correlationId, status: 'FAILED', failureCode: 'ARTIFACT_NOT_AVAILABLE',
@@ -288,9 +306,9 @@ export const createDispatchDocuments = (dependencies: Dependencies) => {
       throw new DispatchDocumentNotAvailableError();
     }
     if (!await dependencies.access.canReadDocuments({ actorId: input.actorId, waybillId: input.waybillId,
-      kinds: [artifact.kind] })) throw new DispatchDocumentNotAvailableError();
+      kinds: [stored.kind] })) throw new DispatchDocumentNotAvailableError();
     try {
-      const bytes = await verifiedBytes(artifact);
+      const { bytes, artifact } = await handoffDocument(stored, input.original);
       let completion: 'PENDING' | 'SUCCEEDED' | 'FAILED' = 'PENDING';
       return { artifact, bytes, complete: {
         succeeded: async () => { if (completion !== 'PENDING') return; completion = 'SUCCEEDED';
@@ -303,12 +321,13 @@ export const createDispatchDocuments = (dependencies: Dependencies) => {
             correlationId: input.correlationId, status: 'FAILED', failureCode, intentFingerprint: retrievalFingerprint }); },
       } };
     } catch (error) {
-      await dependencies.repository.recordRetrieval({ waybillId: input.waybillId, artifact, requestedArtifactId: artifact.id,
+      const integrityFailure = !(error instanceof DispatchWaybillReprintError);
+      await dependencies.repository.recordRetrieval({ waybillId: input.waybillId, artifact: stored, requestedArtifactId: stored.id,
         attemptId, actorId: input.actorId, correlationId: required(input.correlationId, 'correlationId'),
-        status: 'FAILED', failureCode: 'ARTIFACT_INTEGRITY_FAILURE', intentFingerprint: retrievalFingerprint });
-      await dependencies.incidents.report({ waybillId: input.waybillId, artifactId: artifact.id, actorId: input.actorId,
+        status: 'FAILED', failureCode: integrityFailure ? 'ARTIFACT_INTEGRITY_FAILURE' : 'WAYBILL_REPRINT_FAILED', intentFingerprint: retrievalFingerprint });
+      if (integrityFailure) await dependencies.incidents.report({ waybillId: input.waybillId, artifactId: stored.id, actorId: input.actorId,
         correlationId: input.correlationId, failureCode: 'ARTIFACT_INTEGRITY_FAILURE',
-        evidence: { expectedSha256: artifact.sha256, expectedByteLength: artifact.byteLength, storageKey: artifact.storageKey } });
+        evidence: { expectedSha256: stored.sha256, expectedByteLength: stored.byteLength, storageKey: stored.storageKey } });
       throw error;
     }
   };
@@ -343,14 +362,15 @@ export const createDispatchDocuments = (dependencies: Dependencies) => {
     }
     try {
       const documents: Array<{ artifact: PublishedDispatchArtifact; bytes: Uint8Array }> = [];
-      for (const artifact of artifacts) documents.push({ artifact, bytes: await verifiedBytes(artifact) });
+      for (const artifact of artifacts) documents.push(await handoffDocument(artifact));
+      const deliveredArtifacts = documents.map(document => document.artifact);
       let completion: 'PENDING' | 'SUCCEEDED' | 'FAILED' = 'PENDING';
       return { documents, complete: {
         succeeded: async () => {
           if (completion !== 'PENDING') return;
           completion = 'SUCCEEDED';
           await dependencies.repository.recordPrintHandoff({ waybillId: input.waybillId, operationIdempotencyKey,
-            attemptId, correlationId: input.correlationId, actorId: input.actorId, kinds, status: 'SUCCEEDED', artifacts,
+            attemptId, correlationId: input.correlationId, actorId: input.actorId, kinds, status: 'SUCCEEDED', artifacts: deliveredArtifacts,
             intentFingerprint: fingerprint });
         },
         failed: async (failureCode = 'BYTE_HANDOFF_FAILED') => {
@@ -362,10 +382,11 @@ export const createDispatchDocuments = (dependencies: Dependencies) => {
         },
       } };
     } catch (error) {
+      const integrityFailure = !(error instanceof DispatchWaybillReprintError);
       await dependencies.repository.recordPrintHandoff({ waybillId: input.waybillId, operationIdempotencyKey,
         attemptId, correlationId: input.correlationId, actorId: input.actorId, kinds, status: 'FAILED', artifacts,
-        failureCode: 'ARTIFACT_INTEGRITY_FAILURE', intentFingerprint: fingerprint });
-      for (const artifact of artifacts) await dependencies.incidents.report({ waybillId: input.waybillId,
+        failureCode: integrityFailure ? 'ARTIFACT_INTEGRITY_FAILURE' : 'WAYBILL_REPRINT_FAILED', intentFingerprint: fingerprint });
+      if (integrityFailure) for (const artifact of artifacts) await dependencies.incidents.report({ waybillId: input.waybillId,
         artifactId: artifact.id, actorId: input.actorId, correlationId: input.correlationId,
         failureCode: 'ARTIFACT_INTEGRITY_FAILURE', evidence: { expectedSha256: artifact.sha256,
           expectedByteLength: artifact.byteLength, storageKey: artifact.storageKey } });

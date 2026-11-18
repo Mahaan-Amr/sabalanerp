@@ -1,3 +1,5 @@
+import { SalesInvoiceError } from './salesDispatchInvoice/source';
+import { assertLoadingSalesInvoice } from './salesDispatchInvoice/service';
 import { requirePickupVerification } from './dispatchPickupVerification';
 import { externalDriverInclude, externalDriverBlockers, externalBlockerText, externalOperationalReadiness } from "./externalVehicleOperations";
 import { assertPartnerCommercialDispatchEligible } from './partnerSales/fulfillment/commercialSettlement';
@@ -305,6 +307,7 @@ export class DispatchConfirmationService {
     const turn = waybill.candidate.allocationRevision.queueTurn;
     const driverId = queueTurnDriverIdentity(turn);
     const customerPickup = turn.driverSource === 'CUSTOMER_PICKUP';
+    const personalPickup = turn.driverSource === 'PERSONAL_PICKUP';
     if (!driverId) throw new DispatchConfirmationConflictError('The waybill has no immutable driver identity.');
     await this.prisma.$transaction(async (tx) => {
       await assertCanonicalDispatchCommandAllowed(tx);
@@ -319,10 +322,10 @@ export class DispatchConfirmationService {
         await appendAudit(tx, { aggregateType: 'DISPATCH_EXIT_AUTHORIZATION', aggregateId: stale.id, eventType: 'EXPIRED', payload: {}, actorId: input.actorId, at });
       }
     });
-    const method = customerPickup ? 'CUSTOMER_PICKUP_OTP' : turn.driverSource === 'INTERNAL' ? 'INTERNAL_BIOMETRIC' : 'EXTERNAL_BIOMETRIC';
+    const method = personalPickup ? 'PERSONAL_PICKUP_ACCOUNTING' : customerPickup ? 'CUSTOMER_PICKUP_OTP' : turn.driverSource === 'INTERNAL' ? 'INTERNAL_BIOMETRIC' : 'EXTERNAL_BIOMETRIC';
     return this.prisma.$transaction(async (tx) => {
       await assertCanonicalDispatchCommandAllowed(tx);
-      if (customerPickup) await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`ACCOUNTING_DISPATCH_WAYBILL:${waybill.id}`}))`;
+      if (customerPickup || personalPickup) await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`ACCOUNTING_DISPATCH_WAYBILL:${waybill.id}`}))`;
       const currentWaybill = await tx.accountingDispatchWaybill.findUnique({
         where: { id: waybill.id }, select: { status: true, integrityHash: true },
       });
@@ -343,7 +346,7 @@ export class DispatchConfirmationService {
           authorization: { id: authorization.id },
         };
       }
-      if (!customerPickup) {
+      if (!customerPickup && !personalPickup) {
         const subject = await this.sessionSubject({ driverSource: turn.driverSource, driverId }, tx);
         const enrollment = await tx.driverBiometricEnrollment.findFirst({ where: { ...subject.where, status: 'ACTIVE' } });
         if (!enrollment) throw new DispatchConfirmationConflictError('راننده ثبت بیومتریک فعال ندارد. ابتدا پرونده راننده را تکمیل کنید.');
@@ -354,6 +357,10 @@ export class DispatchConfirmationService {
           active.waybillIntegrityHash !== waybill.integrityHash) {
           throw new DispatchConfirmationConflictError('برای این بارنامه نوبت فعال دیگری وجود دارد. از همان حساب کاربری و ایستگاه شروع‌کننده ادامه دهید یا تا پایان مهلت نوبت صبر کنید.');
         }
+        if (personalPickup) {
+          const authorization = await this.createAuthorizationLocked(tx, active.id, accountingActorId, at);
+          return { ...active, status: 'CONFIRMED', authorization: { id: authorization.id } };
+        }
         return active;
       }
       const created = await tx.dispatchConfirmationSession.create({ data: { waybillId: waybill.id, method, driverSource: turn.driverSource,
@@ -361,12 +368,12 @@ export class DispatchConfirmationService {
         workstationId, expiresAt: addMinutes(at, this.dependencies.sessionMinutes || 10) } });
       await appendAudit(tx, { aggregateType: 'DISPATCH_CONFIRMATION_SESSION', aggregateId: created.id,
         eventType: 'SESSION_STARTED', payload: { waybillId: waybill.id, method, waybillIntegrityHash: waybill.integrityHash }, actorId: input.actorId, at });
-      if (customerPickup) {
+      if (customerPickup || personalPickup) {
         const authorization = await this.createAuthorizationLocked(tx, created.id, accountingActorId, at);
         return { ...created, status: 'CONFIRMED', authorization: { id: authorization.id } };
       }
       return created;
-    });
+    }, personalPickup ? { timeout: 30_000 } : undefined);
   }
 
   private async activeSession(sessionId: string, actorId?: string) {
@@ -410,6 +417,13 @@ export class DispatchConfirmationService {
       if (session.method !== 'CUSTOMER_PICKUP_OTP' || session.driverId !== revision.queueTurn.id ||
           revision.queueTurn.status !== 'LOADING_FINALIZED' || revision.queueTurn.loadingId !== revision.loadingId)
         throw new DispatchConfirmationConflictError('تخصیص راننده متفرقه برای خروج معتبر نیست.');
+    } else if (revision.queueTurn.driverSource === 'PERSONAL_PICKUP') {
+      if (session.method !== 'PERSONAL_PICKUP_ACCOUNTING' || session.driverSource !== 'PERSONAL_PICKUP' ||
+          session.driverId !== revision.queueTurn.id || revision.queueTurn.status !== 'LOADING_FINALIZED' ||
+          revision.queueTurn.loadingId !== revision.loadingId)
+        throw new DispatchConfirmationConflictError('بارگیری شخصی برای صدور مجوز خروج معتبر نیست.');
+      try { await assertLoadingSalesInvoice(tx, revision.loadingId); }
+      catch (error) { if (error instanceof SalesInvoiceError) throw new DispatchConfirmationConflictError(error.message); throw error; }
     } else {
       const subject = await this.sessionSubject(session, tx);
       await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', subject.lockKey);

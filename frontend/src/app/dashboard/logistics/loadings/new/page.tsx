@@ -1,4 +1,5 @@
 "use client";
+import { PartnerLoadingDraft } from "@/features/logistics/PartnerLoadingDraft";
 import {
   ErpCheckboxControl,
   ErpField,
@@ -253,6 +254,9 @@ export default function NewLoadingPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const draftId = searchParams.get("draftId");
+  const [partnerDraftId, setPartnerDraftId] = useState<string | null>(null);
+  const partnerCreateKey = useRef<{ selection: string; key: string } | null>(null);
+  const partnerProjectLock = useRef(false);
 
   const [activeQuantityDriverId, setActiveQuantityDriverId] = useState("");
   const [step, setStep] = useState<WizardStep>("customer");
@@ -283,6 +287,10 @@ export default function NewLoadingPage() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
+  const selectedPersonalTurn = (draft?.guardQueueTurns || []).find((turn: any) =>
+    turn.driverSource === "PERSONAL_PICKUP" && turn.status === "RESERVED_FOR_LOADING" && selectedDriverIds.includes(turn.id));
+  const personalPickup = Boolean(selectedPersonalTurn) || drivers.some(driver => driver.source === "PERSONAL_PICKUP" && selectedDriverIds.includes(driver.id));
+
   const selectedProject = remaining?.project || draft?.project || projects.find(project => project.id === draft?.projectId);
 
   const selectedSourceIds = useMemo(
@@ -292,9 +300,10 @@ export default function NewLoadingPage() {
   const selectedDrivers = useMemo(
     () =>
       selectedDriverIds
-        .map((id) => drivers.find((driver) => driver.id === id))
+        .map((id) => drivers.find((driver) => driver.id === id) ||
+          (selectedPersonalTurn?.id === id ? { id, source: "PERSONAL_PICKUP", firstName: "راننده شخصی", lastName: "", vehicleType: "سواری" } : null))
         .filter(Boolean),
-    [drivers, selectedDriverIds],
+    [drivers, selectedDriverIds, selectedPersonalTurn],
   );
 
   const contracts = useMemo(() => {
@@ -490,6 +499,10 @@ export default function NewLoadingPage() {
         const response = await logisticsAPI.getLoading(draftId);
         if (!response.data.success) return;
         const loadingDraft = response.data.data;
+        if (loadingDraft.source?.sourceKind === "PARTNER_CASE") {
+          setPartnerDraftId(draftId);
+          return;
+        }
         setDraft(loadingDraft);
         setSelectedCustomer({
           id: loadingDraft.customerId,
@@ -533,6 +546,27 @@ export default function NewLoadingPage() {
     };
     loadDraft();
   }, [draftId]);
+
+  const selectPartnerDelivery = async (project: { id: string; owner: { caseId: string; revision: number; integrityHash: string }; deliveryId: string }) => {
+    if (partnerProjectLock.current || selectingProjectId) return;
+    partnerProjectLock.current = true;
+    setSelectingProjectId(project.id);
+    setError("");
+    try {
+      const selection = `${project.id}:${project.owner.revision}`;
+      if (partnerCreateKey.current?.selection !== selection) partnerCreateKey.current = { selection, key: crypto.randomUUID() };
+      const { data } = await logisticsAPI.createLoading({
+        sourceKind: "PARTNER_CASE", expected: project.owner, deliveryId: project.deliveryId,
+        idempotencyKey: partnerCreateKey.current.key, reason: "شروع بارگیری از پروژه مشتری",
+      });
+      router.replace(`/dashboard/logistics/loadings/new?draftId=${encodeURIComponent(data.data.loadingId)}`);
+    } catch (err) {
+      setError(userFacingError(err, "ساخت پیش‌نویس بارگیری ناموفق بود."));
+    } finally {
+      partnerProjectLock.current = false;
+      setSelectingProjectId("");
+    }
+  };
 
   const selectProject = async (projectId: string, forceNew = false) => {
     setError("");
@@ -746,7 +780,31 @@ export default function NewLoadingPage() {
     return false;
   };
 
-  const toggleSelectedDriver = (driver: any) => {
+  const changeTransport = async (mode: "PERSONAL" | "DRIVERS") => {
+    if (!draft?.id || mutationLock.current) return false;
+    mutationLock.current = true;
+    setSaving(true);
+    setError("");
+    try {
+      const response = await logisticsAPI.selectLoadingTransport(draft.id, mode);
+      const refreshed = await logisticsAPI.getLoading(draft.id);
+      if (!response.data.success || !refreshed.data.success) throw new Error("تغییر نوع بارگیری ناموفق بود.");
+      setDraft(refreshed.data.data);
+      setSelectedDriverIds(response.data.data.turn ? [response.data.data.turn.id] : []);
+      setDriverLineInputs({});
+      setLines(current => current.map(line => ({ ...line, quantity: "", khatRas: "", pieceCount: "", plus: "0", minus: "0" })));
+      await loadDrivers(draft.id);
+      return true;
+    } catch (err) {
+      setError(userFacingError(err, "تغییر نوع بارگیری ناموفق بود."));
+      return false;
+    } finally {
+      mutationLock.current = false;
+      setSaving(false);
+    }
+  };
+
+  const toggleSelectedDriver = async (driver: any) => {
     const selected = selectedDriverIds.includes(driver.id);
     if (
       !selected &&
@@ -754,6 +812,10 @@ export default function NewLoadingPage() {
       driver.reservedLoading?.id !== draft?.id
     )
       return;
+    if (personalPickup) {
+      if (await changeTransport("DRIVERS")) setSelectedDriverIds([driver.id]);
+      return;
+    }
     setSelectedDriverIds((current) =>
       selected
         ? current.filter((id) => id !== driver.id)
@@ -990,14 +1052,16 @@ export default function NewLoadingPage() {
       )}
       <div className="flex flex-col gap-2">
         {projects.map((project) => (
-          <ErpNeumorphicInteractiveCard key={project.id} onClick={() => selectProject(project.id)} disabled={Boolean(selectingProjectId)} aria-pressed={draft?.projectId === project.id} className="p-4 text-right disabled:opacity-60">
+          <ErpNeumorphicInteractiveCard key={project.id} onClick={() => project.sourceKind === "PARTNER_CASE" ? void selectPartnerDelivery(project) : void selectProject(project.id)} disabled={Boolean(selectingProjectId)} aria-pressed={draft?.projectId === project.id} className="p-4 text-right disabled:opacity-60">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <p className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
                   {project.projectName || project.address}
                 </p>
                 <p className="mt-1 text-xs leading-5 text-[var(--sds-text-secondary)]">
-                  {[project.city, project.address].filter(Boolean).join(" · ")}
+                  {project.sourceKind === "PARTNER_CASE"
+                    ? `قرارداد ${project.contractNumber} · ${new Date(`${project.date}T12:00:00`).toLocaleDateString("fa-IR")}`
+                    : [project.city, project.address].filter(Boolean).join(" · ")}
                 </p>
                 {(project.projectManagerName ||
                   project.projectManagerNumber) && (
@@ -1419,8 +1483,11 @@ export default function NewLoadingPage() {
   const renderDriverStep = () => (
     <ErpSection
       title="انتخاب رانندگان آماده بارگیری"
-      description="می‌توانید چند راننده آماده بارگیری انتخاب کنید."
     >
+      <div className="mb-4 flex flex-wrap gap-3">
+        <ErpButton label="راننده شخصی" variant={personalPickup ? "solid" : "outline"} disabled={saving}
+          onClick={() => void changeTransport(personalPickup ? "DRIVERS" : "PERSONAL")} />
+      </div>
       <div className="grid grid-cols-1 items-end gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
         <ErpField label="جستجوی راننده">
         <ErpInput
@@ -1434,12 +1501,12 @@ export default function NewLoadingPage() {
           icon={FaSearch}
           variant="soft"
           onClick={() => {
-            void loadDrivers();
+            void loadDrivers(draft?.id);
           }}
         />
       </div>
       <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
-        {filteredDrivers.map((driver) => {
+        {filteredDrivers.filter(driver => driver.source !== "PERSONAL_PICKUP").map((driver) => {
           const selected = selectedDriverIds.includes(driver.id);
           const reservedForOther =
             driver.queueStatus === "RESERVED" &&
@@ -1450,7 +1517,7 @@ export default function NewLoadingPage() {
               key={driver.id}
               type="button"
               onClick={() => toggleSelectedDriver(driver)}
-              disabled={reservedForOther}
+              disabled={saving || reservedForOther}
               aria-pressed={selected}
               className={`min-w-0 p-4 text-right disabled:cursor-not-allowed disabled:opacity-60 ${
                 selected
@@ -1501,7 +1568,7 @@ export default function NewLoadingPage() {
             </ErpNeumorphicInteractiveCard>
           );
         })}
-        {!filteredDrivers.length && (
+        {!filteredDrivers.some(driver => driver.source !== "PERSONAL_PICKUP") && !personalPickup && (
           <ErpEmptyState
             icon={FaUsers}
             title="راننده آماده بارگیری وجود ندارد"
@@ -1575,6 +1642,7 @@ export default function NewLoadingPage() {
   );
 
   if (loading) return <ErpLoading />;
+  if (draftId && partnerDraftId === draftId) return <PartnerLoadingDraft key={draftId} draftId={draftId} />;
 
   return (
     <LogisticsPage

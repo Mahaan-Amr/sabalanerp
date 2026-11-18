@@ -80,3 +80,9 @@ test("biometric history distinguishes a failed attempt, a match and missing hist
   }), /تطابق داشت/);
   assert.equal(dispatchEventLabel(type), "نتیجه بررسی اثر انگشت ثبت شد");
 });
+
+
+test("personal pickup history does not claim driver identity or Guard entry verification", () => {
+  assert.equal(dispatchEventLabel("PERSONAL_PICKUP_SELECTED"), "راننده شخصی برای بارگیری انتخاب شد");
+  assert.equal(dispatchEventLabel("CONFIRMATION_CONFIRMED", { method: "PERSONAL_PICKUP_ACCOUNTING" }), "مجوز خروج راننده شخصی صادر شد");
+});

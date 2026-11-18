@@ -15,7 +15,7 @@ This module implements ADR-0138. It creates an independently numbered, immutable
 | Partner prices and counterparty | Official Sabalan-to-Partner preparation and financial approval, through the existing Partner priced-allocation reader; never the retail customer contract |
 | Partner technical facts | `projectPartnerInternalContent` against the exact immutable Case revision bound to the allocation; its existing allowlist excludes retail amounts |
 | Post-exit changes | Posted `DispatchStatementAdjustment` or `SalesInvoiceCorrection` snapshots whose hashes and owner identities verify, after the owning correction workflow; no recomputation from current catalog prices |
-| Downloaded active PDF | Stored original bytes plus their SHA-256 hash; void/invalid historical views are visibly marked without rewriting the original artifact |
+| Downloaded PDF | Current layout from the issued snapshot, or stored original bytes when already current; the original bytes and hash remain available for audit. Void and invalid historical views are visibly marked. |
 
 All arithmetic on quantities and stored money uses decimal strings. Currency conversion is presentation only. The displayed all-in rate divides the approved shipped gross amount by the exact loaded quantity; services already included in that amount are not charged again. Driver summaries group quantities only within the same saved unit.
 

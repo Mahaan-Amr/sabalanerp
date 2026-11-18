@@ -34,6 +34,7 @@ const statusLabels: Record<string, string> = {
 
 const eventLabels: Record<string, string> = {
   ADMITTED: "ورود راننده ثبت شد",
+  PERSONAL_PICKUP_SELECTED: "راننده شخصی برای بارگیری انتخاب شد",
   MADE_AVAILABLE_FOR_LOADING: "راننده برای بارگیری آماده شد",
   RESERVED_FOR_LOADING: "بارگیری برای راننده رزرو شد",
   RESERVATION_RELEASED: "رزرو بارگیری آزاد شد",
@@ -114,6 +115,10 @@ export const dispatchRecoveryLabel = (recovery?: string | null) =>
   })[recovery || ""] || "برای ادامه، وضعیت پرونده را دوباره بررسی کنید";
 
 export const dispatchEventLabel = (eventType?: string | null, detail?: Record<string, any>) => {
+  if (detail?.method === "PERSONAL_PICKUP_ACCOUNTING") {
+    if (eventType === "CONFIRMATION_STARTED") return "درخواست مجوز خروج راننده شخصی ثبت شد";
+    if (eventType === "CONFIRMATION_CONFIRMED") return "مجوز خروج راننده شخصی صادر شد";
+  }
   if (eventType === "BIOMETRIC_ATTEMPT_RECORDED") {
     const result = detail?.result ?? detail;
     if (result?.match || result?.captureQuality || result?.liveness || result?.errorCategory)

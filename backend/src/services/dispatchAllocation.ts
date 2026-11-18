@@ -1,3 +1,4 @@
+import { personalPickupDisplayContext } from './personalLoadingPickup';
 import { requirePickupVerification } from './dispatchPickupVerification';
 import { LOADING_CANCELLATION_DUTY } from './crossWorkspaceDutyAdapters/loadingCancellationDutyCode';
 import { exactQuantityText, ExactQuantityDecimal } from './exactQuantity';
@@ -25,7 +26,7 @@ import { assessBoundAllocationPricingFreshness } from './allocationPricingReadMo
 import type { createDispatchDocuments } from './dispatchDocuments/service';
 import { AllocationPricingBindingError, assertExactStableReservationTransfer, bindFinalizedAllocationPricing, bindApprovedAllocationPriceEvidence } from './allocationPricingBinding';
 import { createPrismaAllocationPricingBindingPort } from './allocationPricingPrismaAdapter';
-import { canonicalHash, canonicalJson, RevisionRefSchema, IdSchema, partnerError,
+import { canonicalHash, canonicalJson, RevisionRefSchema, IdSchema, FulfillmentViewSchema, partnerError,
   type Result, type RevisionRef } from '@sabalanerp/partner-sales-contracts';
 import { createPartnerFulfillmentAdapter } from './partnerSales/fulfillment/adapter';
 import { createPrismaPartnerFulfillmentRepository } from './partnerSales/fulfillment/prismaRepository';
@@ -152,7 +153,7 @@ export const isRetryableDispatchTransactionError = (error: unknown) => error ins
   && (error.code === 'P2034'
     || (error.code === 'P2010' && ['40001', '40P01'].includes(String(error.meta?.code || ''))));
 
-type PartnerLoadingRead = { loadingId: string; loadingNumber: string; status: string; source: PartnerLoadingSource;
+type PartnerLoadingRead = { contractNumber: string; personalTurnId: string | null; loadingId: string; loadingNumber: string; status: string; source: PartnerLoadingSource;
   allocations: Extract<Awaited<ReturnType<typeof readPartnerAllocationDrafts>>, { ok: true }>['value'] };
 const partnerFailure = (code: Parameters<typeof partnerError>[0]): Result<never> => ({ ok: false, error: partnerError(code) });
 
@@ -168,6 +169,49 @@ export const withLogisticsLoadingReadScope = <T>(prisma: Database, input: Partne
     const access: Prisma.LogisticsLoadingWhereInput = { OR: [{ sourceKind: 'SALES_CONTRACT' },
       { sourceKind: 'PARTNER_CASE', partnerCaseId: { in: allowed } }] };
     return read({ database: tx, where: (where = {}) => ({ AND: [access, where] }) });
+  });
+
+export const findLoadablePartnerDeliveries = (db: Database, input: PartnerLoadingActor & { customerIds: string[] }) =>
+  readPartnerSnapshot(db, async tx => {
+    const sales = await tx.partnerSaleCase.findMany({ where: {
+      state: 'COMMITTED', customerId: { in: input.customerIds },
+      customerContract: { is: { isInactive: false, status: { notIn: ['CANCELLED', 'EXPIRED'] } } },
+    }, select: { id: true, customerId: true, profileId: true, headRevision: true, integrityHash: true,
+      customerContract: { select: { contractNumber: true } }, head: { select: { internalProjection: true } } } });
+    const results: { id: string; customerId: string; sourceKind: 'PARTNER_CASE'; owner: RevisionRef;
+      deliveryId: string; projectName: string; address: string; date: string; contractNumber: string; remainingCount: number }[] = [];
+    for (const sale of sales) {
+      if (!sale.customerContract || !(await authorizePartnerLoading(tx, input, sale.id, 'READ')).ok) continue;
+      const view = FulfillmentViewSchema.safeParse((sale.head.internalProjection as Prisma.JsonObject | null)?.fulfillment);
+      if (!view.success || view.data.owner.caseId !== sale.id || view.data.owner.revision !== sale.headRevision
+        || view.data.owner.integrityHash !== sale.integrityHash) continue;
+      if (!(await authorizePartnerTechnicalRollout(tx, sale.profileId, 'COMMITTED_FULFILLMENT')).ok
+        || await partnerPredecessorIsFrozen(tx, sale.id, sale.headRevision)) continue;
+      const projection = await readPartnerShipmentQuantityProjection(tx, sale.id);
+      const balanceByRow = new Map(projection.rows.map(row => [row.productRowId, row]));
+      const used = await tx.logisticsAllocationRevisionLine.groupBy({
+        by: ['partnerDeliveryId', 'productRowId'],
+        where: { sourceKind: 'PARTNER_CASE', partnerCaseId: sale.id, revision: {
+          candidate: { status: { in: [AccountingDispatchCandidateStatus.PENDING, AccountingDispatchCandidateStatus.ACCEPTED] } },
+        } },
+        _sum: { quantity: true },
+      });
+      const usedByRow = new Map(used.map(row => [JSON.stringify([row.partnerDeliveryId, row.productRowId]), row._sum.quantity]));
+      for (const delivery of view.data.deliveries) {
+        const remainingCount = delivery.items.filter(item => {
+          const balance = balanceByRow.get(item.productRowId);
+          return balance?.health === 'CURRENT' && balance.quantities
+            && new ExactQuantityDecimal(balance.quantities.availableToLoad).gt(0)
+            && new ExactQuantityDecimal(item.quantity).gt(usedByRow.get(JSON.stringify([delivery.deliveryId, item.productRowId])) ?? 0);
+        }).length;
+        if (remainingCount) results.push({
+          id: `partner:${sale.id}:${delivery.deliveryId}`, customerId: sale.customerId, sourceKind: 'PARTNER_CASE',
+          owner: view.data.owner, deliveryId: delivery.deliveryId, projectName: delivery.destination, address: delivery.destination,
+          date: delivery.date, contractNumber: sale.customerContract.contractNumber, remainingCount,
+        });
+      }
+    }
+    return results;
   });
 
 /** Creates the existing Logistics loading aggregate, owned by one canonical
@@ -222,7 +266,10 @@ export const readPartnerCaseLoading = (prisma: Database, input: PartnerLoadingAc
 }): Promise<Result<PartnerLoadingRead>> => serializable(prisma, async tx => {
   if (!validLoadingActor(input) || !IdSchema.safeParse(input.loadingId).success) return partnerFailure('INVALID_PAYLOAD');
   await lockPartnerOperationsControl(tx);
-  const loading = await tx.logisticsLoading.findUnique({ where: { id: input.loadingId } });
+  const loading = await tx.logisticsLoading.findUnique({ where: { id: input.loadingId }, include: {
+    partnerCase: { select: { customerContract: { select: { contractNumber: true } } } },
+    guardQueueTurns: { where: { driverSource: 'PERSONAL_PICKUP', status: 'RESERVED_FOR_LOADING' }, select: { id: true } },
+  } });
   if (!loading || loading.sourceKind !== 'PARTNER_CASE' || !loading.partnerCaseId) return partnerFailure('NOT_FOUND');
   const authorized = await authorizePartnerLoading(tx, input, loading.partnerCaseId, 'READ');
   if (!authorized.ok) return authorized;
@@ -237,7 +284,8 @@ export const readPartnerCaseLoading = (prisma: Database, input: PartnerLoadingAc
   const allocations = await readPartnerAllocationDrafts(tx, input, loading.id, source.value);
   if (!allocations.ok) return allocations;
   return { ok: true, value: { loadingId: loading.id, loadingNumber: loading.loadingNumber, status: loading.status,
-    source: source.value, allocations: allocations.value } };
+    contractNumber: loading.partnerCase?.customerContract?.contractNumber ?? '',
+    personalTurnId: loading.guardQueueTurns[0]?.id ?? null, source: source.value, allocations: allocations.value } };
 });
 
 const bindRevisionPricing = async (tx: Tx, input: {
@@ -536,6 +584,14 @@ export type CanonicalAllocationLineInput = {
   sourceContractItemId: string;
   quantity: string | number;
   unit?: string;
+  pieceCount?: string | number | null;
+};
+
+const loadedPieceEvidence = (line: CanonicalAllocationLineInput) => {
+  const value = String(line.pieceCount ?? '').trim();
+  if (!/^\d+(?:\.0+)?$/.test(value)) return {};
+  const count = new ExactQuantityDecimal(value);
+  return count.gt(0) ? { loadedPieceCount: count.toFixed() } : {};
 };
 
 export const saveCanonicalAllocationDraft = async (prisma: Database, input: {
@@ -583,7 +639,7 @@ export const saveCanonicalAllocationDraft = async (prisma: Database, input: {
       sourceContractId: item.contractId, sourceContractItemId: item.id, productRowId: item.productRowId,
       productId: item.productId, quantity: quantity(line.quantity), unit: required(line.unit || 'count', 'unit'),
       snapshot: json({ contractNumber: item.contract.contractNumber, contractItemId: item.id, productRowId: item.productRowId,
-        productId: item.productId, productName: item.product.namePersian || item.product.name }),
+        productId: item.productId, productName: item.product.namePersian || item.product.name, ...loadedPieceEvidence(line) }),
     };
   });
   }
@@ -704,6 +760,7 @@ const finalizePartnerLoadingAllocations = async (tx: Tx, input: {
       queueTurnId: draft.queueTurnId }, _max: { revisionNumber: true } });
     const revisionNumber = (prior._max.revisionNumber || 0) + 1;
     const snapshot = stableValue({ schemaVersion: 1, sourceKind: 'PARTNER_CASE',
+      ...(draft.queueTurn.driverSource === 'PERSONAL_PICKUP' ? { personalPickup: await personalPickupDisplayContext(tx, draft.lines) } : {}),
       loading: { id: loading.id, number: loading.loadingNumber,
         customer: { id: source.recipient.customerId, name: source.recipient.displayName },
         destination: source.recipient.destination, deliveryId: source.deliveryId, plannedDate: source.plannedDate },
@@ -865,7 +922,9 @@ export const finalizeCanonicalLoadingAllocations = async (prisma: Database, inpu
     const confirmationPhone = await resolveRevisionConfirmationPhone(tx, draft.lines.map((line) => line.sourceContractId));
     const prior = await tx.logisticsAllocationRevision.aggregate({ where: { loadingId: loading.id, queueTurnId: draft.queueTurnId }, _max: { revisionNumber: true } });
     const revisionNumber = (prior._max.revisionNumber || 0) + 1;
-    const snapshot = stableValue({ schemaVersion: 1, loading: { id: loading.id, number: loading.loadingNumber,
+    const snapshot = stableValue({ schemaVersion: 1,
+      ...(draft.queueTurn.driverSource === 'PERSONAL_PICKUP' ? { personalPickup: await personalPickupDisplayContext(tx, draft.lines) } : {}),
+      loading: { id: loading.id, number: loading.loadingNumber,
       customer: { id: loading.customer.id, name: `${loading.customer.firstName} ${loading.customer.lastName}`.trim(), companyName: loading.customer.companyName },
       project: { id: loading.project.id, name: loading.project.projectName, address: loading.project.address } },
       queueTurn: { id: draft.queueTurn.id, driverSource: draft.queueTurn.driverSource,
@@ -978,7 +1037,7 @@ export const createSuccessorAllocationRevision = async (prisma: Database, input:
     return { sourceContractId: item.contractId, sourceContractItemId: item.id, productRowId: item.productRowId,
       productId: item.productId, quantity: quantity(line.quantity), unit: required(line.unit || 'count', 'unit'),
       snapshot: json({ contractNumber: item.contract.contractNumber, contractItemId: item.id, productRowId: item.productRowId,
-        productId: item.productId, productName: item.product.namePersian || item.product.name }) };
+        productId: item.productId, productName: item.product.namePersian || item.product.name, ...loadedPieceEvidence(line) }) };
   });
   if (stalePricingTransfer) {
     try {
@@ -1020,6 +1079,7 @@ export const createSuccessorAllocationRevision = async (prisma: Database, input:
     finalizedAt: now, finalizedBy: input.actorId } });
   const revisionNumber = predecessor.revisionNumber + 1;
   const snapshot = stableValue({ schemaVersion: 1, predecessorRevisionId: predecessor.id,
+    ...(refreshedQueueTurn.driverSource === 'PERSONAL_PICKUP' ? { personalPickup: await personalPickupDisplayContext(tx, rows) } : {}),
     loading: { id: predecessor.loading.id, number: predecessor.loading.loadingNumber,
       customer: { id: predecessor.loading.customer.id, name: `${predecessor.loading.customer.firstName} ${predecessor.loading.customer.lastName}`.trim(), companyName: predecessor.loading.customer.companyName },
       project: { id: predecessor.loading.project.id, name: predecessor.loading.project.projectName, address: predecessor.loading.project.address } },
@@ -1239,7 +1299,9 @@ export const cancelFinalizedOrdinaryLoadingInTransaction = async (tx: Tx, input:
 
   const waybills = revisions.flatMap(revision => revision.candidate?.waybills ?? []);
   const turnIds = [...new Set(revisions.map(revision => revision.queueTurnId))];
-  const turns = loading.guardQueueTurns;
+  // Closed draft-only personal selections retain their loading history but are not finalized carriers.
+  const turns = loading.guardQueueTurns.filter(turn => !(turn.driverSource === 'PERSONAL_PICKUP'
+    && turn.status === 'CLOSED_WITHOUT_LOADING' && !turnIds.includes(turn.id)));
   await lockKeys(tx, [
     ...turnIds.map(id => `GUARD_QUEUE:${id}`),
     ...revisions.map(revision => `LOGISTICS_ALLOCATION_REVISION:${revision.id}`),
@@ -1333,11 +1395,13 @@ export const cancelFinalizedOrdinaryLoadingInTransaction = async (tx: Tx, input:
   }
   for (const turn of turns) {
     await tx.guardDriverQueueTurn.update({ where: { id: turn.id }, data: {
-      status: 'AVAILABLE_FOR_LOADING', loadingId: null, availableAt: at, availableBy: input.actorId,
+      ...(turn.driverSource === 'PERSONAL_PICKUP'
+        ? { status: 'CLOSED_WITHOUT_LOADING' as const, closedAt: at, closedBy: input.actorId, closureReason: reason }
+        : { status: 'AVAILABLE_FOR_LOADING' as const, loadingId: null, availableAt: at, availableBy: input.actorId }),
       reservedAt: null, reservedBy: null, finalizedAt: null, finalizedBy: null,
     } });
     await appendQueueEvent(tx, {
-      turnId: turn.id, eventType: 'FINALIZED_LOADING_CANCELLED', fromStatus: 'LOADING_FINALIZED', toStatus: 'AVAILABLE_FOR_LOADING',
+      turnId: turn.id, eventType: 'FINALIZED_LOADING_CANCELLED', fromStatus: 'LOADING_FINALIZED', toStatus: turn.driverSource === 'PERSONAL_PICKUP' ? 'CLOSED_WITHOUT_LOADING' : 'AVAILABLE_FOR_LOADING',
       actorId: input.actorId, reason, payload: { loadingId: loading.id },
     });
   }

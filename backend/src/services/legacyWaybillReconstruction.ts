@@ -95,8 +95,8 @@ export async function reconstructLegacyWaybill(db: PrismaClient, input: {
   }
 }
 
-export async function readLegacyWaybillReconstruction(db: PrismaClient, waybillId: string) {
-  return db.$transaction(async tx => {
+export async function readLegacyWaybillReconstruction(db: PrismaClient, waybillId: string, original = false) {
+  const evidence = await db.$transaction(async tx => {
     const gate = await loadShipmentStatementRuntimeStateUnderLock(tx);
     if (!gate) throw new LegacyWaybillReconstructionError('وضعیت گذار اسناد قابل بررسی نیست.');
     const row = await tx.legacyWaybillReconstruction.findUnique({ where: { waybillId }, include: { waybill: {
@@ -115,18 +115,31 @@ export async function readLegacyWaybillReconstruction(db: PrismaClient, waybillI
     const freshness = await allocationPricingIntegrityVerifier.assess({ transaction: tx, allocationRevisionId: row.allocationRevisionId,
       expectedSourceIntegrityHash: row.sourceIntegrityHash });
     if (freshness.status !== 'CURRENT') throw new LegacyWaybillReconstructionError('شواهد قیمت بارگیری به بررسی نیاز دارند.');
-    return { id: row.id, bytes: row.pdf, pdfSha256: row.pdfSha256 };
+    return { id: row.id, bytes: row.pdf, pdfSha256: row.pdfSha256, sourceIntegrityHash: row.sourceIntegrityHash,
+      candidateId: waybill.candidateId, number: waybill.number.toString(), issuedAt: waybill.issuedAt.toISOString() };
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 60000 });
+  if (original) return { id: evidence.id, bytes: evidence.bytes, pdfSha256: evidence.pdfSha256 };
+  const reader = new PrismaDispatchDocumentSourceReader(db, 'dispatch-documents-v1', 'chromium-pdf-v1');
+  const source = await reader.readPrimaryBundle({ candidateId: evidence.candidateId, historicalPrint: true, waybill: {
+    waybillId, waybillDocumentId: evidence.id, statementDocumentId: evidence.id,
+    number: evidence.number, issuedAt: evidence.issuedAt,
+  } });
+  if (source.sourceIntegrityHash !== evidence.sourceIntegrityHash) {
+    throw new LegacyWaybillReconstructionError('شواهد بارنامه برای بازچاپ مطابقت ندارد.');
+  }
+  const { bytes } = await renderDispatchDocumentPdf({ ...source.waybill, reconstructionLabel: 'LEGACY_RECONSTRUCTED' });
+  return { id: evidence.id, bytes, pdfSha256: hashBytes(bytes) };
 }
 
 export async function recordLegacyReconstructionHandoff(db: PrismaClient, input: {
-  waybillId: string; reconstructionId: string; actorId: string; status: 'SUCCEEDED' | 'FAILED';
+  waybillId: string; reconstructionId: string; actorId: string; status: 'SUCCEEDED' | 'FAILED'; pdfSha256?: string;
 }) {
   for (let attempt = 0; ; attempt++) {
     try {
       await db.$transaction(tx => appendLegacyAudit(tx, { waybillId: input.waybillId, actorId: input.actorId,
         eventType: input.status === 'SUCCEEDED' ? 'RECONSTRUCTION_HANDED_OFF' : 'RECONSTRUCTION_HANDOFF_FAILED',
-        payload: { reconstructionId: input.reconstructionId } }), { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+        payload: { reconstructionId: input.reconstructionId, ...(input.pdfSha256 ? { pdfSha256: input.pdfSha256 } : {}) } }),
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
       return;
     } catch (error) {
       if (attempt >= 2 || !isRetryableDispatchTransactionError(error)) throw error;

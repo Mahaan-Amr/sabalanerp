@@ -4337,7 +4337,7 @@ export const listFinancialRecords = async (query: any = {}, actor?: AccountingRe
     pageSize,
     total
   };
-});
+}, query.recordId ? { financialRecordId: String(query.recordId) } : {});
 
 export const listReceivables = async (query: any = {}, actor?: AccountingReadActor) => withAccountingReadScope(prisma, actor, async scope => {
   const prisma = scope.database;
@@ -4635,7 +4635,7 @@ export const listAuditLogs = async (query: any = {}, actor?: AccountingReadActor
     prisma.accountingAuditLog.count({ where })
   ]);
   return { items: await attachListContext(await scope.contextualize('AUDIT', rows)), page, pageSize, total };
-});
+}, query.recordId ? { auditRecordId: String(query.recordId) } : {});
 
 export const getAccountantPerformanceReport = async (query: any = {}, actor?: AccountingReadActor) => withAccountingReadScope(prisma, actor, async scope => {
   const prisma = scope.database;

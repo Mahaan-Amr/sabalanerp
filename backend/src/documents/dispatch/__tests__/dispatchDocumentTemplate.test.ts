@@ -82,6 +82,29 @@ const englishUnitWaybill = renderDispatchDocumentHtml({ ...common, kind: 'WAYBIL
 assert.match(englishUnitWaybill, /متر طول/);
 assert.doesNotMatch(englishUnitWaybill, /contract-row-123|>meter</);
 assert.doesNotMatch(waybillHtml, /مبلغ ناخالص|تخفیف تخصیص‌یافته|مبلغ خالص|ریال/);
+const measuredWaybill = renderDispatchDocumentHtml({
+  ...common, kind: 'WAYBILL',
+  print: {
+    loadingNumber: 'L-0042', contacts: [],
+    loadedPieceCounts: { 'contract:recorded': '80' },
+    rows: Object.fromEntries([
+      ['fixed', '1', '750'], ['bulk', '375', ''], ['recorded', '375', ''],
+    ].map(([id, length, count]) => [`contract:${id}`, [{
+      code: '', description: 'سنگ طولی', category: 'محصول',
+      length, width: '۰٫۴', count, linearMeasurement: '', squareMeasurement: '',
+    }]])),
+  },
+  payload: { allocationRevisionId: 'revision', contracts: [{
+    contractId: 'contract', contractNumber: '100',
+    lines: [['fixed', '104'], ['bulk', '76'], ['recorded', '76.2']].map(([productRowId, quantity]) => ({
+      contractItemId: productRowId, productRowId, quantity, label: 'سنگ طولی', unit: 'm',
+    })),
+  }] },
+});
+assert.ok(measuredWaybill.includes('<td>۱</td><td>۰٫۴</td><td>۱۰۴</td><td>۱۰۴</td><td>۴۱٫۶</td>'));
+assert.ok(measuredWaybill.includes('<td>—</td><td>۰٫۴</td><td>—</td><td>۷۶</td><td>۳۰٫۴</td>'));
+assert.ok(measuredWaybill.includes('<td>—</td><td>۰٫۴</td><td>۸۰</td><td>۷۶٫۲</td><td>۳۰٫۴۸</td>'));
+assert.doesNotMatch(measuredWaybill, /<td>(۷۵۰|۳۷۵)<\/td>|مبلغ کل|نرخ - ریال/);
 const reconstructedInput: DispatchDocumentRenderData = { ...common, kind: 'WAYBILL', reconstructionLabel: 'LEGACY_RECONSTRUCTED',
   payload: { allocationRevisionId: 'revision', contracts: [] } };
 const reconstructed = renderDispatchDocumentHtml(reconstructedInput);

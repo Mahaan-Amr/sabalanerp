@@ -95,11 +95,16 @@ def assert_closed(directory, filename='deployment-runtime-native.json'):
 SECOND_REBOOT_ACTIVE_SHA = 'b820bfa60ec642b87c17a34fcbc527021164708a33df1227d7e19c39c4f8be8a'
 LOCAL_20261116_ACTIVE_SHA = '2cfea161077b52a2313177be2e2ce0ee9cb15682b7dd2d83c0df6539e30898a9'
 LOCAL_20261117_ACTIVE_SHA = '334255f21ce1dc1eed916c26e47cc70c535cb81654552b760743e0e1cec997fd'
+MACOS_20261118_ACTIVE_SHA = 'bf714032489da8a47d2a0b741ed4236bcdd09d2aedbac193c836b4d5ae7dcd0a'
 
 
 def local_reboot_policy(active_sha):
     # Each incident has its own reviewed policy and append-only proof/receipt.
-    if active_sha == LOCAL_20261117_ACTIVE_SHA:
+    if active_sha == MACOS_20261118_ACTIVE_SHA:
+        helper_name = 'local-native-reboot-macos-20261118.py'
+        proof_name = 'deployment-runtime-recovery-host-proof-macos-20261118.json'
+        receipt_name = 'deployment-runtime-abandonment-macos-20261118.json'
+    elif active_sha == LOCAL_20261117_ACTIVE_SHA:
         helper_name = 'local-native-reboot-20261117.py'
         proof_name = 'deployment-runtime-recovery-host-proof-20261117.json'
         receipt_name = 'deployment-runtime-abandonment-20261117.json'
@@ -239,7 +244,7 @@ def reconcile_local_reboot(directory, incoming_proof=None):
             and os.environ.get('LOCAL_NATIVE_REBOOT_EXPECTED_OLD_BOOT_ID') == active['guardian']['bootId']
             and read_state(directory / receipt_name)[1] is None)
     proof, proof_raw = read_state(directory / proof_name)
-    if active_sha == LOCAL_20261117_ACTIVE_SHA:
+    if active_sha in (LOCAL_20261117_ACTIVE_SHA, MACOS_20261118_ACTIVE_SHA):
         require(incoming_proof is not None and 0 < len(incoming_proof) <= 16384
                 and proof_raw in (None, incoming_proof))
         source = assert_local_reboot_environment()
@@ -329,10 +334,11 @@ def reconcile_local_reboot(directory, incoming_proof=None):
     finally:
         os.close(archive_fd)
     require(read_state(directory / 'deployment-runtime-native.json')[1] == raw)
-    if active_sha == LOCAL_20261117_ACTIVE_SHA:
-        require(observe_previous_local_reboot(directory, active) == {
-            'previousActiveSha256': observed['previousActiveSha256'],
-            'previousReceiptSha256': observed['previousReceiptSha256']})
+    if active_sha in (LOCAL_20261117_ACTIVE_SHA, MACOS_20261118_ACTIVE_SHA):
+        if active_sha == LOCAL_20261117_ACTIVE_SHA:
+            require(observe_previous_local_reboot(directory, active) == {
+                'previousActiveSha256': observed['previousActiveSha256'],
+                'previousReceiptSha256': observed['previousReceiptSha256']})
         require(advisory.poll() is None)
         if read_state(directory / proof_name)[1] is None:
             write_exclusive(directory / proof_name, proof_raw)
@@ -471,11 +477,16 @@ def run():
         require(loaded is None)
         assert_closed(directory)
         return 0
-    if sys.argv[1:] in (['--reconcile-local-reboot'], ['--reconcile-local-reboot-20261117']):
+    if sys.argv[1:] in (['--reconcile-local-reboot'], ['--reconcile-local-reboot-20261117'], ['--reconcile-local-reboot-macos-20261118']):
         require(loaded is None and os.environ.get('BACKEND_RUNTIME_ROLE', 'standalone') == 'standalone')
         proof = None
         if sys.argv[1] == '--reconcile-local-reboot-20261117':
             encoded = os.environ.get('LOCAL_NATIVE_REBOOT_20261117_HOST_PROOF_BASE64', '')
+            require(0 < len(encoded) <= 21848)
+            proof = base64.b64decode(encoded, validate=True)
+        elif sys.argv[1] == '--reconcile-local-reboot-macos-20261118':
+            require(os.environ.get('LOCAL_NATIVE_REBOOT_EXPECTED_ACTIVE_SHA256') == MACOS_20261118_ACTIVE_SHA)
+            encoded = os.environ.get('LOCAL_NATIVE_MACOS_20261118_HOST_PROOF_BASE64', '')
             require(0 < len(encoded) <= 21848)
             proof = base64.b64decode(encoded, validate=True)
         reconcile_local_reboot(directory, proof)
@@ -582,7 +593,7 @@ def run():
         return result
 
     local_reboot_advisory = None
-    if local_abandonment is not None and local_abandonment['activeSha256'] == LOCAL_20261117_ACTIVE_SHA:
+    if local_abandonment is not None and local_abandonment['activeSha256'] in (LOCAL_20261117_ACTIVE_SHA, MACOS_20261118_ACTIVE_SHA):
         local_reboot_advisory = acquire_local_reboot_advisory(pg_env)
     initial = observation()
     # The protected preflight deliberately repairs an interrupted database

@@ -60,6 +60,7 @@ export const internalCapabilities: Partial<Record<PartnerAction, readonly Capabi
 
 export const internalCapabilitiesV2: Partial<Record<PartnerActionV2, readonly Capability[]>> = {
   ...internalCapabilities,
+  CASE_COMMERCIAL_RENEW: [['CASE', 'MANAGEMENT']],
   COMMERCIAL_TERMS_MANAGE: [['PROFILE', 'MANAGEMENT']],
   PROFILE_CONVERSION_MANAGE: [['PROFILE', 'MANAGEMENT']],
   CUSTOMER_DUPLICATE_MATCH: [['CUSTOMER', 'CRM']],

@@ -165,7 +165,7 @@ export default function AccountingDispatchPage() {
       return dispatchConfirmationAPI.startSession(waybillId, workstationId);
     }, data => ({
       kind: "success",
-      text: data?.authorization?.id ? "هویت راننده قبلاً تأیید شده است." : "تأیید راننده آماده انجام است.",
+      text: data?.authorization?.id ? "مجوز خروج صادر شد." : "تأیید راننده آماده انجام است.",
     }));
     if (succeeded) setSection("confirmation");
   };
@@ -341,8 +341,8 @@ export default function AccountingDispatchPage() {
     }
     if (waybill?.status === "ISSUED") {
       if (dispatchCapabilities.canManageAccountingConfirmation) {
-        const pickup = candidate.summary?.driverSource === "CUSTOMER_PICKUP";
-        actions.push({ label: pickup ? "ثبت مجوز خروج" : "تأیید هویت راننده", icon: pickup ? FaTruck : FaFingerprint,
+        const pickup = ["CUSTOMER_PICKUP", "PERSONAL_PICKUP"].includes(candidate.summary?.driverSource);
+        actions.push({ label: pickup ? "صدور مجوز خروج" : "تأیید هویت راننده", icon: pickup ? FaTruck : FaFingerprint,
           disabled: actionsBlocked, onClick: () => void beginConfirmation(waybill.id, pickup) });
       }
       if (canManage) {
@@ -402,7 +402,7 @@ export default function AccountingDispatchPage() {
       columns={[
         { id: "loading", header: "بارگیری", priority: "primary", cell: candidate => candidate.summary?.loadingNumber ? dispatchCaseReference(candidate.summary.loadingNumber) : "—" },
         { id: "driver", header: "راننده و پلاک", cell: candidate => <><strong>{candidate.summary?.driverName || "راننده نامشخص"}</strong><div className="sds-text-secondary">{candidate.summary?.plate || "—"}</div></> },
-        { id: "customer", header: "مشتری و پروژه", cell: candidate => <><div>{candidate.summary?.customerName || "—"}</div><div className="sds-text-secondary">{candidate.summary?.projectName || "—"}</div></> },
+        { id: "customer", header: "مشتری و پروژه", cell: candidate => <><div>{candidate.summary?.customerName || "—"}</div>{candidate.summary?.personalPickup && <div className="sds-text-secondary">{candidate.summary.personalPickup.partners.map((partner: any) => partner.name).join("، ")} · قرارداد {candidate.summary.personalPickup.contracts.map((contract: any) => contract.number).join("، ")}</div>}<div className="sds-text-secondary">{candidate.summary?.projectName || "—"}</div></> },
         { id: "status", header: "وضعیت", cell: candidate => <ErpBadge tone={candidate.status === "ACCEPTED" ? "success" : ["REJECTED", "RETURNED"].includes(candidate.status) ? "danger" : "warning"}><span className="whitespace-nowrap">{dispatchStatusLabels[candidate.status] || operationalStatusLabel(candidate.status)}</span></ErpBadge> },
         { id: "waybill", header: "بارنامه", cell: candidate => activeWaybillFor(candidate) ? Number(activeWaybillFor(candidate).number).toLocaleString("fa-IR") : "—" },
       ]}
@@ -421,7 +421,7 @@ export default function AccountingDispatchPage() {
           confirmation?.id &&
           dispatchCapabilities.canManageAccountingConfirmation && (
             <ErpCard className="p-4">
-              <strong>تأیید هویت راننده</strong>
+              <strong>{confirmation?.method === "PERSONAL_PICKUP_ACCOUNTING" ? "مجوز خروج راننده شخصی" : "تأیید هویت راننده"}</strong>
               {confirmationActions.biometric && <p className="mt-1 text-sm sds-text-muted">
                 یک انگشت ثبت‌شده را انتخاب کنید و تا پایان بررسی روی حسگر نگه
                 دارید.
@@ -473,52 +473,56 @@ export default function AccountingDispatchPage() {
                           dispatchConfirmationAPI.beginFallback(
                             confirmation.id,
                           ),
-                        "روش جایگزین فعال شد. رمز راننده را وارد کنید تا گارد بتواند تأیید را تکمیل کند.",
-                      )
-                    }
-                  />
-                )}
-                {confirmationActions.otp && (
-                  <ErpButton
-                    label="ارسال دوباره رمز"
-                    variant="ghost"
-                    disabled={dispatchTimelineStale || dispatchPending}
-                    onClick={() =>
-                      void runDispatch(
-                        () =>
-                          dispatchConfirmationAPI.resendOtp(confirmation.id),
-                        "رمز دوباره ارسال شد.",
+                        "روش جایگزین فعال است. پس از تأیید رمز راننده، تأیید سرپرست گارد لازم است.",
                       )
                     }
                   />
                 )}
               </div>
               {confirmationActions.otp && (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <ErpInput
-                    aria-label="رمز یک‌بارمصرف راننده"
-                    value={otpCode}
-                    onChange={(event) => setOtpCode(event.target.value)}
-                  />
-                  <ErpButton
-                    label="تأیید رمز"
-                    disabled={
-                      dispatchTimelineStale ||
-                      dispatchPending ||
-                      !otpCode.trim()
-                    }
-                    onClick={() =>
-                      void runDispatch(
-                        () =>
-                          dispatchConfirmationAPI.verifyOtp(
-                            confirmation.id,
-                            otpCode.trim(),
-                          ),
-                        "رمز راننده تأیید شد.",
-                      )
-                    }
-                  />
-                </div>
+                <form
+                  className="mt-4 w-full max-w-sm space-y-4"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    if (dispatchTimelineStale || dispatchPending || otpCode.length !== 6) return;
+                    void runDispatch(
+                      () => dispatchConfirmationAPI.verifyOtp(confirmation.id, otpCode),
+                      "رمز راننده تأیید شد. تأیید نهایی را سرپرست گارد تکمیل می‌کند.",
+                    );
+                  }}
+                >
+                  <ErpField label="رمز یک‌بارمصرف راننده" hint="کد ۶ رقمی پیامک‌شده به راننده را وارد کنید.">
+                    <ErpInput
+                      value={otpCode}
+                      onChange={(event) => setOtpCode(normalizeDigits(event.target.value).replace(/[^0-9]/g, ""))}
+                      dir="ltr"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      maxLength={6}
+                      pattern="[0-9]{6}"
+                      className="text-center text-xl tabular-nums"
+                      disabled={dispatchTimelineStale || dispatchPending}
+                    />
+                  </ErpField>
+                  <div className="flex flex-wrap gap-2">
+                    <ErpButton
+                      type="submit"
+                      label={dispatchPending ? "در حال انجام…" : "تأیید رمز"}
+                      disabled={dispatchTimelineStale || dispatchPending || otpCode.length !== 6}
+                    />
+                    <ErpButton
+                      label="ارسال دوباره رمز"
+                      variant="ghost"
+                      disabled={dispatchTimelineStale || dispatchPending}
+                      onClick={() =>
+                        void runDispatch(
+                          () => dispatchConfirmationAPI.resendOtp(confirmation.id),
+                          "رمز دوباره ارسال شد.",
+                        )
+                      }
+                    />
+                  </div>
+                </form>
               )}
               {confirmation.authorization?.id && (
                 <div className="mt-4">
@@ -559,6 +563,11 @@ export default function AccountingDispatchPage() {
         {selectedCandidate && <div className="space-y-4">
           <div className="space-y-1">
             <strong>{selectedCandidate.summary?.driverName || "راننده نامشخص"}</strong>
+            {selectedCandidate.summary?.personalPickup && <div className="space-y-1 text-sm sds-text-secondary">
+              <p>مشتری: {selectedCandidate.summary.customerName}</p>
+              {selectedCandidate.summary.personalPickup.partners.map((partner: any) => <p key={partner.caseId}>همکار: {partner.name}</p>)}
+              <p>قرارداد: {selectedCandidate.summary.personalPickup.contracts.map((contract: any) => contract.number).join("، ")}</p>
+            </div>}
             {selectedCandidate.summary?.driverSource === "CUSTOMER_PICKUP" && selectedCandidate.summary.plate && (
               <p className="text-sm sds-text-secondary">پلاک <bdi dir="rtl">{selectedCandidate.summary.plate}</bdi></p>
             )}

@@ -19,6 +19,7 @@ import {
 type DispatchCaseRow = {
   id: string;
   loadingId?: string | null;
+  accountingCandidateId?: string;
   loadingNumber?: string | null;
   driverName?: string;
   status: string;

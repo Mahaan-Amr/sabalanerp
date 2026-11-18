@@ -66,7 +66,7 @@ export const listDispatchCases = async (prisma: PrismaClient, access: { workspac
       allocationRevisions: {
         where: { loadingId: filters.loadingId, candidate: accounting ? { isNot: null } : undefined },
         select: { loadingId: true, loading: { select: { loadingNumber: true, status: true } },
-          candidate: { select: { status: true, waybills: { select: { number: true, status: true }, orderBy: { issuedAt: 'desc' }, take: 1 } } } },
+          candidate: { select: { id: true, status: true, waybills: { select: { number: true, status: true }, orderBy: { issuedAt: 'desc' }, take: 1 } } } },
         orderBy: [{ finalizedAt: 'desc' }, { revisionNumber: 'desc' }], take: 1,
       },
     },
@@ -86,6 +86,7 @@ export const listDispatchCases = async (prisma: PrismaClient, access: { workspac
       subjectId: turn.internalDriver?.personnelId || null,
       driverName: access.permission === 'view' ? 'Redacted' : snapshotName(turn.admissionSnapshot),
       accountingStatus: revision?.candidate?.status || null,
+      accountingCandidateId: accounting && access.permission !== 'view' ? revision?.candidate?.id : undefined,
       waybill: waybill ? { ...waybill, number: waybill.number.toString() } : null,
       capabilities: { canMutateTimeline: false, viewOnly: access.permission === 'view' },
     };

@@ -18,7 +18,8 @@ import {
 } from "@/components/erp";
 import RoleAwareDispatchCases from "@/features/dispatch-case/RoleAwareDispatchCases";
 import SalesDispatchInvoices from "@/features/accounting/SalesDispatchInvoices";
-import { createDispatchDocumentsHttpClient } from "@/features/accounting/dispatch-documents/dispatchDocumentsClient";
+import { createDispatchDocumentsHttpClient, dispatchDocumentApiPaths, mapDispatchDocumentReadModel } from "@/features/accounting/dispatch-documents/dispatchDocumentsClient";
+import { sepidarCheckAmount } from "@/features/accounting/dispatch-documents/sepidarCheckAmount";
 import { formatDisplayedMoney, type DispatchDocumentCase } from "@/features/accounting/dispatch-documents/dispatchDocumentsViewModel";
 import { dispatchCaseReference } from "@/features/dispatch-case/dispatchCasePresentation";
 import { operationalStatusLabel } from "@/features/dispatch/operationalStatusPresentation";
@@ -26,7 +27,7 @@ import { userFacingError } from "@/features/dispatch/userFacingError";
 import { biometricAttemptNotice, confirmationActionsFor } from "@/features/biometric/dispatchConfirmationPresentation";
 import api, { accountingAPI, dispatchConfirmationAPI } from "@/lib/api";
 import { biometricConnectorClient } from "@/lib/biometricConnector";
-import { normalizeDigits } from "@/lib/numberFormat";
+import { formatNumericInputText, normalizeDigits } from "@/lib/numberFormat";
 
 type DispatchNotice = { kind: "success" | "error"; text: string };
 type DispatchSection = "candidates" | "confirmation" | "cases";
@@ -39,7 +40,9 @@ type ReferenceAuditEntry = {
   note?: string | null;
 };
 type ReferenceCandidate = {
+  id: string;
   loadingId: string;
+  waybills: { id: string }[];
   canManageSepidarLoadingReference: boolean;
   sepidarLoadingReference: string | null;
   sepidarLoadingReferenceHistory: ReferenceAuditEntry[];
@@ -75,14 +78,22 @@ export default function AccountingDispatchPage() {
   const [search, setSearch] = useState("");
   const [voidInvoiceLoadingId, setVoidInvoiceLoadingId] = useState<string | null>(null);
   const [detailCandidateId, setDetailCandidateId] = useState<string | null>(null);
-  const [referenceLoadingId, setReferenceLoadingId] = useState<string | null>(null);
+  const [referenceTarget, setReferenceTarget] = useState<{ loadingId: string; candidateId: string } | null>(null);
+  const referenceLoadingId = referenceTarget?.loadingId;
+  const referenceCandidateId = referenceTarget?.candidateId;
   const [referenceInput, setReferenceInput] = useState("");
+  const [referenceAmount, setReferenceAmount] = useState("");
+  const [referenceDetail, setReferenceDetail] = useState<DispatchDocumentCase | null>();
   const [referenceExpected, setReferenceExpected] = useState<string | null>(null);
   const [referenceVersion, setReferenceVersion] = useState<string | null>(null);
   const [referenceReason, setReferenceReason] = useState("");
   const [referenceError, setReferenceError] = useState<ReferenceError | null>(null);
   const [loading, setLoading] = useState(true);
   const [dispatchCandidates, setDispatchCandidates] = useState<any[]>([]);
+  const referenceCandidate: ReferenceCandidate | undefined = dispatchCandidates.find(
+    candidate => candidate.id === referenceCandidateId,
+  );
+  const referenceWaybillId = referenceCandidate?.waybills.at(-1)?.id;
   const [dispatchDetails, setDispatchDetails] = useState<Record<string, DispatchDocumentCase>>({});
   const [dispatchReason, setDispatchReason] = useState("");
   const [reasonAction, setReasonAction] = useState<ReasonAction | null>(null);
@@ -100,6 +111,20 @@ export default function AccountingDispatchPage() {
     canManageAccountingConfirmation: false,
   });
   const confirmationActions = confirmationActionsFor(confirmation || {});
+
+  useEffect(() => {
+    if (!referenceCandidateId) return;
+    const controller = new AbortController();
+    api.get(dispatchDocumentApiPaths("/accounting").readModel(referenceCandidateId, referenceWaybillId), { signal: controller.signal })
+      .then(response => {
+        const detail = mapDispatchDocumentReadModel(response.data.data);
+        if (!controller.signal.aborted) setReferenceDetail(detail.id === referenceCandidateId ? detail : null);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setReferenceDetail(null);
+      });
+    return () => controller.abort();
+  }, [referenceCandidateId, referenceWaybillId]);
 
   const loadDispatch = useCallback(async () => {
     setLoading(true);
@@ -331,7 +356,9 @@ export default function AccountingDispatchPage() {
       icon: FaFileAlt,
       disabled: actionsBlocked,
       onClick: () => {
-        setReferenceLoadingId(candidate.loadingId);
+        setReferenceTarget({ loadingId: candidate.loadingId, candidateId: candidate.id });
+        setReferenceAmount("");
+        setReferenceDetail(undefined);
         setReferenceExpected(current);
         setReferenceVersion(version);
         setReferenceInput(current ?? "");
@@ -341,6 +368,10 @@ export default function AccountingDispatchPage() {
     }];
   };
   const referenceIsCorrection = Boolean(referenceExpected || referenceVersion);
+  const checkingReferenceAmount = Boolean(referenceInput.trim());
+  const expectedReferenceAmount = referenceDetail ? sepidarCheckAmount(referenceDetail.total) : null;
+  const referenceAmountMatches = expectedReferenceAmount !== null
+    && sepidarCheckAmount({ amount: referenceAmount, currency: "IRR" }) === expectedReferenceAmount;
   const runReferenceAction = async (action: () => Promise<void>, onFailure: (error: unknown) => void) => {
     if (dispatchPendingRef.current) return;
     dispatchPendingRef.current = true;
@@ -356,6 +387,7 @@ export default function AccountingDispatchPage() {
   };
   const saveReference = async () => {
     if (!referenceLoadingId || dispatchTimelineStale || referenceError?.stale) return;
+    if (checkingReferenceAmount && !referenceAmountMatches) return;
     await runReferenceAction(async () => {
       setReferenceError(null);
       const saved = await accountingAPI.registerSepidarLoadingReference(referenceLoadingId, {
@@ -369,7 +401,7 @@ export default function AccountingDispatchPage() {
         sepidarLoadingReference: value,
         sepidarLoadingReferenceHistory: [auditEntry, ...(candidate.sepidarLoadingReferenceHistory ?? [])],
       } : candidate));
-      setReferenceLoadingId(null);
+      setReferenceTarget(null);
       setDispatchNotice({ kind: "success", text: referenceIsCorrection ? "شماره بارگیری سپیدار اصلاح شد." : "شماره بارگیری سپیدار ثبت شد." });
     }, error => {
       const code = (error as { response?: { data?: { code?: string } } })?.response?.data?.code;
@@ -385,9 +417,10 @@ export default function AccountingDispatchPage() {
       const refreshed = await accountingAPI.getDispatchCandidates();
       const rows = refreshed.data.data || [];
       setDispatchCandidates(rows);
-      const candidate: ReferenceCandidate | undefined = rows.find((row: ReferenceCandidate) => row.loadingId === referenceLoadingId);
+      const candidate: ReferenceCandidate | undefined = rows.find((row: ReferenceCandidate) =>
+        row.loadingId === referenceLoadingId && row.id === referenceCandidateId);
       if (!candidate?.canManageSepidarLoadingReference) {
-        setReferenceLoadingId(null);
+        setReferenceTarget(null);
         setDispatchNotice({ kind: "error", text: "امکان اصلاح شماره برای این بارگیری وجود ندارد." });
         return;
       }
@@ -397,7 +430,7 @@ export default function AccountingDispatchPage() {
     }, error => {
       if (dispatchCandidateAccessDenied(error)) {
         setDispatchCandidates([]);
-        setReferenceLoadingId(null);
+        setReferenceTarget(null);
         setDispatchNotice({ kind: "error", text: "دسترسی به اطلاعات بارگیری مجاز نیست." });
         return;
       }
@@ -676,7 +709,8 @@ export default function AccountingDispatchPage() {
           tableFilter={item => !query || [item.loadingNumber, referenceForLoading(item.loadingId), item.driverName, operationalStatusLabel(item.status)]
             .some(value => normalize(value).includes(query))}
           tableColumns={[{ id: "sepidar", header: referenceLabel, cell: item => <bdi>{referenceForLoading(item.loadingId) ?? "—"}</bdi> }]}
-          tableRowActions={item => referenceAction(item.loadingId ? candidatesByLoading.get(item.loadingId) : undefined)}
+          tableRowActions={item => referenceAction(dispatchCandidates.find(candidate =>
+            candidate.loadingId === item.loadingId && candidate.id === item.accountingCandidateId))}
         />
       </div>
       <ErpSheet open={Boolean(selectedCandidate)} onClose={() => setDetailCandidateId(null)}
@@ -796,12 +830,13 @@ export default function AccountingDispatchPage() {
         </div>}
       </ErpSheet>
       <ErpSheet open={Boolean(referenceLoadingId)} title={referenceIsCorrection ? "اصلاح شماره بارگیری سپیدار" : "ثبت شماره بارگیری سپیدار"} presentation="modal"
-        pending={dispatchPending} onClose={() => { if (!dispatchPending) setReferenceLoadingId(null); }}
+        pending={dispatchPending} onClose={() => { if (!dispatchPending) setReferenceTarget(null); }}
         footer={<div className="flex justify-end gap-2">
-          <ErpButton label="انصراف" variant="ghost" disabled={dispatchPending} onClick={() => setReferenceLoadingId(null)} />
+          <ErpButton label="انصراف" variant="ghost" disabled={dispatchPending} onClick={() => setReferenceTarget(null)} />
           <ErpButton label={referenceIsCorrection ? referenceInput.trim() ? "ذخیره شماره" : "پاک‌کردن شماره" : "ثبت شماره"}
             tone={referenceExpected && !referenceInput.trim() ? "danger" : "primary"}
-            disabled={actionsBlocked || referenceError?.stale || (!referenceExpected && !referenceInput.trim()) || (referenceIsCorrection && !referenceReason.trim())}
+            disabled={actionsBlocked || referenceError?.stale || (!referenceExpected && !checkingReferenceAmount)
+              || (checkingReferenceAmount && !referenceAmountMatches) || (referenceIsCorrection && !referenceReason.trim())}
             onClick={saveReference} />
         </div>}>
         <div className="space-y-3">
@@ -810,6 +845,16 @@ export default function AccountingDispatchPage() {
             <ErpInput dir="ltr" inputMode="numeric" value={referenceInput}
               onChange={event => { setReferenceInput(event.target.value); if (!referenceError?.stale) setReferenceError(null); }} />
           </ErpField>
+          {(!referenceIsCorrection || checkingReferenceAmount) && <ErpField label="مبلغ سپیدار (ریال)" required
+            hint={expectedReferenceAmount !== null
+              ? <>جمع این راننده به ریال <bdi>{formatNumericInputText(expectedReferenceAmount).displayText}</bdi></>
+              : referenceDetail === undefined ? "در حال دریافت جمع این راننده…" : "جمع دقیق این راننده در دسترس نیست."}
+            error={expectedReferenceAmount !== null && referenceAmount && !referenceAmountMatches
+              ? "مبلغ سپیدار باید با جمع این راننده برابر باشد." : undefined}>
+            <ErpInput numberFormat="money" dir="ltr" value={referenceAmount}
+              disabled={dispatchPending || expectedReferenceAmount === null}
+              onChange={event => setReferenceAmount(event.target.value)} />
+          </ErpField>}
           {referenceError?.stale && <ErpButton label="به‌روزرسانی شماره فعلی" variant="soft" disabled={dispatchPending} onClick={refreshReference} />}
           {referenceIsCorrection && <ErpField label="دلیل اصلاح" required error={referenceError?.reason ? referenceError.text : undefined}>
             <ErpInput maxLength={200} value={referenceReason}

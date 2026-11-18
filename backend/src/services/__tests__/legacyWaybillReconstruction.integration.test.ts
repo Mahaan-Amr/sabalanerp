@@ -154,6 +154,7 @@ async function run() {
     const accountingScope = { workspace: 'accounting', permission: 'edit' };
     const cancelledCase = (await listDispatchCases(db, accountingScope)).find(item => item.id === originalTurn.id);
     assert.equal(cancelledCase?.loadingId, cancelledLoading.id);
+    assert.equal(cancelledCase?.accountingCandidateId, revision.candidate.id);
     assert.equal(cancelledCase?.loadingNumber, cancelledLoading.loadingNumber);
     assert.equal(cancelledCase?.status, 'CANCELLED');
     assert.equal(await getDispatchCaseTimeline(db, originalTurn.id, accountingScope, { loadingId: nextLoading.loadingId }), null);

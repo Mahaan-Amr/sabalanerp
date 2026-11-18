@@ -1328,9 +1328,12 @@ if [ "${DEPLOYMENT_MODE}" = "configuration" ] || [ "${CAPTURE_ONLY}" -eq 1 ]; th
   existing_exports="$(docker inspect "$(compose ps -q backend)" "$(compose ps -q frontend)" "$(compose ps -q inquiry)" "$(compose ps -q nginx)" "$(compose ps -q postgres)" "$(compose ps -q clamav)" | node "${OPERATIONS_ROOT}/scripts/deployment-existing-release.mjs")"
   eval "${existing_exports}"
 fi
-DEPLOYMENT_RELEASE_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(printf '%s' "${DEPLOYMENT_TARGET_COMMIT}" | cut -c1-12)-${DEPLOYMENT_MODE}"
 if [ "${MAINTENANCE_IMAGE_SELECTION}" -eq 1 ]; then
-  DEPLOYMENT_RELEASE_ID="${DEPLOYMENT_RELEASE_ID}-$(node -e 'process.stdout.write(require("node:crypto").randomBytes(6).toString("hex"))')"
+  # PostgreSQL keeps 63 application_name bytes; sabalan-lock-deploy- uses 20.
+  # Keep the full source commit in APP_COMMIT and the original session binding.
+  DEPLOYMENT_RELEASE_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(node -e 'process.stdout.write(require("node:crypto").randomBytes(8).toString("hex"))')-${DEPLOYMENT_MODE}"
+else
+  DEPLOYMENT_RELEASE_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(printf '%s' "${DEPLOYMENT_TARGET_COMMIT}" | cut -c1-12)-${DEPLOYMENT_MODE}"
 fi
 DEPLOYMENT_ID="deploy-${DEPLOYMENT_RELEASE_ID}"
 APP_COMMIT="${DEPLOYMENT_TARGET_COMMIT}"

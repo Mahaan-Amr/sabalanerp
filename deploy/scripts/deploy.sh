@@ -1465,9 +1465,12 @@ if [ "${CUSTOMER_ALLOCATION_CURRENT_DATA_ROLLBACK}" -eq 1 ]; then
   customer_allocation_predecessor="$(select_customer_allocation_predecessor)" || exit 1
   eval "${customer_allocation_predecessor}"
 fi
-DEPLOYMENT_RELEASE_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(printf '%s' "${DEPLOYMENT_TARGET_COMMIT}" | cut -c1-12)-${DEPLOYMENT_MODE}"
 if [ "${MAINTENANCE_IMAGE_SELECTION}" -eq 1 ]; then
-  DEPLOYMENT_RELEASE_ID="${DEPLOYMENT_RELEASE_ID}-$(node -e 'process.stdout.write(require("node:crypto").randomBytes(6).toString("hex"))')"
+  # PostgreSQL keeps 63 application_name bytes; sabalan-lock-deploy- uses 20.
+  # Keep the full source commit in APP_COMMIT and the original session binding.
+  DEPLOYMENT_RELEASE_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(node -e 'process.stdout.write(require("node:crypto").randomBytes(8).toString("hex"))')-${DEPLOYMENT_MODE}"
+else
+  DEPLOYMENT_RELEASE_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(printf '%s' "${DEPLOYMENT_TARGET_COMMIT}" | cut -c1-12)-${DEPLOYMENT_MODE}"
 fi
 DEPLOYMENT_ID="deploy-${DEPLOYMENT_RELEASE_ID}"
 APP_COMMIT="${DEPLOYMENT_TARGET_COMMIT}"

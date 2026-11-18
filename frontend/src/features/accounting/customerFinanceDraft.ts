@@ -35,11 +35,3 @@ export function openingLinesPayload(lines: OpeningLineDraft[], account: Customer
   }
   return payload;
 }
-export function allocationPlanPayload(shares: Record<string, Record<string, string>>) {
-  const plan = Object.entries(shares).map(([source, amounts]) => ({
-    receiptId: source.startsWith('receipt:') ? source.slice(8) : undefined, creditItemId: source.startsWith('credit:') ? source.slice(7) : undefined,
-    allocations: Object.entries(amounts).filter(([, amount]) => amount.trim()).map(([openItemId, amount]) => ({ openItemId, amountRials: rialsInput(amount) })),
-  })).filter(row => row.allocations.length);
-  if (!plan.length || plan.some(row => row.allocations.some(line => BigInt(line.amountRials) <= BigInt(0)))) throw new Error('سهم مثبت منبع و بدهی را برای تخصیص مشخص کنید.');
-  return plan;
-}

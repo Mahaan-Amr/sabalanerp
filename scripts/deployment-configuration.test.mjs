@@ -117,7 +117,7 @@ test('provisioning rejects unsupported fields, injection and overwriting an exis
   } finally { dispose(f); }
 });
 
-for (const scenario of ['storage', 'preflight', 'native-closure', 'checkpoint', 'after-mutation', 'success', 'scanner-free']) test(`configuration release retains gates at ${scenario} without source fetch/build`, () => {
+for (const scenario of ['database-role', 'active-allocation', 'storage', 'preflight', 'native-closure', 'checkpoint', 'after-mutation', 'rollback-role-drift', 'success', 'scanner-free']) test(`configuration release retains gates at ${scenario} without source fetch/build`, () => {
   const scannerFree = scenario === 'scanner-free';
   const failure = scannerFree ? 'success' : scenario;
   const f = fixture();
@@ -140,6 +140,10 @@ for (const scenario of ['storage', 'preflight', 'native-closure', 'checkpoint', 
     fs.writeFileSync(f.environment, f.original + `DEPLOYMENT_SECRET_DIR=${secrets.replaceAll('\\', '/')}\nDEPLOYMENT_REMOTE_MOUNT_HOST=${remote.replaceAll('\\', '/')}\nDEPLOYMENT_REPORT_DIR_HOST=reports\nDEPLOYMENT_OWNER=test\n`);
     const before = fs.readFileSync(f.environment, 'utf8');
     const records = f.containers.map((row, index) => ({ ...row, Id: String(index + 1).repeat(64) }));
+    const databaseUrl = 'postgresql://postgres:fixture@postgres:5432/sabalanerp?schema=public&connection_limit=10&pool_timeout=10';
+    records.forEach(row => { row.Config.Labels['com.docker.compose.project'] = 'sabalanerp'; });
+    records[0].Config.Env.push('DATABASE_URL=' + databaseUrl);
+    records[4].Config.Env.push('POSTGRES_USER=postgres', 'POSTGRES_PASSWORD=fixture', 'POSTGRES_DB=sabalanerp');
     records[0].Mounts.push({
       Type: 'volume', Destination: '/app/storage/dispatch-documents',
       Name: 'sabalanerp_backend_storage_dispatch_documents', RW: true,
@@ -180,17 +184,25 @@ else {assert.equal(a.length,6);if(fs.existsSync(marker))assert.deepEqual(JSON.pa
     const fakeDocker = path.join(f.root, 'fake-docker.cjs');
     fs.writeFileSync(fakeDocker, `const fs=require('fs');const path=require('path');const a=process.argv.slice(2);fs.appendFileSync(process.env.TEST_LOG,JSON.stringify(a)+'\\n');const records=JSON.parse(fs.readFileSync(process.env.TEST_CONTAINERS));const env=k=>(a.find(v=>v.startsWith(k+'='))||'').slice(k.length+1);const session=path.join(process.env.TEST_REPORTS,'active-deployment-session.json');
 if(a[0]==='inspect' && a.includes('--format')){console.log(a.includes('{{.Image}}')?records.find(r=>r.Id===a.at(-1)).Image:a.includes('{{.State.Health.Status}}')?'healthy':a.some(v=>v.includes('io.sabalan.release.upload-policy'))?(records[0].Config.Labels['io.sabalan.release.upload-policy']??''):'10.0.0.2');}
-else if(a[0]==='inspect'){console.log(JSON.stringify(records.filter(r=>a.slice(1).includes(r.Id))));}
+else if(a[0]==='inspect'||(a[0]==='container'&&a[1]==='inspect')){console.log(JSON.stringify(a.filter(id=>records.some(r=>r.Id===id)).map(id=>records.find(r=>r.Id===id))));}
 else if(a.includes('ps')){console.log(records.find(r=>r.Config.Labels['com.docker.compose.service']===a.at(-1))?.Id||'');}
-else if(a.includes('config')){console.log(a.includes('--format')&&a[a.indexOf('--format')+1]==='json'?JSON.stringify({name:'sabalanerp',services:{backend:{volumes:[{type:'volume',source:'backend_storage_dispatch_documents',target:'/app/storage/dispatch-documents',read_only:false}]}},volumes:{backend_storage_dispatch_documents:{name:'sabalanerp_backend_storage_dispatch_documents'}}}):'services: {}');}
+else if(a.includes('config')){
+  const runtimeUrl=records[0].Config.Env.find(entry=>entry.startsWith('DATABASE_URL=')).slice(13);
+  const roleChanged=process.env.TEST_FAILURE==='database-role'||fs.existsSync(path.join(process.env.TEST_REPORTS,'changed-database-role'));
+  const configuredRuntime=roleChanged?runtimeUrl.replace('//postgres:', '//restricted:'):runtimeUrl;
+  console.log(a.includes('--format')&&a[a.indexOf('--format')+1]==='json'?JSON.stringify({name:'sabalanerp',services:{postgres:{environment:{POSTGRES_USER:'postgres',POSTGRES_PASSWORD:'fixture',POSTGRES_DB:'sabalanerp'}},deployment:{environment:{DATABASE_URL:runtimeUrl}},backend:{environment:{DATABASE_URL:configuredRuntime},volumes:[{type:'volume',source:'backend_storage_dispatch_documents',target:'/app/storage/dispatch-documents',read_only:false}]}},volumes:{backend_storage_dispatch_documents:{name:'sabalanerp_backend_storage_dispatch_documents'}}}):'services: {}');}
 else if(a.includes('dist/scripts/deployment-performance-identity.js')){fs.writeFileSync(require('path').join(process.env.TEST_REPORTS,'performance-database-'+a.find(v=>v.startsWith('DEPLOYMENT_ID=')).slice(14)+'.json'),JSON.stringify({schemaHash:'b'.repeat(64),policyHash:'b'.repeat(64)}));}
 else if(a.includes('dist/scripts/validate-production-environment.js')){if(process.env.TEST_FAILURE==='preflight')process.exit(42);}
 else if(a.includes('dist/scripts/deployment-control.js')){const c=a[a.indexOf('dist/scripts/deployment-control.js')+1];if(c==='prepare'){fs.writeFileSync(session,JSON.stringify({phase:'PREFLIGHT',leaseToken:'fixture-lease',rollbackPerformanceEnvironment:Object.fromEntries(records[0].Config.Env.filter(v=>v.startsWith('PERFORMANCE_')).map(v=>[v.split('=')[0],v.slice(v.indexOf('=')+1)]))}));}else if(c==='acquire'||c==='transition'){const s=JSON.parse(fs.readFileSync(session));s.phase=c==='acquire'?'LEASE_ACQUIRED':env('DEPLOYMENT_PHASE');fs.writeFileSync(session,JSON.stringify(s));}else if(c==='finish'||c==='cancel-preflight'){fs.rmSync(session,{force:true});}}
 else if(a.includes('dist/scripts/deployment-retention-local.js')){const i=a.indexOf('dist/scripts/deployment-retention-local.js'),command=a[i+1],stage=a[i+2],id=env('DEPLOYMENT_ID');if(!['BEFORE_CHECKPOINT','AFTER_CHECKPOINT'].includes(stage))process.exit(98);if(command==='export-holds'){fs.writeFileSync(path.join(process.env.TEST_REPORTS,'retention-holds-'+id+'-'+stage+'.json'),'[]\\n',{flag:'wx',mode:256});}else if(command==='apply'){const name='remote-retention-'+id+'-'+stage+'.json',file=path.join(process.env.TEST_REPORTS,name),raw=fs.readFileSync(file),value=JSON.parse(raw);if(value.stage!==stage||value.deploymentId!==id||!env('DEPLOYMENT_REMOTE_RETENTION_RECEIPT').replaceAll(String.fromCharCode(92),'/').endsWith('/app/deployment-reports/'+name)||env('DEPLOYMENT_REMOTE_RETENTION_RECEIPT_SHA256')!==require('crypto').createHash('sha256').update(raw).digest('hex'))process.exit(98);}else process.exit(98);}
 else if(a.includes('dist/scripts/deployment-checkpoint.js')){if(process.env.TEST_FAILURE==='checkpoint')process.exit(43);}
 else if(a.includes('sh')&&a.includes('-c')&&a.at(-1).includes('exec python3 - --assert-closed')){if(process.env.TEST_FAILURE==='native-closure')process.exit(46);}
-else if(a.includes('node_modules/prisma/build/index.js')&&a.includes('status')){if(process.env.TEST_FAILURE==='after-mutation')process.exit(44);}
-else if(a.includes('exec')){const text=a.at(-1);if(text.includes('pg_sleep(21600)')){fs.writeFileSync(path.join(process.env.DEPLOYMENT_REPO_ROOT,'fixture-advisory.pid'),String(process.pid));setInterval(()=>{},1000);}else if(text.includes('pg_locks'))console.log('1');else if(text.includes('pg_stat_activity WHERE client_addr'))console.log('0');else if(text.includes('round(100.0'))console.log('20');else if(text.includes('pg_database_size'))console.log('1000000');else if(text.includes('df -Pk'))console.log('6000000');}
+else if(a.includes('node_modules/prisma/build/index.js')&&a.includes('status')){if(process.env.TEST_FAILURE==='rollback-role-drift'){
+  fs.writeFileSync(path.join(process.env.TEST_REPORTS,'changed-database-role'),'changed');
+  process.exit(44);
+}
+if(process.env.TEST_FAILURE==='after-mutation')process.exit(44);}
+else if(a.includes('exec')){const text=a.at(-1);if(text.includes('default_transaction_read_only')){const sql=fs.readFileSync(0,'utf8');if(!sql.includes('public.customer_allocation_release_control'))process.exit(98);console.log(process.env.TEST_FAILURE==='active-allocation'?'ACTIVE':'CLOSED');}else if(text.includes('pg_sleep(21600)')){fs.writeFileSync(path.join(process.env.DEPLOYMENT_REPO_ROOT,'fixture-advisory.pid'),String(process.pid));setInterval(()=>{},1000);}else if(text.includes('pg_locks'))console.log('1');else if(text.includes('pg_stat_activity WHERE client_addr'))console.log('0');else if(text.includes('round(100.0'))console.log('20');else if(text.includes('pg_database_size'))console.log('1000000');else if(text.includes('df -Pk'))console.log('6000000');}
 else if(a.includes('up')||a.includes('start')||a.includes('stop')||a.includes('dist/scripts/dry-run-contract-product-graph-migration.js')||a.includes('dist/scripts/audit-hr-onboarding-task-retirement.js')||a.includes('dist/scripts/migrate-all-contract-product-graphs.js')||a.includes('dist/scripts/reconcile-contract-financial-evidence.js')||a.includes('dist/scripts/deployment-drill-preflight.js')||a.includes('dist/scripts/deployment-notify.js')||a.includes('dist/scripts/deployment-gates.js')||a.includes('dist/scripts/deployment-rollback.js')||a.includes('dist/scripts/deployment-finalize-recovery.js')){}
 else{process.exit(99);}`);
     fs.writeFileSync(path.join(bin, 'docker'), `#!/bin/sh\ncase "$*" in *pg_sleep*) exec /bin/sleep 300;; esac\nexec node '${fakeDocker.replaceAll('\\', '/')}' "$@"\n`, { mode: 0o755 });
@@ -207,12 +219,27 @@ else{process.exit(99);}`);
       encoding: 'utf8', timeout: 120000,
       env: { ...process.env, TEST_BIN: shellBin, TEST_SCRIPT: path.join(repository, 'deploy/scripts/deploy.sh').replaceAll('\\', '/'), TEST_ENV: f.environment.replaceAll('\\', '/'), DEPLOYMENT_MODE: 'configuration', DEPLOYMENT_REPO_ROOT: f.root.replaceAll('\\', '/'), DEPLOYMENT_BIOMETRIC_PROVISIONING_FILE: f.provisioning.replaceAll('\\', '/'), TEST_LOG: log, TEST_GIT_LOG: path.join(f.root, 'git.log'), TEST_CONTAINERS: recordsFile, TEST_REPORTS: reports, TEST_FAILURE: failure },
     });
-    assert.equal(result.status, { storage: 45, preflight: 42, 'native-closure': 1, checkpoint: 43, 'after-mutation': 44, success: 0 }[failure], `${result.stdout}\n${result.stderr}`);
+    assert.equal(result.status, { 'database-role': 1, 'active-allocation': 1, storage: 45, preflight: 42, 'native-closure': 1, checkpoint: 43, 'after-mutation': 44, 'rollback-role-drift': 44, success: 0 }[failure], `${result.stdout}\n${result.stderr}`);
     const commands = fs.readFileSync(log, 'utf8');
     assert.ok(!commands.includes('"build"'));
+    if (['database-role', 'active-allocation'].includes(failure)) {
+      assert.ok(!commands.includes('storage-preflight'));
+      assert.ok(!commands.includes('deployment-control.js'));
+      assert.ok(!commands.includes('"up"'));
+      assert.equal(fs.readFileSync(f.environment, 'utf8'), before);
+      return;
+    }
     assert.ok(commands.includes('storage-preflight'));
     assert.equal(commands.includes('deployment-checkpoint.js'), !['storage', 'preflight', 'native-closure'].includes(failure));
     const rows=commands.trim().split(/\r?\n/).map(line=>JSON.parse(line));
+    if (failure === 'rollback-role-drift') {
+      assert.ok(commands.includes('node_modules/prisma/build/index.js'));
+      assert.ok(commands.includes('maintenance-on'));
+      assert.ok(!commands.includes('maintenance-off'));
+      assert.ok(!commands.includes('deployment-rollback.js'));
+      assert.match(result.stderr, /PROTECTED_DATABASE_ROLE_CONFIGURATION_CHANGED/);
+      return;
+    }
     if (scannerFree) {
       assert.ok(!rows.some(row => row.includes('clamav') || row.includes('docker-compose.rollback-legacy.yml')));
       assert.ok(!commands.includes('HR_HIRING_ANTIVIRUS_COMMAND'));

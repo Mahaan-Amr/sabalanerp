@@ -1,6 +1,7 @@
 """One-use #439 image export. Run only after independent review; no QA import."""
 import base64
 import ctypes
+from dataclasses import dataclass
 import gzip
 import hashlib
 import json
@@ -33,6 +34,7 @@ MAX_ARCHIVE_BYTES = D_ENVELOPE - D_RESERVE
 MAX_TOTAL_BYTES = D_ENVELOPE - D_RESERVE
 TRANSFER_TIMEOUT_SECONDS = 3600
 STDERR_TAIL_BYTES = 65_536
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
 
 class ExportGuardError(RuntimeError):
@@ -43,6 +45,53 @@ def require(condition, message):
     if not condition:
         raise ExportGuardError(message)
 
+
+@dataclass(frozen=True)
+class ReviewedExport:
+    images: dict
+    selected: tuple
+    destination: Path
+    commit: str
+    source_reserve: int
+    backup_reserve: int
+    destination_reserve: int
+    maximum_archive_bytes: int
+    maximum_total_bytes: int
+    plan_sha256: str
+
+
+def read_reviewed_export_plan(plan_file, expected_sha256):
+    require(plan_file.is_absolute() and plan_file.is_file() and not plan_file.is_symlink()
+            and plan_file.stat().st_size <= 16384, 'INVALID_EXPORT_PLAN_FILE')
+    raw = plan_file.read_bytes()
+    require(re.fullmatch(r'[a-f0-9]{64}', expected_sha256)
+            and hashlib.sha256(raw).hexdigest() == expected_sha256, 'EXPORT_PLAN_HASH_MISMATCH')
+    plan = json.loads(raw)
+    require(isinstance(plan, dict) and set(plan) == {
+        'format', 'sourceCommit', 'images', 'exportServices', 'destination', 'sourceReserveBytes',
+        'backupReserveBytes', 'destinationReserveBytes', 'maximumArchiveBytes', 'maximumTotalBytes',
+    }, 'INVALID_EXPORT_PLAN')
+    require(plan['format'] == 'sabalan-reviewed-qa-image-export/v1'
+            and isinstance(plan['sourceCommit'], str) and re.fullmatch(r'[a-f0-9]{40}', plan['sourceCommit']),
+            'INVALID_EXPORT_PLAN_IDENTITY')
+    images, selected = plan['images'], plan['exportServices']
+    require(isinstance(images, dict) and set(images) == set(IMAGES)
+            and all(isinstance(value, str) and re.fullmatch(r'sha256:[a-f0-9]{64}', value)
+                    for value in images.values()) and len(set(images.values())) == len(images), 'INVALID_EXPORT_PLAN_IMAGES')
+    require(isinstance(selected, list) and selected and all(isinstance(service, str) and service in images
+            for service in selected) and len(selected) == len(set(selected)), 'INVALID_EXPORT_PLAN_SELECTION')
+    name = plan['destination']
+    require(isinstance(name, str) and re.fullmatch(r'sabalanerp-qa-current-images-[a-z0-9-]{8,48}', name),
+            'INVALID_EXPORT_DESTINATION')
+    for field in ('sourceReserveBytes', 'backupReserveBytes', 'destinationReserveBytes',
+                  'maximumArchiveBytes', 'maximumTotalBytes'):
+        require(type(plan[field]) is int and 0 < plan[field] < 2**53, 'INVALID_EXPORT_PLAN_CAPACITY')
+    require(plan['sourceReserveBytes'] >= SOURCE_RESERVE and plan['backupReserveBytes'] >= BACKUP_RESERVE
+            and plan['destinationReserveBytes'] >= D_RESERVE
+            and plan['maximumArchiveBytes'] <= plan['maximumTotalBytes'] <= MAX_TOTAL_BYTES, 'INVALID_EXPORT_PLAN_CAPACITY')
+    return ReviewedExport(images, tuple(selected), DEST.with_name(name), plan['sourceCommit'],
+                          plan['sourceReserveBytes'], plan['backupReserveBytes'], plan['destinationReserveBytes'],
+                          plan['maximumArchiveBytes'], plan['maximumTotalBytes'], expected_sha256)
 
 def require_efs(path):
     """Prove NTFS encrypts this path before any image bytes are written."""
@@ -72,9 +121,10 @@ def durable_rename(source, destination):
             os.close(handle)
 
 
-def discard_incomplete_stage(stage):
+def discard_incomplete_stage(stage, destination=None):
     """Free only this invocation's private, unpublished output for a clean rerun."""
-    require(stage.parent == DEST.parent and stage.name.startswith(DEST.name + '.staging-'),
+    destination = destination or DEST
+    require(stage.parent == destination.parent and stage.name.startswith(destination.name + '.staging-'),
             'UNEXPECTED_STAGE_PATH')
     allowed = {'proof.json'} | {service + '.docker.tar' for service in IMAGES}
     allowed |= {service + '.docker.tar.partial' for service in IMAGES}
@@ -85,9 +135,37 @@ def discard_incomplete_stage(stage):
 
 # Executed only in the existing production host via `python3 -c`; no source
 # file/archive staging. Docker save receives exact immutable IDs, never tags.
+READ_ONLY_STORAGE_PLAN = r'''
+import fs from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { dockerStorageAdapter, planStorageCleanup } from './scripts/deployment-storage.mjs';
+
+const [project, lockPath, storageRoot, rootsJson, journalsJson, documentsJson] = process.argv.slice(1);
+const assertLock = async () => {
+  const file = fs.statSync(lockPath);
+  const descriptor = fs.fstatSync(9);
+  if (file.dev !== descriptor.dev || file.ino !== descriptor.ino) throw new Error('STORAGE_LOCK_INVALID');
+  const stdio = Array(10).fill('ignore');
+  stdio[9] = 9;
+  execFileSync('flock', ['--nonblock', '9'], { stdio, timeout: 5000 });
+};
+await assertLock();
+const adapter = dockerStorageAdapter({
+  project, storageRoot, assertLock, protectedImages: [],
+  checkpointRoots: JSON.parse(rootsJson), journalRoots: JSON.parse(journalsJson),
+  documents: JSON.parse(documentsJson),
+});
+const plan = planStorageCleanup(await adapter.snapshot());
+console.log(JSON.stringify({ ok: true, plan, availableBytes: await adapter.availableBytes() }));
+'''
+
+
 SOURCE = r'''
-import fcntl, hashlib, json, os, subprocess, sys
+import base64, fcntl, hashlib, json, os, subprocess, sys
 expected=json.loads(sys.argv[1]); selected=sys.argv[2]
+source_reserve=int(sys.argv[3]) if len(sys.argv)>3 else 6461124544
+expected_commit=sys.argv[4] if len(sys.argv)>4 else None
+read_only_plan=base64.b64decode(sys.argv[5]).decode() if len(sys.argv)>5 else None
 def require(condition, message):
  if not condition: raise RuntimeError(message)
 require(selected in expected.values(), 'UNEXPECTED_IMAGE')
@@ -111,20 +189,25 @@ def census():
   found[service]={'container':row['Id'],'image':row['Image'],'startedAt':row['State']['StartedAt']}
  require(set(found)==set(expected), 'SOURCE_SERVICE_SET_CHANGED')
  return found
+if expected_commit: require(call(['git','rev-parse','HEAD']).decode().strip()==expected_commit, 'SOURCE_COMMIT_CHANGED')
 before=census()
 image=json.loads(call(['docker','image','inspect',selected]))[0]
 require(image['Id']==selected and image['Os']=='linux' and image['Architecture']=='amd64', 'SOURCE_PLATFORM_MISMATCH')
 diff=image['RootFS']['Layers']; require(diff and all(x.startswith('sha256:') for x in diff), 'SOURCE_DIFF_IDS_INVALID')
 preflight=['node','deploy/scripts/storage-preflight.mjs','--mode','plan','--project','sabalanerp',
  '--lock-file','.deploy-state/deployment.lock','--lock-fd','9','--storage-root','/var/lib/docker',
- '--required-bytes','6461124544','--checkpoint-root','/var/lib/docker/volumes/sabalanerp_backend_recovery/_data/packages',
+ '--required-bytes',str(source_reserve),'--checkpoint-root','/var/lib/docker/volumes/sabalanerp_backend_recovery/_data/packages',
  '--checkpoint-root','/mnt/sabalanerp-independent-recovery','--journal-root','/opt/sabalanerp/reports/deploy',
  '--document','/var/lib/docker/volumes/sabalanerp_recovery_coordination/_data/deployment-checkpoint.json',
  '--document','/var/lib/docker/volumes/sabalanerp_recovery_coordination/_data/pending-restore.json',
  '--document','/opt/sabalanerp/reports/deploy/active-deployment-session.json',
  '--audit','/opt/sabalanerp/reports/deploy/storage-cleanup-local.jsonl']
+if read_only_plan:
+ preflight=['node','--input-type=module','-e',read_only_plan,'sabalanerp','.deploy-state/deployment.lock','/var/lib/docker',
+  json.dumps([preflight[preflight.index('--checkpoint-root')+1],'/mnt/sabalanerp-independent-recovery']),
+  json.dumps(['/opt/sabalanerp/reports/deploy']),json.dumps([preflight[i+1] for i,arg in enumerate(preflight) if arg=='--document'])]
 capacity=json.loads(call(preflight))
-require(capacity['ok'] and capacity['availableBytes']>=6461124544 and not capacity['plan']['images'] and not capacity['plan']['containers'], 'SOURCE_CAPACITY_PREFLIGHT_FAILED')
+require(capacity['ok'] and capacity['availableBytes']>=source_reserve and not capacity['plan']['images'] and not capacity['plan']['containers'], 'SOURCE_CAPACITY_PREFLIGHT_FAILED')
 p=subprocess.Popen(['docker','image','save',selected],stdout=sys.stdout.buffer,stderr=subprocess.PIPE)
 error=bytearray()
 for chunk in iter(lambda: p.stderr.read(8192), b''):
@@ -134,6 +217,7 @@ p.wait()
 require(p.returncode==0, 'DOCKER_SAVE_FAILED:'+error.decode(errors='replace')[-300:])
 sys.stdout.buffer.flush()
 after=census(); require(after==before, 'SOURCE_CENSUS_CHANGED')
+if expected_commit: require(call(['git','rev-parse','HEAD']).decode().strip()==expected_commit, 'SOURCE_COMMIT_CHANGED')
 print('SABALAN439_PROOF='+json.dumps({'selected':selected,'before':before,'after':after,
  'rootfsDiffIds':diff,'capacity':capacity['availableBytes']}),file=sys.stderr,flush=True)
 '''
@@ -143,17 +227,26 @@ def run(args, timeout):
     return subprocess.run(args, capture_output=True, check=True, timeout=timeout).stdout
 
 
-def backup_preflight():
+def backup_preflight(required_bytes=None):
+    reviewed = required_bytes is not None
+    required_bytes = BACKUP_RESERVE if required_bytes is None else required_bytes
     cmd = ("exec 9>/run/lock/sabalan-backup-storage.lock; flock -n 9 || exit 75; "
            "node /opt/sabalanerp-recovery/deploy/scripts/storage-preflight.mjs "
            "--mode plan --project sabalanerp-backup --lock-file /run/lock/sabalan-backup-storage.lock "
-           "--lock-fd 9 --storage-root /srv/sabalanerp-recovery --required-bytes 2710526931 "
+           f"--lock-fd 9 --storage-root /srv/sabalanerp-recovery --required-bytes {required_bytes} "
            "--checkpoint-root /srv/sabalanerp-recovery/checkpoints "
            "--audit /var/log/sabalanerp-backup/storage-cleanup.jsonl")
+    if reviewed:
+        encoded = base64.b64encode(READ_ONLY_STORAGE_PLAN.encode()).decode()
+        cmd = ("cd /opt/sabalanerp-recovery || exit 75; exec 9</run/lock/sabalan-backup-storage.lock || exit 75; "
+               "flock -n 9 || exit 75; "
+               f'node --input-type=module -e "$(printf %s {encoded} | base64 -d)" '
+               "sabalanerp-backup /run/lock/sabalan-backup-storage.lock /srv/sabalanerp-recovery "
+               "'[\"/srv/sabalanerp-recovery/checkpoints\"]' '[]' '[]'")
     value = json.loads(run(['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10',
                             '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3',
                             'sabalan-backup', cmd], timeout=180))
-    require(value['ok'] and value['availableBytes'] >= BACKUP_RESERVE, 'BACKUP_CAPACITY_PREFLIGHT_FAILED')
+    require(value['ok'] and value['availableBytes'] >= required_bytes, 'BACKUP_CAPACITY_PREFLIGHT_FAILED')
     require(not value['plan']['images'] and not value['plan']['containers'], 'BACKUP_PREFLIGHT_PLAN_NOT_EMPTY')
     return value['availableBytes']
 
@@ -225,21 +318,20 @@ def public_inquiry_env_example(entry, expanded):
         '7559e1a51bd57102d70c79faddc066576518c8ef8f8db0f14a448cc1427a8bf2'
 
 
-def oci_proof(path, image):
-    root = Path(__file__).resolve().parents[2]
+def oci_proof(path, image, allow_config_identity=False):
     code = ("import {inspectPrivateDockerArchive} from './scripts/lib/private-docker-image-archive.mjs';"
-            "console.log(JSON.stringify(inspectPrivateDockerArchive(process.argv[1],process.argv[2])));")
-    proof = json.loads(run(['node', '--input-type=module', '-e', code, str(path), image], timeout=7200))
-    require(proof['index'] == image and proof['archiveSha256'] == full_hash(path), 'OCI_ARCHIVE_PROOF_MISMATCH')
+            "console.log(JSON.stringify(inspectPrivateDockerArchive(process.argv[1],process.argv[2],"
+            "{allowConfigIdentity:process.argv[3]==='config-or-index'})));")
+    identity_mode = 'config-or-index' if allow_config_identity else 'index'
+    proof = json.loads(run(['node', '--input-type=module', '-e', code, str(path), image, identity_mode], timeout=7200))
+    identity_matches = proof['index'] == image or (allow_config_identity and proof['config'] == image)
+    require(identity_matches and proof['archiveSha256'] == full_hash(path), 'OCI_ARCHIVE_PROOF_MISMATCH')
     with tarfile.open(path, 'r:') as archive:
         members = {entry.name: entry for entry in archive.getmembers()}
         def blob(digest):
             entry = members['blobs/sha256/' + digest[7:]]
             return archive.extractfile(entry)
-        index = json.load(blob(image))
-        platform = next(m for m in index['manifests'] if m.get('platform', {}).get('os') == 'linux'
-                        and m['platform'].get('architecture') == 'amd64')
-        manifest = json.load(blob(platform['digest']))
+        manifest = json.load(blob(proof['platform']))
         config = json.load(blob(manifest['config']['digest']))
         require(proof['rootfsDiffIds'] == config['rootfs']['diff_ids'], 'ROOTFS_CONFIG_MISMATCH')
         secret_name = re.compile(r'(PASSWORD|PASSWD|SECRET|TOKEN|PRIVATE_KEY|API_KEY|CREDENTIAL|DATABASE_URL|CONNECTION_STRING)', re.I)
@@ -274,10 +366,19 @@ def oci_proof(path, image):
     return proof
 
 
-def stream_one(stage, service, image, previous_bytes):
+def stream_one(stage, service, image, previous_bytes, plan=None):
+    images = plan.images if plan else IMAGES
+    destination = plan.destination if plan else DEST
+    source_reserve = plan.source_reserve if plan else SOURCE_RESERVE
+    destination_reserve = plan.destination_reserve if plan else D_RESERVE
+    maximum_archive = plan.maximum_archive_bytes if plan else MAX_ARCHIVE_BYTES
+    maximum_total = plan.maximum_total_bytes if plan else MAX_TOTAL_BYTES
     require_efs(stage)
     encoded = base64.b64encode(SOURCE.encode()).decode()
-    remote = "python3 -c 'import base64;exec(base64.b64decode(\"" + encoded + "\"))' '" + json.dumps(IMAGES, separators=(',', ':')) + "' '" + image + "'"
+    remote = "python3 -c 'import base64;exec(base64.b64decode(\"" + encoded + "\"))' '" + json.dumps(images, separators=(',', ':')) + "' '" + image + "'"
+    if plan:
+        read_only_plan = base64.b64encode(READ_ONLY_STORAGE_PLAN.encode()).decode()
+        remote += f' {source_reserve} {plan.commit} {read_only_plan}'
     remote = f'timeout --signal=TERM --kill-after=5s {TRANSFER_TIMEOUT_SECONDS}s ' + remote
     partial = stage / (service + '.docker.tar.partial')
     final = stage / (service + '.docker.tar')
@@ -318,9 +419,9 @@ def stream_one(stage, service, image, previous_bytes):
         with partial.open('ab') as output:
             require_efs(partial)
             for chunk in iter(lambda: process.stdout.read(1024 * 1024), b''):
-                require(size + len(chunk) <= MAX_ARCHIVE_BYTES, 'ARCHIVE_SIZE_LIMIT_EXCEEDED')
-                require(previous_bytes + size + len(chunk) <= MAX_TOTAL_BYTES, 'EXPORT_TOTAL_SIZE_LIMIT_EXCEEDED')
-                require(shutil.disk_usage(stage).free >= D_RESERVE + len(chunk), 'DESTINATION_FREE_SPACE_EXHAUSTED')
+                require(size + len(chunk) <= maximum_archive, 'ARCHIVE_SIZE_LIMIT_EXCEEDED')
+                require(previous_bytes + size + len(chunk) <= maximum_total, 'EXPORT_TOTAL_SIZE_LIMIT_EXCEEDED')
+                require(shutil.disk_usage(stage).free >= destination_reserve + len(chunk), 'DESTINATION_FREE_SPACE_EXHAUSTED')
                 output.write(chunk)
                 digest.update(chunk)
                 size += len(chunk)
@@ -332,19 +433,19 @@ def stream_one(stage, service, image, previous_bytes):
         require(not stderr_reader.is_alive(), 'SOURCE_STDERR_NOT_CLOSED')
         require(not timed_out.is_set(), 'SOURCE_EXPORT_TIMED_OUT')
         stderr = stderr_tail.decode(errors='replace')
-        require(process.returncode == 0, 'SOURCE_EXPORT_FAILED:' + stderr[-500:])
+        require(process.returncode == 0, 'SOURCE_EXPORT_FAILED')
         markers = [line[17:] for line in stderr.splitlines() if line.startswith('SABALAN439_PROOF=')]
         require(len(markers) == 1, 'SOURCE_PROOF_MISSING')
         source = json.loads(markers[0])
         require(source['selected'] == image and source['before'] == source['after'], 'SOURCE_CENSUS_CHANGED')
-        require(len(source['before']) == 6 and source['capacity'] >= SOURCE_RESERVE, 'SOURCE_CAPACITY_OR_CENSUS_INVALID')
+        require(len(source['before']) == 6 and source['capacity'] >= source_reserve, 'SOURCE_CAPACITY_OR_CENSUS_INVALID')
         require(size > 1024 and full_hash(partial) == digest.hexdigest(), 'DESTINATION_READBACK_MISMATCH')
-        proof = oci_proof(partial, image)
+        proof = oci_proof(partial, image, allow_config_identity=plan is not None)
         require(proof['rootfsDiffIds'] == source['rootfsDiffIds'], 'ROOTFS_SOURCE_PROOF_MISMATCH')
         durable_rename(partial, final)
         require_efs(final)
         return {'service':service,'image':image,'bytes':size,'sha256':digest.hexdigest(),
-                'source':source,'oci':proof,'file':str(DEST / final.name)}
+                'source':source,'oci':proof,'file':str(destination / final.name)}
     except BaseException:
         if process.poll() is None:
             process.kill()
@@ -359,45 +460,63 @@ def stream_one(stage, service, image, previous_bytes):
 
 
 def main():
-    require(sys.argv[1:] == ['--execute-after-review'], 'REVIEW_REQUIRED')
-    require(os.name == 'nt' and Path.cwd().samefile(Path(__file__).resolve().parents[2]), 'WRONG_HOST_OR_DIRECTORY')
-    require(not DEST.exists(), 'DESTINATION_ALREADY_EXISTS')
-    require(shutil.disk_usage('D:\\').free >= D_ENVELOPE, 'DESTINATION_CAPACITY_PREFLIGHT_FAILED')
-    stage = DEST.with_name(DEST.name + '.staging-' + uuid.uuid4().hex)
+    args = sys.argv[1:]
+    plan = None
+    if len(args) == 3 and args[0] == '--execute-reviewed-plan':
+        plan = read_reviewed_export_plan(Path(args[1]), args[2])
+    else:
+        require(args == ['--execute-after-review'], 'REVIEW_REQUIRED')
+    require(os.name == 'nt' and Path.cwd().samefile(REPOSITORY_ROOT), 'WRONG_HOST_OR_DIRECTORY')
+    destination = plan.destination if plan else DEST
+    images = plan.images if plan else IMAGES
+    selected = plan.selected if plan else tuple(images)
+    envelope = (plan.destination_reserve + plan.maximum_total_bytes) if plan else D_ENVELOPE
+    require(not destination.exists(), 'DESTINATION_ALREADY_EXISTS')
+    require(shutil.disk_usage(destination.parent).free >= envelope, 'DESTINATION_CAPACITY_PREFLIGHT_FAILED')
+    stage = destination.with_name(destination.name + '.staging-' + uuid.uuid4().hex)
     try:
         private_destination(stage)
         require_efs(stage)
-        backup = backup_preflight()
+        backup = backup_preflight(plan.backup_reserve) if plan else backup_preflight()
         results = []
-        for service, image in IMAGES.items():
-            results.append(stream_one(stage, service, image, sum(row['bytes'] for row in results)))
-        require(len(results) == len(IMAGES), 'INCOMPLETE_IMAGE_SET')
+        for service in selected:
+            previous_bytes = sum(row['bytes'] for row in results)
+            result = (stream_one(stage, service, images[service], previous_bytes, plan) if plan
+                      else stream_one(stage, service, images[service], previous_bytes))
+            results.append(result)
+        require(len(results) == len(selected), 'INCOMPLETE_IMAGE_SET')
         require(all(row['source']['before'] == results[0]['source']['before'] for row in results),
                 'SOURCE_CENSUS_CHANGED_BETWEEN_EXPORTS')
+        receipt = {'format':'sabalan-439-image-export/v1','productionAdmission':False,
+                   'backupPreflightAvailableBytes':backup,'images':results,
+                   'secretScan':'Common paths and OCI config/history only; content secret absence is not established.'}
+        if plan:
+            receipt.update(sourceCommit=plan.commit, reviewedPlanSha256=plan.plan_sha256)
         with (stage / 'proof.json').open('x', encoding='utf-8') as output:
             require_efs(stage / 'proof.json')
-            json.dump({'format':'sabalan-439-image-export/v1','productionAdmission':False,
-                       'backupPreflightAvailableBytes':backup,'images':results,
-                       'secretScan':'Common paths and OCI config/history only; content secret absence is not established.'},
-                      output, indent=2)
+            json.dump(receipt, output, indent=2)
             output.flush(); os.fsync(output.fileno())
         require_efs(stage / 'proof.json')
-        for service in IMAGES:
+        for service in selected:
             require_efs(stage / (service + '.docker.tar'))
-        durable_rename(stage, DEST)
-        require_efs(DEST)
-        require_efs(DEST / 'proof.json')
-        for service in IMAGES:
-            require_efs(DEST / (service + '.docker.tar'))
+        durable_rename(stage, destination)
+        require_efs(destination)
+        require_efs(destination / 'proof.json')
+        for service in selected:
+            require_efs(destination / (service + '.docker.tar'))
     except BaseException:
         if stage.exists():
             try:
-                discard_incomplete_stage(stage)
+                if plan:
+                    discard_incomplete_stage(stage, destination)
+                else:
+                    discard_incomplete_stage(stage)
             except BaseException:
                 quarantine = stage.with_name(stage.name.replace('.staging-', '.failed-'))
                 durable_rename(stage, quarantine)
         raise
-    print(json.dumps({'directory':str(DEST),'images':[{k:v for k,v in row.items() if k in ('service','image','bytes','sha256')} for row in results]}))
+    print(json.dumps({'directory':str(destination),'images':[
+        {key: value for key, value in row.items() if key in ('service','image','bytes','sha256')} for row in results]}))
 
 
 if __name__ == '__main__':

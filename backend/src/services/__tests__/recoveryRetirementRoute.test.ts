@@ -45,6 +45,7 @@ test('real restore HTTP failure keeps retirement reserved through status and aud
   const replacements: Record<string, unknown> = {
     '../lib/prisma': { prisma: database },
     '../middleware/auth': { protect: (request: any, _response: any, next: any) => { request.user = { id: 'qa-owner' }; next(); }, authorize: () => (_req: any, _res: any, next: any) => next() },
+    '../services/systemRecoveryBackupRequest': {},
     '../services/systemRecoveryEngine': { recoveryPackagePath: () => '/unused/fixture.sabrec',
       validateRecoveryPackage: async () => ({ compatibility: { compatible: true } }),
       stageAndPromoteRecovery: async () => { throw Object.assign(new Error('Injected isolated restore failure'), { code: 'QA_RESTORE_FAILURE' }); } },

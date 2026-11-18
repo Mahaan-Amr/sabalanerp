@@ -210,7 +210,7 @@ test('actual managed private rollback checks image mode and gateway alias before
 });
 
 
-test('local acquisition changes only the fixed mirror while production and updater controls remain unchanged', async () => {
+test('the retained local scanner recipe changes only the fixed mirror and current release graphs are scanner-free', async () => {
  const {readFile}=await import('node:fs/promises');
  const production=await readFile(new URL('../../deploy/clamav/freshclam.conf',import.meta.url),'utf8');
  const local=await readFile(new URL('../../deploy/clamav/freshclam.local.conf',import.meta.url),'utf8');
@@ -223,8 +223,15 @@ test('local acquisition changes only the fixed mirror while production and updat
  assert.equal(recipe(localRecipe).replaceAll('freshclam.local.conf','freshclam.conf'),recipe(productionRecipe)
   .replace('COPY deploy/clamav/clamd.conf deploy/clamav/freshclam.conf /etc/clamav/',
    'COPY deploy/clamav/clamd.conf /etc/clamav/clamd.conf\nCOPY deploy/clamav/freshclam.conf /etc/clamav/freshclam.conf'));
- const compose=await readFile(new URL('../../docker-compose.local.yml',import.meta.url),'utf8');
- assert.match(compose,/dockerfile: deploy\/clamav\/Dockerfile\.local/);
- const prodCompose=await readFile(new URL('../../docker-compose.prod.yml',import.meta.url),'utf8');
- assert.doesNotMatch(prodCompose,/Dockerfile\.local|freshclam\.local\.conf|c3sl-local/);
+ for(const file of ['docker-compose.local.yml','docker-compose.prod.yml','docker-compose.rehearsal-scanner-free.yml']){
+  const compose=await readFile(new URL('../../'+file,import.meta.url),'utf8');
+  assert.doesNotMatch(compose,/^ +clamav:|Dockerfile\.local|freshclam\.local\.conf|c3sl-local|clamav_database|HR_HIRING_ANTIVIRUS_COMMAND/m,file);
+ }
+ const legacy=await readFile(new URL('../../docker-compose.rollback-legacy.yml',import.meta.url),'utf8');
+ assert.match(legacy,/^  clamav:\n    image: \$\{DEPLOYMENT_CLAMAV_IMAGE:/m);
+ assert.match(legacy,/clamav_database:\/var\/lib\/clamav/);
+ assert.match(legacy,/depends_on:\n      clamav:\n        condition: service_healthy/);
+ const rehearsal=await readFile(new URL('../../docker-compose.rehearsal.yml',import.meta.url),'utf8');
+ assert.match(rehearsal,/^  clamav:\n    extends:\n      file: docker-compose\.rollback-legacy\.yml\n      service: clamav/m);
+ assert.match(rehearsal,/clamav_database:\/app\/recovery-sources\/clamav/);
 });

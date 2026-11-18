@@ -19,6 +19,21 @@ EXPORT = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(EXPORT)
 
 
+class ReviewedStoragePlanTests(unittest.TestCase):
+    def test_backup_capacity_uses_existing_lock_without_an_audit_path(self):
+        with mock.patch.object(EXPORT, 'run', return_value=json.dumps({
+            'ok': True, 'availableBytes': EXPORT.BACKUP_RESERVE,
+            'plan': {'images': [], 'containers': []},
+        }).encode()) as run:
+            self.assertEqual(EXPORT.backup_preflight(EXPORT.BACKUP_RESERVE), EXPORT.BACKUP_RESERVE)
+        command = run.call_args.args[0][-1]
+        self.assertIn('exec 9</run/lock/sabalan-backup-storage.lock', command)
+        self.assertNotIn('exec 9>', command)
+        self.assertNotIn('--audit', command)
+        self.assertIn('adapter.snapshot()', EXPORT.READ_ONLY_STORAGE_PLAN)
+        self.assertNotIn('adapter.record', EXPORT.READ_ONLY_STORAGE_PLAN)
+
+
 def pack(entries):
     output = io.BytesIO()
     with tarfile.open(fileobj=output, mode='w') as archive:
@@ -37,7 +52,7 @@ def pack(entries):
     return output.getvalue()
 
 
-def archive_fixture(diff_override=None, secret_path=False, layer_entries=None):
+def archive_fixture(diff_override=None, secret_path=False, layer_entries=None, config_layout=None):
     layer = pack(layer_entries or [('.env.prod' if secret_path else 'app/ready.txt', b'ready')])
     compressed = gzip.compress(layer, mtime=0)
     digest = lambda content: 'sha256:' + hashlib.sha256(content).hexdigest()
@@ -51,21 +66,52 @@ def archive_fixture(diff_override=None, secret_path=False, layer_entries=None):
                          'platform':{'os':'linux','architecture':'amd64'}}]}, separators=(',', ':')).encode()
     blob = lambda content: ('blobs/sha256/' + digest(content)[7:], content)
     compat = json.dumps([{'Config':blob(config)[0],'Layers':[blob(compressed)[0]]}]).encode()
-    return pack([blob(index), blob(manifest), blob(config), blob(compressed), ('manifest.json', compat)]), digest(index)
+    entries = [blob(index), blob(manifest), blob(config), blob(compressed), ('manifest.json', compat)]
+    if config_layout is None:
+        return pack(entries), digest(index)
+    document = index if config_layout == 'nested' else manifest
+    descriptor = {'digest': digest(document), 'size': len(document)}
+    roots = [descriptor, descriptor] if config_layout == 'ambiguous' else [descriptor]
+    if config_layout != 'unanchored':
+        entries.append(('index.json', json.dumps({'schemaVersion': 2, 'manifests': roots}).encode()))
+    return pack(entries), digest(config)
 
 
 class ExportProofTests(unittest.TestCase):
-    def proof(self, data, image):
+    def proof(self, data, image, allow_config_identity=False):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'image.docker.tar'
             path.write_bytes(data)
-            return EXPORT.oci_proof(path, image)
+            return EXPORT.oci_proof(path, image, allow_config_identity)
 
     def test_accepts_matching_full_oci_graph_and_expanded_layer(self):
         data, image = archive_fixture()
         proof = self.proof(data, image)
         self.assertEqual(proof['index'], image)
         self.assertEqual(proof['archiveSha256'], hashlib.sha256(data).hexdigest())
+
+    def test_reviewed_config_identity_handles_direct_and_nested_oci_manifests(self):
+        for layout in ('direct', 'nested'):
+            with self.subTest(layout=layout):
+                data, config = archive_fixture(config_layout=layout)
+                proof = self.proof(data, config, allow_config_identity=True)
+                self.assertEqual(proof['config'], config)
+                self.assertEqual(proof['index'] is None, layout == 'direct')
+                self.assertEqual(proof['archiveSha256'], hashlib.sha256(data).hexdigest())
+                with self.assertRaises(subprocess.CalledProcessError):
+                    self.proof(data, config)
+
+    def test_reviewed_config_identity_requires_one_anchored_manifest(self):
+        for layout in ('ambiguous', 'unanchored'):
+            with self.subTest(layout=layout):
+                data, config = archive_fixture(config_layout=layout)
+                with self.assertRaises(subprocess.CalledProcessError):
+                    self.proof(data, config, allow_config_identity=True)
+
+    def test_reviewed_config_identity_still_checks_expanded_layers(self):
+        data, config = archive_fixture('sha256:' + '0' * 64, config_layout='direct')
+        with self.assertRaisesRegex(EXPORT.ExportGuardError, 'ROOTFS_DIFF_ID_MISMATCH'):
+            self.proof(data, config, allow_config_identity=True)
 
     def test_rejects_false_rootfs_diff_id_even_with_valid_blob_hashes(self):
         data, image = archive_fixture('sha256:' + '0' * 64)
@@ -251,6 +297,53 @@ class TransferTests(unittest.TestCase):
             self.assertEqual(row['bytes'], 2048)
             self.assertTrue((stage / 'backend.docker.tar').exists())
 
+
+class ReviewedPlanTests(unittest.TestCase):
+    def plan(self):
+        return {
+            'format': 'sabalan-reviewed-qa-image-export/v1',
+            'sourceCommit': 'a' * 40,
+            'images': EXPORT.IMAGES,
+            'exportServices': ['backend', 'frontend', 'inquiry'],
+            'destination': 'sabalanerp-qa-current-images-fixture-20261117',
+            'sourceReserveBytes': EXPORT.SOURCE_RESERVE,
+            'backupReserveBytes': EXPORT.BACKUP_RESERVE,
+            'destinationReserveBytes': EXPORT.D_RESERVE,
+            'maximumArchiveBytes': 600_000_000,
+            'maximumTotalBytes': 1_500_000_000,
+        }
+
+    def test_seals_complete_source_census_and_the_selected_subset(self):
+        with tempfile.TemporaryDirectory() as directory:
+            file = Path(directory) / 'plan.json'
+            raw = json.dumps(self.plan()).encode()
+            file.write_bytes(raw)
+            sealed = EXPORT.read_reviewed_export_plan(file, hashlib.sha256(raw).hexdigest())
+            self.assertEqual(sealed.images, EXPORT.IMAGES)
+            self.assertEqual(sealed.selected, ('backend', 'frontend', 'inquiry'))
+            self.assertEqual(sealed.destination.parent, EXPORT.DEST.parent)
+            self.assertEqual(sealed.commit, 'a' * 40)
+            with self.assertRaisesRegex(EXPORT.ExportGuardError, 'EXPORT_PLAN_HASH_MISMATCH'):
+                EXPORT.read_reviewed_export_plan(file, '0' * 64)
+
+    def test_rejects_path_overrides_unreviewed_targets_and_reduced_reserves(self):
+        for patch in (
+            {'destination': '../other-directory'},
+            {'images': {'backend': EXPORT.IMAGES['backend']}},
+            {'exportServices': ['backend', 'backend']},
+            {'exportServices': ['unknown']},
+            {'sourceCommit': "' bad"},
+            {'sourceReserveBytes': EXPORT.SOURCE_RESERVE - 1},
+            {'backupReserveBytes': EXPORT.BACKUP_RESERVE - 1},
+            {'destinationReserveBytes': EXPORT.D_RESERVE - 1},
+            {'maximumArchiveBytes': 2_000_000_000},
+        ):
+            with self.subTest(patch=patch), tempfile.TemporaryDirectory() as directory:
+                file = Path(directory) / 'plan.json'
+                raw = json.dumps({**self.plan(), **patch}).encode()
+                file.write_bytes(raw)
+                with self.assertRaises(EXPORT.ExportGuardError):
+                    EXPORT.read_reviewed_export_plan(file, hashlib.sha256(raw).hexdigest())
 
 if __name__ == '__main__':
     unittest.main()

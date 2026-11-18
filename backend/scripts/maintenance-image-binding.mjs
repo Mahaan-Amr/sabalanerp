@@ -1,0 +1,29 @@
+/** Content custody only; the original deployment session and journal own recovery. */
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import {canonical,hash} from './preserved-clamav-policy.mjs';
+const digest=/^[a-f0-9]{64}$/,image=/^sha256:[a-f0-9]{64}$/,commit=/^[a-f0-9]{40}$/;
+const keys=(value,expected)=>assert.deepEqual(Object.keys(value).sort(),expected.slice().sort());
+function content(plan){return {applicationCommit:plan.applicationCommit,applicationTree:plan.applicationTree,applicationSourceHash:plan.applicationSourceHash,inquirySourceCommit:plan.inquirySourceCommit,imageStore:plan.imageStore,uploadPolicy:plan.uploadPolicy,target:plan.target,images:Object.fromEntries(['backend','frontend','inquiry'].map(role=>[role,{image:plan.images[role].image,archiveGraph:plan.images[role].archiveGraph,browser:plan.images[role].browser}]))};}
+export function validateMaintenanceBinding(binding){
+ keys(binding,['format','planSha256','contentSha256','content']);assert.equal(binding.format,'sabalan-maintenance-image-binding/v1');assert.match(binding.planSha256,digest);assert.equal(binding.contentSha256,hash(canonical(binding.content)));
+ const value=binding.content;keys(value,['applicationCommit','applicationTree','applicationSourceHash','inquirySourceCommit','imageStore','uploadPolicy','target','images']);for(const name of ['applicationCommit','applicationTree','inquirySourceCommit'])assert.match(value[name],commit);assert.match(value.applicationSourceHash,digest);assert.ok(['classic','containerd'].includes(value.imageStore));assert.ok(['no-malware-scan','legacy-scanner'].includes(value.uploadPolicy));
+ keys(value.target,['composeFile','qaPlanSha256']);assert.ok(['docker-compose.prod.yml','docker-compose.rehearsal.yml'].includes(value.target.composeFile));if(value.target.composeFile==='docker-compose.prod.yml')assert.equal(value.target.qaPlanSha256,null);else assert.match(value.target.qaPlanSha256,digest);
+ keys(value.images,['backend','frontend','inquiry']);for(const role of ['backend','frontend','inquiry']){const selected=value.images[role];keys(selected,['image','archiveGraph','browser']);assert.match(selected.image,image);const graph=selected.archiveGraph;keys(graph,['index','platform','config','rootfsDiffIds','archiveSha256','archiveBytes']);for(const name of ['index','platform','config'])assert.match(graph[name],image);assert.equal(selected.image,value.imageStore==='containerd'?graph.index:graph.config);assert.match(graph.archiveSha256,digest);assert.ok(Number.isSafeInteger(graph.archiveBytes)&&graph.archiveBytes>0);assert.ok(Array.isArray(graph.rootfsDiffIds)&&graph.rootfsDiffIds.length>0);for(const layer of graph.rootfsDiffIds)assert.match(layer,image);if(role==='backend')assert.equal(selected.browser,null);else{keys(selected.browser,['id','nativeBuildId','manifestSha256']);assert.match(selected.browser.id,/^(?:erp|inquiry)_[a-z0-9_-]{8,120}$/);assert.match(selected.browser.nativeBuildId,/^[A-Za-z0-9_-]{1,128}$/);assert.match(selected.browser.manifestSha256,digest);}}
+ return binding;
+}
+export function maintenanceImageBinding(plan,planSha256){const value=content(plan);return validateMaintenanceBinding({format:'sabalan-maintenance-image-binding/v1',planSha256,contentSha256:hash(canonical(value)),content:value});}
+export function validateMaintenanceRecord(record,binding){
+ keys(record,['format','binding','planRawBase64']);assert.equal(record.format,'sabalan-maintenance-image-record/v1');assert.deepEqual(validateMaintenanceBinding(record.binding),validateMaintenanceBinding(binding));assert.match(record.planRawBase64,/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/);const raw=Buffer.from(record.planRawBase64,'base64');assert.ok(raw.length>0&&raw.length<=8*1024**2);assert.equal(hash(raw),binding.planSha256,'MAINTENANCE_SAVED_PLAN_CHANGED');assert.deepEqual(maintenanceImageBinding(JSON.parse(raw),binding.planSha256),binding,'MAINTENANCE_SAVED_CONTENT_CHANGED');return record;
+}
+export function readMaintenanceRecord(file,binding){
+ for(let directory=path.dirname(file);;directory=path.dirname(directory)){const stat=fs.lstatSync(directory,{bigint:true});assert.ok(stat.isDirectory()&&!stat.isSymbolicLink()&&stat.uid===0n&&!(stat.mode&0o022n));if(path.dirname(directory)===directory)break;}
+ const before=fs.lstatSync(file,{bigint:true});assert.equal(fs.realpathSync(file),file);assert.ok(before.isFile()&&before.uid===0n&&before.nlink===1n&&!(before.mode&0o077n)&&before.size>0n&&before.size<=12n*1024n**2n);const fd=fs.openSync(file,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW|fs.constants.O_NONBLOCK),pin=s=>['dev','ino','size','mtimeNs','ctimeNs','mode','nlink','uid'].map(k=>String(s[k]));
+ try{assert.deepEqual(pin(before),pin(fs.fstatSync(fd,{bigint:true})));const record=JSON.parse(fs.readFileSync(fd));assert.deepEqual(pin(before),pin(fs.fstatSync(fd,{bigint:true})));assert.deepEqual(pin(before),pin(fs.lstatSync(file,{bigint:true})));return validateMaintenanceRecord(record,binding);}finally{fs.closeSync(fd);}
+}
+export function validateMaintenanceResume(session,first,record,inherited){
+ assert.equal(first.deploymentId,session.deploymentId);assert.equal(first.sequence,1);assert.equal(first.event,'deployment-prepared');const binding=session.maintenanceImages;
+ if(!binding){assert.ok(!first.details?.maintenanceImages&&!record&&!inherited,'MAINTENANCE_SESSION_BINDING_MISSING');return null;}
+ validateMaintenanceBinding(binding);assert.deepEqual(validateMaintenanceBinding(first.details?.maintenanceImages),binding,'MAINTENANCE_JOURNAL_BINDING_CHANGED');validateMaintenanceRecord(record,binding);if(inherited)assert.deepEqual(validateMaintenanceBinding(inherited),binding,'MAINTENANCE_INHERITED_BINDING_CHANGED');assert.equal(session.targetCommit,binding.content.applicationCommit);assert.equal(session.controlImage,binding.content.images.backend.image);return binding;
+}

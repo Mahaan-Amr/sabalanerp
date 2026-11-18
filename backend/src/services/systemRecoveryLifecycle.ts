@@ -9,10 +9,20 @@ import {
   rollbackInterruptedRecovery,
   withSystemRecoveryDatabaseClient,
 } from './systemRecoveryEngine';
-import { RECOVERY_FRESHNESS_MS } from './systemRecoveryPolicy';
+import { isRestrictedRecoveryRuntime, RECOVERY_FRESHNESS_MS } from './systemRecoveryPolicy';
 import { setRecoveryRuntimeState } from './recoveryRuntime';
 import { publishNotificationEvent } from './notificationService';
 import { replayPerformanceErasureAfterRestore } from './personnelPerformanceErasureStore';
+import { OWNER_BACKUP_REQUESTED } from './systemRecoveryBackupRequest';
+import { OWNER_HANDOFF_REQUESTED } from './systemRecoveryOwnerHandoff';
+
+const pendingOwnerBackup = {
+  status: 'CREATING', source: 'CREATED', progress: 0, storageName: null,
+  auditEvents: { some: { eventType: OWNER_BACKUP_REQUESTED } },
+};
+const pendingOwnerRequest = { OR: [pendingOwnerBackup, {
+  status: 'RESTORING', progress: 0, auditEvents: { some: { eventType: OWNER_HANDOFF_REQUESTED } },
+}] };
 
 const replayPerformanceErasureFromSafetyDatabase = async (prisma: PrismaClient, safetyDatabase: string) => {
   // System Recovery deliberately reads its alternate pre-restore database and
@@ -30,10 +40,14 @@ const recoverInterruptedRestore = async (prisma: PrismaClient, options: Recovery
     await fs.promises.rm(INQUIRY_RESTART_MARKER, { force: true });
     setRecoveryRuntimeState('NORMAL');
     await prisma.recoveryOperation.updateMany({
-      where: { status: { in: ['CREATING', 'VALIDATING', 'RESTORING'] } },
+      where: { status: { in: ['CREATING', 'VALIDATING', 'RESTORING'] }, NOT: pendingOwnerRequest },
       data: { status: 'FAILED', errorCode: 'PROCESS_INTERRUPTED', errorMessage: 'The recovery worker was interrupted before completion.' },
     });
     return;
+  }
+  if (isRestrictedRecoveryRuntime()) {
+    setRecoveryRuntimeState('MAINTENANCE', journal.operationId, 'The protected owner must finish the pending restore.');
+    return false;
   }
   setRecoveryRuntimeState('MAINTENANCE', journal.operationId, 'Completing recovery startup checks.');
   const databases = await prisma.$queryRawUnsafe<Array<{ datname: string }>>(
@@ -52,8 +66,13 @@ const recoverInterruptedRestore = async (prisma: PrismaClient, options: Recovery
 };
 
 const cleanupExpiredPackages = async (prisma: PrismaClient) => {
+  const now = new Date();
+  await prisma.recoveryOperation.updateMany({
+    where: { ...pendingOwnerRequest, expiresAt: { lte: now } },
+    data: { status: 'EXPIRED' },
+  });
   const expired = await prisma.recoveryOperation.findMany({
-    where: { expiresAt: { lte: new Date() }, storageName: { not: null }, status: { notIn: ['RESTORING'] } },
+    where: { expiresAt: { lte: now }, storageName: { not: null }, status: { notIn: ['RESTORING'] } },
     select: { id: true, source: true, storageName: true },
   });
   for (const item of expired) {
@@ -90,7 +109,7 @@ const notifyStaleBackup = async (prisma: PrismaClient) => {
 
 export const initializeSystemRecovery = async (prisma: PrismaClient, options: RecoveryInitializationOptions = {}) => {
   try {
-    await recoverInterruptedRestore(prisma, options);
+    if (await recoverInterruptedRestore(prisma, options) === false) return;
     await cleanupExpiredPackages(prisma);
     await notifyStaleBackup(prisma);
   } catch (error) {

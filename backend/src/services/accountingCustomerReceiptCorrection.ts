@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { requireCustomerSourceSharesWithin } from './customerSemanticCompatibility';
 import { AccountingCustomerTreasuryError, type CustomerTreasuryActor } from './accountingCustomerTreasury';
-import { allocateCustomerReceiptPrisma, reverseCustomerAllocationPrisma, requireCustomerConsumptionDate } from './accountingCustomerTreasuryPrisma';
+import { lockCustomerReceiptWithin, allocateCustomerReceiptPrisma, reverseCustomerAllocationPrisma, requireCustomerConsumptionDate } from './accountingCustomerTreasuryPrisma';
 import { effectiveCustomerReceiptRials } from './accountingCustomerReceiptBalance';
 import { createAccountingLedgerApplication, hashAccountingEvidence, IRR_ROUNDING_RULE_V1 } from './accountingLedgerFoundation';
 import { createAccountingLedgerPrismaRepository } from './accountingLedgerPrismaRepository';
@@ -53,7 +53,7 @@ export async function correctCustomerReceiptWithin(tx: Prisma.TransactionClient,
     if (prior.receiptId !== input.receiptId || prior.commandHash !== commandHash) fail('IDEMPOTENCY_KEY_REUSED', 'کلید اصلاح برای اطلاعات دیگری استفاده شده است.');
     return prior;
   }
-  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${input.receiptId}))`;
+  await lockCustomerReceiptWithin(tx, input.receiptId);
   const receipt = await tx.accountingTreasuryTransaction.findUnique({ where: { id: input.receiptId }, include: {
     profile: true, checkInstrument: true, sourceResolution: true, adjustments: { include: { ledgerVoucher: true } },
     allocations: { where: { reversesId: null, reversedById: null }, include: { lines: true } },

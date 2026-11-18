@@ -10,6 +10,7 @@ import { assertQaRemoteMountAtRuntime } from './qa-remote-mount-guard.mjs';
 import { performanceSourceHash } from '../../scripts/performance-source-identity.mjs';
 
 const COMPOSE_FILE = 'docker-compose.rehearsal.yml';
+const SCANNER_FREE_COMPOSE_FILE = 'docker-compose.rehearsal-scanner-free.yml';
 const SERVICE_NAMES = ['backend', 'clamav', 'deployment', 'frontend', 'inquiry', 'nginx', 'postgres'];
 const sha256 = raw => createHash('sha256').update(raw).digest('hex');
 const keys = value => Object.keys(value ?? {}).sort();
@@ -44,21 +45,23 @@ function observeQaNetworkNamespace() {
   };
 }
 
-export function validateQaRenderedConfig(config, planSha256) {
+export function validateQaRenderedConfig(config, planSha256, { scannerRetained = true } = {}) {
   assert.equal(config.name, 'sabalanerp');
-  assert.deepEqual(keys(config.services), SERVICE_NAMES);
-  assert.deepEqual(keys(config.networks), ['app_network', 'clamav_egress', 'qa_ingress']);
+  const services = scannerRetained ? SERVICE_NAMES : SERVICE_NAMES.filter(name => name !== 'clamav');
+  const networks = scannerRetained ? ['app_network', 'clamav_egress', 'qa_ingress'] : ['app_network', 'qa_ingress'];
+  assert.deepEqual(keys(config.services), services);
+  assert.deepEqual(keys(config.networks), networks);
   assert.equal(config.networks.app_network.internal, true);
-  assert.notEqual(config.networks.clamav_egress.internal, true);
+  if (scannerRetained) assert.notEqual(config.networks.clamav_egress.internal, true);
   assert.equal(config.networks.qa_ingress.driver, 'bridge');
   assert.notEqual(config.networks.qa_ingress.internal, true);
   assert.deepEqual(config.networks.qa_ingress.driver_opts,
     { 'com.docker.network.bridge.enable_ip_masquerade': 'false' });
-  assert.equal(config.services.clamav.extra_hosts, undefined);
+  if (scannerRetained) assert.equal(config.services.clamav.extra_hosts, undefined);
   assert.equal(config.services.deployment.environment.SABALAN_BACKUP_TARGET, 'qa');
   assert.match(config.services.deployment.environment.SABALAN_QA_PLAN_SHA256,/^[a-f0-9]{64}$/);
   if(planSha256)assert.equal(config.services.deployment.environment.SABALAN_QA_PLAN_SHA256,planSha256);
-  for (const service of SERVICE_NAMES) {
+  for (const service of services) {
     assert.deepEqual(keys(config.services[service].networks), service === 'clamav'
       ? ['app_network', 'clamav_egress'] : service === 'nginx'
         ? ['app_network', 'qa_ingress'] : ['app_network']);
@@ -82,6 +85,7 @@ const BACKEND_MOUNTS = {
     '/app/recovery-coordination': 'recovery_coordination',
     '/app/recovery-sources/inquiry': 'inquiry_data',
     '/run/deployment-secrets/partner-release-trust-public.der': 'secret-trust',
+    '/run/deployment-secrets/system-recovery-owner-public.pem': 'secret-recovery-owner-public',
 };
 
 const QA_MOUNTS = {
@@ -108,10 +112,11 @@ const QA_MOUNTS = {
   },
 };
 
-export function validateQaRenderedMounts(config, { qaRoot, repositoryRoot, environment }) {
+export function validateQaRenderedMounts(config, { qaRoot, repositoryRoot, environment, scannerRetained = true }) {
   assert.equal(fs.realpathSync(qaRoot), qaRoot);
   const binds = {
     'secret-trust': path.join(environment.DEPLOYMENT_SECRET_DIR, 'partner-release-trust-public.der'),
+    'secret-recovery-owner-public': path.join(environment.DEPLOYMENT_SECRET_DIR, 'system-recovery-owner-public.pem'),
     'secret-dir': environment.DEPLOYMENT_SECRET_DIR,
     'remote-dir': environment.DEPLOYMENT_REMOTE_MOUNT_HOST,
     'report-dir': environment.DEPLOYMENT_REPORT_DIR_HOST,
@@ -120,7 +125,13 @@ export function validateQaRenderedMounts(config, { qaRoot, repositoryRoot, envir
     'nginx-check': path.join(repositoryRoot, 'deploy/nginx/maintenance-check.conf'),
     'nginx-maintenance': path.join(repositoryRoot, 'deploy/nginx/maintenance.html'),
   };
-  for (const [service, targets] of Object.entries(QA_MOUNTS)) {
+  const expectedMounts = { ...QA_MOUNTS };
+  if (!scannerRetained) {
+    const { '/app/recovery-sources/clamav': _scanner, ...deployment } = QA_MOUNTS.deployment;
+    expectedMounts.deployment = deployment;
+    delete expectedMounts.clamav;
+  }
+  for (const [service, targets] of Object.entries(expectedMounts)) {
     if (!config.services[service]) continue;
     const volumes = config.services[service].volumes ?? [];
     assert.deepEqual(volumes.map(volume => volume.target).sort(), keys(targets));
@@ -132,8 +143,16 @@ export function validateQaRenderedMounts(config, { qaRoot, repositoryRoot, envir
         assert.ok(path.isAbsolute(volume.source));
         assert.equal(fs.realpathSync(volume.source), volume.source);
         const sourceStat = fs.lstatSync(volume.source);
-        if (expected === 'secret-trust' || expected.startsWith('nginx-')) {
+        if (expected === 'secret-trust' || expected === 'secret-recovery-owner-public' || expected.startsWith('nginx-')) {
           assert.equal(sourceStat.isFile(), true);
+          if (expected === 'secret-recovery-owner-public') {
+            assert.equal(sourceStat.uid, 0);
+            assert.equal(sourceStat.nlink, 1);
+            assert.equal(sourceStat.mode & 0o022, 0);
+            const publicBytes = fs.readFileSync(volume.source, 'utf8');
+            assert.ok(publicBytes.startsWith('-----BEGIN PUBLIC KEY-----\n'));
+            assert.equal(publicBytes.includes('PRIVATE KEY'), false);
+          }
         } else {
           assert.equal(sourceStat.isDirectory(), true);
         }
@@ -147,7 +166,7 @@ export function validateQaRenderedMounts(config, { qaRoot, repositoryRoot, envir
     }
   }
   if (config.volumes) {
-    assert.deepEqual(keys(config.volumes), [...new Set(Object.values(QA_MOUNTS).flatMap(Object.values)
+    assert.deepEqual(keys(config.volumes), [...new Set(Object.values(expectedMounts).flatMap(Object.values)
       .filter(name => !Object.hasOwn(binds, name)))].sort());
     for (const [name, definition] of Object.entries(config.volumes)) {
       assert.notEqual(definition.external, true);
@@ -322,15 +341,20 @@ async function main() {
   ]) {
     assert.equal(fs.realpathSync(environment[name]), environment[name]);
   }
-  const rendered = JSON.parse(execFileSync('docker', ['compose', '--profile', 'deployment', '-p', 'sabalanerp',
-    '--env-file', environmentFile, '-f', composePath, 'config', '--format', 'json'], {
+  const render = compose => JSON.parse(execFileSync('docker', ['compose', '--profile', 'deployment', '-p', 'sabalanerp',
+    '--env-file', environmentFile, '-f', compose, 'config', '--format', 'json'], {
     cwd: repositoryRoot,
     env: { ...process.env, ...environment },
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'ignore'],
   }));
-  validateQaRenderedConfig(rendered,planSha256);
+  const rendered = render(composePath);
+  validateQaRenderedConfig(rendered, planSha256);
   validateQaRenderedMounts(rendered, { qaRoot: plan.qaRoot, repositoryRoot, environment });
+  // The sealed application tree authenticates the second Compose file too.
+  const scannerFree = render(path.join(repositoryRoot, SCANNER_FREE_COMPOSE_FILE));
+  validateQaRenderedConfig(scannerFree, planSha256, { scannerRetained: false });
+  validateQaRenderedMounts(scannerFree, { qaRoot: plan.qaRoot, repositoryRoot, environment, scannerRetained: false });
   process.stdout.write(`${COMPOSE_FILE}\n`);
 }
 

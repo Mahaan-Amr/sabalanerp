@@ -146,6 +146,9 @@ export async function resolvePartnerWorkspaceAuthority(
   if (canViewAssigned) {
     add({ action: 'INQUIRY_READ', rootKind: 'INQUIRY', purpose: 'RESPONDER', scope: 'ASSIGNED' });
   }
+  if (effective.workspaces.some(({ workspace, permission }) => workspace === 'sales' && permission === 'admin')) {
+    add({ action: 'CASE_COMMERCIAL_RENEW', rootKind: 'CASE', purpose: 'MANAGEMENT', scope: 'COMPANY' });
+  }
   if (canRespondAssigned) {
     add({ action: 'INQUIRY_RESPOND', rootKind: 'INQUIRY', purpose: 'RESPONDER', scope: 'ASSIGNED' });
   }

@@ -100,6 +100,7 @@ export type InvoiceSource = {
     contacts: DispatchContractContact[];
     rows: Record<string, DispatchProductPrintRow[]>;
     contractedGross: Record<string, string>;
+    loadedPieceCounts?: Record<string, string>;
   };
 };
 const ExactDecimal = Prisma.Decimal.clone({ precision: 100 });
@@ -209,7 +210,8 @@ async function buildInvoiceSource(
   };
   const print = includePrint ? { contacts: new Map<string, DispatchContractContact>(),
     rows: Object.create(null) as Record<string, DispatchProductPrintRow[]>,
-    contractedGross: Object.create(null) as Record<string, string> } : undefined;
+    contractedGross: Object.create(null) as Record<string, string>,
+    loadedPieceCounts: Object.create(null) as Record<string, string> } : undefined;
   if (print) {
     const contractIds = revisions.flatMap(revision => revision.lines.flatMap(
       line => line.sourceContractId ? [line.sourceContractId] : [],
@@ -270,7 +272,7 @@ async function buildInvoiceSource(
           driver.name,
         "راننده",
       ),
-      plate: nonempty(
+      plate: record(snapshot.queueTurn).driverSource === "PERSONAL_PICKUP" ? "—" : nonempty(
         record(admission.plate).plate ||
           record(admission.vehicle).plate ||
           admission.vehiclePlate,
@@ -402,6 +404,9 @@ async function buildInvoiceSource(
           : null,
       );
       if (print) {
+        if (typeof lineSnapshot.loadedPieceCount === 'string') {
+          print.loadedPieceCounts[line.allocationRevisionLineId] = lineSnapshot.loadedPieceCount;
+        }
         let projectRows = contractRows.get(contractId);
         if (partner) {
           projectRows = createDispatchProductRows({ products: [{ ...product,
@@ -535,6 +540,9 @@ async function buildInvoiceSource(
         );
         if (!target || target.unit !== delta.unit)
           throw new SalesInvoiceError("اصلاح ارسال با ردیف مبدأ مطابقت ندارد.");
+        if (print?.loadedPieceCounts && !amount(delta.quantityDelta).isZero()) {
+          delete print.loadedPieceCounts[target.key];
+        }
         target.quantity = exactQuantityText(
           amount(target.quantity).add(delta.quantityDelta),
         );
@@ -583,6 +591,6 @@ async function buildInvoiceSource(
     throw new SalesInvoiceError(
       "فاکتور باید متعلق به یک مشتری و یک طرف‌حساب باشد.",
     );
-  if (print) result.print = { contacts: [...print.contacts.values()], rows: print.rows, contractedGross: print.contractedGross };
+  if (print) result.print = { ...print, contacts: [...print.contacts.values()] };
   return result;
 }

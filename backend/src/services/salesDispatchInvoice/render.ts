@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client';
 import {
-  escapePrint, printDigits, printSection, shipmentHeader, shipmentHtml, shipmentItemTable,
-  shipmentParties, shipmentQuantity, shipmentSignature, shipmentTable, shipmentTerms, shipmentUnitLabel, type ShipmentPrintRow,
+  escapePrint, loadedProductMeasurements, parsePrintNumber, printDigits, printSection, shipmentHeader, shipmentHtml, shipmentItemTable,
+  shipmentParties, shipmentSignature, shipmentTable, shipmentTerms, shipmentUnitLabel, type ShipmentPrintRow,
 } from '../../documents/dispatch/dispatchPrintLayout';
 import type { DispatchProductPrintRow } from '../../utils/printTemplate';
 import { pricingCurrencyKind } from '../approvedPricing/domain';
@@ -13,13 +13,9 @@ export type IssuedInvoiceSnapshot = InvoiceSource & {
   number: string;
   issuedAt: string;
   replacesNumber: string | null;
+  pdfLayoutVersion?: number;
 };
-
-const parsePrintNumber = (value: string) => {
-  const normalized = value.trim().replace(/[۰-۹]/g, digit => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(digit)))
-    .replace(/٬/g, '').replace('٫', '.').replace('−', '-');
-  return /^\d+(\.\d+)?$/.test(normalized) ? new Decimal(normalized) : undefined;
-};
+export const salesInvoicePdfLayoutVersion = 2;
 
 function rialRate(value: string, multiplier: number) {
   const [rate, unit] = value.split(' / ', 2);
@@ -68,12 +64,10 @@ export function renderSalesInvoice(snapshot: IssuedInvoiceSnapshot, voidReason?:
       code: '', description: line.details.join('، '), category: 'توضیحات',
       length: '', width: '', count: '', linearMeasurement: '', squareMeasurement: '',
     }] : [];
-    const allocatedQuantity = shipmentQuantity(line.quantity, line.unit);
     const main: ShipmentPrintRow = {
       code: saved?.code && saved.code !== '—' ? saved.code : line.code,
       description: saved?.description || line.label, category: saved?.category || 'محصول',
-      length: saved?.length || line.length, width: saved?.width || line.width, ...allocatedQuantity,
-      count: allocatedQuantity.count || (saved?.count === '۰' ? '' : saved?.count) || '',
+      ...loadedProductMeasurements(line, saved, snapshot.print?.loadedPieceCounts?.[line.key]),
       index: String(index + 1),
       rate: saved?.rate ? rialRate(saved.rate, multiplier)
         : services.length || new Decimal(line.quantity).isZero() ? ''

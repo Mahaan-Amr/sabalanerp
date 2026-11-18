@@ -5,6 +5,7 @@ export type WaybillPrintData = {
   loadingNumber: string;
   contacts: DispatchContractContact[];
   rows: Record<string, Array<Omit<DispatchProductPrintRow, 'rate' | 'total'>>>;
+  loadedPieceCounts?: Record<string, string>;
 };
 
 export const DISPATCH_DOCUMENT_KINDS = [

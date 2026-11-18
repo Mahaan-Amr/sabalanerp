@@ -1162,7 +1162,6 @@ export default function SecurityVehiclesPage() {
           {activeSection === "sales-exit" && (
             <ErpSection
               title="خروج مجاز گیت"
-              description="فقط بارنامه‌ای که مجوز یک‌بارمصرف معتبر دارد در این فهرست دیده می‌شود؛ نسخه چاپی به‌تنهایی اجازه خروج نمی‌دهد."
             >
               {authorizedExits.length === 0 ? (
                 <ErpEmptyState
@@ -1183,8 +1182,13 @@ export default function SecurityVehiclesPage() {
                             <p className="mt-1 text-sm sds-text-muted">
                               {snapshot.driver?.firstName}{" "}
                               {snapshot.driver?.lastName} ·{" "}
-                              {snapshot.plate?.plate || "بدون پلاک"}
+                              {authorization.summary?.driverSource === "PERSONAL_PICKUP" ? "سواری" : snapshot.plate?.plate || "بدون پلاک"}
                             </p>
+                            {authorization.summary?.personalPickup && <div className="mt-2 space-y-1 text-sm sds-text-secondary">
+                              <p>مشتری: {authorization.summary.customerName}</p>
+                              {authorization.summary.personalPickup.partners.map((partner: any) => <p key={partner.caseId}>همکار: {partner.name}</p>)}
+                              <p>قرارداد: {authorization.summary.personalPickup.contracts.map((contract: any) => contract.number).join("، ")}</p>
+                            </div>}
                             <p className="mt-1 text-xs sds-text-muted">
                               اعتبار تا{" "}
                               {new Date(

@@ -4,11 +4,12 @@ import { canonicalHash } from '@sabalanerp/partner-sales-contracts';
 import { historicalAccountingFixture, writerBoundAccountingFixture } from './partnerAccountingHistoricalReadFixture';
 const json = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value));
 
-export async function seedHistoricalAccountingRead(database: PrismaClient, password = 'HistoricalAccountingQa2026!', writerBound = false): Promise<{
+export async function seedHistoricalAccountingRead(database: PrismaClient, password = 'HistoricalAccountingQa2026!', writerBound = false,
+  identity: { invoiceId?: string; customerContractNumber?: string } = {}): Promise<{
   fixture: Awaited<ReturnType<typeof historicalAccountingFixture>> | Awaited<ReturnType<typeof writerBoundAccountingFixture>>;
   actorId: string; username: string; password: string;
 }> {
-    const f = writerBound ? await writerBoundAccountingFixture(true) : await historicalAccountingFixture();
+    const f = writerBound ? await writerBoundAccountingFixture(true) : await historicalAccountingFixture('DRAFT', identity);
     const row = f.row;
     await database.$transaction(async tx => {
       // Fixture assembly only, in the isolated exact-schema database. This

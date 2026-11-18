@@ -40,6 +40,7 @@ export const projectDispatchCaseTimeline = (events: TimelineEvent[], access: { w
 const snapshotName = (snapshot: unknown) => {
   if (!snapshot || typeof snapshot !== 'object') return 'راننده';
   const data = snapshot as Record<string, any>;
+  if (data.kind === "PERSONAL_PICKUP_SELECTION") return "راننده شخصی";
   return data.driverName || data.fullName || [data.firstName, data.lastName].filter(Boolean).join(' ') || 'راننده';
 };
 
@@ -59,12 +60,12 @@ export const listDispatchCases = async (prisma: PrismaClient, access: { workspac
     select: { id: true, status: true, admittedAt: true, updatedAt: true, loadingId: true, admissionSnapshot: true,
       internalDriver: { select: { personnelId: true } },
       loading: { select: { id: true, loadingNumber: true } },
-      allocationRevisions: { where: { loadingId: filters.loadingId }, select: { loading: { select: { loadingNumber: true } }, candidate: { select: { status: true, waybills: { select: { number: true, status: true }, orderBy: { issuedAt: 'desc' }, take: 1 } } } }, orderBy: [{ finalizedAt: 'desc' }, { revisionNumber: 'desc' }], take: 1 },
+      allocationRevisions: { where: { loadingId: filters.loadingId }, select: { loadingId: true, loading: { select: { loadingNumber: true } }, candidate: { select: { status: true, waybills: { select: { number: true, status: true }, orderBy: { issuedAt: 'desc' }, take: 1 } } } }, orderBy: [{ finalizedAt: 'desc' }, { revisionNumber: 'desc' }], take: 1 },
     },
     orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }], take: 100,
   });
   return turns.map((turn) => ({ id: turn.id, status: turn.status, admittedAt: turn.admittedAt, updatedAt: turn.updatedAt,
-    loadingId: filters.loadingId ?? turn.loadingId,
+    loadingId: filters.loadingId ?? turn.loadingId ?? (access.workspace === 'accounting' ? turn.allocationRevisions[0]?.loadingId ?? null : null),
     loadingNumber: (filters.loadingId === undefined || filters.loadingId === turn.loadingId ? turn.loading?.loadingNumber : null)
       || turn.allocationRevisions[0]?.loading.loadingNumber || null,
     subjectId: turn.internalDriver?.personnelId || null, driverName: access.permission === 'view' ? 'Redacted' : snapshotName(turn.admissionSnapshot),
@@ -84,7 +85,8 @@ export const getDispatchCaseTimeline = async (prisma: PrismaClient, queueTurnId:
     const loadingId = (event.payload as { loadingId?: string } | null)?.loadingId;
     return !filters.loadingId || !loadingId || loadingId === filters.loadingId;
   });
-  const events: TimelineEvent[] = queueEvents.map((item) => ({ id: item.id, station: 'GUARD', eventType: item.eventType,
+  const events: TimelineEvent[] = queueEvents.map((item) => ({ id: item.id, station: turn.driverSource === 'PERSONAL_PICKUP'
+    && !['PHYSICAL_EXIT_RECORDED', 'MANUAL_OUTAGE_EXIT_REGISTERED'].includes(item.eventType) ? 'LOGISTICS' : 'GUARD', eventType: item.eventType,
     occurredAt: item.recordedAt.toISOString(), actorId: item.actorId, detail: { fromStatus: item.fromStatus, toStatus: item.toStatus, reason: item.reason, ...(item.payload as any) } }));
   const aggregateIds = [turn.id];
   for (const revision of turn.allocationRevisions) {

@@ -35,6 +35,8 @@ for the same contract.
   runs `prisma migrate deploy`, reads them again, and persists the comparison. Repeating the command records a
   second immutable run that proves deploy idempotency.
 
+Standard waybill downloads and print handoffs can regenerate an older layout under the same waybill number and date after verifying the stored file and issued allocation evidence. Original artifacts remain immutable and available with `original=true` on the download route. Handoff records capture the digest and size of the delivered bytes. Historical fields absent from verified evidence are left blank.
+
 Primary `WAYBILL` and `STATEMENT` artifacts are each unique per waybill. Adjustment artifacts require a positive,
 waybill-local sequence linked one-to-one to a posted correction. Successful print handoff is represented by ordered
 artifact items; failed transfer attempts retain failure evidence and do not create successful items.

@@ -887,6 +887,7 @@ enum GuardDriverSource {
   INTERNAL
   EXTERNAL
   CUSTOMER_PICKUP
+  PERSONAL_PICKUP
 }
 
 enum GuardDriverQueueTurnStatus {
@@ -3090,6 +3091,7 @@ model LogisticsLoading {
   cancelledAt                  DateTime?
   cancelledBy                  String?
   cancellationReason           String?
+  sepidarLoadingReference      String?                            @unique
   createdBy                    String
   createdAt                    DateTime                           @default(now())
   updatedAt                    DateTime                           @updatedAt
@@ -3863,6 +3865,7 @@ model DispatchOtpChallenge {
   id             String                      @id @default(cuid())
   sessionId      String
   digest         String
+  code           String? @ignore             // Retained for migration compatibility. OTP custody is digest-only.
   expiresAt      DateTime
   resendAfter    DateTime
   incorrectCount Int                         @default(0)

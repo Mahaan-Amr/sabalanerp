@@ -1,0 +1,1 @@
+ALTER TYPE "GuardDriverSource" ADD VALUE 'PERSONAL_PICKUP';

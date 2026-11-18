@@ -12,6 +12,7 @@ import {
   SalesInvoiceError,
 } from "../salesDispatchInvoice/source";
 import { PrismaDispatchDocumentSourceReader } from "../dispatchDocuments/prismaSourceReader";
+import type { PublishedDispatchArtifact } from "../dispatchDocuments/contracts";
 import { renderDispatchDocumentHtml } from "../../documents/dispatch/dispatchDocumentPdf";
 import { renderSalesInvoice } from "../salesDispatchInvoice/render";
 import { freezeSalesInvoiceCorrection } from "../salesDispatchInvoice/correction";
@@ -421,6 +422,42 @@ async function run() {
         assert.doesNotMatch(waybillHtml, /نشانی فرضی|نرخ - ریال|مبلغ کل - ریال|۴۰ \/ متر طول/);
         assert.match(waybillHtml, /سنگ مصوب[\s\S]*برش طولی[\s\S]*ابزار نیم‌لول[\s\S]*ساب آزمون/);
         assert.doesNotMatch(JSON.stringify(waybillSource.waybill.print), /"rate"|"total"/);
+        const oldArtifact: PublishedDispatchArtifact = {
+          id: 'test-waybill-pdf', waybillId: 'test-waybill', kind: 'WAYBILL',
+          templateVersion: 'dispatch-test-contract-table', storageKey: 'dispatch-documents/test-waybill-pdf.pdf',
+          adjustmentSequence: null, generatorVersion: 'chromium-pdf-v1', sourceVersionIdentities: {},
+          mediaType: 'application/pdf', publishedAt: waybillSource.waybill.issuedAt, byteLength: 3, sha256: bytesHash(Buffer.from('old')),
+        };
+        const savedWaybill = {
+          id: oldArtifact.waybillId, candidateId: candidates[0], number: 42n, status: 'VOIDED',
+          issuedAt: new Date(waybillSource.waybill.issuedAt), replacesWaybillId: null,
+          snapshot: waybillSource.waybillSnapshot, integrityHash: sourceHash(waybillSource.waybillSnapshot),
+          candidate: { allocationRevisionId: waybillSource.allocationRevisionId },
+        };
+        const reprintClient = new Proxy(client, {
+          get(target, key, receiver) {
+            if (key === 'dispatchDocumentArtifact') return { findUnique: async () => ({
+              id: oldArtifact.id, waybillId: oldArtifact.waybillId, waybill: savedWaybill,
+              sourceIntegrityHash: waybillSource.sourceIntegrityHash,
+            }) };
+            if (key === '$transaction') return async (work: (tx: PrismaClient) => Promise<unknown>) => work(reprintClient);
+            return Reflect.get(target, key, receiver);
+          },
+        });
+        const reprintReader = new PrismaDispatchDocumentSourceReader(reprintClient, 'dispatch-test', 'chromium-pdf-v1');
+        const reprinted = await reprintReader.reprintWaybill(oldArtifact, async input => {
+          assert.equal(input.waybillNumber, '42');
+          assert.equal(input.issuedAt, waybillSource.waybill.issuedAt);
+          assert.equal(input.kind, 'WAYBILL');
+          const bytes = Buffer.from(renderDispatchDocumentHtml(input));
+          return { bytes, metadata: { documentId: input.documentId, kind: input.kind, mimeType: 'application/pdf',
+            size: bytes.length, sha256: bytesHash(bytes), templateVersion: input.templateVersion, generatorVersion: 'chromium-pdf-v1' } };
+        });
+        assert.ok(reprinted);
+        assert.match(Buffer.from(reprinted).toString(), /باطل‌شده/);
+        assert.match(Buffer.from(reprinted).toString(), /نشانی ذخیره‌شدهٔ قرارداد/);
+        assert.doesNotMatch(Buffer.from(reprinted).toString(), /نرخ - ریال|مبلغ کل - ریال/);
+        assert.equal(await reprintReader.reprintWaybill({ ...oldArtifact, templateVersion: 'dispatch-test-contract-table-v2' }), undefined);
         const financialCount = await tx.accountingFinancialRecord.count();
         const issuedParts = await tx.accountingDispatchCandidate.findMany({
           where: { id: { in: candidates } }, select: { id: true, allocationRevisionId: true },
@@ -466,6 +503,33 @@ async function run() {
         assert.match(invoiceHtml, /برش طولی[\s\S]*۳۰ \/ متر طول/);
         assert.match(invoiceHtml, /ساب آزمون[\s\S]*۲۰ \/ متر مربع/);
         assert.match(invoiceHtml, /امضای تحویل‌گیرنده/);
+        const record = await tx.salesDispatchInvoice.findUniqueOrThrow({ where: { id: issued.id } });
+        const { print, pdfLayoutVersion: _pdfLayoutVersion, ...legacySnapshot } = record.snapshot as Prisma.JsonObject;
+        let historicalSnapshot = { ...legacySnapshot, print };
+        const legacyBytes = Buffer.from("legacy invoice artifact");
+        const legacyClient = new Proxy(client, {
+          get(target, key, receiver) {
+            if (key === "salesDispatchInvoice") return {
+              findFirst: async () => ({ ...record, snapshot: historicalSnapshot, pdf: legacyBytes, pdfSha256: bytesHash(legacyBytes) }),
+            };
+            return Reflect.get(target, key, receiver);
+          },
+        });
+        const legacyService = createSalesInvoiceService(new Proxy(wrapped, {
+          get(target, key, receiver) {
+            if (key === "$transaction") return async (work: (database: PrismaClient) => Promise<unknown>) => work(legacyClient);
+            return Reflect.get(target, key, receiver);
+          },
+        }), async (snapshot, reason) => Buffer.from(renderSalesInvoice(snapshot, reason)));
+        const refreshed = await legacyService.download(ctx, loading.id, issued.id);
+        assert.equal(refreshed.number, issued.number);
+        assert.match(Buffer.from(refreshed.bytes).toString(), /ابزار نیم‌لول[\s\S]*۴۰ \/ متر طول/);
+        assert.match(Buffer.from(refreshed.bytes).toString(), /بلوار دکتر حسابی/);
+        historicalSnapshot = { ...legacySnapshot, print: undefined };
+        const withoutPrint = await legacyService.download(ctx, loading.id, issued.id);
+        assert.match(Buffer.from(withoutPrint.bytes).toString(), /ابزار نیم‌لول[\s\S]*۴۰ \/ متر طول/);
+        assert.equal(bytesHash((await legacyService.download(ctx, loading.id, issued.id, false, true)).bytes), bytesHash(legacyBytes));
+        assert.equal((await tx.salesDispatchInvoice.findUniqueOrThrow({ where: { id: issued.id } })).pdfSha256, record.pdfSha256);
         assert.equal(
           (await service.list(ctx, loading.id)).invoices[0].status,
           "ISSUED",

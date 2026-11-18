@@ -52,7 +52,7 @@ const biometricErrorText = (message: string) => ({
   'Fingerprint capture image was not found.': 'تصویر اثر انگشت برای این ثبت موجود نیست.',
   'The protected enrollment is unavailable.': 'اثر انگشت فعال در دسترس نیست؛ ثبت بیومتریک راننده را بررسی کنید.',
   'This session does not accept biometric verification.': 'این نوبت برای بررسی اثر انگشت فعال نیست؛ تأیید هویت را دوباره آغاز کنید.',
-  'A qualifying biometric failure is required.': 'روش جایگزین فقط پس از خطای معتبر حسگر یا سه عدم تطبیق معتبر در همین نوبت مجاز است.',
+  'A qualifying biometric failure is required.': 'روش جایگزین فقط پس از خطای معتبر حسگر یا دو عدم تطبیق معتبر پیاپی در همین نوبت مجاز است.',
   'The confirmation session is not active.': 'این نوبت تأیید هویت فعال نیست؛ وضعیت بارنامه را بررسی و نوبت جدید آغاز کنید.',
   'The confirmation session expired.': 'مهلت تأیید هویت تمام شده است؛ نوبت جدید آغاز کنید.',
   'Physical enrollment commands are disabled in simulator mode.': 'محیط محلی در حالت شبیه‌سازی است و فرمان حسگر واقعی صادر نمی‌کند.',

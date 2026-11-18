@@ -7,7 +7,9 @@ import {
   ErpBadge,
   ErpButton,
   ErpCard,
+  ErpDisclosure,
   ErpEmptyState,
+  ErpField,
   ErpInlineState,
   ErpInput,
   ErpListPage,
@@ -28,6 +30,26 @@ import { normalizeDigits } from "@/lib/numberFormat";
 
 type DispatchNotice = { kind: "success" | "error"; text: string };
 type DispatchSection = "candidates" | "confirmation" | "cases";
+type ReferenceAuditEntry = {
+  id: string;
+  actorId: string;
+  createdAt: string;
+  beforeState?: { sepidarLoadingReference: string | null } | null;
+  afterState?: { sepidarLoadingReference: string | null } | null;
+  note?: string | null;
+};
+type ReferenceCandidate = {
+  loadingId: string;
+  canManageSepidarLoadingReference: boolean;
+  sepidarLoadingReference: string | null;
+  sepidarLoadingReferenceHistory: ReferenceAuditEntry[];
+};
+type ReferenceError = { text: string; stale?: boolean; reason?: boolean };
+const referenceLabel = "شماره بارگیری سپیدار";
+const dispatchCandidateAccessDenied = (error: unknown) => {
+  const status = (error as { response?: { status?: number } })?.response?.status;
+  return status === 401 || status === 403;
+};
 type ReasonAction = {
   type: "reject" | "void" | "replace" | "revoke" | "reconstruct";
   id: string;
@@ -53,6 +75,12 @@ export default function AccountingDispatchPage() {
   const [search, setSearch] = useState("");
   const [voidInvoiceLoadingId, setVoidInvoiceLoadingId] = useState<string | null>(null);
   const [detailCandidateId, setDetailCandidateId] = useState<string | null>(null);
+  const [referenceLoadingId, setReferenceLoadingId] = useState<string | null>(null);
+  const [referenceInput, setReferenceInput] = useState("");
+  const [referenceExpected, setReferenceExpected] = useState<string | null>(null);
+  const [referenceVersion, setReferenceVersion] = useState<string | null>(null);
+  const [referenceReason, setReferenceReason] = useState("");
+  const [referenceError, setReferenceError] = useState<ReferenceError | null>(null);
   const [loading, setLoading] = useState(true);
   const [dispatchCandidates, setDispatchCandidates] = useState<any[]>([]);
   const [dispatchDetails, setDispatchDetails] = useState<Record<string, DispatchDocumentCase>>({});
@@ -84,6 +112,8 @@ export default function AccountingDispatchPage() {
       ]);
       if (candidates.status === "fulfilled" && candidates.value.data.success)
         setDispatchCandidates(candidates.value.data.data || []);
+      if (candidates.status === "rejected" && dispatchCandidateAccessDenied(candidates.reason))
+        setDispatchCandidates([]);
       if (
         capabilities.status === "fulfilled" &&
         capabilities.value.data.success
@@ -121,6 +151,10 @@ export default function AccountingDispatchPage() {
       setDispatchNotice(typeof notice === "string" ? { kind: "success", text: notice } : notice(response.data?.data));
       if (response.data?.data?.id && response.data?.data?.waybillId)
         setConfirmation(response.data.data);
+      if (response.data?.data?.sessionId && response.data.data.method)
+        setConfirmation((current: any) => current?.id === response.data.data.sessionId
+          ? { ...current, method: response.data.data.method }
+          : current);
       if (response.data?.data?.authorization)
         setConfirmation((current: any) => ({
           ...current,
@@ -160,7 +194,7 @@ export default function AccountingDispatchPage() {
       return dispatchConfirmationAPI.startSession(waybillId, workstationId);
     }, data => ({
       kind: "success",
-      text: data?.authorization?.id ? "هویت راننده قبلاً تأیید شده است." : "تأیید راننده آماده انجام است.",
+      text: data?.authorization?.id ? "مجوز خروج صادر شد." : "تأیید راننده آماده انجام است.",
     }));
     if (succeeded) setSection("confirmation");
   };
@@ -260,7 +294,7 @@ export default function AccountingDispatchPage() {
   const filteredCandidates = dispatchCandidates.filter(candidate => {
     if (!query) return true;
     const detail = dispatchDetails[candidate.id];
-    const values = [candidate.summary?.loadingNumber, candidate.summary?.driverName, candidate.summary?.plate,
+    const values = [candidate.summary?.loadingNumber, candidate.sepidarLoadingReference, candidate.summary?.driverName, candidate.summary?.plate,
       candidate.summary?.customerName, candidate.summary?.projectName, candidate.summary?.projectAddress,
       ...(candidate.waybills || []).map((waybill: any) => waybill.number),
       ...(candidate.lines || []).map((line: any) => line.contractNumber),
@@ -284,6 +318,92 @@ export default function AccountingDispatchPage() {
     data => ({ kind: "success", text: data?.verified ? "شماره همراه تأیید شد." : "کد به شماره همراه ثبت‌شده در پذیرش ارسال شد." }),
   );
   const actionsBlocked = dispatchTimelineStale || dispatchPending;
+  const candidatesByLoading = new Map<string, ReferenceCandidate>(
+    dispatchCandidates.filter(candidate => candidate.loadingId).map(candidate => [candidate.loadingId, candidate]),
+  );
+  const referenceForLoading = (id?: string | null) => id ? candidatesByLoading.get(id)?.sepidarLoadingReference : null;
+  const referenceAction = (candidate?: ReferenceCandidate): ErpAction[] => {
+    if (!candidate?.canManageSepidarLoadingReference || !dispatchCapabilities.canManageAccountingCandidates) return [];
+    const current = candidate.sepidarLoadingReference;
+    const version = candidate.sepidarLoadingReferenceHistory?.[0]?.id ?? null;
+    return [{
+      label: current || version ? "اصلاح شماره بارگیری سپیدار" : "ثبت شماره بارگیری سپیدار",
+      icon: FaFileAlt,
+      disabled: actionsBlocked,
+      onClick: () => {
+        setReferenceLoadingId(candidate.loadingId);
+        setReferenceExpected(current);
+        setReferenceVersion(version);
+        setReferenceInput(current ?? "");
+        setReferenceReason("");
+        setReferenceError(null);
+      },
+    }];
+  };
+  const referenceIsCorrection = Boolean(referenceExpected || referenceVersion);
+  const runReferenceAction = async (action: () => Promise<void>, onFailure: (error: unknown) => void) => {
+    if (dispatchPendingRef.current) return;
+    dispatchPendingRef.current = true;
+    setDispatchPending(true);
+    try {
+      await action();
+    } catch (error) {
+      onFailure(error);
+    } finally {
+      dispatchPendingRef.current = false;
+      setDispatchPending(false);
+    }
+  };
+  const saveReference = async () => {
+    if (!referenceLoadingId || dispatchTimelineStale || referenceError?.stale) return;
+    await runReferenceAction(async () => {
+      setReferenceError(null);
+      const saved = await accountingAPI.registerSepidarLoadingReference(referenceLoadingId, {
+        value: referenceInput.trim() ? referenceInput : null,
+        expectedVersion: referenceVersion,
+        reason: referenceIsCorrection ? referenceReason : undefined,
+      });
+      const { value, auditEntry } = saved.data.data as { value: string | null; auditEntry: ReferenceAuditEntry };
+      setDispatchCandidates(current => current.map(candidate => candidate.loadingId === referenceLoadingId ? {
+        ...candidate,
+        sepidarLoadingReference: value,
+        sepidarLoadingReferenceHistory: [auditEntry, ...(candidate.sepidarLoadingReferenceHistory ?? [])],
+      } : candidate));
+      setReferenceLoadingId(null);
+      setDispatchNotice({ kind: "success", text: referenceIsCorrection ? "شماره بارگیری سپیدار اصلاح شد." : "شماره بارگیری سپیدار ثبت شد." });
+    }, error => {
+      const code = (error as { response?: { data?: { code?: string } } })?.response?.data?.code;
+      setReferenceError({
+        text: userFacingError(error, "ثبت شماره بارگیری سپیدار انجام نشد."),
+        stale: code === "SEPIDAR_REFERENCE_STALE",
+        reason: code === "SEPIDAR_REFERENCE_REASON_REQUIRED",
+      });
+    });
+  };
+  const refreshReference = async () => {
+    await runReferenceAction(async () => {
+      const refreshed = await accountingAPI.getDispatchCandidates();
+      const rows = refreshed.data.data || [];
+      setDispatchCandidates(rows);
+      const candidate: ReferenceCandidate | undefined = rows.find((row: ReferenceCandidate) => row.loadingId === referenceLoadingId);
+      if (!candidate?.canManageSepidarLoadingReference) {
+        setReferenceLoadingId(null);
+        setDispatchNotice({ kind: "error", text: "امکان اصلاح شماره برای این بارگیری وجود ندارد." });
+        return;
+      }
+      setReferenceExpected(candidate.sepidarLoadingReference);
+      setReferenceVersion(candidate.sepidarLoadingReferenceHistory?.[0]?.id ?? null);
+      setReferenceError(null);
+    }, error => {
+      if (dispatchCandidateAccessDenied(error)) {
+        setDispatchCandidates([]);
+        setReferenceLoadingId(null);
+        setDispatchNotice({ kind: "error", text: "دسترسی به اطلاعات بارگیری مجاز نیست." });
+        return;
+      }
+      setReferenceError({ text: userFacingError(error, "تازه‌سازی انجام نشد."), stale: true });
+    });
+  };
   const canManageLoadingInvoices = (id: string) =>
     !actionsBlocked && dispatchCapabilities.canManageAccountingCandidates &&
     dispatchCandidates.some(candidate => candidate.loadingId === id) &&
@@ -308,6 +428,7 @@ export default function AccountingDispatchPage() {
     const canManage = candidate.canManage && dispatchCapabilities.canManageAccountingCandidates;
     const actions: ErpAction[] = [
       { label: "جزئیات اقلام و اسناد بارگیری", icon: FaFileAlt, onClick: () => showCandidate(candidate.id) },
+      ...referenceAction(candidate),
     ];
     if (["REJECTED", "RETURNED"].includes(candidate.status) && candidate.loadingId) {
       actions.push({ label: "پیگیری بارگیری در لجستیک", icon: FaTruck, href: `/dashboard/logistics/loadings/${encodeURIComponent(candidate.loadingId)}` });
@@ -336,8 +457,8 @@ export default function AccountingDispatchPage() {
     }
     if (waybill?.status === "ISSUED") {
       if (dispatchCapabilities.canManageAccountingConfirmation) {
-        const pickup = candidate.summary?.driverSource === "CUSTOMER_PICKUP";
-        actions.push({ label: pickup ? "ثبت مجوز خروج" : "تأیید هویت راننده", icon: pickup ? FaTruck : FaFingerprint,
+        const pickup = ["CUSTOMER_PICKUP", "PERSONAL_PICKUP"].includes(candidate.summary?.driverSource);
+        actions.push({ label: pickup ? "صدور مجوز خروج" : "تأیید هویت راننده", icon: pickup ? FaTruck : FaFingerprint,
           disabled: actionsBlocked, onClick: () => void beginConfirmation(waybill.id, pickup) });
       }
       if (canManage) {
@@ -387,8 +508,8 @@ export default function AccountingDispatchPage() {
       filters={section !== "confirmation" ? [{
         id: "dispatch-search", type: "search", label: "جست‌وجو", value: search, onChange: setSearch,
         placeholder: section === "candidates"
-          ? "شماره بارگیری، مشتری، پروژه، قرارداد، راننده، پلاک یا شماره بارنامه"
-          : "شماره بارگیری، راننده یا وضعیت",
+          ? "شماره بارگیری، شماره بارگیری سپیدار، مشتری، پروژه، قرارداد، راننده، پلاک یا شماره بارنامه"
+          : "شماره بارگیری، شماره بارگیری سپیدار، راننده یا وضعیت",
       }] : []}
       isLoading={section === "candidates" && loading}
       mobileLayout="table"
@@ -396,9 +517,10 @@ export default function AccountingDispatchPage() {
       rowKey={candidate => candidate.id}
       columns={[
         { id: "loading", header: "بارگیری", priority: "primary", cell: candidate => candidate.summary?.loadingNumber ? dispatchCaseReference(candidate.summary.loadingNumber) : "—" },
+        { id: "sepidar", header: referenceLabel, cell: candidate => <bdi>{candidate.sepidarLoadingReference ?? "—"}</bdi> },
         { id: "driver", header: "راننده و پلاک", cell: candidate => <><strong>{candidate.summary?.driverName || "راننده نامشخص"}</strong><div className="sds-text-secondary">{candidate.summary?.plate || "—"}</div></> },
-        { id: "customer", header: "مشتری و پروژه", cell: candidate => <><div>{candidate.summary?.customerName || "—"}</div><div className="sds-text-secondary">{candidate.summary?.projectName || "—"}</div></> },
-        { id: "status", header: "وضعیت", cell: candidate => <ErpBadge tone={candidate.status === "ACCEPTED" ? "success" : ["REJECTED", "RETURNED"].includes(candidate.status) ? "danger" : "warning"}>{dispatchStatusLabels[candidate.status] || operationalStatusLabel(candidate.status)}</ErpBadge> },
+        { id: "customer", header: "مشتری و پروژه", cell: candidate => <><div>{candidate.summary?.customerName || "—"}</div>{candidate.summary?.personalPickup && <div className="sds-text-secondary">{candidate.summary.personalPickup.partners.map((partner: any) => partner.name).join("، ")} · قرارداد {candidate.summary.personalPickup.contracts.map((contract: any) => contract.number).join("، ")}</div>}<div className="sds-text-secondary">{candidate.summary?.projectName || "—"}</div></> },
+        { id: "status", header: "وضعیت", cell: candidate => <ErpBadge tone={candidate.status === "ACCEPTED" ? "success" : ["REJECTED", "RETURNED"].includes(candidate.status) ? "danger" : "warning"}><span className="whitespace-nowrap">{dispatchStatusLabels[candidate.status] || operationalStatusLabel(candidate.status)}</span></ErpBadge> },
         { id: "waybill", header: "بارنامه", cell: candidate => activeWaybillFor(candidate) ? Number(activeWaybillFor(candidate).number).toLocaleString("fa-IR") : "—" },
       ]}
       rowActions={rowActions}
@@ -416,7 +538,9 @@ export default function AccountingDispatchPage() {
           confirmation?.id &&
           dispatchCapabilities.canManageAccountingConfirmation && (
             <ErpCard className="p-4">
-              <strong>تأیید هویت راننده</strong>
+              <strong>{confirmation?.method === "PERSONAL_PICKUP_ACCOUNTING" ? "مجوز خروج راننده شخصی" : "تأیید هویت راننده"}</strong>
+              <p className="mt-1 text-sm sds-text-secondary">شماره بارگیری سپیدار: <bdi>{dispatchCandidates.find(candidate =>
+                candidate.waybills?.some((waybill: any) => waybill.id === confirmation.waybillId))?.sepidarLoadingReference || "—"}</bdi></p>
               {confirmationActions.biometric && <p className="mt-1 text-sm sds-text-muted">
                 یک انگشت ثبت‌شده را انتخاب کنید و تا پایان بررسی روی حسگر نگه
                 دارید.
@@ -468,52 +592,56 @@ export default function AccountingDispatchPage() {
                           dispatchConfirmationAPI.beginFallback(
                             confirmation.id,
                           ),
-                        "روش جایگزین فعال شد.",
-                      )
-                    }
-                  />
-                )}
-                {confirmationActions.otp && (
-                  <ErpButton
-                    label="ارسال دوباره رمز"
-                    variant="ghost"
-                    disabled={dispatchTimelineStale || dispatchPending}
-                    onClick={() =>
-                      void runDispatch(
-                        () =>
-                          dispatchConfirmationAPI.resendOtp(confirmation.id),
-                        "رمز دوباره ارسال شد.",
+                        "روش جایگزین فعال است. پس از تأیید رمز راننده، تأیید سرپرست گارد لازم است.",
                       )
                     }
                   />
                 )}
               </div>
               {confirmationActions.otp && (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <ErpInput
-                    aria-label="رمز یک‌بارمصرف راننده"
-                    value={otpCode}
-                    onChange={(event) => setOtpCode(event.target.value)}
-                  />
-                  <ErpButton
-                    label="تأیید رمز"
-                    disabled={
-                      dispatchTimelineStale ||
-                      dispatchPending ||
-                      !otpCode.trim()
-                    }
-                    onClick={() =>
-                      void runDispatch(
-                        () =>
-                          dispatchConfirmationAPI.verifyOtp(
-                            confirmation.id,
-                            otpCode.trim(),
-                          ),
-                        "رمز راننده تأیید شد.",
-                      )
-                    }
-                  />
-                </div>
+                <form
+                  className="mt-4 w-full max-w-sm space-y-4"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    if (dispatchTimelineStale || dispatchPending || otpCode.length !== 6) return;
+                    void runDispatch(
+                      () => dispatchConfirmationAPI.verifyOtp(confirmation.id, otpCode),
+                      "رمز راننده تأیید شد. تأیید نهایی را سرپرست گارد تکمیل می‌کند.",
+                    );
+                  }}
+                >
+                  <ErpField label="رمز یک‌بارمصرف راننده" hint="کد ۶ رقمی پیامک‌شده به راننده را وارد کنید.">
+                    <ErpInput
+                      value={otpCode}
+                      onChange={(event) => setOtpCode(normalizeDigits(event.target.value).replace(/[^0-9]/g, ""))}
+                      dir="ltr"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      maxLength={6}
+                      pattern="[0-9]{6}"
+                      className="text-center text-xl tabular-nums"
+                      disabled={dispatchTimelineStale || dispatchPending}
+                    />
+                  </ErpField>
+                  <div className="flex flex-wrap gap-2">
+                    <ErpButton
+                      type="submit"
+                      label={dispatchPending ? "در حال انجام…" : "تأیید رمز"}
+                      disabled={dispatchTimelineStale || dispatchPending || otpCode.length !== 6}
+                    />
+                    <ErpButton
+                      label="ارسال دوباره رمز"
+                      variant="ghost"
+                      disabled={dispatchTimelineStale || dispatchPending}
+                      onClick={() =>
+                        void runDispatch(
+                          () => dispatchConfirmationAPI.resendOtp(confirmation.id),
+                          "رمز دوباره ارسال شد.",
+                        )
+                      }
+                    />
+                  </div>
+                </form>
               )}
               {confirmation.authorization?.id && (
                 <div className="mt-4">
@@ -545,34 +673,68 @@ export default function AccountingDispatchPage() {
         <RoleAwareDispatchCases
           workspace="accounting"
           onStaleChange={setDispatchTimelineStale}
-          tableFilter={item => !query || [item.loadingNumber, item.driverName, operationalStatusLabel(item.status)]
+          tableFilter={item => !query || [item.loadingNumber, referenceForLoading(item.loadingId), item.driverName, operationalStatusLabel(item.status)]
             .some(value => normalize(value).includes(query))}
+          tableColumns={[{ id: "sepidar", header: referenceLabel, cell: item => <bdi>{referenceForLoading(item.loadingId) ?? "—"}</bdi> }]}
+          tableRowActions={item => referenceAction(item.loadingId ? candidatesByLoading.get(item.loadingId) : undefined)}
         />
       </div>
-      <ErpSheet open={Boolean(selectedCandidate)} onClose={() => setDetailCandidateId(null)} title="جزئیات اقلام و اسناد بارگیری" presentation="modal" size="wide">
-        {selectedCandidate && <>
-          <strong>{selectedCandidate.summary?.driverName || "راننده نامشخص"}</strong>
+      <ErpSheet open={Boolean(selectedCandidate)} onClose={() => setDetailCandidateId(null)}
+        title="جزئیات اقلام و اسناد بارگیری" presentation="modal" size="wide" pending={dispatchPending}>
+        {selectedCandidate && <div className="space-y-4">
+          <div className="space-y-1">
+            <strong>{selectedCandidate.summary?.driverName || "راننده نامشخص"}</strong>
+            <p className="text-sm sds-text-secondary">شماره بارگیری سپیدار: <bdi>{selectedCandidate.sepidarLoadingReference || "—"}</bdi></p>
+            {selectedCandidate.loadingStatus === "CANCELLED" && <ErpBadge tone="danger">بارگیری لغوشده</ErpBadge>}
+            {selectedCandidate.summary?.personalPickup && <div className="space-y-1 text-sm sds-text-secondary">
+              <p>مشتری: {selectedCandidate.summary.customerName}</p>
+              {selectedCandidate.summary.personalPickup.partners.map((partner: any) => <p key={partner.caseId}>همکار: {partner.name}</p>)}
+              <p>قرارداد: {selectedCandidate.summary.personalPickup.contracts.map((contract: any) => contract.number).join("، ")}</p>
+            </div>}
+            {selectedCandidate.summary?.driverSource === "CUSTOMER_PICKUP" && selectedCandidate.summary.plate && (
+              <p className="text-sm sds-text-secondary">پلاک <bdi dir="rtl">{selectedCandidate.summary.plate}</bdi></p>
+            )}
+            {selectedCandidate.summary?.projectAddress && (
+              <p className="text-sm sds-text-secondary">{selectedCandidate.summary.projectAddress}</p>
+            )}
+          </div>
+          {Boolean(selectedCandidate.sepidarLoadingReferenceHistory?.length) &&
+            <ErpDisclosure title="سابقه شماره بارگیری سپیدار" className="mt-3">
+              <div className="space-y-2">{selectedCandidate.sepidarLoadingReferenceHistory.map((entry: ReferenceAuditEntry) =>
+                <p key={entry.id} className="text-sm sds-text-secondary">
+                  <bdi>{entry.beforeState?.sepidarLoadingReference || "—"}</bdi> ← <bdi>{entry.afterState?.sepidarLoadingReference || "—"}</bdi>
+                  {' · '}{entry.actorId}{' · '}{new Date(entry.createdAt).toLocaleString('fa-IR')}
+                  {entry.note && <> · {entry.note}</>}
+                </p>)}</div>
+            </ErpDisclosure>}
           {selectedCandidate.summary?.driverSource === "CUSTOMER_PICKUP" && (
-            <div className="mt-3 space-y-2">
-              <p className="text-sm sds-text-secondary">پلاک {selectedCandidate.summary.plate}</p>
-              {selectedCandidate.pickupVerification?.verifiedAt && <ErpInlineState kind="success" title="شماره همراه تأیید شده است" />}
+            <>
+              {selectedCandidate.pickupVerification?.verifiedAt && <ErpBadge tone="success">شماره همراه تأیید شده است</ErpBadge>}
               {pendingPickupVerification(selectedCandidate) && selectedCandidate.canManage && (
-                <div className="flex flex-wrap items-end gap-2">
-                  <ErpButton label="ارسال کد پیامکی" variant="soft" disabled={actionsBlocked}
-                    onClick={() => void pickupVerification(selectedCandidate.id, "send")} />
-                  <ErpInput aria-label="کد پیامکی راننده متفرقه" placeholder="کد پیامکی" dir="ltr"
-                    inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={pickupCode}
-                    onChange={event => setPickupCode(event.target.value)} />
-                  <ErpButton label="تأیید کد" disabled={actionsBlocked || pickupCode.trim().length !== 6}
-                    onClick={async () => {
-                      if (await pickupVerification(selectedCandidate.id, "verify")) setPickupCode("");
-                    }} />
-                </div>
+                <ErpCard className="space-y-3 p-3 sm:p-4">
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                    <h3 className="font-semibold">تأیید شماره همراه</h3>
+                    <ErpButton label="ارسال کد پیامکی" variant="outline" disabled={actionsBlocked}
+                      onClick={() => void pickupVerification(selectedCandidate.id, "send")} />
+                  </div>
+                  <div className="grid items-end gap-2 sm:max-w-sm sm:grid-cols-[minmax(0,1fr)_auto]">
+                    <ErpField label="کد پیامکی راننده متفرقه">
+                      <ErpInput dir="ltr" className="text-center tabular-nums"
+                        inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={pickupCode} disabled={actionsBlocked}
+                        onChange={event => setPickupCode(normalizeDigits(event.target.value).replace(/[^0-9]/g, ""))} />
+                    </ErpField>
+                    <ErpButton label="تأیید کد" disabled={actionsBlocked || pickupCode.length !== 6}
+                      onClick={async () => {
+                        if (await pickupVerification(selectedCandidate.id, "verify")) setPickupCode("");
+                      }} />
+                  </div>
+                </ErpCard>
               )}
-              {dispatchNotice && <ErpInlineState kind={dispatchNotice.kind} title={dispatchNotice.text} />}
-            </div>
+              {dispatchNotice && (!selectedCandidate.pickupVerification?.verifiedAt || dispatchNotice.text !== "شماره همراه تأیید شد.") && (
+                <ErpInlineState kind={dispatchNotice.kind} title={dispatchNotice.text} />
+              )}
+            </>
           )}
-          {selectedCandidate.summary?.projectAddress && <p className="text-sm sds-text-secondary">{selectedCandidate.summary.projectAddress}</p>}
           {["REJECTED", "RETURNED"].includes(selectedCandidate.status) && selectedCandidate.dispositionReason && (
             <ErpInlineState kind="stale" title={`دلیل بازگرداندن: ${selectedCandidate.dispositionReason}`} />
           )}
@@ -631,7 +793,29 @@ export default function AccountingDispatchPage() {
               } catch (error) { preview.close(); throw error; }
             }}
             refreshKey={dispatchCandidates}/>}
-        </>}
+        </div>}
+      </ErpSheet>
+      <ErpSheet open={Boolean(referenceLoadingId)} title={referenceIsCorrection ? "اصلاح شماره بارگیری سپیدار" : "ثبت شماره بارگیری سپیدار"} presentation="modal"
+        pending={dispatchPending} onClose={() => { if (!dispatchPending) setReferenceLoadingId(null); }}
+        footer={<div className="flex justify-end gap-2">
+          <ErpButton label="انصراف" variant="ghost" disabled={dispatchPending} onClick={() => setReferenceLoadingId(null)} />
+          <ErpButton label={referenceIsCorrection ? referenceInput.trim() ? "ذخیره شماره" : "پاک‌کردن شماره" : "ثبت شماره"}
+            tone={referenceExpected && !referenceInput.trim() ? "danger" : "primary"}
+            disabled={actionsBlocked || referenceError?.stale || (!referenceExpected && !referenceInput.trim()) || (referenceIsCorrection && !referenceReason.trim())}
+            onClick={saveReference} />
+        </div>}>
+        <div className="space-y-3">
+          <ErpField label={referenceLabel} error={referenceError?.reason ? undefined : referenceError?.text}
+            hint={referenceIsCorrection ? <>شماره فعلی <bdi>{referenceExpected ?? "—"}</bdi></> : undefined}>
+            <ErpInput dir="ltr" inputMode="numeric" value={referenceInput}
+              onChange={event => { setReferenceInput(event.target.value); if (!referenceError?.stale) setReferenceError(null); }} />
+          </ErpField>
+          {referenceError?.stale && <ErpButton label="به‌روزرسانی شماره فعلی" variant="soft" disabled={dispatchPending} onClick={refreshReference} />}
+          {referenceIsCorrection && <ErpField label="دلیل اصلاح" required error={referenceError?.reason ? referenceError.text : undefined}>
+            <ErpInput maxLength={200} value={referenceReason}
+              onChange={event => { setReferenceReason(event.target.value); if (!referenceError?.stale) setReferenceError(null); }} />
+          </ErpField>}
+        </div>
       </ErpSheet>
       {voidInvoiceLoadingId && <SalesDispatchInvoices key={voidInvoiceLoadingId}
         loadingId={voidInvoiceLoadingId} workspace="accounting"

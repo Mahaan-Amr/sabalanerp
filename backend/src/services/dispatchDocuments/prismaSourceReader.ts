@@ -1,7 +1,10 @@
 import { createDispatchProductRows } from '../../utils/printTemplate';
 import { partnerPhysicalPrintDetails } from '../../utils/partnerProductPrint';
 import { readDispatchContractPrintSources } from './contractPrintSource';
-import type { WaybillPrintData } from './contracts';
+import type { PublishedDispatchArtifact, WaybillPrintData } from './contracts';
+import { renderDispatchDocumentPdf } from '../../documents/dispatch/dispatchDocumentPdf';
+import { dispatchRecoveryIntegrityHash } from '../dispatchDocumentAuditRecovery';
+import { canonicalApprovedPricingHash } from '../approvedPricing/domain';
 import { createHash } from 'node:crypto';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { assessBoundAllocationPricingFreshness, readBoundPricedAllocation,
@@ -17,7 +20,8 @@ const stable = (value: unknown): unknown => Array.isArray(value) ? value.map(sta
 export const dispatchDocumentSourceIntegrityHash = (input: { allocationRevisionId: string; allocationIntegrityHash: string; pricedAllocation: BoundPricedAllocationReadModel }) =>
   createHash('sha256').update(JSON.stringify(stable(input))).digest('hex');
 
-const sourceFrom = async (tx: Tx, candidateId: string, identity: PrimaryBundleIdentity, templateVersion: string, generatorVersion: string) => {
+const sourceFrom = async (tx: Tx, candidateId: string, identity: PrimaryBundleIdentity, templateVersion: string, generatorVersion: string,
+  reprint?: { frozenPrint?: WaybillPrintData }) => {
   const candidate = await tx.accountingDispatchCandidate.findUnique({ where: { id: candidateId }, include: {
     allocationRevision: { include: { lines: true } },
   } });
@@ -40,7 +44,8 @@ const sourceFrom = async (tx: Tx, candidateId: string, identity: PrimaryBundleId
       .filter(part => typeof part === 'string' && part.trim()).join(' ')]
     .find((name): name is string => typeof name === 'string' && Boolean(name.trim()))?.trim();
   const lineSnapshots = new Map(candidate.allocationRevision.lines.map(line => [line.id, record(line.snapshot)]));
-  const waybillTemplateVersion = `${templateVersion}-contract-table`;
+  const waybillTemplateVersion = `${templateVersion}-contract-table-v2`;
+  const frozenPrint = reprint?.frozenPrint;
   const print: WaybillPrintData = { loadingNumber: String(loading.number || ''), contacts: [], rows: Object.create(null) };
   const siblingDispatchRows = new Set(pricedAllocation.lines.map(line => line.productRowId));
   const physicalRows = (rows: ReturnType<ReturnType<typeof createDispatchProductRows>>) =>
@@ -51,12 +56,12 @@ const sourceFrom = async (tx: Tx, candidateId: string, identity: PrimaryBundleId
     if (!partnerCase || pricedAllocation.pricingVersions.length !== 1) {
       throw new DispatchDocumentEvidenceConflictError('Partner document ownership evidence is incomplete.');
     }
-    const contract = partnerCase.customerContractId
+    const contract = !reprint && partnerCase.customerContractId
       ? (await readDispatchContractPrintSources(tx, [partnerCase.customerContractId])).get(partnerCase.customerContractId)
       : undefined;
     if (contract) print.contacts.push(contract.contact);
     const revisionNumber = candidate.allocationRevision.partnerCaseRevision;
-    const frozen = revisionNumber == null ? null : await tx.partnerCaseRevision.findUnique({
+    const frozen = frozenPrint || revisionNumber == null ? null : await tx.partnerCaseRevision.findUnique({
       where: { caseId_revision: { caseId: pricedAllocation.pricingVersions[0].caseId, revision: revisionNumber } },
       select: { graph: true, integrityHash: true },
     });
@@ -97,7 +102,7 @@ const sourceFrom = async (tx: Tx, candidateId: string, identity: PrimaryBundleId
       waybill: { ...base, kind: 'WAYBILL' as const,
         customerName: String(customer.companyName || customer.name || 'نام مشتری ثبت نشده'),
         projectOrDestination: String(loading.destination || project.address || project.name || ''),
-        templateVersion: waybillTemplateVersion, driverName, print, documentId: identity.waybillDocumentId,
+        templateVersion: waybillTemplateVersion, driverName, print: frozenPrint ?? print, documentId: identity.waybillDocumentId,
         payload: { ...shared, allocationRevisionId: candidate.allocationRevisionId,
           lines: lines.map(({ grossAmount: _gross, allocatedDiscount: _discount, netAmount: _net, ...line }) => line) } },
       statement: { ...base, kind: 'STATEMENT' as const, documentId: identity.statementDocumentId,
@@ -105,10 +110,24 @@ const sourceFrom = async (tx: Tx, candidateId: string, identity: PrimaryBundleId
           grossAmount: pricedAllocation.totals.grossAmount, allocatedDiscount: pricedAllocation.totals.discountAmount,
           netAmount: pricedAllocation.totals.netAmount } } };
   }
-  const saved = await readDispatchContractPrintSources(tx, pricedAllocation.pricingVersions.map(version => version.contractId));
+  const saved = await readDispatchContractPrintSources(tx, reprint ? [] : pricedAllocation.pricingVersions.map(version => version.contractId));
   print.contacts = [...saved.values()].map(contract => contract.contact);
   const rowsByContract = new Map([...saved].map(([id, contract]) =>
     [id, createDispatchProductRows(contract.contractData, { siblingDispatchRows })]));
+  if (reprint && !frozenPrint) {
+    for (const bound of pricedAllocation.pricingVersions) {
+      const version = await tx.contractApprovedPricingVersion.findUnique({ where: { id: bound.pricingVersionId },
+        select: { sourceFinancialRecordId: true, sourceEvidence: true } });
+      if (!version) continue;
+      const expectedHash = record(record(version.sourceEvidence).financialApproval).sourceSnapshotHash;
+      const financial = await tx.accountingFinancialRecord.findUnique({ where: { id: version.sourceFinancialRecordId },
+        select: { contractId: true, sourceSnapshot: true } });
+      if (financial?.contractId === bound.contractId && expectedHash &&
+          canonicalApprovedPricingHash(financial.sourceSnapshot) === expectedHash) {
+        rowsByContract.set(bound.contractId, createDispatchProductRows(record(financial.sourceSnapshot).contractData, { siblingDispatchRows }));
+      }
+    }
+  }
   const contracts = new Map<string, { contractId: string; contractNumber: string; lines: any[] }>();
   for (const line of pricedAllocation.lines) {
     const sourceLine = candidate.allocationRevision.lines.find(item => item.id === line.allocationRevisionLineId);
@@ -117,7 +136,11 @@ const sourceFrom = async (tx: Tx, candidateId: string, identity: PrimaryBundleId
     const group = contracts.get(line.contractId) || { contractId: line.contractId,
       contractNumber: String(snapshot.contractNumber || saved.get(line.contractId)?.contact.contractNumber || 'ثبت نشده'), lines: [] };
     const projectRows = rowsByContract.get(line.contractId);
-    if (projectRows) print.rows[`${line.contractId}:${line.productRowId}`] = physicalRows(projectRows(line.productRowId));
+    const printKey = `${line.contractId}:${line.productRowId}`;
+    if (projectRows) print.rows[printKey] = physicalRows(projectRows(line.productRowId));
+    if (typeof snapshot.loadedPieceCount === 'string') {
+      (print.loadedPieceCounts ??= Object.create(null))[printKey] = snapshot.loadedPieceCount;
+    }
     group.lines.push({ contractItemId: line.contractItemId, productRowId: line.productRowId,
       label: String(snapshot.productName || snapshot.label || line.productRowId), unit: line.unit, quantity: line.quantity,
       grossAmount: line.grossAmount, allocatedDiscount: line.discountAmount, netAmount: line.netAmount });
@@ -145,7 +168,7 @@ const sourceFrom = async (tx: Tx, candidateId: string, identity: PrimaryBundleId
     waybill: { ...base, kind: 'WAYBILL' as const,
         customerName: String(customer.companyName || customer.name || 'نام مشتری ثبت نشده'),
         projectOrDestination: String(loading.destination || project.address || project.name || ''),
-        templateVersion: waybillTemplateVersion, driverName, print, documentId: identity.waybillDocumentId,
+        templateVersion: waybillTemplateVersion, driverName, print: frozenPrint ?? print, documentId: identity.waybillDocumentId,
       payload: { allocationRevisionId: candidate.allocationRevisionId, contracts: groups.map(group => ({ ...group,
         lines: group.lines.map(({ grossAmount: _gross, allocatedDiscount: _discount, netAmount: _net, ...line }) => line) })) } },
     statement: { ...base, kind: 'STATEMENT' as const, documentId: identity.statementDocumentId,
@@ -160,8 +183,9 @@ const sourceFrom = async (tx: Tx, candidateId: string, identity: PrimaryBundleId
 
 export class PrismaDispatchDocumentSourceReader implements DispatchDocumentSourceReader {
   constructor(private readonly prisma: PrismaClient, private readonly templateVersion: string, private readonly generatorVersion: string) {}
-  readPrimaryBundle(input: { candidateId: string; waybill: PrimaryBundleIdentity }) {
-    return this.prisma.$transaction(tx => sourceFrom(tx, input.candidateId, input.waybill, this.templateVersion, this.generatorVersion),
+  readPrimaryBundle(input: { candidateId: string; waybill: PrimaryBundleIdentity; historicalPrint?: boolean }) {
+    return this.prisma.$transaction(tx => sourceFrom(tx, input.candidateId, input.waybill, this.templateVersion, this.generatorVersion,
+      input.historicalPrint ? {} : undefined),
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
   async readReplacementBundle(input: { waybillId: string; replacement: PrimaryBundleIdentity }) {
@@ -170,6 +194,36 @@ export class PrismaDispatchDocumentSourceReader implements DispatchDocumentSourc
     return { predecessorWaybillId: input.waybillId,
       ...await this.prisma.$transaction(tx => sourceFrom(tx, waybill.candidateId, input.replacement, this.templateVersion, this.generatorVersion),
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }) };
+  }
+
+  async reprintWaybill(artifact: PublishedDispatchArtifact, render = renderDispatchDocumentPdf): Promise<Uint8Array | undefined> {
+    if (artifact.kind !== 'WAYBILL' || artifact.templateVersion.endsWith('-contract-table-v2')) return;
+    const input = await this.prisma.$transaction(async tx => {
+      const stored = await tx.dispatchDocumentArtifact.findUnique({
+        where: { id: artifact.id },
+        include: { waybill: { include: { candidate: { select: { allocationRevisionId: true } } } } },
+      });
+      const waybill = stored?.waybill;
+      if (!stored || !waybill || stored.waybillId !== artifact.waybillId) {
+        throw new DispatchDocumentConflictError('Waybill reprint evidence is missing.');
+      }
+      const snapshot = record(waybill.snapshot);
+      const hashedSnapshot = waybill.replacesWaybillId ? { ...snapshot, replacementId: waybill.id } : snapshot;
+      if (dispatchRecoveryIntegrityHash(hashedSnapshot) !== waybill.integrityHash) {
+        throw new DispatchDocumentConflictError('Waybill reprint snapshot failed verification.');
+      }
+      const frozenPrint = snapshot.documentPrint as WaybillPrintData | undefined;
+      const source = await sourceFrom(tx, waybill.candidateId, {
+        waybillId: waybill.id, number: waybill.number.toString(), issuedAt: waybill.issuedAt.toISOString(),
+        waybillDocumentId: stored.id, statementDocumentId: stored.id,
+      }, this.templateVersion, this.generatorVersion, { frozenPrint });
+      if (source.sourceIntegrityHash !== stored.sourceIntegrityHash ||
+          source.allocationRevisionId !== waybill.candidate.allocationRevisionId) {
+        throw new DispatchDocumentConflictError('Waybill reprint allocation failed verification.');
+      }
+      return { ...source.waybill, voided: waybill.status === 'VOIDED' };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    return (await render(input)).bytes;
   }
 }
 

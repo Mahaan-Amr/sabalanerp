@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { getPrintTemplateLogoDataUri, renderYekanFontFaces } from '../../utils/printTemplate';
 import type { DispatchProductPrintRow } from '../../utils/printTemplate';
 import type { DispatchContractContact } from '../../services/dispatchDocuments/contractPrintSource';
@@ -5,6 +6,7 @@ import type { DispatchContractContact } from '../../services/dispatchDocuments/c
 export const escapePrint = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, char =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
 export const printDigits = (value: string) => value.replace(/\d/g, digit => '۰۱۲۳۴۵۶۷۸۹'[Number(digit)]);
+const Decimal = Prisma.Decimal.clone({ precision: 100 });
 const blank = '—';
 const ltr = (value: string) => `<bdi dir="ltr">${escapePrint(printDigits(value || '_'))}</bdi>`;
 const field = (label: string, value: string) => `<div><strong>${label}</strong> ${value}</div>`;
@@ -108,6 +110,45 @@ export function shipmentQuantity(quantity: string, unit: string) {
   if (label === 'متر طول') return { count: '', linearMeasurement: amount, squareMeasurement: '' };
   if (label === 'متر مربع') return { count: '', linearMeasurement: '', squareMeasurement: amount };
   return { count: label === 'عدد' ? amount : `${amount} ${label}`, linearMeasurement: '', squareMeasurement: '' };
+}
+
+export const parsePrintNumber = (value: string) => {
+  const normalized = value.trim().replace(/[۰-۹]/g, digit => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(digit)))
+    .replace(/٬/g, '').replace('٫', '.').replace('−', '-');
+  return /^\d+(\.\d+)?$/.test(normalized) ? new Decimal(normalized) : undefined;
+};
+
+const positiveMeasurement = (value: string | undefined) => {
+  const number = parsePrintNumber(value ?? '');
+  return number?.gt(0) ? number : undefined;
+};
+
+export function loadedProductMeasurements(
+  line: { quantity: string; unit: string; length?: string; width?: string },
+  saved?: Pick<ShipmentPrintRow, 'length' | 'width' | 'count'>,
+  pieceCount?: string,
+) {
+  const loaded = shipmentQuantity(line.quantity, line.unit);
+  const width = saved?.width || line.width || '';
+  const length = saved?.length || line.length || '';
+  if (shipmentUnitLabel(line.unit) !== 'متر طول') return { length, width, ...loaded };
+
+  const meters = new Decimal(line.quantity);
+  const widthMeters = positiveMeasurement(line.width) ?? positiveMeasurement(width);
+  // A counted contract row has a unit length. An uncounted longitudinal
+  // row can put its total contracted metres in the same length field.
+  const fixedLength = positiveMeasurement(saved?.count) ? positiveMeasurement(length) : undefined;
+  const inferred = fixedLength && meters.gt(0) ? meters.div(fixedLength) : undefined;
+  const count = pieceCount ?? (inferred?.isInteger() && fixedLength?.times(inferred).eq(meters) ? inferred.toFixed() : '');
+  return {
+    ...loaded,
+    length: fixedLength && count && fixedLength.times(count).eq(meters) ? length : '',
+    width,
+    count,
+    // Loaded linear metres already include every piece: for fixed lengths
+    // this is (piece length × count) × width, with no second multiplier.
+    squareMeasurement: widthMeters ? meters.times(widthMeters).toFixed().replace('.', '٫') : '',
+  };
 }
 
 export function shipmentHtml(title: string, content: string, fonts = renderYekanFontFaces()) {

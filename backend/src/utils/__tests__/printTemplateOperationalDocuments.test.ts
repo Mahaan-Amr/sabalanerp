@@ -22,12 +22,31 @@ assert.equal(validFinancialRecord({kind:'INVOICE_CANDIDATE',status:'ISSUED',fina
 assert.equal(validFinancialRecord({kind:'INVOICE_CANDIDATE',status:'POSTED',financiallyApprovedAt:new Date()}),true);
 const invoice:IssuedInvoiceSnapshot={schemaVersion:1,loadingId:'loading',loadingNumber:'27',customerId:'customer',customerName:'مشتری <script>',counterparty:'طرف‌حساب',currency:'TOMAN',grossAmount:'12.500000000000',discountAmount:'2.500000000000',netAmount:'10.000000000000',number:'1',issuedAt:'2026-10-27T08:00:00Z',replacesNumber:null,evidence:[],drivers:[{id:'driver',name:'راننده',plate:'۱۲ ب ۳۴۵',waybillNumber:'3'}],lines:[{key:'line',contractNumber:'1024',project:'آفتاب',productRowId:'stable',code:'ST-1',label:'سنگ',length:'1.2',width:'0.4',quantity:'1.25',unit:'m2',grossAmount:'12.500000000000',discountAmount:'2.500000000000',netAmount:'10.000000000000',details:['برش و ابزار'],driverId:'driver'}]};
 const html=renderSalesInvoice(invoice);
-assert.equal((html.match(/class="invoice-first-page-header"/g) || []).length, 1);
+assert.equal((html.match(/<header>/g) || []).length, 1);
 assert.match(html,/شماره فاکتور/);
 assert.match(html,/<img /);
 assert.ok(!html.includes('برنامه پرداخت'));assert.ok(!html.includes('برنامه تحویل'));
 assert.ok(!html.includes('<script>'));assert.match(html,/&lt;script&gt;/);
-assert.match(html,/۱۲۵ ریال/);assert.match(html,/۱۰۰ ریال/);assert.match(html,/مشخصات راننده/);
-assert.match(renderSalesInvoice({...invoice,currency:'toman'}),/۱۲۵ ریال/);
+assert.match(html,/مبلغ پرداختنی<\/td><td>۱۰۰<\/td>/);assert.match(html,/مشخصات راننده/);
+assert.match(renderSalesInvoice({...invoice,currency:'toman'}),/جمع کل<\/td><td>۱۲۵<\/td>/);
 assert.match(renderSalesInvoice({...invoice,replacesNumber:'3'},'ابطال آزمایشی'),/باطل‌شده/);
+
+const linearInvoice = (quantity: string, length: string, count: string, loadedCount?: string) =>
+  renderSalesInvoice({
+    ...invoice,
+    lines: [{ ...invoice.lines[0], length, quantity, unit: 'm' }],
+    print: {
+      contacts: [],
+      contractedGross: {},
+      rows: { line: [{ code: 'ST-1', description: 'سنگ', category: 'محصول',
+        length, width: '۰٫۴', count, linearMeasurement: '', squareMeasurement: '', rate: '', total: '' }] },
+      loadedPieceCounts: loadedCount ? { line: loadedCount } : undefined,
+    },
+  });
+assert.match(linearInvoice('104', '1', '۷۵۰'), /<td>۱<\/td><td>۰٫۴<\/td><td>۱۰۴<\/td><td>۱۰۴<\/td><td>۴۱٫۶<\/td>/);
+assert.match(linearInvoice('6', '1٫5', '۲۰', '4'), /<td>۱٫۵<\/td><td>۰٫۴<\/td><td>۴<\/td><td>۶<\/td><td>۲٫۴<\/td>/);
+assert.match(linearInvoice('76', '375', ''), /<td>—<\/td><td>۰٫۴<\/td><td>—<\/td><td>۷۶<\/td><td>۳۰٫۴<\/td>/);
+assert.match(linearInvoice('76.2', '375', '', '80'), /<td>—<\/td><td>۰٫۴<\/td><td>۸۰<\/td><td>۷۶٫۲<\/td><td>۳۰٫۴۸<\/td>/);
+assert.doesNotMatch(linearInvoice('76', '375', ''), /۳۷۵/);
+assert.match(linearInvoice('76', '375', ''), /مبلغ پرداختنی<\/td><td>۱۰۰<\/td>/);
 console.log('operational PDF content, currency, workshop confidentiality and escaped invoice rendering: PASS');

@@ -24,9 +24,11 @@ export const configureDispatchDocumentsRuntime = (input: {
   const storage = input.filePublication
     ? createScopedVersionedFilesystemDispatchArtifactStorage(root, input.filePublication)
     : createFilesystemDispatchArtifactStorage(root);
+  const sourceReader = new PrismaDispatchDocumentSourceReader(input.prisma, input.templateVersion, input.generatorVersion);
   const service = createDispatchDocuments({
     repository: new PrismaDispatchDocumentRepository(input.prisma, allocationPricingIntegrityVerifier, storage),
-    sourceReader: new PrismaDispatchDocumentSourceReader(input.prisma, input.templateVersion, input.generatorVersion),
+    sourceReader,
+    reprintWaybill: artifact => sourceReader.reprintWaybill(artifact),
     publisher: input.publisher,
     storage,
     incidents: createDispatchIntegrityIncidentReporter(input.prisma),

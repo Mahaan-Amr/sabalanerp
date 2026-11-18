@@ -1231,6 +1231,8 @@ export const accountingAPI = {
     api.get('/accounting/dashboard/workspace', { params }),
   getFinancialTrend: (range: '1m' | '3m' | '6m' | '1y') => api.get('/accounting/financial-trend', { params: { range } }),
   getDispatchCandidates: () => api.get('/accounting/dispatch-candidates'),
+  registerSepidarLoadingReference: (loadingId: string, data: { value: string | null; expectedVersion: string | null; reason?: string }) =>
+    api.post(`/accounting/loadings/${encodeURIComponent(loadingId)}/sepidar-reference`, data),
   issueLoadingDocuments: (loadingId: string, recovery?: { waybillId: string; invoiceId: string; reason: string }) =>
     api.post(`/accounting/loadings/${encodeURIComponent(loadingId)}/issue-dispatch-documents`, recovery ? { recovery } : undefined),
   reconstructLegacyWaybill: (waybillId: string, reason: string) => api.post(`/accounting/dispatch-waybills/${encodeURIComponent(waybillId)}/reconstruct-legacy`, { reason }),
@@ -1375,11 +1377,13 @@ export const logisticsAPI = {
     api.post(`/logistics/loadings/${encodeURIComponent(id)}/cancel`, { reason, expectedDocumentIds }),
   createCorrection: (id: string, data: any) => api.post(`/logistics/loadings/${id}/corrections`, data),
   getDrivers: (params?: any) => api.get('/logistics/drivers', { params }),
-  reserveCanonicalDriver: (queueTurnId: string, loadingId: string) =>
-    api.post(`/logistics/canonical-driver-queue/${queueTurnId}/reserve`, { loadingId }),
+  selectLoadingTransport: (loadingId: string, mode: 'PERSONAL' | 'DRIVERS', expected?: unknown) =>
+    api.put(`/logistics/loadings/${encodeURIComponent(loadingId)}/transport`, { mode, expected }),
+  reserveCanonicalDriver: (queueTurnId: string, loadingId: string, context?: { expected: unknown; reason: string }) =>
+    api.post(`/logistics/canonical-driver-queue/${queueTurnId}/reserve`, { loadingId, ...context }),
   releaseCanonicalDriver: (queueTurnId: string, loadingId: string, reason: string) =>
     api.post(`/logistics/canonical-driver-queue/${queueTurnId}/release`, { loadingId, reason }),
-  saveCanonicalAllocation: (loadingId: string, queueTurnId: string, data: { lines: any[] }) =>
+  saveCanonicalAllocation: (loadingId: string, queueTurnId: string, data: { lines: any[]; expected?: unknown; reason?: string }) =>
     api.put(`/logistics/loadings/${loadingId}/canonical-allocations/${queueTurnId}`, data),
 };
 

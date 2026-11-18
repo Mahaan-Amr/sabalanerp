@@ -21,7 +21,7 @@ import {
   SalesInvoiceError,
   invoiceSourceHash,
 } from "./source";
-import { renderSalesInvoice, type IssuedInvoiceSnapshot } from "./render";
+import { renderSalesInvoice, salesInvoicePdfLayoutVersion, type IssuedInvoiceSnapshot } from "./render";
 export type InvoiceContext = {
   actorId: string;
   workspace: "accounting" | "logistics";
@@ -366,6 +366,7 @@ export function createSalesInvoiceService(
         >`SELECT nextval('sales_dispatch_invoice_number_seq') AS number`;
         const snapshot: IssuedInvoiceSnapshot = {
           ...source,
+          pdfLayoutVersion: salesInvoicePdfLayoutVersion,
           number: number.toString(),
           issuedAt: new Date().toISOString(),
           replacesNumber: predecessor?.number.toString() ?? null,
@@ -412,7 +413,7 @@ export function createSalesInvoiceService(
       transaction(db, async (tx) => {
         return (await voidSalesInvoiceInTransaction(tx, ctx, loadingId, id, reason, false, onlyIfInvalidated))!;
       }),
-    download: async (ctx: InvoiceContext, loadingId: string, id: string, requireCurrent = false) =>
+    download: async (ctx: InvoiceContext, loadingId: string, id: string, requireCurrent = false, original = false) =>
       transaction(db, async (tx) => {
         await authorize(tx, ctx, loadingId);
         const invoice = await tx.salesDispatchInvoice.findFirst({
@@ -436,11 +437,21 @@ export function createSalesInvoiceService(
             reason = error.message;
           }
         if (requireCurrent && reason) throw new SalesInvoiceError('فاکتور فروش معتبر برای چاپ موجود نیست.');
-        const bytes = reason
-          ? await render(
-              invoice.snapshot as unknown as IssuedInvoiceSnapshot,
-              reason,
-            )
+        const snapshot = invoice.snapshot as unknown as IssuedInvoiceSnapshot;
+        const refreshTemplate = !original && snapshot.pdfLayoutVersion !== salesInvoicePdfLayoutVersion;
+        let print = snapshot.print;
+        // Attach printable details only when the live dispatch still matches the
+        // issued evidence. The stored snapshot owns all financial values.
+        if (refreshTemplate && !print && !reason) {
+          try {
+            const source = await readInvoiceSource(tx, loadingId, true);
+            if (invoiceSourceHash(source) === invoice.sourceHash) print = source.print;
+          } catch (error) {
+            if (!(error instanceof SalesInvoiceError)) throw error;
+          }
+        }
+        const bytes = reason || refreshTemplate
+          ? await render({ ...snapshot, print }, reason ?? undefined)
           : invoice.pdf;
         await auditSalesInvoice(
           tx,

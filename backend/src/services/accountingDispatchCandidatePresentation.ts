@@ -6,6 +6,7 @@ type CandidateSummary = {
   customerName: string | null;
   projectName: string | null;
   projectAddress: string | null;
+  personalPickup?: { contracts: Array<{ id: string; number: string }>; partners: Array<{ caseId: string; name: string }> };
 };
 
 const record = (value: unknown): Record<string, unknown> | null => (
@@ -26,7 +27,17 @@ export const projectAccountingDispatchCandidateSummary = (snapshot: unknown): Ca
   const customer = record(loading?.customer);
   const project = record(loading?.project);
 
+  const pickup = record(root?.personalPickup);
+  const personalPickup = queueTurn?.driverSource === 'PERSONAL_PICKUP' ? {
+    contracts: (Array.isArray(pickup?.contracts) ? pickup.contracts : []).flatMap(value => {
+      const item = record(value); return text(item?.id) && text(item?.number) ? [{ id: text(item?.id)!, number: text(item?.number)! }] : [];
+    }),
+    partners: (Array.isArray(pickup?.partners) ? pickup.partners : []).flatMap(value => {
+      const item = record(value); return text(item?.caseId) && text(item?.name) ? [{ caseId: text(item?.caseId)!, name: text(item?.name)! }] : [];
+    }),
+  } : undefined;
   return {
+    ...(personalPickup ? { personalPickup } : {}),
     driverName: [text(driver?.firstName), text(driver?.lastName)].filter(Boolean).join(' ') || null,
     driverSource: text(queueTurn?.driverSource),
     loadingNumber: text(loading?.number),

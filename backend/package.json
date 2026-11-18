@@ -35,6 +35,7 @@
     "migration:product-graph:all": "node dist/scripts/migrate-all-contract-product-graphs.js",
     "migration:product-graph:all:apply": "node dist/scripts/migrate-all-contract-product-graphs.js --apply",
     "test:hr-personnel-boundary": "tsx src/services/__tests__/hrPersonnelBoundary.test.ts",
+    "test:personal-loading-pickup": "tsx src/services/__tests__/personalLoadingPickupCandidate.integration.test.ts",
     "test:dispatch-master-data": "tsx src/services/__tests__/dispatchMasterDataPolicy.test.ts",
     "test:hr-personnel-collection": "tsx src/services/__tests__/hrPersonnelCollection.test.ts && tsx src/routes/__tests__/hrRedesignRoutes.test.ts",
     "test:hr-candidate-access": "tsx src/services/__tests__/hrCandidateAccess.test.ts",

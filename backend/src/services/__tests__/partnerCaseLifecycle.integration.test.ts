@@ -87,6 +87,11 @@ test('Partner dispatch statements require current internal Accounting authority 
       rootKind: 'CASE', purpose: 'ACCOUNTING', scope: 'PURPOSE_BOUND', boundRootId: ids.caseId,
       effect: 'ALLOW', grantedBy: managerId,
       reason: 'isolated dispatch document policy fixture', correlationId: `${managerId}-accounting-read` } });
+    await database.effectiveActionGrant.create({ data: { id: `${managerId}-accounting-write`, principalKind: 'USER',
+      principalId: managerId, subjectUserId: managerId, domain: 'PARTNER', action: 'ACCOUNTING_WRITE',
+      rootKind: 'CASE', purpose: 'ACCOUNTING', scope: 'PURPOSE_BOUND', boundRootId: ids.caseId,
+      effect: 'ALLOW', grantedBy: managerId,
+      reason: 'isolated loading reference fixture', correlationId: `${managerId}-accounting-write` } });
     // Residual narrow grants must not let a Partner persona read wholesale shipment documents.
     const residualGrant = { userId: ids.partnerId, workspace: 'accounting',
       feature: 'accounting_dispatch_candidates_view', permissionLevel: 'view', grantedBy: managerId };
@@ -99,7 +104,7 @@ test('Partner dispatch statements require current internal Accounting authority 
     });
     const project = await database.projectAddress.create({ data: { customerId: ids.customerId, address: 'Isolated policy fixture' } });
     const loading = await database.logisticsLoading.create({ data: { loadingNumber: `${ids.caseId}-loading`,
-      customerId: ids.customerId, projectId: project.id, createdBy: managerId } });
+      customerId: ids.customerId, projectId: project.id, createdBy: managerId, status: 'FINALIZED' } });
     const driver = await database.externalDriver.create({ data: { firstName: 'Policy', lastName: 'Fixture',
       nationalCode: temporary.runId, phone: '09120000000', createdBy: managerId } });
     const vehicle = await database.externalVehicle.create({ data: { vehicleType: 'Policy fixture', createdBy: managerId } });
@@ -126,11 +131,27 @@ test('Partner dispatch statements require current internal Accounting authority 
       const candidate = await database.accountingDispatchCandidate.create({ data: { allocationRevisionId: revision.id } });
       candidates[sourceKind] = candidate.id;
     }
+    const otherLoading = await database.logisticsLoading.create({ data: { loadingNumber: `${ids.caseId}-other-loading`,
+      customerId: ids.customerId, projectId: project.id, createdBy: managerId, status: 'FINALIZED' } });
+    const otherDriver = await database.externalDriver.create({ data: { firstName: 'Other', lastName: 'Fixture',
+      nationalCode: `${temporary.runId}o`, phone: '09120000002', createdBy: managerId } });
+    const otherVehicle = await database.externalVehicle.create({ data: { vehicleType: 'Other fixture', createdBy: managerId } });
+    const otherQueue = await database.guardDriverQueueTurn.create({ data: { driverSource: 'EXTERNAL',
+      externalDriverId: otherDriver.id, externalVehicleId: otherVehicle.id, admittedBy: managerId, admissionSnapshot: {},
+      integrityHash: 'e'.repeat(64), loadingId: otherLoading.id } });
+    const otherBatch = await database.logisticsAllocationBatch.create({ data: { loadingId: otherLoading.id,
+      idempotencyKey: 'other-policy-fixture', finalizedBy: managerId } });
+    const otherRevision = await database.logisticsAllocationRevision.create({ data: { loadingId: otherLoading.id,
+      queueTurnId: otherQueue.id, batchId: otherBatch.id, revisionNumber: 1, snapshot: {},
+      integrityHash: 'f'.repeat(64), finalizedBy: managerId } });
+    candidates.OTHER_ORDINARY = (await database.accountingDispatchCandidate.create({ data: {
+      allocationRevisionId: otherRevision.id,
+    } })).id;
     const hiddenProject = await database.projectAddress.create({ data: {
       customerId: hiddenIds.customerId, address: 'Hidden isolated policy fixture',
     } });
     const hiddenLoading = await database.logisticsLoading.create({ data: { loadingNumber: `${hiddenIds.caseId}-loading`,
-      customerId: hiddenIds.customerId, projectId: hiddenProject.id, createdBy: managerId } });
+      customerId: hiddenIds.customerId, projectId: hiddenProject.id, createdBy: managerId, status: 'FINALIZED' } });
     const hiddenDriver = await database.externalDriver.create({ data: { firstName: 'Hidden', lastName: 'Policy',
       nationalCode: `${temporary.runId}h`, phone: '09120000001', createdBy: managerId } });
     const hiddenVehicle = await database.externalVehicle.create({ data: { vehicleType: 'Hidden policy fixture', createdBy: managerId } });
@@ -158,7 +179,7 @@ test('Partner dispatch statements require current internal Accounting authority 
     await database.workspacePermission.create({ data: { userId: managerId, workspace: 'accounting',
       permissionLevel: 'edit', grantedBy: managerId } });
     for (const [feature, permissionLevel] of [['accounting_dispatch_candidates_view', 'view'],
-      ['accounting_dispatch_candidates_manage', 'edit']] as const) {
+      ['accounting_dispatch_candidates_manage', 'edit'], ['accounting_audit_view', 'view']] as const) {
       await database.featurePermission.create({ data: { userId: managerId, workspace: 'accounting',
         feature, permissionLevel, grantedBy: managerId } });
     }
@@ -167,7 +188,9 @@ test('Partner dispatch statements require current internal Accounting authority 
         DATABASE_URL: temporary.databaseUrl, PARTNER_TEST_ACTOR_ID: managerId,
         PARTNER_TEST_ORDINARY_CANDIDATE_ID: candidates.SALES_CONTRACT,
         PARTNER_TEST_ALLOWED_CANDIDATE_ID: candidates.PARTNER_CASE,
-        PARTNER_TEST_HIDDEN_CANDIDATE_ID: candidates.HIDDEN_PARTNER_CASE } });
+        PARTNER_TEST_HIDDEN_CANDIDATE_ID: candidates.HIDDEN_PARTNER_CASE,
+        PARTNER_TEST_LOADING_ID: loading.id, PARTNER_TEST_OTHER_LOADING_ID: otherLoading.id,
+        PARTNER_TEST_HIDDEN_LOADING_ID: hiddenLoading.id } });
     const access = createPrismaDispatchDocumentAccessPolicy(database);
     const request = { actorId: ids.partnerId, candidateId: candidates.PARTNER_CASE, kinds: ['STATEMENT'] as ['STATEMENT'] };
     assert.equal(await access.canReadDocuments(request), false);
@@ -1121,6 +1144,16 @@ test('real-schema loading source selects canonical delivery evidence without cha
   const ids = idsFor(`partner-delivery-source-${temporary.runId}`);
   const actorId = `${ids.caseId}-manager`;
   try {
+    if (process.env.PERSONAL_PICKUP_ACCEPTANCE === '1') {
+      const types = await database.$queryRaw<Array<{ enumlabel: string }>>`SELECT enumlabel FROM pg_enum WHERE enumtypid = '"GuardDriverSource"'::regtype`;
+      if (!types.some(row => row.enumlabel === 'PERSONAL_PICKUP')) {
+        const { readFile } = await import('node:fs/promises');
+        for (const name of ['20261118120000_personal_pickup_source', '20261118120100_personal_pickup_dispatch']) {
+          const sql = await readFile(`backend/prisma/migrations/${name}/migration.sql`, 'utf8');
+          for (const statement of sql.split(';').map(part => part.trim()).filter(Boolean)) await database.$executeRawUnsafe(statement);
+        }
+      }
+    }
     await database.effectiveAuthorizationState.create({ data: { id: 1, revision: 1 } });
     const expected = await database.$transaction(async tx => {
       const owner = await seedCase(tx, ids, false, false, [
@@ -1252,13 +1285,18 @@ test('real-schema loading source selects canonical delivery evidence without cha
       assert.equal(concurrent.ok ? null : concurrent.error.code, 'FORBIDDEN',
         'a workspace downgrade committed while loading waits must invalidate its earlier authorization snapshot');
     } finally { await waiting; }
-    await promisify(execFile)(process.execPath, ['backend/node_modules/tsx/dist/cli.mjs',
+    if (process.env.PERSONAL_PICKUP_ACCEPTANCE !== '1') await promisify(execFile)(process.execPath, ['backend/node_modules/tsx/dist/cli.mjs',
       'backend/src/services/__tests__/partnerLoadingHttpProbe.ts'], { timeout: 120_000, env: { ...process.env,
         DATABASE_URL: temporary.databaseUrl, PARTNER_TEST_ACTOR_ID: actorId, PARTNER_TEST_OWNER: JSON.stringify(expected) } });
     const accountantId = `${ids.caseId}-dispatch-accountant`;
     await database.$transaction(async tx => {
       await tx.user.create({ data: { id: accountantId, username: accountantId,
         email: `${accountantId}@example.invalid`, password: 'not-a-login', firstName: 'Dispatch', lastName: 'Accountant' } });
+      if (process.env.PERSONAL_PICKUP_ACCEPTANCE === '1') {
+        await tx.workspacePermission.create({ data: { userId: accountantId, workspace: 'accounting', permissionLevel: 'edit', grantedBy: actorId } });
+        await tx.featurePermission.create({ data: { userId: accountantId, workspace: 'accounting',
+          feature: 'accounting_invoice_candidates_manage', permissionLevel: 'edit', grantedBy: actorId } });
+      }
       for (const action of ['ACCOUNTING_READ', 'ACCOUNTING_WRITE']) await tx.effectiveActionGrant.create({ data: {
         id: `${accountantId}-${action}`, principalKind: 'USER', principalId: accountantId, subjectUserId: accountantId,
         domain: 'PARTNER', action, rootKind: 'CASE', purpose: 'ACCOUNTING', scope: 'PURPOSE_BOUND',
@@ -1276,7 +1314,7 @@ test('real-schema loading source selects canonical delivery evidence without cha
       actorId: accountantId, correlationId: `${accountantId}-queue` })).enqueueCommitted(accountingView, commitment);
     assert.equal(queued.ok, true, JSON.stringify(queued));
     const invoice = await database.accountingFinancialRecord.findFirstOrThrow({ where: { sourceId: ids.internalId } });
-    await promisify(execFile)(process.execPath, ['backend/node_modules/tsx/dist/cli.mjs',
+    if (process.env.PERSONAL_PICKUP_ACCEPTANCE !== '1') await promisify(execFile)(process.execPath, ['backend/node_modules/tsx/dist/cli.mjs',
       'backend/src/services/__tests__/partnerFinancialApprovalProbe.ts'], { timeout: 120_000, env: { ...process.env,
         DATABASE_URL: temporary.databaseUrl, PARTNER_TEST_INVOICE_ID: invoice.id, PARTNER_TEST_ACTOR_ID: accountantId } });
     for (const [feature, permissionLevel] of [['accounting_dispatch_candidates_view', 'view'],
@@ -1284,11 +1322,22 @@ test('real-schema loading source selects canonical delivery evidence without cha
       await database.featurePermission.create({ data: { userId: accountantId, workspace: 'accounting', feature,
         permissionLevel, grantedBy: accountantId } });
     }
-    await promisify(execFile)(process.execPath, ['backend/node_modules/tsx/dist/cli.mjs',
-      'backend/src/services/__tests__/partnerFinalizationHttpProbe.ts'], { timeout: 180_000, env: { ...process.env,
+    const probe = process.env.PERSONAL_PICKUP_ACCEPTANCE === '1' ? 'personalPickupHttpProbe' : 'partnerFinalizationHttpProbe';
+    const result = await promisify(execFile)(process.execPath, ['backend/node_modules/tsx/dist/cli.mjs',
+      `backend/src/services/__tests__/${probe}.ts`], { timeout: 180_000, env: { ...process.env,
         DATABASE_URL: temporary.databaseUrl, PARTNER_TEST_ACTOR_ID: actorId, PARTNER_TEST_ACCOUNTANT_ID: accountantId,
         PARTNER_TEST_OWNER: JSON.stringify(expected) } });
-  } finally { await database.$disconnect(); await temporary.cleanup(); }
+    if (process.env.PERSONAL_PICKUP_ACCEPTANCE === '1') console.log(result.stdout.trim());
+  } finally {
+    await database.$disconnect();
+    for (let attempt = 0; ; attempt++) {
+      try { await temporary.cleanup(); break; }
+      catch (error) {
+        if (attempt >= 8 || !(error instanceof Error) || !error.message.includes('still has sessions')) throw error;
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    }
+  }
 });
 
 test('real-schema correction HTTP dispatch approves a requested retail correction, saves once and confirms its successor', async () => {

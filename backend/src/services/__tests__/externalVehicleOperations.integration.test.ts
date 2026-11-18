@@ -124,9 +124,20 @@ test('external fallback requires qualifying failures, OTP, separate Guard actor 
   await f.assign(); await f.enroll(); const { bill } = await f.waybill();
   const session = await f.service.startSession({ waybillId: bill.id, actorId: f.actor.id, workstationId: 'TEST' });
   await assert.rejects(() => f.service.beginInternalFallback({ sessionId: session.id, actorId: f.actor.id }), /qualifying/);
-  for (let i = 0; i < 3; i++) await f.service.verifyInternalBiometric({ sessionId: session.id, actorId: f.actor.id, scenario: 'NON_MATCH' });
+  const first = await f.service.verifyInternalBiometric({ sessionId: session.id, actorId: f.actor.id, scenario: 'NON_MATCH' });
+  assert.equal(first.fallbackEligible, false);
+  await assert.rejects(() => f.service.beginInternalFallback({ sessionId: session.id, actorId: f.actor.id }), /qualifying/);
+  const second = await f.service.verifyInternalBiometric({ sessionId: session.id, actorId: f.actor.id, scenario: 'NON_MATCH' });
+  assert.equal(second.fallbackEligible, true);
   assert.equal((await f.service.beginInternalFallback({ sessionId: session.id, actorId: f.actor.id })).method, 'EXTERNAL_FALLBACK');
   assert.equal(f.messages[0].phone, '09123333333');
+  const challenge = await f.tx.dispatchOtpChallenge.findFirstOrThrow({ where: { sessionId: session.id } });
+  assert.match(f.messages[0].code, /^\d{6}$/);
+  assert.equal('code' in challenge, false, 'the generated client exposes only digest custody');
+  const [persisted] = await f.tx.$queryRaw<Array<{ code: string | null }>>`
+    SELECT code FROM public.dispatch_otp_challenges WHERE id = ${challenge.id}
+  `;
+  assert.deepEqual(persisted, { code: null }, 'the retained column stays empty');
   await f.service.verifyOtp({ sessionId: session.id, code: f.messages[0].code });
   await assert.rejects(() => f.service.approveByGuard({ sessionId: session.id, guardActorId: f.actor.id, reauthenticatedAt: new Date(), reason: 'test' }), /different actor/);
   await assert.rejects(() => f.service.approveByGuard({ sessionId: session.id, guardActorId: 'other-guard', reauthenticatedAt: new Date() }), /reason/);

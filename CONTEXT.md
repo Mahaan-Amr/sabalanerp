@@ -2459,8 +2459,8 @@ The permission-scoped record collection represented by an Accounting dashboard c
 _Avoid_: linking an operational metric to an unfiltered register, disabling zero-value drilldown, exposing records outside the viewer's authority, or letting a saved destination silently change the represented population
 
 **حذف پیش‌نویس رکورد مالی**:
-An accounting financial record may be physically deleted only while it is still a draft and has not been financially approved, while keeping an audit trail of the deletion. Issued, posted, financially approved, or otherwise submitted records are not deleted; they are voided or corrected through accounting workflows.
-_Avoid_: deleting financially approved accounting records, or keeping undeletable draft clutter when a new draft should be regenerated
+An accounting financial record may be physically deleted only while it is still an unapproved draft, keeping its deletion audit attached to the old identity and assigning a separate identity to any subsequently created draft. Issued, posted, financially approved, or otherwise submitted records are not deleted; they are voided or corrected through accounting workflows.
+_Avoid_: deleting financially approved accounting records, reusing a deleted draft's identity, treating a fresh draft after deletion as correction of an approved invoice, or keeping undeletable draft clutter when a new draft should be regenerated
 
 **Legacy Accounting-Originated Correction Request**:
 A historical correction request created by Accounting before the Seller-originated Cross-Workspace Duty cutover. Existing active rows may finish through their preserved lifecycle, but no new row may be created through the retired Accounting writer; they are explicitly reported as grandfathered rather than assigned inferred Seller or Accounting actors.
@@ -2684,6 +2684,10 @@ _Avoid_: یکی‌دانستن شماره این خروجی با شماره قر
 دانلود مجدد فاکتور صادرشده شماره آن را حفظ می‌کند؛ اصلاح آن با ابطال نسخه قبلی و صدور فاکتور با شماره جدید انجام می‌شود و پس از خروج، تکمیل گردش اصلاح ارسال پیش‌نیاز آن است. نسخه باطل‌شده با علامت روشن در سابقه قابل مشاهده و دانلود می‌ماند؛ اقلام و مقدارها فقط از بارگیری می‌آیند و مستقلاً در فاکتور تغییر نمی‌کنند.
 _Avoid_: تخصیص شماره تازه به هر دانلود، یا بازنویسی فاکتور قبلی به جای ابطال و صدور جدید
 
+**بازچاپ فاکتور فروش ارسالی**:
+نسخهٔ قابل دانلود یا چاپ با قالب جاری، از مقدارهای بارگیری و اطلاعات زمان صدور همان فاکتور. شماره، تاریخ، وضعیت و مبالغ فاکتور حفظ می‌شوند و اصل صادرشده در سابقه می‌ماند.
+_Avoid_: تغییر مقدار ثبت‌شدهٔ بارگیری یا استفاده از تعداد و متراژ کل قرارداد برای نمایش مقدار این بار
+
 **آمادگی خروج بارگیری دارای فاکتور فروش ارسالی**:
 خروج هر راننده یک بارگیری، علاوه بر مجوزهای معتبر خروج خودش، به تکمیل تأیید حسابداری همه بخش‌های بارگیری و صدور فاکتور معتبر برای کل آن وابسته است. تا آماده‌شدن کل بارگیری و صدور فاکتور، تأیید مستقل بار یک راننده برای خروج او کافی نیست.
 _Avoid_: خروج بخشی از بارگیری پیش از صدور فاکتور کل، یا جایگزین‌کردن مجوزهای گارد با فاکتور فروش
@@ -2732,13 +2736,18 @@ _Avoid_: showing only one piece area when multiple source pieces are consumed, a
 A logistics-owned execution document that records what was actually loaded for shipment from one customer project, including the selected contract rows, loaded amounts, driver or vehicle details, and resulting remaining amounts.
 _Avoid_: treating بارگیری as the customer-facing برنامه تحویل, or editing the sales delivery promise when logistics is recording actual shipment
 
+**شماره بارگیری سپیدار**:
+The external Sepidar reference for one whole بارگیری, shared across its Accounting dispatch rows. It is distinct from the Sabalan loading number, waybill number, numbered sales dispatch invoice, and financial record's system invoice number.
+_Avoid_: assigning a different reference to each dispatch row, or treating an internal document number as the Sepidar loading reference
+
 **محدوده بارگیری**:
 Each بارگیری belongs to exactly one customer project and may include deliverable rows from multiple sales contracts for that same project.
 _Avoid_: mixing multiple customer projects in one بارگیری, even when the same driver or vehicle carries them together
 
 **جستجوی پروژه در بارگیری**:
 A logistics project lookup matches the project, address, customer identity, company identity, and contact numbers tied to the customer or project.
-In the new-loading project picker, only projects with at least one positive مانده بارگیری group are shown. Existing draft or historical loading records for a project with no current remaining stay accessible through the loading list for edit, cancellation, or history.
+Partner deliveries appear in the same new-loading picker when searched by the name of the final Customer who owns the Contract and Project. The Partner seller name is not a search field for those deliveries.
+In the new-loading project picker, only projects and deliveries with at least one positive مانده بارگیری group are shown. Existing draft or historical loading records for a project with no current remaining stay accessible through the loading list for edit, cancellation, or history.
 _Avoid_: forcing logistics users to know the project name when the operational clue they have is a phone number, showing non-loadable projects in the new-loading flow, or offering projects for a new loading when logistics has no remaining physical cargo to select
 
 **شروع پیش‌نویس بارگیری**:
@@ -2863,8 +2872,8 @@ A one-time گارد gate movement for a driver/vehicle that should be recorded f
 _Avoid_: cluttering the reusable driver/vehicle registry with every one-time supplier, customer, or visitor movement
 
 **خروج با سواری شخصی مشتری**:
-A lightweight outbound sales movement where the customer takes goods with a personal vehicle. It must be tied to the customer or linked بارگیری/project and must record the exact exit time, without requiring a reusable driver/vehicle pair.
-_Avoid_: forcing customer personal vehicles into the reusable logistics driver/vehicle registry, or requiring freight settlement fields for a customer pickup
+A lightweight outbound sales movement where the customer or their representative takes goods with a personal passenger car, identified in loading as «راننده شخصی» independently of داخلی، بیرونی، and متفرقه; a loading is either entirely personal-car pickup or entirely carried by other drivers. Its customer and source contracts come only from the actual selected allocation rows of this loading, excluding other contracts of the same customer or project, without manually entered driver, phone, or plate details; Partner sales retain both the final Customer and Partner identities, and the physical exit has its own exact recorded time.
+_Avoid_: forcing personal passenger cars into the reusable driver/vehicle registry, treating the customer as necessarily the person behind the wheel, manually re-entering customer or contract identity, or requiring freight settlement fields for this pickup
 
 **Canonical Driver and Vehicle Master Data (supersedes ثبت راننده و خودرو)**:
 Internal-driver eligibility is an HR-owned effective period attached to Personnel. The internal driving profile, licence facts, company vehicles, effective plates, and effective driver–vehicle assignments are independently permissioned Vehicle Operations facts. Guard owns independent external-driver and external-vehicle identities and their lifecycle evidence. A driver and a vehicle are combined only at physical Guard admission, where the queue turn freezes the identities and plate that actually arrived.

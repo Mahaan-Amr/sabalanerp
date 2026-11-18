@@ -10,7 +10,7 @@ import { PARTNER_INTERNAL_ACCOUNTING_SOURCE, preparePartnerFinancialSource } fro
 
 /** Fake persistence only: authorization, projection reconstruction, preparation,
  * current plan validation and accounting read scope all execute production code. */
-export async function historicalAccountingFixture(status = 'DRAFT') {
+export async function historicalAccountingFixture(status = 'DRAFT', identity: { invoiceId?: string; customerContractNumber?: string } = {}) {
   const base = createPartnerFixtures();
   const plan: ReturnType<typeof PaymentPlanSchema.parse> = { ...base.accounting.sabalanPaymentPlan, planId: 'historical-plan-3', version: 3,
     predecessorPlanId: 'historical-plan-2', installments: [] };
@@ -32,7 +32,7 @@ export async function historicalAccountingFixture(status = 'DRAFT') {
   const integrityHash = await canonicalHash({ purpose: 'PARTNER_CASE_REVISION', schemaVersion: 1, ...evidence });
   const projected = await buildCaseProjections({ caseId: 'historical-case', revision: 1, integrityHash,
     caseNumber: 'historical-case-number', internalRecordId: 'historical-internal', internalRecordNumber: 'historical-internal-number',
-    customerContractNumber: 'historical-contract-number', commercialAccountId: 'historical-account', state: 'DRAFT',
+    customerContractNumber: identity.customerContractNumber ?? 'historical-contract-number', commercialAccountId: 'historical-account', state: 'DRAFT',
     evidence: projectionEvidence(evidence as never)! });
   assert.ok(projected.ok);
   assert.ok(projected.value.accounting);
@@ -48,14 +48,14 @@ export async function historicalAccountingFixture(status = 'DRAFT') {
     profile: { userId: 'historical-partner' }, customer: { firstName: 'Fixture', lastName: 'Customer', companyName: null },
     internalRecord: { recordNumber: 'historical-internal-number', commercialAccountId: 'historical-account',
       pricingState: 'READY_TO_FINALIZE', expectedRevision: 1, integrityHash },
-    customerContract: { contractNumber: 'historical-contract-number', partnerRevision: 1, partnerIntegrityHash: integrityHash } };
+    customerContract: { contractNumber: identity.customerContractNumber ?? 'historical-contract-number', partnerRevision: 1, partnerIntegrityHash: integrityHash } };
   const currentPlan = { ...structuredClone(plan), planId: 'current-plan-4', version: 4, predecessorPlanId: plan.planId };
   const persistedPlan = { id: currentPlan.planId, caseId: row.id, caseRevision: 1, purpose: 'SABALAN', version: 4,
     predecessorId: plan.planId, effectiveDate: new Date(currentPlan.effectiveDate), evidence: currentPlan, installments: [],
     predecessor: { id: plan.planId, caseId: row.id, purpose: 'SABALAN', version: 3 },
     integrityHash: await canonicalHash({ purpose: 'PARTNER_SABALAN_PAYMENT_PLAN', schemaVersion: 1, caseId: row.id, revision: 1, plan: currentPlan }) };
   const storedPlans = new Map([[persistedPlan.id, persistedPlan]]);
-  const invoice = { id: 'historical-invoice', kind: 'INVOICE_CANDIDATE', sourceId: row.internalRecordId, sourceKind: PARTNER_INTERNAL_ACCOUNTING_SOURCE,
+  const invoice = { id: identity.invoiceId ?? 'historical-invoice', kind: 'INVOICE_CANDIDATE', sourceId: row.internalRecordId, sourceKind: PARTNER_INTERNAL_ACCOUNTING_SOURCE,
     status, amount: prepared.value.amount.amount, currency: prepared.value.amount.currency,
     sourceSnapshot: { partnerPreparation: prepared.value }, metadata: { partnerCaseId: row.id } };
   const writes: string[] = [];

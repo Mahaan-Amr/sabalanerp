@@ -1,6 +1,6 @@
 import {
   printSection, shipmentHeader, shipmentHtml, shipmentItemTable, shipmentParties,
-  shipmentQuantity, shipmentSignature, shipmentTable, shipmentTerms, shipmentUnitLabel,
+  loadedProductMeasurements, shipmentSignature, shipmentTable, shipmentTerms, shipmentUnitLabel,
 } from './dispatchPrintLayout';
 import type { WaybillPrintData } from '../../services/dispatchDocuments/contracts';
 import crypto from 'node:crypto';
@@ -45,6 +45,7 @@ type PartnerMonetaryLine = PartnerQuantityLine & {
 export type DispatchDocumentRenderData = CommonRenderInput & ({
   kind: 'WAYBILL';
   driverName?: string;
+  voided?: boolean;
   print?: WaybillPrintData;
   payload: {
     allocationRevisionId: string;
@@ -283,16 +284,16 @@ function renderShipmentWaybill(input: Extract<DispatchDocumentRenderData, { kind
   const title = documentTitle(input);
   let index = 0;
   const group = (reference: string, lines: Array<PartnerQuantityLine>, contractId?: string) => lines.map((line, lineIndex) => {
-    const [saved, ...services] = print.rows[contractId ? `${contractId}:${line.productRowId}` : line.productRowId] || [];
-    const quantity = shipmentQuantity(line.quantity, line.unit);
+    const printKey = contractId ? `${contractId}:${line.productRowId}` : line.productRowId;
+    const [saved, ...services] = print.rows[printKey] || [];
+    const measurements = loadedProductMeasurements(line, saved, print.loadedPieceCounts?.[printKey]);
     return {
       reference: lineIndex === 0 ? reference : undefined,
       rows: [{
         index: String(++index), code: saved?.code || '',
         description: saved?.description && saved.description !== '—' ? saved.description
           : line.label && line.label !== line.productRowId ? line.label : 'شرح کالا ثبت نشده',
-        category: saved?.category || 'محصول', length: saved?.length || '', width: saved?.width || '',
-        ...quantity, count: quantity.count || (saved?.count === '۰' ? '' : saved?.count) || '',
+        category: saved?.category || 'محصول', ...measurements,
       }, ...services],
     };
   });
@@ -301,6 +302,8 @@ function renderShipmentWaybill(input: Extract<DispatchDocumentRenderData, { kind
     : input.payload.contracts.flatMap(contract => group(`قرارداد ${contract.contractNumber}`, contract.lines, contract.contractId));
   return shipmentHtml(title, shipmentHeader({ title, number: input.waybillNumber, numberLabel: 'شماره بارنامه',
     loadingNumber: print.loadingNumber, date: formatIssuedAt(input.issuedAt), logo: assets.logoDataUri })
+    + (input.voided ? printSection('وضعیت بارنامه', '<p>باطل‌شده</p>') : '')
+    + (input.reconstructionLabel === 'LEGACY_RECONSTRUCTED' ? printSection('نسخه بازسازی‌شده', '') : '')
     + shipmentParties(input.customerName, print.contacts, false)
     + printSection('مشخصات حمل', shipmentTable(['نام راننده', 'پلاک خودرو', 'مقصد بارگیری'],
       [[input.driverName || '—', input.vehiclePlate, input.projectOrDestination || '—']]))

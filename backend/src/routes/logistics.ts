@@ -1,3 +1,4 @@
+import { selectLoadingTransport, retirePersonalLoadingDraft } from '../services/personalLoadingPickup';
 import { latestLoadingCancellationRequest, readLoadingCancellationDocuments, requestLoadingCancellation } from '../services/crossWorkspaceDutyAdapters/loadingCancellationDutyAdapter';
 import { exactQuantityText, ExactQuantityDecimal } from '../services/exactQuantity';
 import { prisma } from '../lib/prisma';
@@ -13,7 +14,7 @@ import { GuardQueueConflictError, GuardQueueValidationError, isGuardQueueTurnCur
 import { cancelFinalizedOrdinaryLoading, loadingCancellationAccountingAuthority, LoadingCancellationAccountingAccessError, createSuccessorAllocationRevision, DispatchAllocationConflictError, DispatchAllocationValidationError, finalizeCanonicalLoadingAllocations, saveCanonicalAllocationDraft } from '../services/dispatchAllocation';
 import { PilotSafetyPauseError } from '../services/dispatchCutover';
 import { allocateLoadingNumber } from '../services/logisticsLoadingNumber';
-import { createPartnerCaseLoading, readPartnerCaseLoading, withLogisticsLoadingReadScope } from '../services/dispatchAllocation';
+import { createPartnerCaseLoading, readPartnerCaseLoading, findLoadablePartnerDeliveries, withLogisticsLoadingReadScope } from '../services/dispatchAllocation';
 import { randomUUID } from 'node:crypto';
 import { partnerError, type Result } from '@sabalanerp/partner-sales-contracts';
 import { ordinaryContractDispatchEligible, assertOrdinaryContractsDispatchEligible } from '../services/ordinaryContractDispatchEligibility';
@@ -48,6 +49,20 @@ const canCancelLoadings = requireFeatureAccess(FEATURES.LOGISTICS_LOADINGS_CANCE
 const canCreateCorrections = requireFeatureAccess(FEATURES.LOGISTICS_CORRECTIONS_CREATE, FEATURE_PERMISSIONS.EDIT);
 const canViewDrivers = requireFeatureAccess(FEATURES.LOGISTICS_DRIVERS_VIEW, FEATURE_PERMISSIONS.VIEW);
 const canManageDrivers = requireNarrowFeatureAccess(FEATURES.LOGISTICS_DRIVERS_MANAGE, FEATURE_PERMISSIONS.EDIT);
+
+router.put('/loadings/:id/transport', canEdit, canEditLoadings, canManageDrivers, async (req: any, res: Response) => {
+  try {
+    const result = await selectLoadingTransport(prisma, { loadingId: req.params.id, actorId: req.user.id,
+      mode: req.body.mode, expected: req.body.expected, correlationId: req.get('X-Correlation-Id') });
+    return res.json({ success: true, data: result });
+  } catch (error) {
+    if (error instanceof PartnerLoadingCommandError) return respondPartnerLoading(res, { ok: false, error: error.error });
+    if (error instanceof GuardQueueConflictError || error instanceof GuardQueueValidationError || error instanceof PilotSafetyPauseError)
+      return res.status(error instanceof GuardQueueValidationError ? 400 : 409).json({ success: false, error: error.message });
+    console.error('Loading transport change failed:', error);
+    return res.status(500).json({ success: false, error: 'تغییر نوع بارگیری ناموفق بود.' });
+  }
+});
 
 router.post('/canonical-driver-queue/:id/reserve', canEdit, canManageDrivers, async (req: any, res: Response) => {
   try {
@@ -244,6 +259,7 @@ const getProjectContracts = async (projectId: string, customerId: string) => {
   const contracts = await prisma.salesContract.findMany({
     where: {
       customerId,
+      partnerCaseId: null,
       isInactive: false,
       status: { notIn: ['CANCELLED', 'EXPIRED'] as any },
       contractData: {
@@ -849,6 +865,23 @@ router.get('/customers', canView, canCreateLoadings, async (req: any, res: Respo
       take: 50
     });
 
+    const partnerCustomerIds = customers.filter(customer => {
+      const name = normalizePersianSearchTokens(customerDisplayName(customer)).join(' ');
+      return !search || (terms.length > 0 && terms.every(term => name.includes(term)));
+    }).map(customer => customer.id);
+    const partnerCounts = new Map<string, { deliveries: number; groups: number }>();
+    if (partnerCustomerIds.length) {
+      const deliveries = await findLoadablePartnerDeliveries(prisma, {
+        actorId: req.user.id, correlationId: randomUUID(), customerIds: partnerCustomerIds,
+      });
+      for (const delivery of deliveries) {
+        const count = partnerCounts.get(delivery.customerId) ?? { deliveries: 0, groups: 0 };
+        count.deliveries++;
+        count.groups += delivery.remainingCount;
+        partnerCounts.set(delivery.customerId, count);
+      }
+    }
+
     const projectMatches: any[] = [];
     const loadableCustomers: any[] = [];
     for (const customer of customers) {
@@ -875,7 +908,8 @@ router.get('/customers', canView, canCreateLoadings, async (req: any, res: Respo
         });
       }
 
-      if (projects.length > 0 && (matchesName || matchingProjects.size === 0)) {
+      const partner = partnerCounts.get(customer.id);
+      if (partner || (projects.length > 0 && (matchesName || matchingProjects.size === 0))) {
         loadableCustomers.push({
           id: customer.id,
           customerName: customerDisplayName(customer),
@@ -884,8 +918,8 @@ router.get('/customers', canView, canCreateLoadings, async (req: any, res: Respo
           projectManagerName: customer.projectManagerName,
           projectManagerNumber: customer.projectManagerNumber,
           primaryPhone: customer.phoneNumbers[0]?.number || customer.primaryContact?.mobile || customer.primaryContact?.phone || customer.homeNumber || customer.workNumber || null,
-          loadableProjectCount: projects.length,
-          remainingGroupCount: projects.reduce((sum, item) => sum + item.remainingCount, 0)
+          loadableProjectCount: projects.length + (partner?.deliveries ?? 0),
+          remainingGroupCount: projects.reduce((sum, item) => sum + item.remainingCount, partner?.groups ?? 0)
         });
       }
     }
@@ -904,9 +938,12 @@ router.get('/customers/:customerId/projects', canView, canCreateLoadings, async 
 
     const projectId = typeof req.query.projectId === 'string' ? req.query.projectId : undefined;
     const projects = await loadableProjectsForCustomer(customer.id, projectId);
+    const partnerDeliveries = !projectId && customer.isActive ? await findLoadablePartnerDeliveries(prisma, {
+      actorId: req.user.id, correlationId: randomUUID(), customerIds: [customer.id],
+    }) : [];
     res.json({
       success: true,
-      data: projects.map(({ project, remainingCount, remainingTotal }) => ({
+      data: [...projects.map(({ project, remainingCount, remainingTotal }) => ({
         id: project.id,
         projectName: project.projectName,
         projectType: project.projectType,
@@ -919,7 +956,7 @@ router.get('/customers/:customerId/projects', canView, canCreateLoadings, async 
         projectManagerNumber: project.projectManagerNumber || project.customer.projectManagerNumber,
         remainingCount,
         remainingTotal: Number(remainingTotal)
-      }))
+      })), ...partnerDeliveries]
     });
   } catch (error) {
     console.error('Logistics customer projects error:', error);
@@ -1068,6 +1105,7 @@ router.get('/loadings', canView, canViewLoadings, async (req: any, res: Response
       success: true,
       data: loadings.map((loading) => ({
         id: loading.id,
+        sourceKind: loading.sourceKind,
         loadingNumber: loading.loadingNumber,
         status: loading.status,
         loadingDate: loading.loadingDate,
@@ -1192,6 +1230,7 @@ router.delete('/loadings/:id', canEdit, canEditLoadings, async (req: any, res: R
     if (existing.status !== EDITABLE_STATUS) return res.status(400).json({ success: false, error: 'Only draft loadings can be deleted' });
 
     await prisma.$transaction(async (tx) => {
+      if (await retirePersonalLoadingDraft(tx, existing.id, req.user.id)) return;
       await releaseQueueTurn(tx, existing.id);
       await tx.logisticsLoading.delete({ where: { id: existing.id } });
     });

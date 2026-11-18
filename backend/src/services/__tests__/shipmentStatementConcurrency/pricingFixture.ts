@@ -8,6 +8,48 @@ import { createProductionApprovedPricingFixture } from './productionApprovedPric
 
 const json = (value: unknown) => value as Prisma.InputJsonValue;
 
+export const seedCanonicalContractTemplate = async (client: PrismaClient, runId: string) => {
+  const department = await client.department.create({ data: {
+    name: `operations-${runId}`, namePersian: `operations-${runId}-fa`,
+  } });
+  const seller = await client.user.create({ data: {
+    username: `operations-seller-${runId}`, email: `operations-seller-${runId}@example.invalid`,
+    password: 'not-a-login', firstName: 'Operations', lastName: 'Seller', departmentId: department.id,
+  } });
+  const customer = await client.crmCustomer.create({ data: { firstName: 'Operations', lastName: 'Customer' } });
+  const product = await client.product.create({ data: {
+    code: `operations-${runId}`, name: 'Operations product', namePersian: 'محصول آزمون عملیات',
+    cuttingDimensionCode: 'prepared', cuttingDimensionName: 'Prepared', cuttingDimensionNamePersian: 'آماده',
+    stoneTypeCode: 'test', stoneTypeName: 'Test', stoneTypeNamePersian: 'آزمون',
+    widthCode: '40', widthValue: '40', widthName: '40', thicknessCode: '2', thicknessValue: '2', thicknessName: '2',
+    mineCode: 'test', mineName: 'Test', mineNamePersian: 'آزمون', finishCode: 'test', finishName: 'Test',
+    finishNamePersian: 'آزمون', colorCode: 'test', colorName: 'Test', colorNamePersian: 'آزمون',
+    qualityCode: 'test', qualityName: 'Test', qualityNamePersian: 'آزمون', images: [],
+  } });
+  const productRowId = `template-row-${randomUUID()}`;
+  const graph = {
+    schemaVersion: 1, revision: 1,
+    calculationPolicy: { calculation: 'calculation-v1', packing: 'packing-v1', pricing: 'pricing-v1', rounding: 'rounding-v1' },
+    catalogSnapshots: [{ catalogProductId: product.id, snapshotVersion: 'catalog-v1', facts: {} }],
+    rows: [{ productRowId, catalogProductId: product.id, catalogSnapshotVersion: 'catalog-v1',
+      productType: 'prepared', contractualTitle: 'Operations product',
+      commercial: { requestedQuantity: '1', totalAmountToman: '100' } }],
+    stairSystems: [], layerConfigurations: [], sourceBatches: [], remainingStones: [], allocations: [],
+    operationGroups: [], toolSelections: [], finishingSelections: [],
+  };
+  const hash = createHash('sha256').update(JSON.stringify(graph)).digest('hex');
+  await client.salesContract.create({ data: {
+    contractNumber: `OPERATIONS-TEMPLATE-${runId}`, title: 'Operations template', titlePersian: 'قالب آزمون عملیات',
+    content: '', status: 'APPROVED', customerId: customer.id, departmentId: department.id,
+    createdBy: seller.id, responsibleSellerId: seller.id, totalAmount: '100', currency: 'تومان',
+    contractData: json({ products: [] }),
+    items: { create: { productId: product.id, productRowId, productType: 'prepared', quantity: '1',
+      unitPrice: '100', totalPrice: '100', description: 'Operations product' } },
+    productGraphState: { create: { schemaVersion: 1, revision: 1, graph: json(graph),
+      policySnapshot: json(graph.calculationPolicy), inputHash: hash, resultHash: hash, totalAmountToman: '100' } },
+  } });
+};
+
 export const authorConcurrentPricingFixture = async (
   client: PrismaClient,
   runId: string,

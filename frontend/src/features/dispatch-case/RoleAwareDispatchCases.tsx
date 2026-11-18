@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useId, useMemo, useState } from 'react';
 import { FaChevronDown, FaChevronUp, FaListAlt } from 'react-icons/fa';
-import { ErpListContent, ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpInlineState, ErpLoading, ErpPressable, ErpSection, ErpSheet } from '@/components/erp';
+import { ErpListContent, ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpInlineState, ErpLoading, ErpPressable, ErpSection, ErpSheet, type ErpAction, type ErpColumn } from '@/components/erp';
 import { useAuth } from '@/contexts/AuthContext';
 import { dispatchCasesAPI } from '@/lib/api';
 import {
@@ -16,16 +16,27 @@ import {
   evidenceDetailPresentation,
 } from './dispatchCasePresentation';
 
+type DispatchCaseRow = {
+  id: string;
+  loadingId?: string | null;
+  loadingNumber?: string | null;
+  driverName?: string;
+  status: string;
+};
+
 type Props = { workspace: 'hr' | 'vehicle-operations' | 'security' | 'logistics' | 'accounting'; subjectId?: string; loadingId?: string;
   onStaleChange?: (stale: boolean) => void;
-  tableFilter?: (item: { loadingNumber?: string | number; driverName?: string; status: string }) => boolean };
+  tableFilter?: (item: DispatchCaseRow) => boolean;
+  tableColumns?: ErpColumn<DispatchCaseRow>[];
+  tableRowActions?: (item: DispatchCaseRow) => ErpAction[];
+};
 const labels: Record<string, string> = { hr: 'منابع انسانی', 'vehicle-operations': 'عملیات خودرو', security: 'گارد', logistics: 'لجستیک', accounting: 'حسابداری' };
 const statusOf = (error: any) => Number(error?.response?.status || 0);
 
-export default function RoleAwareDispatchCases({ workspace, subjectId, loadingId, onStaleChange, tableFilter }: Props) {
+export default function RoleAwareDispatchCases({ workspace, subjectId, loadingId, onStaleChange, tableFilter, tableColumns, tableRowActions }: Props) {
   const { user, loading: authLoading } = useAuth();
   const storagePrefix = `dispatch-cases:last-success:${user?.id || 'anonymous'}:${workspace}:${subjectId || loadingId || 'all'}`;
-  const [cases, setCases] = useState<any[]>([]);
+  const [cases, setCases] = useState<DispatchCaseRow[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [timeline, setTimeline] = useState<any>(null);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
@@ -123,10 +134,14 @@ export default function RoleAwareDispatchCases({ workspace, subjectId, loadingId
       mobileLayout="table"
       columns={[
         { id: 'loading', header: 'بارگیری', cell: item => dispatchCaseReference(item.loadingNumber) },
+        ...(tableColumns ?? []),
         { id: 'driver', header: 'راننده', cell: item => dispatchDriverName(item.driverName) },
         { id: 'status', header: 'وضعیت', cell: item => <ErpBadge tone={item.status === 'EXIT_RECORDED' ? 'success' : 'info'}>{dispatchStatusLabel(item.status)}</ErpBadge> },
       ]}
-      rowActions={item => [{ label: 'مشاهده مراحل ارسال', icon: FaListAlt, onClick: () => setSelected(item.id) }]}
+      rowActions={item => [
+        { label: 'مشاهده مراحل ارسال', icon: FaListAlt, onClick: () => setSelected(item.id) },
+        ...(tableRowActions?.(item) ?? []),
+      ]}
       isLoading={loading && !visibleCases.length}
       emptyState={!denied && <ErpEmptyState title={visibleCases.length ? 'پرونده‌ای مطابق جست‌وجو پیدا نشد' : 'پرونده ارسالی در این دامنه وجود ندارد'} />}
     /> : loading && !visibleCases.length ? <ErpLoading /> : visibleCases.length ? <div className="mt-3 grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-3">

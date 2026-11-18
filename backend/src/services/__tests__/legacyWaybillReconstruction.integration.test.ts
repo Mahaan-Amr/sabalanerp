@@ -2,10 +2,9 @@ import { latestLoadingCancellationRequest, requestLoadingCancellation } from '..
 import { getCrossWorkspaceDutyDetail, listCrossWorkspaceDuties } from '../crossWorkspaceDutyInbox';
 import { respondToCrossWorkspaceDuty } from '../crossWorkspaceDutyModule';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { createTemporaryConcurrencyDatabase } from './shipmentStatementConcurrency/database';
-import { createConcurrentPricingFixture } from './shipmentStatementConcurrency/pricingFixture';
+import { createConcurrentPricingFixture, seedCanonicalContractTemplate } from './shipmentStatementConcurrency/pricingFixture';
 import { createAuthorizedActorFixture } from './shipmentStatementConcurrency/authorityFixture';
 import { cancelFinalizedOrdinaryLoading, decideAccountingDispatchCandidate, finalizeCanonicalLoadingAllocations,
   LoadingCancellationAccountingAccessError, recoverLegacyLoadingWaybill, replaceAccountingDispatchWaybill,
@@ -25,13 +24,11 @@ async function run() {
   const sourceDatabaseUrl = process.env.DATABASE_URL;
   if (!sourceDatabaseUrl) throw new Error('DATABASE_URL must point at sabalanerp-local.');
   const root = path.resolve(process.cwd(), '..');
-  const database = await createTemporaryConcurrencyDatabase({ repositoryRoot: root, sourceDatabaseUrl });
+  const database = await createTemporaryConcurrencyDatabase({ repositoryRoot: root, sourceDatabaseUrl, migrateEmptySchema: true });
   const db = database.client();
   try {
-    execFileSync(process.execPath, [require.resolve('prisma/build/index.js'), 'migrate', 'deploy', '--schema', 'prisma/schema.prisma'], {
-      cwd: process.cwd(), env: { ...process.env, DATABASE_URL: database.databaseUrl }, stdio: 'pipe', timeout: 120000,
-    });
     process.env.CUSTOMER_SHIPMENT_STATEMENTS_ENABLED = 'false';
+    await seedCanonicalContractTemplate(db, database.runId);
     const fixture = await createConcurrentPricingFixture(db, database.runId, database.databaseUrl, { activateCutover: false });
     await finalizeCanonicalLoadingAllocations(db, { loadingId: fixture.loadings[0].id, actorId: fixture.actorId,
       effectiveAuthority: fixture.effectiveAuthority, idempotencyKey: `legacy-${database.runId}` });
@@ -79,6 +76,7 @@ async function run() {
     assert.equal(await db.salesDispatchInvoice.count({ where: { loadingId: fixture.loadings[0].id } }), 1);
     assert.equal(await db.accountingDispatchWaybill.count({ where: { candidateId: revision.candidate.id } }), 1);
     const cancelInput = { loadingId: fixture.loadings[0].id, actorId: fixture.actorId, reason: 'لغو بارگیری آزمایشی پیش از خروج' };
+    await db.logisticsLoading.update({ where: { id: cancelInput.loadingId }, data: { sepidarLoadingReference: '00123' } });
     const originalTurn = await db.guardDriverQueueTurn.findUniqueOrThrow({ where: { id: revision.queueTurnId } });
     const driverId = originalTurn.externalDriverId!;
     assert.ok(driverId);
@@ -137,11 +135,14 @@ async function run() {
     assert.equal(await db.shipmentQuantityEvidence.count({ where: { sourceType: 'FINALIZED_LOADING_CANCELLATION', sourceId: line.id } }), 1);
     const cancelledLoading = await db.logisticsLoading.findUniqueOrThrow({ where: { id: cancelInput.loadingId } });
     assert.equal(cancelledLoading.status, 'CANCELLED');
+    assert.equal(cancelledLoading.sepidarLoadingReference, '00123');
     assert.equal(cancelledLoading.cancellationReason, cancelInput.reason);
     assert.equal((await db.accountingDispatchCandidate.findUniqueOrThrow({ where: { id: revision.candidate.id } })).status, 'WITHDRAWN');
     const readyForLoading = await db.guardDriverQueueTurn.findUniqueOrThrow({ where: { id: originalTurn.id } });
     assert.equal(readyForLoading.status, 'AVAILABLE_FOR_LOADING');
     assert.equal(readyForLoading.loadingId, null);
+    const accountingCases = await listDispatchCases(db, { workspace: 'accounting', permission: 'edit' });
+    assert.equal(accountingCases.find(item => item.id === originalTurn.id)?.loadingId, cancelledLoading.id);
     assert.equal(readyForLoading.admittedAt.toISOString(), originalTurn.admittedAt.toISOString());
     assert.equal(readyForLoading.voidedAt, null);
     assert.ok(!(await listGuardQueueAdmissionOptions(db)).externalDrivers.some(driver => driver.id === driverId));
@@ -193,6 +194,9 @@ async function run() {
     assert.equal(await db.accountingDispatchWaybill.count({ where: { candidateId: second.candidate!.id } }), 1);
     assert.equal(await db.salesDispatchInvoice.count({ where: { loadingId: fixture.loadings[1].id } }), 1);
     const secondLoadingId = fixture.loadings[1].id;
+    const secondLoading = await db.logisticsLoading.findUniqueOrThrow({ where: { id: secondLoadingId } });
+    assert.equal(secondLoading.sepidarLoadingReference, null);
+    await db.logisticsLoading.update({ where: { id: secondLoadingId }, data: { sepidarLoadingReference: '00456' } });
     const originalWaybill = await db.accountingDispatchWaybill.findFirstOrThrow({ where: { candidateId: second.candidate!.id } });
     const originalInvoice = await db.salesDispatchInvoice.findFirstOrThrow({ where: { loadingId: secondLoadingId } });
     const replacementInput = { waybillId: originalWaybill.id, actorId: actor.id, effectiveAuthority: authority,
@@ -269,6 +273,7 @@ async function run() {
     await issueSecond(repairedPart, recoveredInvoice.id);
     const repairedInvoice = await db.salesDispatchInvoice.findFirstOrThrow({ where: { loadingId: secondLoadingId, voidedAt: null } });
     assert.equal(repairedInvoice.replacesId, recoveredInvoice.id);
+    assert.equal((await db.logisticsLoading.findUniqueOrThrow({ where: { id: secondLoadingId } })).sepidarLoadingReference, '00456');
     assert.deepEqual(await db.dispatchExitAuthorization.findUniqueOrThrow({ where: { id: exitInput.authorizationId } }), authorizationBeforeRepair);
     assert.deepEqual(await db.accountingDispatchWaybill.findUniqueOrThrow({ where: { id: secondWaybill.id } }), secondWaybill);
     await db.externalDriver.update({ where: { id: secondTurn.externalDriverId }, data: { status: 'RESTRICTED' } });

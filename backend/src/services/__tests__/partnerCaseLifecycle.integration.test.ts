@@ -87,6 +87,11 @@ test('Partner dispatch statements require current internal Accounting authority 
       rootKind: 'CASE', purpose: 'ACCOUNTING', scope: 'PURPOSE_BOUND', boundRootId: ids.caseId,
       effect: 'ALLOW', grantedBy: managerId,
       reason: 'isolated dispatch document policy fixture', correlationId: `${managerId}-accounting-read` } });
+    await database.effectiveActionGrant.create({ data: { id: `${managerId}-accounting-write`, principalKind: 'USER',
+      principalId: managerId, subjectUserId: managerId, domain: 'PARTNER', action: 'ACCOUNTING_WRITE',
+      rootKind: 'CASE', purpose: 'ACCOUNTING', scope: 'PURPOSE_BOUND', boundRootId: ids.caseId,
+      effect: 'ALLOW', grantedBy: managerId,
+      reason: 'isolated loading reference fixture', correlationId: `${managerId}-accounting-write` } });
     // Residual narrow grants must not let a Partner persona read wholesale shipment documents.
     const residualGrant = { userId: ids.partnerId, workspace: 'accounting',
       feature: 'accounting_dispatch_candidates_view', permissionLevel: 'view', grantedBy: managerId };
@@ -99,7 +104,7 @@ test('Partner dispatch statements require current internal Accounting authority 
     });
     const project = await database.projectAddress.create({ data: { customerId: ids.customerId, address: 'Isolated policy fixture' } });
     const loading = await database.logisticsLoading.create({ data: { loadingNumber: `${ids.caseId}-loading`,
-      customerId: ids.customerId, projectId: project.id, createdBy: managerId } });
+      customerId: ids.customerId, projectId: project.id, createdBy: managerId, status: 'FINALIZED' } });
     const driver = await database.externalDriver.create({ data: { firstName: 'Policy', lastName: 'Fixture',
       nationalCode: temporary.runId, phone: '09120000000', createdBy: managerId } });
     const vehicle = await database.externalVehicle.create({ data: { vehicleType: 'Policy fixture', createdBy: managerId } });
@@ -126,11 +131,27 @@ test('Partner dispatch statements require current internal Accounting authority 
       const candidate = await database.accountingDispatchCandidate.create({ data: { allocationRevisionId: revision.id } });
       candidates[sourceKind] = candidate.id;
     }
+    const otherLoading = await database.logisticsLoading.create({ data: { loadingNumber: `${ids.caseId}-other-loading`,
+      customerId: ids.customerId, projectId: project.id, createdBy: managerId, status: 'FINALIZED' } });
+    const otherDriver = await database.externalDriver.create({ data: { firstName: 'Other', lastName: 'Fixture',
+      nationalCode: `${temporary.runId}o`, phone: '09120000002', createdBy: managerId } });
+    const otherVehicle = await database.externalVehicle.create({ data: { vehicleType: 'Other fixture', createdBy: managerId } });
+    const otherQueue = await database.guardDriverQueueTurn.create({ data: { driverSource: 'EXTERNAL',
+      externalDriverId: otherDriver.id, externalVehicleId: otherVehicle.id, admittedBy: managerId, admissionSnapshot: {},
+      integrityHash: 'e'.repeat(64), loadingId: otherLoading.id } });
+    const otherBatch = await database.logisticsAllocationBatch.create({ data: { loadingId: otherLoading.id,
+      idempotencyKey: 'other-policy-fixture', finalizedBy: managerId } });
+    const otherRevision = await database.logisticsAllocationRevision.create({ data: { loadingId: otherLoading.id,
+      queueTurnId: otherQueue.id, batchId: otherBatch.id, revisionNumber: 1, snapshot: {},
+      integrityHash: 'f'.repeat(64), finalizedBy: managerId } });
+    candidates.OTHER_ORDINARY = (await database.accountingDispatchCandidate.create({ data: {
+      allocationRevisionId: otherRevision.id,
+    } })).id;
     const hiddenProject = await database.projectAddress.create({ data: {
       customerId: hiddenIds.customerId, address: 'Hidden isolated policy fixture',
     } });
     const hiddenLoading = await database.logisticsLoading.create({ data: { loadingNumber: `${hiddenIds.caseId}-loading`,
-      customerId: hiddenIds.customerId, projectId: hiddenProject.id, createdBy: managerId } });
+      customerId: hiddenIds.customerId, projectId: hiddenProject.id, createdBy: managerId, status: 'FINALIZED' } });
     const hiddenDriver = await database.externalDriver.create({ data: { firstName: 'Hidden', lastName: 'Policy',
       nationalCode: `${temporary.runId}h`, phone: '09120000001', createdBy: managerId } });
     const hiddenVehicle = await database.externalVehicle.create({ data: { vehicleType: 'Hidden policy fixture', createdBy: managerId } });
@@ -158,7 +179,7 @@ test('Partner dispatch statements require current internal Accounting authority 
     await database.workspacePermission.create({ data: { userId: managerId, workspace: 'accounting',
       permissionLevel: 'edit', grantedBy: managerId } });
     for (const [feature, permissionLevel] of [['accounting_dispatch_candidates_view', 'view'],
-      ['accounting_dispatch_candidates_manage', 'edit']] as const) {
+      ['accounting_dispatch_candidates_manage', 'edit'], ['accounting_audit_view', 'view']] as const) {
       await database.featurePermission.create({ data: { userId: managerId, workspace: 'accounting',
         feature, permissionLevel, grantedBy: managerId } });
     }
@@ -167,7 +188,9 @@ test('Partner dispatch statements require current internal Accounting authority 
         DATABASE_URL: temporary.databaseUrl, PARTNER_TEST_ACTOR_ID: managerId,
         PARTNER_TEST_ORDINARY_CANDIDATE_ID: candidates.SALES_CONTRACT,
         PARTNER_TEST_ALLOWED_CANDIDATE_ID: candidates.PARTNER_CASE,
-        PARTNER_TEST_HIDDEN_CANDIDATE_ID: candidates.HIDDEN_PARTNER_CASE } });
+        PARTNER_TEST_HIDDEN_CANDIDATE_ID: candidates.HIDDEN_PARTNER_CASE,
+        PARTNER_TEST_LOADING_ID: loading.id, PARTNER_TEST_OTHER_LOADING_ID: otherLoading.id,
+        PARTNER_TEST_HIDDEN_LOADING_ID: hiddenLoading.id } });
     const access = createPrismaDispatchDocumentAccessPolicy(database);
     const request = { actorId: ids.partnerId, candidateId: candidates.PARTNER_CASE, kinds: ['STATEMENT'] as ['STATEMENT'] };
     assert.equal(await access.canReadDocuments(request), false);

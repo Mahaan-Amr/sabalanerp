@@ -8,6 +8,7 @@ test('accountant registers a loading reference and finds every driver row by it'
   await expect(page).toHaveURL(/\/dashboard$/, { timeout: 60_000 });
   let reference: string | null = null;
   let canManage = true;
+  let partnerWritable = false;
   let failNextSave = true;
   const rows = ['driver-a', 'driver-b', 'driver-c'].map(id => ({ id, loadingId: id === 'driver-c' ? 'loading-2' : 'loading-1',
     status: 'PENDING', canManage: true, sepidarLoadingReference: reference,
@@ -19,7 +20,7 @@ test('accountant registers a loading reference and finds every driver row by it'
     success: true, data: { id: 'session-a', waybillId: 'waybill-a' },
   } }));
   await page.route('**/api/accounting/dispatch-candidates', route => route.fulfill({ json: {
-    success: true, data: rows.map(row => ({ ...row, canManage,
+    success: true, data: rows.map(row => ({ ...row, canManage: canManage && (row.id !== 'driver-b' || partnerWritable),
       sepidarLoadingReference: row.loadingId === 'loading-1' ? reference : null })),
   } }));
   await page.route('**/api/accounting/loadings/loading-1/sepidar-reference', async route => {
@@ -34,6 +35,9 @@ test('accountant registers a loading reference and finds every driver row by it'
   await page.goto('/dashboard/accounting/dispatch');
   await expect(page.getByRole('columnheader', { name: 'شماره بارگیری سپیدار' })).toBeVisible();
   await expect(page.getByRole('row').filter({ hasText: 'driver-a' }).getByRole('cell').nth(1)).toHaveText('—');
+  await expect(page.getByRole('row').filter({ hasText: 'driver-a' }).getByRole('button', { name: 'ثبت شماره بارگیری سپیدار' })).toHaveCount(0);
+  partnerWritable = true;
+  await page.getByRole('button', { name: 'به‌روزرسانی' }).click();
   await page.getByRole('row').filter({ hasText: 'driver-a' }).getByRole('button', { name: 'ثبت شماره بارگیری سپیدار' }).click();
   await page.getByRole('textbox', { name: 'شماره بارگیری سپیدار' }).fill(' ۰۰۱۲۳ ');
   await page.getByRole('button', { name: 'ثبت شماره', exact: true }).click();

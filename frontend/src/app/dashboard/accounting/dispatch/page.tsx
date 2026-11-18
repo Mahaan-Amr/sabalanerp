@@ -309,10 +309,12 @@ export default function AccountingDispatchPage() {
   const rowActions = (candidate: any): ErpAction[] => {
     const waybill = activeWaybillFor(candidate);
     const canManage = candidate.canManage && dispatchCapabilities.canManageAccountingCandidates;
+    const canManageReference = canManage && candidate.loadingId && dispatchCandidates.every(item =>
+      item.loadingId !== candidate.loadingId || item.canManage);
     const actions: ErpAction[] = [
       { label: "جزئیات اقلام و اسناد بارگیری", icon: FaFileAlt, onClick: () => showCandidate(candidate.id) },
     ];
-    if (candidate.loadingId && canManage && !candidate.sepidarLoadingReference) actions.push({
+    if (canManageReference && !candidate.sepidarLoadingReference) actions.push({
       label: "ثبت شماره بارگیری سپیدار", icon: FaFileAlt, disabled: actionsBlocked,
       onClick: () => { setReferenceLoadingId(candidate.loadingId); setReferenceInput(""); setReferenceError(null); },
     });

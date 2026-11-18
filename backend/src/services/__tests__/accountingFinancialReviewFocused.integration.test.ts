@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { createPartnerLifecycleDatabase } from './partnerCaseLifecycleDatabase';
 import { seedHistoricalAccountingRead } from './partnerAccountingHistoricalReadSeed';
 
-const recordId = 'partner-accounting:5a11d03abd0ece495a335b337d94b2b8d9d726b73715abeff6c3e6b3592f2c52:replacement:2d8dadce-7015-40e3-a14d-ed45b0f11fe8';
+const recordId = 'partner-accounting:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:replacement:00000000-0000-4000-8000-000000000001';
 
 test('exact financial review and history retain authority, evidence and data without reading unrelated Cases', async () => {
   const sourceDatabaseUrl = process.env.CONTRACT_RECOVERY_TEST_DATABASE_URL ?? '';
@@ -13,7 +13,7 @@ test('exact financial review and history retain authority, evidence and data wit
   const database = temporary.client();
   try {
     const { fixture } = await seedHistoricalAccountingRead(database, undefined, false,
-      { invoiceId: recordId, customerContractNumber: '100999' });
+      { invoiceId: recordId, customerContractNumber: '900001' });
     await database.$transaction(async tx => {
       await tx.$executeRawUnsafe("SET LOCAL session_replication_role = 'replica'");
       for (let index = 0; index < 42; index++) {

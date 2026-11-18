@@ -115,8 +115,17 @@ export function PartnerLoadingDraft({ draftId }: { draftId: string }) {
     return quantity ? [{ sourceKind: "PARTNER_CASE", productRowId: row.productRowId, quantity, unit: row.unit }] : [];
   }) ?? [] }));
   const ready = entered.length > 0 && entered.every(driver => driver.lines.length > 0 && driver.lines.every(row => validQuantity(row.quantity)));
+  async function recoverFinalizedLoading(loadingId: string) {
+    const response = await logisticsAPI.getLoading(encodeURIComponent(loadingId)).catch(() => null);
+    const current = response?.data.data as Loading | undefined;
+    if (current?.loadingId !== loadingId || current.status !== "FINALIZED") return false;
+    setLoading(current);
+    return true;
+  }
+
   async function save(finalize: boolean) {
     if (!loading || !ready) return;
+    if (finalizeKey.current && await recoverFinalizedLoading(loading.loadingId)) return;
     const id = encodeURIComponent(loading.loadingId);
     for (const driver of entered) {
       await logisticsAPI.saveCanonicalAllocation(id, encodeURIComponent(driver.id), {
@@ -125,10 +134,14 @@ export function PartnerLoadingDraft({ draftId }: { draftId: string }) {
     }
     if (!finalize) return;
     finalizeKey.current ??= crypto.randomUUID();
-    await api.post(`/logistics/loadings/${id}/finalize`, {
-      expected: loading.source.owner, reason: "نهایی‌سازی بارگیری",
-    }, { headers: { "Idempotency-Key": finalizeKey.current } });
-    setLoading({ ...loading, status: "FINALIZED" });
+    try {
+      await api.post(`/logistics/loadings/${id}/finalize`, {
+        expected: loading.source.owner, reason: "نهایی‌سازی بارگیری",
+      }, { headers: { "Idempotency-Key": finalizeKey.current } });
+      setLoading({ ...loading, status: "FINALIZED" });
+    } catch (error) {
+      if (!await recoverFinalizedLoading(loading.loadingId)) throw error;
+    }
   }
 
   return (

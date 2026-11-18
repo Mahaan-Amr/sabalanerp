@@ -1341,6 +1341,7 @@ router.post('/loadings/:id/cancel', canEdit, canCancelLoadings, [
     if (loading.status === CANCELLED_STATUS) return res.status(400).json({ success: false, error: 'Loading is already cancelled' });
 
     await prisma.$transaction(async (tx) => {
+      if (loading.status === EDITABLE_STATUS && await retirePersonalLoadingDraft(tx, loading.id, req.user.id, reason)) return;
       const changed = await tx.logisticsLoading.updateMany({
         where: { id: loading.id, status: loading.status },
         data: { status: CANCELLED_STATUS, cancelledAt: new Date(), cancelledBy: req.user.id, cancellationReason: reason },
@@ -1354,7 +1355,7 @@ router.post('/loadings/:id/cancel', canEdit, canCancelLoadings, [
     if (error instanceof LoadingCancellationAccountingAccessError) {
       return res.status(403).json({ success: false, error: error.message });
     }
-    if (error instanceof DispatchAllocationConflictError || error instanceof PilotSafetyPauseError) {
+    if (error instanceof DispatchAllocationConflictError || error instanceof GuardQueueConflictError || error instanceof PilotSafetyPauseError) {
       return res.status(409).json({ success: false, error: error.message });
     }
     console.error('Cancel loading error:', error);

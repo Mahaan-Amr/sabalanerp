@@ -17,7 +17,16 @@ function installTsHook(){
 }
 const serviceImages={backend:'1',frontend:'2',inquiry:'3',nginx:'4',postgres:'5',clamav:'6'};
 const image=service=>'sha256:'+serviceImages[service].repeat(64);
-const backendId='1'.repeat(64);
+const backendId='1'.repeat(64),postgresId='5'.repeat(64);
+const bootstrapEnvironment={POSTGRES_USER:'postgres',POSTGRES_PASSWORD:'fixture',POSTGRES_DB:'sabalanerp'};
+const runtimeEnvironment={DATABASE_URL:'postgresql://runtime:fixture@postgres:5432/sabalanerp?schema=public'};
+const controlEnvironment={DATABASE_URL:'postgresql://postgres:fixture@postgres:5432/sabalanerp?schema=public'};
+function container(role,id,environment){
+ return {Id:id,Image:image(role),Config:{
+  Labels:{'com.docker.compose.project':'sabalanerp','com.docker.compose.service':role},
+  Env:Object.entries(environment).map(([key,value])=>key+'='+value)
+ },State:{Running:true},Mounts:[]};
+}
 const rollbackEnvironment={PERFORMANCE_RELEASE_COMMIT:'a'.repeat(40),PERFORMANCE_RELEASE_SOURCE_HASH:'b'.repeat(64),PERFORMANCE_RELEASE_BACKEND_IMAGE:image('backend'),PERFORMANCE_RELEASE_FRONTEND_IMAGE:image('frontend'),PERFORMANCE_RELEASE_INQUIRY_IMAGE:image('inquiry'),PERFORMANCE_RELEASE_SCHEMA_HASH:'b'.repeat(64),PERFORMANCE_RELEASE_POLICY_HASH:'b'.repeat(64),PERFORMANCE_RELEASE_INFRASTRUCTURE_HASH:'b'.repeat(64),PERFORMANCE_RUNTIME_INFRASTRUCTURE_HASH:'b'.repeat(64)};
 (async()=>{
  record({kind,args:a,phase:phase()});
@@ -111,11 +120,20 @@ const rollbackEnvironment={PERFORMANCE_RELEASE_COMMIT:'a'.repeat(40),PERFORMANCE
  }
  if(a[0]==='builder')return;
  if(a[0]==='volume'&&a[1]==='inspect'){console.log(root);return;}
+ if(a[0]==='container'&&a[1]==='inspect'){
+  if(a.length!==4||a[2]!==backendId||a[3]!==postgresId)throw Error('Database role observation must inspect the running backend and postgres');
+  console.log(JSON.stringify([container('backend',backendId,runtimeEnvironment),container('postgres',postgresId,bootstrapEnvironment)]));return;
+ }
  if(a[0]==='inspect'){
   if(a.includes('--format')){
-   const format=a[a.indexOf('--format')+1],service=a.at(-1),name=service===backendId?'backend':service;
-   console.log(format==='{{.Image}}'?image(name):format==='{{.Id}}'?(name==='backend'?backendId:name):format==='{{.State.Running}}'?'false':'10.0.0.2');
-  } else console.log(JSON.stringify([{Id:backendId,Image:image('backend'),Config:{Env:Object.entries(rollbackEnvironment).map(([k,v])=>k+'='+v)},State:{Running:true},Mounts:[]}]));
+   const format=a[a.indexOf('--format')+1],service=a.at(-1),name=service===backendId?'backend':service===postgresId?'postgres':service;
+   // Docker's index lookup on a missing string label returns an empty string.
+   if(format==='{{index .Config.Labels "io.sabalan.release.upload-policy"}}'){
+    if(name!=='backend')throw Error('Upload policy must be read from the previous backend');
+    console.log('');return;
+   }
+   console.log(format==='{{.Image}}'?image(name):format==='{{.Id}}'?service:format==='{{.State.Running}}'?'false':'10.0.0.2');
+  } else console.log(JSON.stringify([container('backend',backendId,{...runtimeEnvironment,...rollbackEnvironment})]));
   return;
  }
  if(a[0]==='cp'){
@@ -131,8 +149,8 @@ const rollbackEnvironment={PERFORMANCE_RELEASE_COMMIT:'a'.repeat(40),PERFORMANCE
  }
  if(a[0]==='exec'&&a[1]===backendId&&a.at(-1).includes('p=/app/storage/dispatch-documents'))return;
  if(a[0]!=='compose')throw Error('Unexpected Docker command');
- if(a.includes('ps')){console.log(a.at(-1)==='backend'?backendId:a.at(-1));return;}
- if(a.includes('config')){console.log(a.includes('json')?JSON.stringify({name:'fixture',services:{backend:{volumes:[{type:'volume',source:'backend_storage_dispatch_documents',target:'/app/storage/dispatch-documents'}]}},volumes:{backend_storage_dispatch_documents:{name:'fixture_dispatch_documents'}}}):'services: {}');return;}
+ if(a.includes('ps')){console.log(a.at(-1)==='backend'?backendId:a.at(-1)==='postgres'?postgresId:a.at(-1));return;}
+ if(a.includes('config')){console.log(a.includes('json')?JSON.stringify({name:'sabalanerp',services:{postgres:{environment:bootstrapEnvironment},deployment:{environment:controlEnvironment},backend:{environment:runtimeEnvironment,volumes:[{type:'volume',source:'backend_storage_dispatch_documents',target:'/app/storage/dispatch-documents'}]}},volumes:{backend_storage_dispatch_documents:{name:'fixture_dispatch_documents'}}}):'services: {}');return;}
  if(a.some(value=>value.includes('exec python3 - --assert-closed'))){if(failure==='runtime-not-closed')process.exit(49);return;}
  if(a.includes('build')||a.includes('create')||a.includes('stop')||a.includes('start'))return;
  if(a.includes('up')){
@@ -238,6 +256,11 @@ const rollbackEnvironment={PERFORMANCE_RELEASE_COMMIT:'a'.repeat(40),PERFORMANCE
  }
  if(a.includes('exec')){
   const text=a.at(-1);
+  if(text.includes('default_transaction_read_only')){
+   const sql=fs.readFileSync(0,'utf8');
+   if(!sql.includes('public.customer_allocation_release_control'))throw Error('Customer allocation guard must read the release state');
+   console.log('ABSENT');return;
+  }
   if(text.includes('pg_sleep(21600)')){fs.writeFileSync(path.join(root,'advisory.pid'),String(process.pid));setInterval(()=>{},1000);return;}
   if(text.includes('pg_locks'))console.log('1');
   else if(text.includes('pg_stat_activity WHERE client_addr'))console.log('0');

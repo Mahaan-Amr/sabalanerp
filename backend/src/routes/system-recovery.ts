@@ -8,7 +8,6 @@ import multer from 'multer';
 import { PrismaClient } from '@prisma/client';
 import { AuthRequest, authorize, protect } from '../middleware/auth';
 import {
-  createRecoveryPackage,
   isSanitizedRecoveryEnvironment,
   recoveryPackagePath,
   stageAndPromoteRecovery,
@@ -18,6 +17,7 @@ import {
 import {
   assertRestoreAuthorization,
   assertStrongBackupPassphrase,
+  isRestrictedRecoveryRuntime,
   packageExpired,
   RECOVERY_APPROVAL_MS,
   RECOVERY_FRESHNESS_MS,
@@ -33,7 +33,9 @@ import {
   waitForActiveWrites,
 } from '../services/recoveryRuntime';
 import { publishNotificationEvent } from '../services/notificationService';
+import { createBackupRequest, executeBackupRequest } from '../services/systemRecoveryBackupRequest';
 import { runtimeHttpRequests } from '../services/httpRequestLifecycle';
+import { queueRecoveryOwnerRequest } from '../services/systemRecoveryOwnerHandoff';
 
 const router = express.Router();
 const uploadTemp = path.join(RECOVERY_ROOT, 'upload-temp');
@@ -104,6 +106,28 @@ router.get('/', async (req: AuthRequest, res) => {
   });
 });
 
+router.post('/owner-backup-requests', async (req: AuthRequest, res) => {
+  if (!isRestrictedRecoveryRuntime(process.env)) {
+    return res.status(404).json({ success: false, error: 'SYSTEM_RECOVERY_OWNER_REQUEST_UNAVAILABLE' });
+  }
+  if (Object.keys(req.body ?? {}).length !== 1 || typeof req.body?.adminPassword !== 'string') {
+    return res.status(400).json({ success: false, error: 'SYSTEM_RECOVERY_OWNER_REQUEST_INVALID' });
+  }
+  try {
+    const operation = await runtimeHttpRequests.trackWork(req, async () => {
+      await verifyAdminPassword(req);
+      return createBackupRequest(prisma, { packageType: 'COMPLETE', actorId: req.user!.id, ownerExecution: true });
+    });
+    return res.status(202).json({ success: true, data: { id: operation.id, status: operation.status } });
+  } catch (error) {
+    const code = (error as { code?: string })?.code;
+    if (code === 'ADMIN_PASSWORD_INCORRECT' || code === 'RECOVERY_WRITE_ADMISSION_CLOSED') {
+      return respondError(res, error);
+    }
+    return res.status(500).json({ success: false, error: 'SYSTEM_RECOVERY_OWNER_REQUEST_FAILED' });
+  }
+});
+
 router.post('/backups', async (req: AuthRequest, res) => {
   let lockAcquired = false;
   let backgroundStarted = false;
@@ -114,17 +138,22 @@ router.post('/backups', async (req: AuthRequest, res) => {
     const passphrase = assertStrongBackupPassphrase(req.body.passphrase);
     if (!acquireRecoveryOperation()) return res.status(409).json({ success: false, error: 'RECOVERY_OPERATION_IN_PROGRESS' });
     lockAcquired = true;
-    const operation = await prisma.recoveryOperation.create({
-      data: {
-        packageType,
-        source: 'CREATED',
-        status: 'CREATING',
-        progress: 0,
-        createdById: req.user!.id,
-        expiresAt: new Date(Date.now() + RECOVERY_RETENTION_MS),
-      },
-    });
-    await audit(operation.id, req.user!.id, 'RECOVERY_BACKUP_REQUESTED', null, { packageType });
+    const ownerExecution = isRestrictedRecoveryRuntime(process.env);
+    const operation = await createBackupRequest(prisma, { packageType, actorId: req.user!.id, ownerExecution });
+    if (ownerExecution) {
+      try {
+        await queueRecoveryOwnerRequest(prisma, { operationId: operation.id, actorId: req.user!.id,
+          action: 'BACKUP', packageType, passphrase });
+      } catch (error) {
+        await prisma.recoveryOperation.update({ where: { id: operation.id }, data: {
+          status: 'FAILED', errorCode: 'SYSTEM_RECOVERY_OWNER_HANDOFF_FAILED', errorMessage: 'Owner handoff failed.' } });
+        throw error;
+      }
+      releaseRecoveryOperation();
+      lockAcquired = false;
+      backgroundStarted = true;
+      return res.status(202).json({ success: true, data: serializeOperation(operation) });
+    }
     res.status(202).json({ success: true, data: serializeOperation(operation) });
     backgroundStarted = true;
     setImmediate(async () => {
@@ -132,11 +161,11 @@ router.post('/backups', async (req: AuthRequest, res) => {
       try {
         setRecoveryRuntimeState('READ_ONLY', operation.id, 'A consistent recovery snapshot is being captured.');
         await waitForActiveWrites();
-        const result = await createRecoveryPackage({
+        await executeBackupRequest(prisma, {
           operationId: operation.id,
+          actorId: req.user!.id,
           packageType,
           passphrase,
-          prisma,
           onProgress: async (progress) => {
             if (progress >= 55 && !snapshotReleased) {
               snapshotReleased = true;
@@ -146,24 +175,6 @@ router.post('/backups', async (req: AuthRequest, res) => {
           },
         });
         if (!snapshotReleased) setRecoveryRuntimeState('NORMAL');
-        const readyAt = new Date();
-        await prisma.recoveryOperation.update({
-          where: { id: operation.id },
-          data: {
-            status: 'READY',
-            progress: 100,
-            storageName: result.storageName,
-            originalName: `sabalan-${packageType.toLowerCase()}-${readyAt.toISOString().replace(/[:.]/g, '-')}.sabrec`,
-            encryptedSha256: result.sha256,
-            size: BigInt(result.size),
-            sourceAppVersion: result.manifest.appVersion,
-            sourceCommit: result.manifest.commit,
-            sourcePostgresVersion: result.manifest.postgresVersion,
-            compatibility: { compatible: true, reasons: [] },
-            readyAt,
-          },
-        });
-        await audit(operation.id, req.user!.id, 'RECOVERY_BACKUP_READY', result.sha256, { packageType, size: result.size });
       } catch (error: any) {
         setRecoveryRuntimeState('NORMAL');
         await prisma.recoveryOperation.update({
@@ -222,6 +233,8 @@ router.post('/:id/download', async (req: AuthRequest, res) => {
   }
 });
 
+// Intake authenticates archive bytes and checks compatibility without restoring
+// SQL or creating a database, so it also runs under the restricted serving role.
 router.post('/uploads', upload.single('file'), async (req: AuthRequest, res) => {
   const temporaryPath = req.file?.path;
   let operationId: string | null = null;
@@ -265,7 +278,9 @@ router.post('/uploads', upload.single('file'), async (req: AuthRequest, res) => 
     backgroundStarted = true;
     setImmediate(async () => {
       try {
-        const validation = await validateRecoveryPackage({ sourcePath: stored.destination, passphrase, prisma });
+        const validation = await validateRecoveryPackage({
+          sourcePath: stored.destination, expectedChecksum: stored.sha256, passphrase, prisma,
+        });
         if (validation.manifest.packageType === 'SANITIZED_TEST' && (process.env.NODE_ENV === 'production' || process.env.ALLOW_SANITIZED_RECOVERY !== 'true')) {
           throw Object.assign(new Error('Sanitized test restore is disabled in this environment.'), { code: 'SANITIZED_RESTORE_DISABLED' });
         }
@@ -351,7 +366,9 @@ router.post('/:id/restore', async (req: AuthRequest, res) => {
       confirmationPhrase: req.body.confirmationPhrase,
     });
     const sourcePath = recoveryPackagePath(operation.source, operation.storageName);
-    const validation = await validateRecoveryPackage({ sourcePath, passphrase, prisma });
+    const validation = await validateRecoveryPackage({
+      sourcePath, expectedChecksum: operation.encryptedSha256, passphrase, prisma,
+    });
     if (!validation.compatibility.compatible) return res.status(409).json({ success: false, error: 'RECOVERY_PACKAGE_INCOMPATIBLE', data: validation.compatibility });
     if (!acquireRecoveryOperation()) return res.status(409).json({ success: false, error: 'RECOVERY_OPERATION_IN_PROGRESS' });
     lockAcquired = true;
@@ -385,6 +402,26 @@ router.post('/:id/restore', async (req: AuthRequest, res) => {
       });
     });
     await audit(operation.id, req.user!.id, 'RECOVERY_RESTORE_STARTED', operation.encryptedSha256, { authorizationMode: authorization.mode });
+    if (isRestrictedRecoveryRuntime(process.env)) {
+      try {
+        await queueRecoveryOwnerRequest(prisma, { operationId: operation.id, actorId: req.user!.id,
+          action: 'RESTORE', packageType: operation.packageType as RecoveryPackageType, passphrase,
+          checksum: operation.encryptedSha256, approvedById: operation.approvedById,
+          approvalExpiresAt: operation.approvalExpiresAt?.toISOString() || null,
+          breakGlassReason: authorization.mode === 'BREAK_GLASS' ? String(req.body.breakGlassReason).trim() : undefined,
+          confirmationPhrase: req.body.confirmationPhrase, bootstrapPassword });
+      } catch (error) {
+        await prisma.recoveryOperation.update({ where: { id: operation.id }, data: {
+          status: operation.status, progress: 100, restoreStartedAt: null,
+        } });
+        throw error;
+      }
+      releaseRecoveryOperation();
+      lockAcquired = false;
+      backgroundStarted = true;
+      return res.status(202).json({ success: true, data: { operationId: operation.id, restarting: true,
+        bootstrapAdmin: bootstrapPassword ? { username: 'local_recovery_admin', temporaryPassword: bootstrapPassword } : null } });
+    }
     setRecoveryRuntimeState('MAINTENANCE', operation.id, 'A validated system recovery is being promoted.');
     res.status(202).json({
       success: true,

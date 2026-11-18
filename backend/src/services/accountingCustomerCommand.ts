@@ -7,8 +7,15 @@ import { requireCustomerSourceSharesWithin } from './customerSemanticCompatibili
 export async function customerCompoundCommandWithin<T>(tx: Prisma.TransactionClient, input: {
   profileId: string; kind: string; idempotencyKey: string; actor: { id: string }; payload: unknown;
 }, execute: () => Promise<T>): Promise<T> {
-  await requireCustomerSourceSharesWithin(tx);
+  await requireCustomerSourceSharesWithin(tx, input.kind === 'ALLOCATION' ? 'grouped-allocation' : 'other');
   const commandHash = hashAccountingEvidence(input.payload);
+  if (input.kind === 'ALLOCATION') {
+    const intent = await tx.accountingCustomerAllocationIntent.findUnique({ where: { idempotencyKey: input.idempotencyKey } });
+    if (!intent || intent.profileId !== input.profileId || intent.ownerId !== input.actor.id ||
+      intent.commandHash !== commandHash || intent.state !== 'PENDING') {
+      throw new AccountingCustomerTreasuryError('ALLOCATION_INTENT_REQUIRED', 'درخواست تخصیص مطابق اطلاعات تأییدشده پیدا نشد.', 409);
+    }
+  }
   const prior = await tx.accountingCustomerCommand.findUnique({ where: { idempotencyKey: input.idempotencyKey } });
   if (prior) {
     if (prior.profileId !== input.profileId || prior.kind !== input.kind || prior.commandHash !== commandHash)

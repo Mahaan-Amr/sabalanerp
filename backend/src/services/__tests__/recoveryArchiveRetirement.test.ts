@@ -50,10 +50,17 @@ async function main() {
       return { source, sourceSha256: sha(fs.readFileSync(source)) };
     }
     const valid = await encrypted('valid');
-    const result = await validateRecoveryPackage({ sourcePath: valid.source, passphrase, prisma, verifyRestore: false });
+    const result = await validateRecoveryPackage({
+      sourcePath: valid.source, expectedChecksum: valid.sourceSha256, passphrase, prisma, verifyRestore: false,
+    });
     assert.deepEqual(result.manifest.components, manifest.components);
     assert.equal(sha(fs.readFileSync(valid.source)), valid.sourceSha256);
     const tampered = await encrypted('bad-component', true);
+    const beforeMismatch = manifestReads;
+    await assert.rejects(validateRecoveryPackage({
+      sourcePath: valid.source, expectedChecksum: tampered.sourceSha256, passphrase, prisma, verifyRestore: true,
+    }), (error: any) => error.code === 'RECOVERY_INTEGRITY_FAILED');
+    assert.equal(manifestReads, beforeMismatch, 'a valid envelope for a different receipt cannot reach archive processing');
     await assert.rejects(validateRecoveryPackage({ sourcePath: tampered.source, passphrase, prisma, verifyRestore: false }),
       (error: any) => error.code === 'RECOVERY_INTEGRITY_FAILED');
     assert.equal(sha(fs.readFileSync(tampered.source)), tampered.sourceSha256);

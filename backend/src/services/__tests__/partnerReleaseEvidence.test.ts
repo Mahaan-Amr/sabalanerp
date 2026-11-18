@@ -6,7 +6,6 @@ import { pathToFileURL } from 'node:url';
 import type { Prisma } from '@prisma/client';
 import { verifiedReadinessFromPublication, verifySignedPublication } from '../partnerSales/activationPackage/releaseEvidence';
 import { acceptanceResponsibilities, readinessGates } from '../partnerSales/operations/readiness';
-import { mandatoryReleaseDeploymentGateNames } from '../deploymentGates';
 
 const runtime = { deploymentId: 'deploy-release-1', releaseId: 'release-1', schemaId: 'partner-schema-v1' };
 const evidence = {
@@ -15,31 +14,18 @@ const evidence = {
   gates: Object.fromEntries(readinessGates.map(gate => [gate, true])),
   acceptedBy: Object.fromEntries(acceptanceResponsibilities.map(role => [role, `actor-${role}`])),
 };
-const deployment = { id: runtime.deploymentId, releaseId: runtime.releaseId,
-  targetCommit: 'a'.repeat(40), phase: 'COMPLETED', reportJson: {
-    format: 'sabalan-deployment-report', version: 1, mode: 'RELEASE', deploymentId: runtime.deploymentId,
-    releaseId: runtime.releaseId, targetCommit: 'a'.repeat(40),
-    gates: mandatoryReleaseDeploymentGateNames.map(name => ({ name, passed: true })),
-  } as Prisma.JsonValue };
 const row = { id: runtime.deploymentId, deploymentId: runtime.deploymentId, releaseId: runtime.releaseId,
   targetCommit: 'a'.repeat(40), schemaId: runtime.schemaId, checkedAt: new Date(evidence.checkedAt),
   expiresAt: new Date(evidence.expiresAt), packageSha256: 'b'.repeat(64), trustEnvelopeSha256: 'c'.repeat(64),
   trustKeyId: `sha256:${'d'.repeat(64)}`, packageBytesBase64: 'e30=', trustEnvelopeBytesBase64: 'e30=',
-  evidenceJson: evidence as Prisma.JsonValue, deployment };
+  evidenceJson: evidence as Prisma.JsonValue };
 
-test('accepts only an immutable candidate-bound publication for a completed deployment', () => {
+test('accepts candidate-bound readiness from an admitted publication', () => {
   assert.deepEqual(verifiedReadinessFromPublication(row, runtime), evidence);
 });
 
-test('fails closed for incomplete deployment, report drift, failed gates, or missing acceptance', () => {
-  assert.equal(verifiedReadinessFromPublication({ ...row, deployment: { ...deployment, phase: 'GATES_PASSED' } }, runtime), null);
-  assert.equal(verifiedReadinessFromPublication({ ...row, deployment: { ...deployment, reportJson: {
-    ...(deployment.reportJson as Record<string, unknown>), targetCommit: 'b'.repeat(40),
-  } as Prisma.JsonValue } }, runtime), null);
-  assert.equal(verifiedReadinessFromPublication({ ...row, deployment: { ...deployment, reportJson: {
-    ...(deployment.reportJson as Record<string, unknown>), gates: mandatoryReleaseDeploymentGateNames
-      .map((name, index) => ({ name, passed: index !== 0 })),
-  } as Prisma.JsonValue } }, runtime), null);
+test('fails closed for wrong runtime identity or missing acceptance', () => {
+  assert.equal(verifiedReadinessFromPublication(row, { ...runtime, releaseId: 'other-release' }), null);
   assert.equal(verifiedReadinessFromPublication({ ...row, evidenceJson: {
     ...evidence, acceptedBy: { ...evidence.acceptedBy, SALES: '' },
   } as Prisma.JsonValue }, runtime), null);

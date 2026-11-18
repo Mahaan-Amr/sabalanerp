@@ -9,7 +9,12 @@ test('protected release captures the stopped bank before checkpoint, applies tar
  for(const step of steps) {const index=source.indexOf(step, previous + 1);assert.ok(index>previous,`missing or out of order: ${step}`);previous=index;}
  assert.doesNotMatch(source,/compose up -d postgres clamav/,'pre-checkpoint must not replace AV');
  assert.match(source,/if \[ "\$\{DEPLOYMENT_CLAMAV_REPAIR\}" = true \] && \[ "\$\{MUTATION_STARTED\}" -eq 0 \]; then[\s\S]*compose start clamav[\s\S]*--no-deps/);
- assert.match(source,/deployment-rollback.js[\s\S]*switch_to_previous_images\n    restore_clamav_configuration[\s\S]*verify_clamav_repair_runtime[\s\S]*DEPLOYMENT_GATE_MODE=ROLLBACK/);
+ const rollback=source.slice(source.indexOf('Running the single permitted automatic rollback attempt.'));
+ const rollbackSteps=['deployment-rollback.js','deployment-finalize-recovery.js','&& switch_to_previous_images; then',
+  'restore_clamav_configuration || exit 1','if start_release_services 300','&& verify_clamav_repair_runtime',
+  '&& DEPLOYMENT_GATE_MODE=ROLLBACK','&& control maintenance-off; then'];
+ previous=-1;
+ for(const step of rollbackSteps) {const index=rollback.indexOf(step,previous+1);assert.ok(index>previous,`missing or out of order during rollback: ${step}`);previous=index;}
  assert.match(source,/PUBLIC_TRAFFIC_OPEN.*[\s\S]*rollback is forbidden because new writes may exist/);
  assert.match(source,/DEPLOYMENT_MODE.*release.*[\s\S]*ClamAV repair requires the complete protected release path/);
 });
@@ -110,7 +115,15 @@ for(const scenario of ['qualification','remote-tamper','post-mutation','rollback
   if(['post-mutation','rollback-qualifier','install-interrupted','lease-expired'].includes(failure)){
    assert.equal(fs.readFileSync(path.join(root,'bank/freshclam.dat'),'utf8'),'native-cooldown-fixture');
    assert.equal(fs.readFileSync(path.join(root,'restored-config.tar'),'utf8'),'effective-config-fixture');
-   if(!incident)assert.ok(commands.some(c=>c.kind==='node'&&c.args[1]==='inspect-rollback'&&c.phase==='ROLLBACK_STARTED'));
+   if(!incident){
+    const verification=commands.findIndex(c=>c.kind==='node'&&c.args[1]==='inspect-rollback'&&c.phase==='ROLLBACK_STARTED');
+    assert.ok(verification>=0,'healthy rollback must verify the exact restored scanner');
+    if(failure==='post-mutation'){
+     const gates=commands.findIndex(c=>c.args.includes('dist/scripts/deployment-gates.js')&&c.args.includes('DEPLOYMENT_GATE_MODE=ROLLBACK'));
+     const reopen=commands.indexOf(controls('maintenance-off')[0]);
+     assert.ok(verification<gates&&gates<reopen,'scanner verification and rollback gates must precede reopening');
+    }
+   }
    if(incident)assert.equal(commands.filter(c=>c.kind==='node'&&c.args[1]==='inspect-rollback').length,0,'degraded evidence must not be passed to the healthy verifier');
   }
  } finally {

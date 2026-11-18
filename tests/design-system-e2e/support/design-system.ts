@@ -1,5 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, type Locator, type Page, type TestInfo } from '@playwright/test';
+import { loginThroughBrowser } from '../../support/browser-login';
 
 /** Reproduce the owner-scoped navigation handoff used by the contract wizard. */
 export const seedContractNavigation = async (page: Page, value: unknown) => {
@@ -25,11 +26,7 @@ export const loginAsAdmin = async (page: Page, landingPath = '/dashboard') => {
       body: JSON.stringify({ success: true, badge: null })
     });
   });
-  await page.goto('/login');
-  await page.getByRole('textbox', { name: 'ایمیل، نام کاربری یا شماره تماس' }).fill(username);
-  await page.locator('input[type="password"]').fill(password);
-  await page.getByRole('button', { name: 'ورود', exact: true }).click();
-  await expect(page).toHaveURL(new URL(landingPath, page.url()).href, { timeout: 60_000 });
+  await loginThroughBrowser(page, username, password, landingPath);
 };
 
 export const isolatedTestNamespace = (testInfo: TestInfo) => [

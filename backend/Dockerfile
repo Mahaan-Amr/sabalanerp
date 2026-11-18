@@ -1,3 +1,4 @@
+ARG RECOVERY_POSTGRES_IMAGE=postgres:15-alpine
 FROM node:22-bookworm-slim AS builder
 
 WORKDIR /app
@@ -49,12 +50,32 @@ COPY backend/tsconfig.json ./
 COPY backend/tsconfig.cutover.json ./
 COPY backend/scripts/shipment-statement-cutover.ts ./scripts/shipment-statement-cutover.ts
 COPY backend/scripts/clamav-checkpoint.mjs backend/scripts/clamav-checkpoint.d.mts backend/scripts/clamav-incident-policy.mjs backend/scripts/preserved-clamav-policy.mjs backend/scripts/preserved-clamav-policy.d.mts ./scripts/
+COPY backend/scripts/maintenance-image-binding.mjs backend/scripts/maintenance-image-binding.d.mts ./scripts/
 COPY backend/src ./src
 
 RUN npx prisma generate
 # Bound compiler memory independently of the production runtime's default heap.
 RUN NODE_OPTIONS=--max-old-space-size=3072 npm run build
 RUN npm prune --omit=dev --no-audit --fund=false
+
+FROM node:22-bookworm-slim AS recovery-postgres-launcher
+
+ARG DEBIAN_MIRROR=http://deb.debian.org/debian
+ARG DEBIAN_SECURITY_MIRROR=http://security.debian.org/debian-security
+RUN printf 'Types: deb\nURIs: %s\nSuites: bookworm\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n\nTypes: deb\nURIs: %s\nSuites: bookworm-security\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n' "$DEBIAN_MIRROR" "$DEBIAN_SECURITY_MIRROR" > /etc/apt/sources.list.d/debian.sources \
+  && HTTP_PROXY= HTTPS_PROXY= http_proxy= https_proxy= apt-get -o Acquire::ForceIPv4=true update \
+  && HTTP_PROXY= HTTPS_PROXY= http_proxy= https_proxy= apt-get -o Acquire::ForceIPv4=true install -y --no-install-recommends \
+    gcc libc6-dev \
+  && rm -rf /var/lib/apt/lists/*
+COPY backend/scripts/recovery-postgres-sandbox.c /tmp/recovery-postgres-sandbox.c
+RUN mkdir -p /usr/local/libexec \
+  && gcc -O2 -Wall -Wextra -Werror -o /usr/local/libexec/recovery-postgres-sandbox /tmp/recovery-postgres-sandbox.c
+
+# Preserve the running database image's PostgreSQL, libc and locale semantics.
+FROM ${RECOVERY_POSTGRES_IMAGE} AS recovery-postgres
+ARG RECOVERY_POSTGRES_IMAGE_ID=unattested
+COPY backend/scripts/build-recovery-postgres-root.sh /tmp/build-recovery-postgres-root.sh
+RUN RECOVERY_POSTGRES_IMAGE_ID="$RECOVERY_POSTGRES_IMAGE_ID" sh /tmp/build-recovery-postgres-root.sh
 
 FROM node:22-bookworm-slim AS runner
 
@@ -96,6 +117,9 @@ ENV NODE_ENV=production
 ENV PORT=5000
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
+COPY --from=recovery-postgres-launcher /usr/local/libexec/recovery-postgres-sandbox /usr/local/libexec/recovery-postgres-sandbox
+COPY --from=recovery-postgres /opt/recovery-postgres-root /opt/recovery-postgres-root
+
 COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /packages/contract-product-graph /packages/contract-product-graph
@@ -105,6 +129,9 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/dist-cutover ./dist-cutover
 COPY backend/public ./public
 COPY backend/scripts ./scripts
+COPY deploy/scripts/customer-allocation-release.mjs ./operations/deploy/scripts/
+COPY deploy/scripts/lib/customer-allocation-controller.mjs deploy/scripts/lib/customer-allocation-go-manifest.mjs ./operations/deploy/scripts/lib/
+COPY scripts/production-database-role-boundary.mjs ./operations/scripts/
 COPY deploy/scripts/with-backend-control-ownership.sh ./scripts/with-backend-control-ownership.sh
 COPY deploy/scripts/protected-bootstrap-owner.py deploy/scripts/protected-bootstrap-state.py ./scripts/
 COPY deploy/scripts/protected-file-adoption-owner.py deploy/scripts/protected-file-adoption-state.py ./scripts/
@@ -131,6 +158,9 @@ ARG PERFORMANCE_SOURCE_HASH=unattested
 LABEL io.sabalan.release.upload-policy=no-malware-scan
 LABEL io.sabalan.performance.source-commit=$PERFORMANCE_SOURCE_COMMIT \
   io.sabalan.performance.source-hash=$PERFORMANCE_SOURCE_HASH
+RUN printf '%s\n' "$PERFORMANCE_SOURCE_COMMIT" > /app/.allocation-build-commit \
+  && chown root:root /app/.allocation-build-commit \
+  && chmod 0444 /app/.allocation-build-commit
 
 EXPOSE 5000
 

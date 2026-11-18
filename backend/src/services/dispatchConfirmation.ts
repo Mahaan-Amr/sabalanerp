@@ -291,7 +291,7 @@ export class DispatchConfirmationService {
       const expiresAt = addMinutes(at, 10);
       const resendAfter = addMinutes(at, 1);
       await tx.dispatchOtpChallenge.updateMany({ where: { sessionId, invalidatedAt: null }, data: { invalidatedAt: at } });
-      await tx.dispatchOtpChallenge.create({ data: { id, sessionId, code, digest: this.otpDigest(id, code), expiresAt, resendAfter }, select: { id: true } });
+      await tx.dispatchOtpChallenge.create({ data: { id, sessionId, digest: this.otpDigest(id, code), expiresAt, resendAfter }, select: { id: true } });
       return { phone: enrollment.confirmationPhone, expiresAt, resendAfter };
     });
     await this.dependencies.sendOtp({ phone, code, dispatchNumber: String(session.waybill.number), sessionId, expiresAt });

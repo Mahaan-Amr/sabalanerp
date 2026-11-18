@@ -4,7 +4,7 @@ import { loginAsAdmin } from './support/design-system';
 test('dossier approval sends stable financial identities when an HTTP response is lost', async ({ page }) => {
   await loginAsAdmin(page);
   const contractId = 'draft-approval-qa';
-  const record = { id: 'invoice-approval-qa', kind: 'INVOICE_CANDIDATE', status: 'DRAFT', amount: 100,
+  const record = { id: 'invoice-approval-qa', kind: 'INVOICE_CANDIDATE', status: 'DRAFT', amount: 1234567,
     currency: 'IRR', createdAt: '2026-11-16T08:00:00Z', draftDetails: {
       systemInvoiceNumber: 'S-19', systemInvoiceDate: '2026-11-16', sepidarAmount: '100' } };
   const contract = { contractId, contractNumber: 'QA', status: 'SIGNED', isInactive: false,
@@ -33,7 +33,14 @@ test('dossier approval sends stable financial identities when an HTTP response i
 
   await page.goto(`/dashboard/accounting/contracts/${contractId}?section=financial`);
   await page.getByRole('button', { name: 'ادامه تکمیل' }).click();
-  const approve = page.locator('[data-invoice-draft-editor]').getByRole('button', { name: 'تأیید مالی' });
+  const editor = page.locator('[data-invoice-draft-editor]');
+  const amount = editor.getByRole('textbox', { name: 'مبلغ سپیدار (ریال)' });
+  await amount.fill('');
+  await amount.pressSequentially('1234567');
+  await expect(amount).toHaveValue('1,234,567');
+  await amount.fill('۱٬۲۳۴٬۵۶۷');
+  await expect(amount).toHaveValue('1,234,567');
+  const approve = editor.getByRole('button', { name: 'تأیید مالی' });
   await expect(approve).toBeEnabled();
   await approve.click();
   await expect.poll(() => approvals.length).toBe(1);
@@ -41,7 +48,7 @@ test('dossier approval sends stable financial identities when an HTTP response i
   await approve.click();
   await expect.poll(() => approvals.length).toBe(2);
   expect(approvals[0]).toMatchObject({ kind: 'APPROVE_FINANCIAL_INVOICE', invoiceId: record.id,
-    systemInvoiceNumber: 'S-19', systemInvoiceDate: '2026-11-16', sepidarAmount: '100' });
+    systemInvoiceNumber: 'S-19', systemInvoiceDate: '2026-11-16', sepidarAmount: '1234567' });
   expect(typeof approvals[0].idempotencyKey).toBe('string');
   expect(typeof approvals[0].correlationId).toBe('string');
   expect(String(approvals[0].idempotencyKey).length).toBeGreaterThan(0);

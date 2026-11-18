@@ -10,7 +10,7 @@ const {HttpRequestLifecycle}=require('./httpRequestLifecycle.js');
 const policy=require('./systemRecoveryPolicy.js');
 const deferred=()=>{let resolve;const promise=new Promise(done=>{resolve=done;});return {promise,resolve};};
 
-async function fixture(work){
+async function fixture(work, environment = {}){
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'sabalan-http-control-'));
   const file=path.join(root,'checkpoint.sabrec');fs.writeFileSync(file,'OWNED_RECOVERY_FIXTURE');
   const lifecycle=new HttpRequestLifecycle();
@@ -43,9 +43,16 @@ async function fixture(work){
         manifest:{appVersion:'1.0.0',commit:'a'.repeat(40),postgresVersion:'15'}};
     }},
   };
+  const backupExports={};
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'systemRecoveryBackupRequest.js'),'utf8'),{
+    exports:backupExports,require:name=>({
+      './systemRecoveryPolicy':policy,'./systemRecoveryEngine':replacements['../services/systemRecoveryEngine'],
+    })[name]??require(name),
+  });
+  replacements['../services/systemRecoveryBackupRequest']=backupExports;
   const exports={};
   vm.runInNewContext(fs.readFileSync(path.join(__dirname,'system-recovery.js'),'utf8'),{exports,
-    require:name=>Object.hasOwn(replacements,name)?replacements[name]:require(name),console,process,Buffer,setImmediate,setTimeout,clearTimeout},
+    require:name=>Object.hasOwn(replacements,name)?replacements[name]:require(name),console,process:{env:environment},Buffer,setImmediate,setTimeout,clearTimeout},
     {filename:'actual-system-recovery-route.js'});
   const app=express();app.use(express.json());app.use(lifecycle.middleware);app.use('/api/system-recovery',exports.default);lifecycle.install(app);
   const server=app.listen(0,'127.0.0.1');await new Promise(resolve=>server.once('listening',resolve));
@@ -77,3 +84,13 @@ test('actual backup POST leaves its own HTTP scope before the background snapsho
   await new Promise(resolve=>setImmediate(resolve));assert.equal(api.state().mode,'NORMAL');assert.equal(api.state().busy,false);
   await api.lifecycle.waitForDrain(1000);
 }));
+
+test('restricted recovery refuses privileged operations before queueing or writing uploads',async()=>fixture(async api=>{
+  for(const endpoint of ['/backups','/uploads','/qa-operation/restore']){
+    const response=await api.post(endpoint);
+    assert.equal(response.status,503);
+    assert.equal((await response.json()).error,'SYSTEM_RECOVERY_OWNER_HANDOFF_UNAVAILABLE');
+  }
+  assert.equal(api.state().transactions,0);
+  assert.equal(api.state().busy,false);
+},{DATABASE_URL:'postgresql://sabalan_application_runtime@local-test/sabalanerp'}));

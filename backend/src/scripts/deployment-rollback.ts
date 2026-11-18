@@ -2,9 +2,11 @@ import fs from 'node:fs';
 import { recoverUnit, restoreUnit, requireBoundary } from '../../scripts/clamav-checkpoint.mjs';
 import path from 'node:path';
 import { disconnectDatabase, prisma } from '../lib/prisma';
+import { Prisma } from '@prisma/client';
 import { readSecret } from '../services/deploymentCheckpointStorage';
 import { decryptRecoveryArchive, sha256File } from '../services/recoveryCrypto';
 import { stageAndPromoteRecovery, validateRecoveryPackage } from '../services/systemRecoveryEngine';
+import { assertProtectedRoleCheckpointBoundary, configuredProtectedDatabaseRoleRecovery } from '../services/protectedDatabaseRoleRecovery';
 import { RECOVERY_COORDINATION_DIR, setRecoveryRuntimeState } from '../services/recoveryRuntime';
 
 type CheckpointMetadata = {
@@ -28,7 +30,15 @@ const main = async () => {
     throw Object.assign(new Error('The local rollback checkpoint checksum changed.'), { code: 'DEPLOYMENT_ROLLBACK_CHECKSUM_MISMATCH' });
   }
   const localKey = await readSecret('DEPLOYMENT_LOCAL_ROLLBACK_KEY');
-  const validated = await validateRecoveryPackage({ sourcePath: metadata.localPath, passphrase: localKey, prisma });
+  const roleRecovery = configuredProtectedDatabaseRoleRecovery();
+  const protectedDatabaseRoles = roleRecovery && {
+    ...roleRecovery,
+    assertBoundary: () => assertProtectedRoleCheckpointBoundary({ prisma, coordinationDir: RECOVERY_COORDINATION_DIR,
+      id: metadata.deploymentId, phase: 'ROLLBACK_STARTED', checksum: metadata.checksum }),
+  };
+  await protectedDatabaseRoles?.assertBoundary();
+  const validated = await validateRecoveryPackage({ sourcePath: metadata.localPath, passphrase: localKey, prisma,
+    protectedDatabaseRoles: protectedDatabaseRoles ?? null });
   const clamavUnit = path.join(RECOVERY_COORDINATION_DIR, `clamav-checkpoint-${metadata.deploymentId}`);
   if (validated.manifest.components.some((item) => item.path.startsWith(`recovery-coordination/clamav-checkpoint-${metadata.deploymentId}/`))) {
     const session = JSON.parse(await fs.promises.readFile(path.join(process.env.DEPLOYMENT_REPORT_DIR || '/app/deployment-reports', 'active-deployment-session.json'), 'utf8'));
@@ -64,8 +74,23 @@ const main = async () => {
     breakGlassReason: `Automatic rollback for deployment ${metadata.deploymentId}`,
     applyMigrations: false,
     preservePackage: true,
+    protectedDatabaseRoles,
+    prepareProtectedStage: process.env.SYSTEM_RECOVERY_OPERATION_ID ? async stage => {
+      await protectedDatabaseRoles?.assertBoundary();
+      const operation = await prisma.deploymentOperation.findUnique({ where: { id: metadata.deploymentId } });
+      if (!operation || operation.activeKey !== 'production' || operation.phase !== 'ROLLBACK_STARTED'
+        || operation.leaseToken !== process.env.DEPLOYMENT_LEASE_TOKEN) throw new Error('ROLLBACK_LEASE_CHANGED');
+      await stage.deploymentOperation.updateMany({ where: { activeKey: 'production' }, data: { activeKey: null } });
+      const trusted = { ...operation, checkpointJson: operation.checkpointJson ?? Prisma.DbNull,
+        reportJson: operation.reportJson ?? Prisma.DbNull };
+      await stage.deploymentOperation.upsert({ where: { id: operation.id }, create: trusted, update: trusted });
+    } : undefined,
     onProgress: async (progress) => console.log(JSON.stringify({ event: 'rollback-progress', progress })),
   });
+  if (protectedDatabaseRoles) {
+    if (!result.verifyPromotedRoles) throw new Error('ROLLBACK_PROMOTED_ROLES_UNPROVEN');
+    await result.verifyPromotedRoles();
+  }
   console.log(JSON.stringify({ ok: true, result, rollbackReleaseSet: metadata.rollbackReleaseSet }));
 };
 

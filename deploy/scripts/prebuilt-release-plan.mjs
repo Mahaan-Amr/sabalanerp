@@ -12,6 +12,22 @@ const roles=['backend','frontend','inquiry'],digest=/^[a-f0-9]{64}$/,commit=/^[a
 const sha=raw=>createHash('sha256').update(raw).digest('hex');
 const keys=(value,expected)=>assert.deepEqual(Object.keys(value).sort(),expected.slice().sort());
 const graphKeys=['index','platform','config','rootfsDiffIds','archiveSha256','archiveBytes'];
+export function validateImmutableApplicationGraph(selected,observed,archiveReceipt,store){
+  keys(selected.archiveGraph,graphKeys);const graph=selected.archiveGraph;
+  for(const key of ['index','platform','config'])assert.match(graph[key],image);
+  assert.equal(store==='containerd'?graph.index:graph.config,selected.image,'PREBUILT_ACTIVATION_EXECUTION_NAMESPACE_CHANGED');assert.match(graph.archiveSha256,digest);assert.ok(Number.isSafeInteger(graph.archiveBytes)&&graph.archiveBytes>0);
+  assert.ok(Array.isArray(graph.rootfsDiffIds)&&graph.rootfsDiffIds.length>0&&graph.rootfsDiffIds.length<=128);for(const layer of graph.rootfsDiffIds)assert.match(layer,image);
+  for(const key of graphKeys)assert.deepEqual(archiveReceipt[key],graph[key],'PREBUILT_ARCHIVE_GRAPH_CHANGED');
+  validateInstalledApplicationGraph(selected,observed,store);
+  return graph;
+}
+export function validateInstalledApplicationGraph(selected,observed,store){
+  const graph=selected.archiveGraph;
+  assert.equal(observed.Id,selected.image,'PREBUILT_INSTALLED_EXECUTION_CHANGED');assert.equal(observed.Os,'linux');assert.equal(observed.Architecture,'amd64');assert.deepEqual(observed.RootFS.Layers,graph.rootfsDiffIds,'PREBUILT_INSTALLED_LAYERS_CHANGED');
+  if(store==='containerd'){assert.equal(observed.Descriptor?.digest,graph.index);assert.ok(['application/vnd.oci.image.index.v1+json','application/vnd.docker.distribution.manifest.list.v2+json'].includes(observed.Descriptor?.mediaType));assert.ok(Number.isSafeInteger(observed.Descriptor.size)&&observed.Descriptor.size>0);}
+  else assert.ok(!observed.Descriptor);
+  return graph;
+}
 export function requirePrebuiltScannerSelection(plan){assert.ok(plan.preservedClamav,'PREBUILT_SCANNER_PRESERVATION_SELECTION_REQUIRED');return validateSelection(plan.preservedClamav);}
 export function validatePrebuiltReleasePlan(plan,actual){
  keys(plan,['format','applicationCommit','applicationTree','applicationSourceHash','inquirySourceCommit','images','operations',...(Object.hasOwn(plan,'imageStore')?['imageStore']:[]),...(Object.hasOwn(plan,'preservedClamav')?['preservedClamav']:[])]);
@@ -32,14 +48,7 @@ export function validatePrebuiltReleasePlan(plan,actual){
   keys(selected,['image','sourceCommit','archiveGraph','archiveReceipt','buildReceipt',...(role==='backend'?[]:['browser'])]);
   assert.match(selected.image,image);assert.match(selected.sourceCommit,commit);
   for(const reference of [selected.buildReceipt,selected.archiveReceipt]){keys(reference,['file','sha256']);assert.ok(path.posix.isAbsolute(reference.file));assert.match(reference.sha256,digest);}
-  keys(selected.archiveGraph,graphKeys);const graph=selected.archiveGraph;
-  for(const key of ['index','platform','config'])assert.match(graph[key],image);
-  assert.equal(store==='containerd'?graph.index:graph.config,selected.image,'PREBUILT_ACTIVATION_EXECUTION_NAMESPACE_CHANGED');assert.match(graph.archiveSha256,digest);assert.ok(Number.isSafeInteger(graph.archiveBytes)&&graph.archiveBytes>0);
-  assert.ok(Array.isArray(graph.rootfsDiffIds)&&graph.rootfsDiffIds.length>0&&graph.rootfsDiffIds.length<=128);for(const layer of graph.rootfsDiffIds)assert.match(layer,image);
-  for(const key of graphKeys)assert.deepEqual(actual.archiveReceipts[role][key],graph[key],'PREBUILT_ARCHIVE_GRAPH_CHANGED');
-  assert.equal(observed.Id,selected.image,'PREBUILT_INSTALLED_EXECUTION_CHANGED');assert.equal(observed.Os,'linux');assert.equal(observed.Architecture,'amd64');assert.deepEqual(observed.RootFS.Layers,graph.rootfsDiffIds,'PREBUILT_INSTALLED_LAYERS_CHANGED');
-  if(store==='containerd'){assert.equal(observed.Descriptor?.digest,graph.index);assert.ok(['application/vnd.oci.image.index.v1+json','application/vnd.docker.distribution.manifest.list.v2+json'].includes(observed.Descriptor?.mediaType));assert.ok(Number.isSafeInteger(observed.Descriptor.size)&&observed.Descriptor.size>0);}
-  else assert.ok(!observed.Descriptor);
+  const graph=validateImmutableApplicationGraph(selected,observed,actual.archiveReceipts[role],store);
   if(role==='backend'){
    if(retiredScanner)assert.equal(observed.Config.Labels['io.sabalan.release.upload-policy'],'no-malware-scan','PREBUILT_UPLOAD_POLICY_CHANGED');
    assert.equal(selected.sourceCommit,plan.applicationCommit);assert.equal(receipt.format,'sabalan-current-backend-image/v1');assert.equal(receipt.pass,true);assert.equal(receipt.sourceUnchanged,true);
@@ -63,14 +72,14 @@ export function validatePrebuiltReleasePlan(plan,actual){
  return Object.freeze({applicationCommit:plan.applicationCommit,applicationSourceHash:plan.applicationSourceHash,images:Object.fromEntries(roles.map(role=>[role,plan.images[role].image])),frontendBuildId:plan.images.frontend.browser.id,...(plan.preservedClamav?{preservedClamav:plan.preservedClamav}:{}),releaseAdmission:false});
 }
 
-function read(file,expected,{privatePlan=false,maximum=128*1024**2}={}){
+export function readPinnedContent(file,expected,{privatePlan=false,maximum=128*1024**2}={}){
  assert.ok(path.isAbsolute(file)&&fs.realpathSync(file)===file);const before=fs.lstatSync(file,{bigint:true});
  assert.ok(before.isFile()&&!before.isSymbolicLink()&&before.uid===0n&&before.nlink===1n&&before.size>0n&&before.size<=BigInt(maximum)&&!(before.mode&0o022n));
  if(privatePlan)assert.equal(before.mode&0o777n,0o400n);
  const fd=fs.openSync(file,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW|fs.constants.O_NONBLOCK),pin=s=>['dev','ino','size','mtimeNs','ctimeNs','uid','mode','nlink'].map(key=>String(s[key]));
  try{assert.deepEqual(pin(fs.fstatSync(fd,{bigint:true})),pin(before));const raw=fs.readFileSync(fd);assert.deepEqual(pin(fs.fstatSync(fd,{bigint:true})),pin(before));assert.deepEqual(pin(fs.lstatSync(file,{bigint:true})),pin(before));if(expected){assert.match(expected,digest);assert.equal(sha(raw),expected,'PREBUILT_PINNED_BYTES_CHANGED');}return raw;}finally{fs.closeSync(fd);}
 }
-function command(executable,args,cwd){const child=spawnSync(executable,args,{cwd,encoding:'utf8',maxBuffer:16*1024**2,stdio:['ignore','pipe','pipe']});assert.ifError(child.error);assert.equal(child.signal,null,'PREBUILT_ORIGINAL_CHILD_SIGNAL');assert.equal(child.status,0,'PREBUILT_ORIGINAL_CHILD_FAILED');return child.stdout;}
+export function contentCommand(executable,args,cwd){const child=spawnSync(executable,args,{cwd,encoding:'utf8',maxBuffer:16*1024**2,stdio:['ignore','pipe','pipe']});assert.ifError(child.error);assert.equal(child.signal,null,'PREBUILT_ORIGINAL_CHILD_SIGNAL');assert.equal(child.status,0,'PREBUILT_ORIGINAL_CHILD_FAILED');return child.stdout;}
 function originalPipes(){
  assert.equal(process.env.DEPLOYMENT_MODE??'release','release');const descriptors=['DEPLOYMENT_ONLINE_BOOTSTRAP_REQUEST_FD','DEPLOYMENT_ONLINE_BOOTSTRAP_RESPONSE_FD'].map(key=>{assert.match(process.env[key]??'',/^[1-9][0-9]*$/);const fd=Number(process.env[key]);assert.ok(fd>=3&&fs.fstatSync(fd).isFIFO(),'PREBUILT_ORIGINAL_PIPE_REQUIRED');return fd;});assert.notEqual(descriptors[0],descriptors[1]);
 }
@@ -83,21 +92,21 @@ export function prebuiltReleaseExports(value){
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
  assert.equal(process.platform,'linux');assert.equal(process.getuid(),0);assert.equal(process.argv.length,6);originalPipes();
  const [planFile,expected,repository,operationsRoot]=process.argv.slice(2);assert.equal(fs.realpathSync(repository),repository);assert.equal(fs.realpathSync(operationsRoot),operationsRoot);
- const plan=JSON.parse(read(planFile,expected,{privatePlan:true,maximum:8*1024**2})),actual={};
+ const plan=JSON.parse(readPinnedContent(planFile,expected,{privatePlan:true,maximum:8*1024**2})),actual={};
  if(plan.format==='sabalan-prebuilt-protected-release-plan/v1')requirePrebuiltScannerSelection(plan);
  else assert.equal(plan.format,'sabalan-prebuilt-protected-release-plan/v2');
  keys(plan.images,roles);assert.ok(plan.operations?.files);
  for(const role of roles){assert.match(plan.images[role].image,image);assert.equal(plan.images[role].image,(plan.imageStore==='containerd'?plan.images[role].archiveGraph.index:plan.images[role].archiveGraph.config));}
- const git=(...args)=>command('git',args,repository).trim();actual.head=git('rev-parse','HEAD');actual.tree=git('rev-parse','HEAD^{tree}');actual.status=git('status','--porcelain','--untracked-files=all');actual.inquiryGitlink=git('rev-parse','HEAD:apps/sabalan-inquiry');actual.inquiryHead=git('-C','apps/sabalan-inquiry','rev-parse','HEAD');actual.inquiryStatus=git('-C','apps/sabalan-inquiry','status','--porcelain','--untracked-files=all');
+ const git=(...args)=>contentCommand('git',args,repository).trim();actual.head=git('rev-parse','HEAD');actual.tree=git('rev-parse','HEAD^{tree}');actual.status=git('status','--porcelain','--untracked-files=all');actual.inquiryGitlink=git('rev-parse','HEAD:apps/sabalan-inquiry');actual.inquiryHead=git('-C','apps/sabalan-inquiry','rev-parse','HEAD');actual.inquiryStatus=git('-C','apps/sabalan-inquiry','status','--porcelain','--untracked-files=all');
  // Git tree identity and build-input byte identity are separate namespaces:
  // Windows CRLF build hashes must never be equated to Linux checkout bytes.
- const receipt=JSON.parse(read(path.join(operationsRoot,'host-pack-receipt.json'),plan.operations.receiptSha256));assert.equal(receipt.format,'sabalan-online-controller-host-pack/v1');assert.equal(receipt.packagingComplete,true);
- actual.operations={receiptSha256:plan.operations.receiptSha256,files:{}};for(const [relative,pin]of Object.entries(receipt.outputs)){assert.ok(/^[a-zA-Z0-9_.-]+(?:\/[a-zA-Z0-9_.-]+)*$/.test(relative)&&!relative.split('/').includes('..'));actual.operations.files[relative]=sha(read(path.join(operationsRoot,relative),pin.sha256));}
+ const receipt=JSON.parse(readPinnedContent(path.join(operationsRoot,'host-pack-receipt.json'),plan.operations.receiptSha256));assert.equal(receipt.format,'sabalan-online-controller-host-pack/v1');assert.equal(receipt.packagingComplete,true);
+ actual.operations={receiptSha256:plan.operations.receiptSha256,files:{}};for(const [relative,pin]of Object.entries(receipt.outputs)){assert.ok(/^[a-zA-Z0-9_.-]+(?:\/[a-zA-Z0-9_.-]+)*$/.test(relative)&&!relative.split('/').includes('..'));actual.operations.files[relative]=sha(readPinnedContent(path.join(operationsRoot,relative),pin.sha256));}
  actual.buildReceipts={};actual.archiveReceipts={};actual.images={};
- actual.imageStore=productionImageStore(JSON.parse(command('docker',['info','--format','{{json .}}'],repository)));
- for(const role of roles){const selected=plan.images[role];actual.buildReceipts[role]=JSON.parse(read(selected.buildReceipt.file,selected.buildReceipt.sha256,{privatePlan:true}));actual.archiveReceipts[role]=JSON.parse(read(selected.archiveReceipt.file,selected.archiveReceipt.sha256,{privatePlan:true}));
-  command('docker',['compose','--env-file',process.env.DEPLOYMENT_PREBUILT_ENV_FILE,'-f',path.join(repository,'docker-compose.prod.yml'),'-p','sabalanerp','ps','--format','json'],repository);
-  const rows=JSON.parse(command('docker',['image','inspect',selected.image],repository));assert.equal(rows.length,1);actual.images[role]=rows[0];
+ actual.imageStore=productionImageStore(JSON.parse(contentCommand('docker',['info','--format','{{json .}}'],repository)));
+ for(const role of roles){const selected=plan.images[role];actual.buildReceipts[role]=JSON.parse(readPinnedContent(selected.buildReceipt.file,selected.buildReceipt.sha256,{privatePlan:true}));actual.archiveReceipts[role]=JSON.parse(readPinnedContent(selected.archiveReceipt.file,selected.archiveReceipt.sha256,{privatePlan:true}));
+  contentCommand('docker',['compose','--env-file',process.env.DEPLOYMENT_PREBUILT_ENV_FILE,'-f',path.join(repository,'docker-compose.prod.yml'),'-p','sabalanerp','ps','--format','json'],repository);
+  const rows=JSON.parse(contentCommand('docker',['image','inspect',selected.image],repository));assert.equal(rows.length,1);actual.images[role]=rows[0];
  }
  process.stdout.write(prebuiltReleaseExports({...validatePrebuiltReleasePlan(plan,actual),planSha256:expected}));
 }

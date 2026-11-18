@@ -5,7 +5,6 @@ import { pathToFileURL } from 'node:url';
 import type { Prisma } from '@prisma/client';
 import { acceptanceResponsibilities, readinessGates, type ReadinessEvidence } from '../operations/readiness';
 import { verifyPartnerTrustedClaimsEnvelope } from './trustedClaimsEnvelope';
-import { completeReleaseDeploymentGateReport } from '../../deploymentGates';
 
 type PublicationRow = {
   id: string;
@@ -21,7 +20,6 @@ type PublicationRow = {
   packageBytesBase64: string;
   trustEnvelopeBytesBase64: string;
   evidenceJson: Prisma.JsonValue;
-  deployment: { id: string; releaseId: string; targetCommit: string; phase: string; reportJson: Prisma.JsonValue | null };
 };
 
 const object = (value: unknown): Record<string, unknown> | null =>
@@ -29,20 +27,15 @@ const object = (value: unknown): Record<string, unknown> | null =>
     ? value as Record<string, unknown>
     : null;
 
-/** Accepts only an immutable publication linked to a completed deployment. */
+/** Validates the evidence of a publication admitted by the database completion projection. */
 export function verifiedReadinessFromPublication(
   row: PublicationRow | null,
   expected: { deploymentId: string; releaseId: string; schemaId: string },
 ): ReadinessEvidence | null {
   if (!row || row.id !== expected.deploymentId || row.deploymentId !== expected.deploymentId
       || row.releaseId !== expected.releaseId || row.schemaId !== expected.schemaId) return null;
-  const deployment = row.deployment, report = object(deployment.reportJson), evidence = object(row.evidenceJson);
-  if (deployment.id !== row.deploymentId || deployment.phase !== 'COMPLETED'
-      || deployment.releaseId !== row.releaseId || deployment.targetCommit !== row.targetCommit
-      || !report || report.format !== 'sabalan-deployment-report' || report.version !== 1
-      || report.deploymentId !== deployment.id || report.releaseId !== deployment.releaseId
-      || report.targetCommit !== deployment.targetCommit || !completeReleaseDeploymentGateReport(report)
-      || !evidence) return null;
+  const evidence = object(row.evidenceJson);
+  if (!evidence) return null;
   if (evidence.source !== 'DATABASE_VERIFIED' || evidence.evidenceId !== row.id
       || evidence.releaseId !== row.releaseId || evidence.schemaId !== expected.schemaId
       || evidence.checkedAt !== row.checkedAt.toISOString() || evidence.expiresAt !== row.expiresAt.toISOString()) return null;
@@ -82,9 +75,15 @@ export async function resolveDeploymentReadiness(
   deploymentId: string,
   runtimeIdentity: { releaseId: string; schemaId: string },
 ) {
-  const row = await tx.partnerReleaseReadinessPublication.findUnique({ where: { id: deploymentId }, include: {
-    deployment: { select: { id: true, releaseId: true, targetCommit: true, phase: true, reportJson: true } },
-  } });
+  const [row] = await tx.$queryRaw<PublicationRow[]>`
+    SELECT publication.id, publication."deploymentId", publication."releaseId", publication."targetCommit",
+      publication."schemaId", publication."checkedAt", publication."expiresAt", publication."packageSha256",
+      publication."trustEnvelopeSha256", publication."trustKeyId", publication."packageBytesBase64",
+      publication."trustEnvelopeBytesBase64", publication."evidenceJson"
+    FROM public.partner_release_readiness_publications AS publication
+    JOIN public.partner_release_readiness_completed AS completed ON completed.id = publication.id
+    WHERE publication.id = ${deploymentId}
+  `;
   if (!row) return null;
   try {
     const publicKey = await fs.promises.readFile('/run/deployment-secrets/partner-release-trust-public.der');

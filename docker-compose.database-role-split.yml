@@ -1,0 +1,9 @@
+# Opt-in candidate overlay for isolated qualification. The protected deployment
+# runner does not yet use this file: rollback must first preserve prior env bytes.
+services:
+  backend:
+    environment:
+      DATABASE_URL: ${BACKEND_DATABASE_URL:?A separate bounded runtime DATABASE_URL is required}
+  deployment:
+    environment:
+      DATABASE_URL: ${DEPLOYMENT_DATABASE_URL:?A privileged control DATABASE_URL is required}

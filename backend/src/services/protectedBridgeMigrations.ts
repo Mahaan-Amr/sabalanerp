@@ -13,6 +13,59 @@ const known = {
 export const protectedBridgeMigrationNames: readonly string[] = Object.freeze(Object.keys(known));
 const pickupSourceName = '20261116100000_customer_pickup_driver_source';
 const pickupDispatchName = '20261116100100_customer_pickup_dispatch';
+const retireAttachmentScanStatusName = '20261117120000_retire_attachment_scan_status';
+const partnerReadinessProjectionName = '20261117160000_partner_release_readiness_completed_projection';
+const allocationControllerTransitionName = '20261116133000_customer_allocation_controller_transition';
+const nextReleaseCatalog = {
+  '20261116120000_customer_allocation_intents': {
+    tables: ['accounting_customer_allocation_intents'],
+    functions: ['protect_allocation_intent_evidence'],
+  },
+  '20261116121000_bind_allocation_intent_result': {
+    tables: ['accounting_customer_commands', 'accounting_customer_allocation_intents'],
+    functions: ['bind_customer_allocation_intent_result', 'verify_customer_allocation_intent_result'],
+  },
+  '20261116122000_serialize_customer_allocation_reservations': {
+    tables: ['accounting_customer_allocation_fences'], functions: [],
+  },
+  '20261116123000_cancel_unreceived_allocation_intents': {
+    tables: ['accounting_customer_commands'], functions: ['serialize_customer_allocation_parent'],
+  },
+  '20261116124000_serialize_allocation_command_keys': {
+    tables: ['accounting_customer_command_key_fences', 'accounting_customer_allocation_intents'],
+    functions: ['serialize_customer_command_key_within', 'serialize_customer_allocation_intent_insert'],
+  },
+  '20261116130000_grouped_allocation_child_lineage': {
+    tables: ['accounting_settlement_allocations'], functions: ['verify_grouped_allocation_child'],
+  },
+  '20261116131000_customer_allocation_closed_control': {
+    tables: ['customer_allocation_release_control'], functions: ['keep_customer_allocation_control_closed'],
+  },
+  '20261116132000_close_grouped_allocation_child_backstop': {
+    tables: ['accounting_settlement_allocations'], functions: ['require_active_grouped_allocation_child'],
+  },
+  [allocationControllerTransitionName]: {
+    tables: ['customer_allocation_release_control', 'customer_allocation_release_audit'],
+    functions: ['guard_customer_allocation_control', 'guard_customer_allocation_audit',
+      'customer_allocation_controller_lock', 'customer_allocation_controller_activate'],
+  },
+  [retireAttachmentScanStatusName]: {
+    tables: ['support_ticket_attachments', 'accounting_archive_evidence', 'hr_employment_contract_documents', 'purchasing_attachments'],
+    functions: [],
+  },
+  '20261117130000_store_dispatch_exit_otp_code': {
+    tables: ['dispatch_otp_challenges'], functions: [],
+  },
+  '20261117140000_customer_allocation_controller_closure': {
+    tables: ['customer_allocation_release_control', 'customer_allocation_release_audit'],
+    functions: ['customer_allocation_controller_close'],
+  },
+  '20261117150000_customer_allocation_runtime_admission': {
+    tables: ['customer_allocation_release_control', 'accounting_settlement_allocations'],
+    functions: ['customer_allocation_runtime_admitted'],
+  },
+  [partnerReadinessProjectionName]: { tables: [], functions: [] },
+};
 // This is the exact source delta from the retained 2026-11-12 production
 // release. It is intentionally separate from the frozen historical bootstrap.
 const currentRelease = {
@@ -40,10 +93,24 @@ const currentRelease = {
   '20261115131000_accounting_private_marker_index': ['31ab2f1cd447819b9f1863337c230fe1c23959eb01e260232f54e044d0bdba30', 1],
   [pickupSourceName]: ['37ebbfab7f1c7dde67450e9117bcc54ea186835e9cc1b448f0e8c97a3229122a', 1],
   [pickupDispatchName]: ['1ae2687716e07ecdc08b4c89aa2dd21c3399ed3853d4e7a1124b4932131268a9', 6],
+  [retireAttachmentScanStatusName]: ['9fad9a9544c0c5da8fe58b4f636c2b35ad420fd871c3a7392e12911c5fd4ab91', 5],
+  '20261116120000_customer_allocation_intents': ['b6213e3838399149f6c61da9ae079abb0a6eb1afcbba7bd46e247a9bd0d225ea', 6],
+  '20261116121000_bind_allocation_intent_result': ['04c84e72ee82adc229bc1c5c2fe131998058d5357f0efaa17f958afcb77dac08', 4],
+  '20261116122000_serialize_customer_allocation_reservations': ['a21cc1a12f8bfae622302c39d258ca881c0be2847e1329cae70f9baa5d272670', 1],
+  '20261116123000_cancel_unreceived_allocation_intents': ['f46bae03614df7d3dfca3e611bedc91f597f87571bc94142e251a7763340ff12', 3],
+  '20261116124000_serialize_allocation_command_keys': ['2f2f1742ea48a8e11bb8b9db4829532278af27356af4308df03264b9248d6e99', 5],
+  '20261116130000_grouped_allocation_child_lineage': ['64b0e0bae723c37775e9d67b36dc607c156fa9d02476d132f925e1011fb64135', 5],
+  '20261116131000_customer_allocation_closed_control': ['a2d5edfe312f2e85d2a17e0deb26c6d7838534cf40713a741349b1e65bf2131c', 4],
+  '20261116132000_close_grouped_allocation_child_backstop': ['bc83e4c5dbf13051374ebaaab5bb1a5b75682b6044eb179ac03e94a971c18c90', 2],
+  [allocationControllerTransitionName]: ['8f8389793094eb9ea72abb292a419e0ac547412c44559c6a2c03e00b06bc5cdc', 18],
+  '20261117130000_store_dispatch_exit_otp_code': ['375715f6a9930906e9cfae9b5bfbd59c4e4371d5d70587ec651de81afb7e2353', 1],
+  '20261117140000_customer_allocation_controller_closure': ['3f063d8699ce903cecab90eb22dc1fa9f4bf3aeda8bd37176f9e2ea602efcb72', 6],
+  '20261117150000_customer_allocation_runtime_admission': ['bf469b3fa2d29be6f5bc3cfa5a34c0851a6f14ec546d9560039aa52cc682e0b4', 6],
+  [partnerReadinessProjectionName]: ['76c5f34dc094e9c15b879cb6eda417e347fd1118864c5c6207070cc78c190fe0', 3],
 } as const;
 export const protectedCurrentReleaseNames: readonly string[] = Object.freeze(Object.keys(currentRelease));
 // Each release extends the ledger while preserving the prior release-set hashes.
-const protectedReleaseEpochEnds = Object.freeze([12, 22, 24]);
+const protectedReleaseEpochEnds = Object.freeze([12, 22, 24, 25, 35, 36, 37, 38]);
 const releaseSetSha256 = (files: CurrentFile[], index: number) => sha(files.slice(0,
   protectedReleaseEpochEnds.find(end => index < end)!).map(file => file.sha256).join('\n'));
 
@@ -82,8 +149,9 @@ export function compileProtectedCurrentRelease(files: ReadonlyArray<readonly [st
     if (!Buffer.isBuffer(bytes) || sha(bytes) !== sha256) failure('PROTECTED_CURRENT_RELEASE_SQL_IDENTITY_MISMATCH');
     const sql = bytes.toString('utf8');
     let statements = splitCurrentReleaseSql(sql);
-    if (name === '20261108000100_start_new_waybill_numbers_at_one') {
-      if (statements.length !== 4 || statements[0] !== 'BEGIN;' || statements[3] !== 'COMMIT;') {
+    if (name === '20261108000100_start_new_waybill_numbers_at_one' || name === retireAttachmentScanStatusName) {
+      const opening = statements[0]?.replace(/^(?:--[^\r\n]*\r?\n\s*)+/, '');
+      if (statements.length !== expectedCount + 2 || opening !== 'BEGIN;' || statements.at(-1) !== 'COMMIT;') {
         failure('PROTECTED_CURRENT_RELEASE_TRANSACTION_WRAPPER_UNPROVEN');
       }
       // The byte-pinned source wraps the same two statements in a transaction;
@@ -93,6 +161,8 @@ export function compileProtectedCurrentRelease(files: ReadonlyArray<readonly [st
     if (statements.length !== expectedCount || statements.some(statement => /^\s*(BEGIN|COMMIT|ROLLBACK)\s*;/i.test(statement))) {
       failure('PROTECTED_CURRENT_RELEASE_STATEMENTS_UNPROVEN');
     }
+    const reviewedScope = nextReleaseCatalog[name as keyof typeof nextReleaseCatalog];
+    if (reviewedScope) return { name, sha256, statements, ...reviewedScope };
     const tables = [...new Set([
       ...[...sql.matchAll(/\b(?:CREATE|ALTER)\s+TABLE\s+"?([A-Za-z_][A-Za-z_0-9]*)"?/gi)].map(match => match[1]),
       ...(names.indexOf(name) >= protectedReleaseEpochEnds[0]
@@ -182,7 +252,9 @@ async function assertLease(tx: Prisma.TransactionClient, owner: Owner, shareLock
   }
 }
 
-async function catalog(tx: Prisma.TransactionClient, input: { tables: string[]; functions: string[]; pickupSource?: boolean }) {
+async function catalog(tx: Prisma.TransactionClient, input: {
+  tables: string[]; functions: string[]; pickupSource?: boolean; partnerReadinessProjection?: boolean;
+}) {
   const tables = await tx.$queryRaw<Array<{ name: string; details: unknown }>>(Prisma.sql`
     SELECT c.relname AS name, jsonb_build_object('kind',c.relkind,'persistence',c.relpersistence,'owner',pg_get_userbyid(c.relowner),
       'rls',c.relrowsecurity,'forceRls',c.relforcerowsecurity,'replicaIdentity',c.relreplident,
@@ -218,7 +290,9 @@ async function catalog(tx: Prisma.TransactionClient, input: { tables: string[]; 
       AND p.proname IN (${Prisma.join(input.functions)}) ORDER BY p.proname`) : [];
   if (tables.length !== input.tables.length || functions.length !== input.functions.length) failure('PROTECTED_BRIDGE_SCHEMA_UNPROVEN');
   const pickupSource = input.pickupSource ? { pickupSource: await pickupSourceProof(tx, true) } : {};
-  return sha(JSON.stringify(canonical({ tables, functions, ...pickupSource })));
+  const partnerReadinessProjection = input.partnerReadinessProjection
+    ? { partnerReadinessProjection: await partnerReadinessProjectionProof(tx) } : {};
+  return sha(JSON.stringify(canonical({ tables, functions, ...pickupSource, ...partnerReadinessProjection })));
 }
 
 /** Also required when discovery finds no pending work. A successful no-op
@@ -276,9 +350,28 @@ const quantityNames = new Set([protectedCurrentReleaseNames[1], protectedCurrent
 const dutyName = protectedCurrentReleaseNames[9], waybillName = protectedCurrentReleaseNames[10];
 function currentCatalogScope(files: CurrentFile[], through: number) {
   const applied = files.slice(0, through + 1);
+  const functions = new Set(applied.flatMap(file => file.functions));
+  if (applied.some(file => file.name === allocationControllerTransitionName)) {
+    functions.delete('keep_customer_allocation_control_closed');
+  }
   return { tables: [...new Set(applied.flatMap(file => file.tables))].sort(),
-    functions: [...new Set(applied.flatMap(file => file.functions))].sort(),
-    pickupSource: applied.some(file => file.name === pickupSourceName) };
+    functions: [...functions].sort(),
+    pickupSource: applied.some(file => file.name === pickupSourceName),
+    partnerReadinessProjection: applied.some(file => file.name === partnerReadinessProjectionName) };
+}
+
+async function partnerReadinessProjectionProof(tx: Prisma.TransactionClient) {
+  const [view] = await tx.$queryRaw<Array<{ definition: string; owner: string; options: string[] }>>`
+    SELECT pg_get_viewdef(relation.oid, false) AS definition, pg_get_userbyid(relation.relowner) AS owner,
+      relation.reloptions AS options
+    FROM pg_class relation
+    JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+    WHERE namespace.nspname = 'public' AND relation.relname = 'partner_release_readiness_completed'
+      AND relation.relkind = 'v' AND relation.relowner = (SELECT oid FROM pg_roles WHERE rolname = current_user)
+      AND relation.reloptions = ARRAY['security_barrier=true']
+  `;
+  if (!view?.definition) failure('PROTECTED_CURRENT_RELEASE_PARTNER_READINESS_VIEW_UNPROVEN');
+  return view;
 }
 
 async function pickupSourceProof(tx: Prisma.TransactionClient, after: boolean) {

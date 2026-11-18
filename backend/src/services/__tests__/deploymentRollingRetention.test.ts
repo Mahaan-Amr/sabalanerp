@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { withHealthyDrill } from './deploymentCheckpointDrill.fixture';
 import { test } from 'node:test';
-import { hasHealthyIndependentCheckpointDrill, planRemoteCheckpointRetention } from '../deploymentCheckpointPolicy';
+import { hasHealthyIndependentCheckpointDrill, planRemoteCheckpointRetention, PROTECTED_DATABASE_ROLE_COMPONENT } from '../deploymentCheckpointPolicy';
+import { assertRoleDrillDatabase, replaceRoleDrillSidecar, type RoleDrillTarget } from '../deploymentDrillRoleTarget';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -26,6 +27,42 @@ test('independent drill must bind full verified scope, exact archive and distinc
     ].map(change => ({ lastDrill: { ...point.lastDrill, ...change } })),
   ];
   for (const change of invalid) assert.equal(hasHealthyIndependentCheckpointDrill({ ...point, ...change }), false, JSON.stringify(change));
+});
+
+test('role-aware COMPLETE checkpoints require the exact role snapshot readback before counting as healthy', () => {
+  const snapshotSha256 = '8'.repeat(64);
+  const point = withHealthyDrill({
+    id: 'role-point', releaseId: 'release', size: 100,
+    manifest: { packageType: 'COMPLETE', components: [{ path: PROTECTED_DATABASE_ROLE_COMPONENT, sha256: snapshotSha256, size: 64 }] },
+  });
+  const roleEvidence = { snapshotSha256, targetSealSha256: '9'.repeat(64), owner: 'isolated_owner' };
+  assert.equal(hasHealthyIndependentCheckpointDrill(point), false);
+  assert.equal(hasHealthyIndependentCheckpointDrill({
+    ...point, lastDrill: { ...point.lastDrill, verifiedDatabaseRoles: { ...roleEvidence, snapshotSha256: '7'.repeat(64) } },
+  }), false);
+  assert.equal(hasHealthyIndependentCheckpointDrill({
+    ...point, lastDrill: { ...point.lastDrill, verifiedDatabaseRoles: roleEvidence },
+  }), true);
+});
+
+test('role-aware drill refuses a target that differs from the sealed PostgreSQL identity', () => {
+  const target = { name: 'drill', oid: '123', systemIdentifier: '555', owner: 'drill_owner' };
+  const plan: RoleDrillTarget = {
+    format: 'sabalan-independent-role-drill-target/v1', checkpointId: 'role-point',
+    ciphertextSha256: '1'.repeat(64), ciphertextSize: 1024, snapshotSha256: '2'.repeat(64),
+    sourceDatabase: { name: 'source', oid: '321', systemIdentifier: '444' },
+    recoveryHost: { machineUuidSha256: '3'.repeat(64), kernelBootIdSha256: '4'.repeat(64) },
+    targetDatabase: target,
+  };
+  const observed = { ...target, admitted: true, controlSchemaAvailable: true };
+  assert.doesNotThrow(() => assertRoleDrillDatabase(plan, observed));
+  const changes = [{ oid: '456' }, { systemIdentifier: '444' }, { owner: 'foreign' },
+    { name: 'source' }, { admitted: false }, { controlSchemaAvailable: false }];
+  for (const change of changes) {
+    assert.throws(() => assertRoleDrillDatabase(plan, { ...observed, ...change }), { code: 'DEPLOYMENT_DRILL_ROLE_TARGET_UNPROVEN' });
+  }
+  assert.throws(() => assertRoleDrillDatabase(plan, observed, true), { code: 'DEPLOYMENT_DRILL_ROLE_TARGET_UNPROVEN' });
+  assert.doesNotThrow(() => assertRoleDrillDatabase(plan, { ...observed, oid: '456' }, true));
 });
 
 test('new local-validation-only uploads cannot displace independently healthy recovery points', async () => {
@@ -198,4 +235,27 @@ test('retention resumes interrupted deletions and carries remote retirement evid
     for (const id of [1, 2]) await assert.rejects(fs.stat(path.join(local, `backup-${id}.sabrec.json`)), { code: 'ENOENT' });
     for (const id of [3, 4]) assert.equal(await fs.readFile(path.join(local, `backup-${id}.sabrec`), 'utf8'), `backup-${id}`);
   } finally { context.mock.restoreAll(); await fs.rm(root, { recursive: true, force: true }); }
+});
+
+test('role drill evidence is replaced whole and an interrupted publish preserves the old receipt', async (context) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'sabalan-role-sidecar-'));
+  const sidecar = path.join(directory, 'point.sabrec.json');
+  try {
+    await fs.writeFile(sidecar, 'original evidence');
+    await assert.rejects(replaceRoleDrillSidecar(sidecar, 'stale evidence', 'new evidence'),
+      /DEPLOYMENT_DRILL_EVIDENCE_CHANGED/);
+    context.mock.method(fs, 'rename', async () => { throw new Error('simulated interrupted publish'); });
+    await assert.rejects(replaceRoleDrillSidecar(sidecar, 'original evidence', 'new evidence'),
+      /simulated interrupted publish/);
+    assert.equal(await fs.readFile(sidecar, 'utf8'), 'original evidence');
+    assert.deepEqual(await fs.readdir(directory), ['point.sabrec.json']);
+    context.mock.restoreAll();
+
+    await replaceRoleDrillSidecar(sidecar, 'original evidence', 'new evidence');
+    assert.equal(await fs.readFile(sidecar, 'utf8'), 'new evidence');
+    assert.deepEqual(await fs.readdir(directory), ['point.sabrec.json']);
+  } finally {
+    context.mock.restoreAll();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
 });

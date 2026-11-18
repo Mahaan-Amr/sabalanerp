@@ -7,7 +7,7 @@ import { dateFa } from './accountingUi';
 import styles from './customerAccountWorkspace.module.css';
 
 export default function CustomerReceiptTrace({ account, onAllocate, onItem, onEvidence, evidenceLoading }: {
-  account: CustomerAccount; onAllocate: () => void; onItem: (id: string) => void; onEvidence: (id: string) => void; evidenceLoading: boolean;
+  account: CustomerAccount; onAllocate: (receiptId: string) => void; onItem: (id: string) => void; onEvidence: (id: string) => void; evidenceLoading: boolean;
 }) {
   const [selected, setSelected] = useState('');
   const receipt = account.receipts.find(row => row.id === selected) ?? account.receipts[0];
@@ -20,7 +20,7 @@ export default function CustomerReceiptTrace({ account, onAllocate, onItem, onEv
       <strong className="block">{accountMoney(receipt.effectiveAmountRials ?? receipt.amountRials)}</strong>
       <p className="text-sm sds-text-secondary">آزاد: {accountMoney(receiptRemainingRials(receipt))}</p>
       <ErpButton label="سند دریافت" tone="neutral" disabled={evidenceLoading} onClick={() => onEvidence(receipt.postedVoucherId)} />
-      {account.capabilities.canManageTreasury && <ErpButton label="تخصیص اعتبار" onClick={onAllocate} />}
+      {account.capabilities.canManageTreasury && <ErpButton label="تخصیص اعتبار" onClick={() => onAllocate(receipt.id)} />}
     </div>
     <div className="min-w-0 space-y-3"><div className="flex flex-wrap items-center gap-2"><strong>ارتباط با بدهی‌ها</strong><ErpBadge tone={shares.length ? 'success' : 'neutral'}>{shares.length.toLocaleString('fa-IR')} سهم فعال</ErpBadge></div>
       {!shares.length && <ErpEmptyState title="تخصیص فعالی ندارد" />}

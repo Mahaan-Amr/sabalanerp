@@ -6,6 +6,17 @@ export const RESTORE_CONFIRMATION_PHRASE = 'RESTORE SABALAN ERP';
 
 export type RecoveryPackageType = 'COMPLETE' | 'SANITIZED_TEST';
 
+export function isRestrictedRecoveryRuntime(environment: NodeJS.ProcessEnv = process.env): boolean {
+  if (!environment.DATABASE_URL) return false;
+  try {
+    const database = new URL(environment.DATABASE_URL);
+    return (database.protocol === 'postgresql:' || database.protocol === 'postgres:')
+      && decodeURIComponent(database.username) === 'sabalan_application_runtime';
+  } catch {
+    return false;
+  }
+}
+
 export const assertStrongBackupPassphrase = (value: unknown): string => {
   const passphrase = String(value || '');
   if (passphrase.length < 12 || !/[a-z]/i.test(passphrase) || !/\d/.test(passphrase)) {

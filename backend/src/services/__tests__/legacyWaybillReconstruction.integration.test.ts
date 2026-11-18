@@ -2,10 +2,9 @@ import { latestLoadingCancellationRequest, requestLoadingCancellation } from '..
 import { getCrossWorkspaceDutyDetail, listCrossWorkspaceDuties } from '../crossWorkspaceDutyInbox';
 import { respondToCrossWorkspaceDuty } from '../crossWorkspaceDutyModule';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { createTemporaryConcurrencyDatabase } from './shipmentStatementConcurrency/database';
-import { createConcurrentPricingFixture } from './shipmentStatementConcurrency/pricingFixture';
+import { createConcurrentPricingFixture, seedCanonicalContractTemplate } from './shipmentStatementConcurrency/pricingFixture';
 import { createAuthorizedActorFixture } from './shipmentStatementConcurrency/authorityFixture';
 import { cancelFinalizedOrdinaryLoading, decideAccountingDispatchCandidate, finalizeCanonicalLoadingAllocations,
   LoadingCancellationAccountingAccessError, recoverLegacyLoadingWaybill, replaceAccountingDispatchWaybill,
@@ -25,13 +24,11 @@ async function run() {
   const sourceDatabaseUrl = process.env.DATABASE_URL;
   if (!sourceDatabaseUrl) throw new Error('DATABASE_URL must point at sabalanerp-local.');
   const root = path.resolve(process.cwd(), '..');
-  const database = await createTemporaryConcurrencyDatabase({ repositoryRoot: root, sourceDatabaseUrl });
+  const database = await createTemporaryConcurrencyDatabase({ repositoryRoot: root, sourceDatabaseUrl, migrateEmptySchema: true });
   const db = database.client();
   try {
-    execFileSync(process.execPath, [require.resolve('prisma/build/index.js'), 'migrate', 'deploy', '--schema', 'prisma/schema.prisma'], {
-      cwd: process.cwd(), env: { ...process.env, DATABASE_URL: database.databaseUrl }, stdio: 'pipe', timeout: 120000,
-    });
     process.env.CUSTOMER_SHIPMENT_STATEMENTS_ENABLED = 'false';
+    await seedCanonicalContractTemplate(db, database.runId);
     const fixture = await createConcurrentPricingFixture(db, database.runId, database.databaseUrl, { activateCutover: false });
     await finalizeCanonicalLoadingAllocations(db, { loadingId: fixture.loadings[0].id, actorId: fixture.actorId,
       effectiveAuthority: fixture.effectiveAuthority, idempotencyKey: `legacy-${database.runId}` });

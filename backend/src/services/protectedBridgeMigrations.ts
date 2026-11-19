@@ -23,6 +23,9 @@ const allocationControllerTransitionName = '20261116133000_customer_allocation_c
 const protectPartnerNumberReservationName = '20261120121000_protect_partner_number_reservation';
 const runtimeDisclosureRevisionName = '20261120122000_protect_runtime_disclosure_revision';
 const runtimeReferenceRowLocksName = '20261120123000_protect_runtime_reference_row_locks';
+const runtimeDispatchPermissionsName = '20261120124000_runtime_dispatch_permissions';
+const runtimeDriverAssignmentName = '20261120125000_runtime_driver_assignment_permissions';
+const runtimePartnerReceiptName = '20261120126000_runtime_partner_receipt_permissions';
 const nextReleaseCatalog = {
   '20261116120000_customer_allocation_intents': {
     tables: ['accounting_customer_allocation_intents'],
@@ -90,6 +93,18 @@ const nextReleaseCatalog = {
     tables: ['external_driver_documents', 'external_vehicle_documents', 'partner_commercial_accounts', 'partner_commercial_numbers', 'partner_duplicate_customer_matches', 'partner_identity_evidence', 'partner_terms_policies', 'simple_performance_profiles'],
     functions: ['protect_runtime_reference_row'],
   },
+  [runtimeDispatchPermissionsName]: {
+    tables: ['logistics_loading_lines', 'shipment_quantity_evidence'],
+    functions: ['protect_runtime_loading_line_write', 'prevent_shipment_quantity_evidence_mutation'],
+  },
+  [runtimeDriverAssignmentName]: {
+    tables: ['driver_vehicle_assignments', 'external_driver_vehicle_assignments'],
+    functions: ['protect_runtime_driver_assignment_identity'],
+  },
+  [runtimePartnerReceiptName]: {
+    tables: ['partner_case_events', 'partner_payment_installments', 'partner_payment_plans', 'partner_retail_receipt_allocations', 'partner_retail_receipts'],
+    functions: ['protect_runtime_partner_receipt_assembly'],
+  },
 };
 // This is the exact source delta from the retained 2026-11-12 production
 // release. It is intentionally separate from the frozen historical bootstrap.
@@ -140,11 +155,13 @@ const currentRelease = {
   [runtimeDisclosureRevisionName]: ['79e5cd2c01edbfd88c56d671e73cd7eec80961b38f9ccb343c38f61451eacfc2', 4],
 
   [runtimeReferenceRowLocksName]: ['85364edd5944addeb6606ba5ad6209e0f0d4bd5bcd71a492715469b91c1d1688', 2],
-
+  [runtimeDispatchPermissionsName]: ['9b895b031f0a369ac65cd1011afd6e8a9b53294d5d3034b2f55ad8929df18dbb', 4],
+  [runtimeDriverAssignmentName]: ['3a1329ef8fb845b5ac18f03224e4b0d596a414918f29a0dfaa62c00fe443eb6b', 1],
+  [runtimePartnerReceiptName]: ['7983529ea9ea7995598e300bb99f35dbfd6959a278488bc4b230898ea04d1257', 3],
 } as const;
 export const protectedCurrentReleaseNames: readonly string[] = Object.freeze(Object.keys(currentRelease));
 // Each release extends the ledger while preserving the prior release-set hashes.
-const protectedReleaseEpochEnds = Object.freeze([12, 22, 24, 25, 35, 36, 37, 38, 41, 42, 43, 44, 45]);
+const protectedReleaseEpochEnds = Object.freeze([12, 22, 24, 25, 35, 36, 37, 38, 41, 42, 43, 44, 45, 46, 47, 48]);
 const releaseSetSha256 = (files: CurrentFile[], index: number) => sha(files.slice(0,
   protectedReleaseEpochEnds.find(end => index < end)!).map(file => file.sha256).join('\n'));
 
@@ -439,6 +456,32 @@ export async function protectedCurrentReleaseRuntimeAclProof(tx: RuntimeAclCatal
       simple_performance_profiles: ['INSERT', 'SELECT', 'UPDATE'],
     });
     routineDefiners.protect_runtime_reference_row = false;
+  }
+
+  if (appliedNames.has(runtimeDispatchPermissionsName)) {
+    Object.assign(tableGrants, {
+      logistics_loading_lines: ['DELETE', 'INSERT', 'SELECT', 'UPDATE'],
+      shipment_quantity_evidence: ['DELETE', 'INSERT', 'SELECT', 'UPDATE'],
+    });
+    routineDefiners.protect_runtime_loading_line_write = false;
+    routineDefiners.prevent_shipment_quantity_evidence_mutation = false;
+  }
+  if (appliedNames.has(runtimeDriverAssignmentName)) {
+    Object.assign(tableGrants, {
+      driver_vehicle_assignments: ['INSERT', 'SELECT', 'UPDATE'],
+      external_driver_vehicle_assignments: ['INSERT', 'SELECT', 'UPDATE'],
+    });
+    routineDefiners.protect_runtime_driver_assignment_identity = false;
+  }
+  if (appliedNames.has(runtimePartnerReceiptName)) {
+    Object.assign(tableGrants, {
+      partner_case_events: ['INSERT', 'SELECT', 'UPDATE'],
+      partner_payment_installments: ['INSERT', 'SELECT', 'UPDATE'],
+      partner_payment_plans: ['INSERT', 'SELECT', 'UPDATE'],
+      partner_retail_receipt_allocations: ['INSERT', 'SELECT', 'UPDATE'],
+      partner_retail_receipts: ['INSERT', 'SELECT', 'UPDATE'],
+    });
+    routineDefiners.protect_runtime_partner_receipt_assembly = false;
   }
 
   const split = configuredProtectedDatabaseRoleRecovery(env);

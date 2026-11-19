@@ -401,6 +401,34 @@ def assert_capture_gate():
     return dict(file=str(file), device=str(named.st_dev), inode=str(named.st_ino), descriptor=10)
 
 
+def runtime_observation_sql(database, namespace, restricted_serving):
+    # PostgreSQL 15 exposes application names across roles. Query details and
+    # transaction timestamps remain private. Verify the named observer row
+    # before using the view to count tagged connections.
+    visibility = """(
+          current_user = 'sabalan_application_runtime' AND session_user = current_user
+          AND current_setting('server_version_num')::integer BETWEEN 150000 AND 159999
+          AND current_setting('track_activities') = 'on'
+          AND EXISTS (
+            SELECT 1 FROM pg_catalog.pg_stat_activity
+            WHERE pid = pg_backend_pid()
+              AND usename = current_user
+              AND application_name = 'sabalan-native-runtime-observer'
+          )
+        )""" if restricted_serving else (
+        "r.rolsuper OR pg_has_role(current_user,'pg_read_all_stats','USAGE')"
+    )
+    require(re.fullmatch(r'sabalan-rt-[0-9a-f]{48}', namespace))
+    database_literal = database.replace("'", "''")
+    return f"""SELECT json_build_object('system',c.system_identifier::text,
+      'visible', {visibility},
+      'sourceOid',(SELECT oid::text FROM pg_catalog.pg_database WHERE datname='{database_literal}'),
+      'sessions',(SELECT count(*) FROM pg_catalog.pg_stat_activity WHERE application_name='{namespace}'),
+      'allTagged',(SELECT count(*) FROM pg_catalog.pg_stat_activity WHERE application_name LIKE 'sabalan-rt-%'),
+      'prepared',(SELECT count(*) FROM pg_catalog.pg_prepared_xacts))
+      FROM pg_catalog.pg_control_system() c CROSS JOIN pg_catalog.pg_roles r WHERE r.rolname=current_user"""
+
+
 def run():
     require(sys.platform == 'linux' and len(sys.argv) > 1)
     coordination = Path(os.environ.get('RECOVERY_COORDINATION_DIR', '/app/recovery-coordination'))
@@ -499,16 +527,11 @@ def run():
                   PGAPPNAME='sabalan-native-runtime-observer', PGCONNECT_TIMEOUT='5',
                   PGOPTIONS='-c statement_timeout=5000 -c lock_timeout=250 -c default_transaction_read_only=on')
     requested_database = unquote(source.path[1:])
-    database_literal = requested_database.replace("'", "''")
-    sql = """SELECT json_build_object('system',c.system_identifier::text,
-      'visible',r.rolsuper OR pg_has_role(current_user,'pg_read_all_stats','USAGE'),
-      'sourceOid',(SELECT oid::text FROM pg_database WHERE datname='""" + database_literal + """'),
-      'sessions',(SELECT count(*) FROM pg_stat_activity WHERE application_name='""" + namespace + """'),
-      'allTagged',(SELECT count(*) FROM pg_stat_activity WHERE application_name LIKE 'sabalan-rt-%'),
-      'prepared',(SELECT count(*) FROM pg_prepared_xacts))
-      FROM pg_control_system() c CROSS JOIN pg_roles r WHERE r.rolname=current_user"""
+    restricted_serving = (role == 'standalone' and loaded is None
+                          and unquote(source.username) == 'sabalan_application_runtime')
 
-    def observation():
+    def observation(target_namespace=namespace):
+        sql = runtime_observation_sql(requested_database, target_namespace, restricted_serving)
         value = subprocess.run(['psql', '-X', '-q', '-t', '-A', '-v', 'ON_ERROR_STOP=1', '-c', sql],
                                env=pg_env, stdin=subprocess.DEVNULL, capture_output=True, timeout=10)
         require(value.returncode == 0 and len(value.stdout) < 16384)
@@ -528,11 +551,7 @@ def run():
         require(initial['system'] == previous['clusterIdentifier']
                 and initial['sourceOid'] == previous['initialDatabase']['oid']
                 and initial['allTagged'] == 0)
-        old_sql = sql.replace(namespace, previous['namespace'])
-        old = subprocess.run(['psql', '-X', '-q', '-t', '-A', '-v', 'ON_ERROR_STOP=1', '-c', old_sql],
-                             env=pg_env, stdin=subprocess.DEVNULL, capture_output=True, timeout=10)
-        require(old.returncode == 0 and len(old.stdout) < 16384)
-        old_work = json.loads(old.stdout)
+        old_work = observation(previous['namespace'])
         require(old_work['system'] == initial['system'] and old_work['sessions'] == 0
                 and old_work['allTagged'] == 0 and old_work['prepared'] == 0)
     if loaded:
@@ -544,12 +563,8 @@ def run():
         require(prior.get('clusterIdentifier') == initial['system'])
         # The persisted native closure is necessary, never a substitute for a
         # fresh SQL observation before reusing control after a prior runtime.
-        old_sql = sql.replace(namespace, prior['namespace'])
-        old = subprocess.run(['psql', '-X', '-q', '-t', '-A', '-v', 'ON_ERROR_STOP=1', '-c', old_sql],
-                             env=pg_env, stdin=subprocess.DEVNULL, capture_output=True, timeout=10)
-        require(old.returncode == 0 and len(old.stdout) < 16384)
-        old_work = json.loads(old.stdout)
-        require(old_work['visible'] is True and old_work['system'] == initial['system']
+        old_work = observation(prior['namespace'])
+        require(old_work['system'] == initial['system']
                 and old_work['sessions'] == 0 and old_work['prepared'] == 0)
     directory_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     previous_sha = hashlib.sha256(previous_raw).hexdigest() if previous_raw else None

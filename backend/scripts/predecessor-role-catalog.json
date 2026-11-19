@@ -1,5 +1,5 @@
 {
-  "migrationSha256": "394eef12319ac5c1fdf2316d66a51826d0207fcf9916e8281bb160f1f40aba39",
+  "migrationSha256": "b78b5b36be7e82c1599840a2b49a71d5c997a787b57e0b67e228a21bf76a6e49",
   "tables": {
     "NONE": [
       "_prisma_migrations",
@@ -553,6 +553,7 @@
     ],
     "SELECT INSERT DELETE": [
       "authentication_events",
+      "crm_customer_cards",
       "hr_application_decisions",
       "hr_authorization_audit_events",
       "hr_foundation_lifecycle_versions",
@@ -576,7 +577,6 @@
       "shipment_quantity_evidence"
     ],
     "SELECT DELETE": [
-      "crm_customer_cards",
       "delivery_products",
       "hr_formal_assessment_attempts",
       "hr_formal_assessment_evidence_links",

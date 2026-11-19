@@ -55,8 +55,9 @@ test('restricted runtime sees only Partner publications for actual completed and
     const migrationFiles = protectedCurrentReleaseNames.map(name => [
       name, readFileSync(path.join(repositoryRoot, 'backend/prisma/migrations', name, 'migration.sql')),
     ] as const);
-    const projection = compileProtectedCurrentRelease(migrationFiles).at(-1)!;
-    assert.equal(projection.name, '20261117160000_partner_release_readiness_completed_projection');
+    const projection = compileProtectedCurrentRelease(migrationFiles)
+      .find(file => file.name === '20261117160000_partner_release_readiness_completed_projection');
+    assert.ok(projection);
     const rolledBack = new Error('Roll back Partner projection fixture');
     await assert.rejects(database.$transaction(async tx => {
       await tx.$executeRaw`DO $$ BEGIN

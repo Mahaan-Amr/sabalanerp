@@ -605,7 +605,12 @@ verify_clamav_repair_runtime() {
   if [ "${DEPLOYMENT_PHASE:-}" = ROLLBACK_STARTED ]; then
     timeout "${clamav_runtime_timeout}" node "${OPERATIONS_ROOT}/scripts/clamav-release-readiness.mjs" inspect-rollback "$(compose ps -q clamav)" "${DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_FILE}" >"${DEPLOYMENT_REPORT_DIR_HOST}/clamav-runtime-${DEPLOYMENT_ID}.json"
   else
-    timeout "${clamav_runtime_timeout}" node "${OPERATIONS_ROOT}/scripts/clamav-release-readiness.mjs" inspect "$(compose ps -q clamav)" >"${DEPLOYMENT_REPORT_DIR_HOST}/clamav-runtime-${DEPLOYMENT_ID}.json"
+    installed_receipt="${REPO_ROOT}/.deploy-state/$(clamav_unit_name)/target.json"
+    set -- inspect "$(compose ps -q clamav)"
+    if [ "${DEPLOYMENT_CLAMAV_OPERATION}" = incident-recovery ]; then
+      set -- inspect "$2" "${installed_receipt}"
+    fi
+    timeout "${clamav_runtime_timeout}" node "${OPERATIONS_ROOT}/scripts/clamav-release-readiness.mjs" "$@" >"${DEPLOYMENT_REPORT_DIR_HOST}/clamav-runtime-${DEPLOYMENT_ID}.json"
   fi
 }
 

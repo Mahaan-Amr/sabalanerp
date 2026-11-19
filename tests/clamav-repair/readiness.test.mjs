@@ -228,3 +228,34 @@ test('local acquisition changes only the fixed mirror while production and updat
  const prodCompose=await readFile(new URL('../../docker-compose.prod.yml',import.meta.url),'utf8');
  assert.doesNotMatch(prodCompose,/Dockerfile\.local|freshclam\.local\.conf|c3sl-local/);
 });
+
+test('UFPR is a fixed direct acquisition source with unchanged publisher verification and preserved vendor provenance',async()=>{
+ const {validateAcquisitionConfiguration}=await import('../../scripts/clamav-release-readiness.mjs');
+ const {readFile}=await import('node:fs/promises');
+ const origin='https://clamavdb.c3sl.ufpr.br';
+ const config=await readFile(new URL('../../deploy/clamav/freshclam.local.conf',import.meta.url),'utf8');
+ assert.equal(validateAcquisitionConfiguration(config),origin);
+ assert.throws(()=>validateAcquisitionConfiguration(config.replace(origin,'https://another.example')));
+ assert.throws(()=>validateAcquisitionConfiguration(config.replace('ScriptedUpdates yes','ScriptedUpdates no')));
+ assert.throws(()=>validateAcquisitionConfiguration(config.replace('TestDatabases yes','TestDatabases no')));
+ assert.throws(()=>validateAcquisitionConfiguration(config+'HTTPProxyServer sabalan-clamav-egress\nHTTPProxyPort 10808\n','backup-host-http-v1'));
+ const image='sha256:d40cb3d0822e616661899426ab55922e0fe6ab00ada574c2b3962635f561d8df';
+ const versions={main:63,daily:28188,bytecode:339};
+ const receipt={image,acquisitionOrigin:origin,engine:'1.4.6',checkedAt:new Date().toISOString(),
+  updaterHealthy:true,signatureVerified:true,loadVerified:true,eicarRejected:true,loadedDaily:versions.daily,versions};
+ assert.throws(()=>validateReceipt(receipt,image,versions),/source migration evidence/);
+ const originalStateFiles=Object.fromEntries(['freshclam.dat','.sabalan-updater-state','.sabalan-freshclam-result']
+  .map(name=>[name,{sha256:'a'.repeat(64)}]));
+ const sourceMigration={kind:'CLAMAV_ACQUISITION_SOURCE_MIGRATION_V1',originalOrigin:'https://database.clamav.net',
+  targetOrigin:'https://mirrors.fe.up.pt/pub/clamav',intervalSeconds:7200,lastActualAttempt:1800,
+  firstEligibleAttempt:9000,vendorCooldownUntil:10000,originalStateFiles,cdnFallback:false};
+ const attempted=Math.floor(Date.now()/1000)-60;
+ const ufprCycle={containerStartedAt:new Date((attempted-60)*1000).toISOString(),
+  attempted,succeeded:attempted+15,next:attempted+7200,resultSha256:'b'.repeat(64)};
+ const qualified={...receipt,sourceMigration,ufprCycle};
+ assert.equal(validateReceipt(qualified,image,versions).acquisitionOrigin,origin);
+ assert.throws(()=>validateReceipt({...qualified,ufprCycle:{...ufprCycle,
+  containerStartedAt:new Date((attempted+1)*1000).toISOString()}},image,versions),/scheduled update/);
+ const unrelatedImage='sha256:'+'e'.repeat(64);
+ assert.throws(()=>validateReceipt({...qualified,image:unrelatedImage},unrelatedImage,versions),/Unreviewed UFPR/);
+});

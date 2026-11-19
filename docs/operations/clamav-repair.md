@@ -23,8 +23,13 @@ mirror `https://clamavdb.c3sl.ufpr.br`, listed by the university at
 FEUP still served 28172 and returned 404 for the 28173 patch. FreshClam must
 still authenticate and load publisher signatures during a real eligible cycle.
 
-This local image changes only the acquisition origin. Production keeps its
-existing Dockerfile, FEUP source and protected qualification contract. Local
+This image changes only the acquisition origin. The normal production image
+still uses FEUP. The protected incident-recovery operation may select the
+fixed UFPR image built from the same pinned engine with the direct acquisition
+transport. Qualification checks the effective image configuration, exact
+publisher versions, genuine scheduled FreshClam success, matching loaded bank,
+and the previous vendor-state hashes archived during the original FEUP migration.
+Keep the existing updater schedule and cooldown when preparing this replacement. Local
 recreation reuses `clamav_database` with the exact existing `freshclam.dat`,
 updater schedule and result evidence. Do not clear or advance those files:
 changing the source does not authorize an early attempt or claim healthy state.

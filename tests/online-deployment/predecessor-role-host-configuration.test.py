@@ -22,6 +22,9 @@ NATIVE_SPEC.loader.exec_module(native)
 CANONICAL_SPEC = importlib.util.spec_from_file_location("role_canonical", MODULE.with_name("predecessor-role-cutover-canonical.py"))
 canonical = importlib.util.module_from_spec(CANONICAL_SPEC)
 CANONICAL_SPEC.loader.exec_module(canonical)
+RECOVERY_SPEC = importlib.util.spec_from_file_location("qa_recovery", MODULE.with_name("qa-interrupted-role-owner.py"))
+recovery = importlib.util.module_from_spec(RECOVERY_SPEC)
+RECOVERY_SPEC.loader.exec_module(recovery)
 TERMINAL_SPEC = importlib.util.spec_from_file_location("role_terminal", MODULE.with_name("predecessor-role-cutover-terminal.py"))
 terminal = importlib.util.module_from_spec(TERMINAL_SPEC)
 TERMINAL_SPEC.loader.exec_module(terminal)
@@ -590,6 +593,68 @@ class HostConfigurationTest(unittest.TestCase):
         self.assertTrue(receipt["heartbeatFailed"])
         self.assertTrue(receipt["stdoutClosed"] and receipt["stderrClosed"] and receipt["childClosed"])
         self.assertFalse(receipt["canOpenTraffic"])
+
+    def test_interrupted_qa_recovery_keeps_original_clock_and_gates_transition(self):
+        reports, coordination = self.root / "reports", self.root / "coordination"
+        folder = self.root / ".deploy-state" / ("predecessor-role-host-" + self.session["deploymentId"])
+        folder.mkdir(mode=0o700)
+        original_clock = b"expired original clock"
+        proof = {"deploymentId": self.session["deploymentId"], "checkpointSha256": self.checkpoint["checksum"]}
+        compose = self.root / "docker-compose.rehearsal.yml"
+        attempt = folder / "interrupted-recovery-attempt.json"
+        clock_archive = folder / "interrupted-recovery-original-rollback-deadline.json"
+        events = []
+
+        @contextlib.contextmanager
+        def owner(operation, *, canonical_label):
+            self.assertEqual(operation, proof["deploymentId"])
+            self.assertTrue(canonical_label)
+            events.append("exclusive")
+            yield {"databasePid": 500, "clientPid": 501, "applicationName": "fixture"}
+            events.append("released")
+
+        def historical_exit(*_args):
+            self.assertEqual(clock_archive.read_bytes(), original_clock)
+            self.assertEqual(json.loads(attempt.read_bytes())["evidence"], proof)
+            self.assertTrue(canonical.clock_file(reports, self.session, "rollback").is_file())
+            events.append("historical-exit")
+
+        def command(_root, args):
+            events.append(args[-1])
+            if args[-1] == "transition":
+                self.assertEqual(os.environ["DEPLOYMENT_PHASE"], "ROLLBACK_STARTED")
+            return True
+
+        def launch(*args):
+            self.assertEqual(args[-2], "ROLLBACK_STARTED")
+            events.append("canonical-rollback")
+            return {"phase": "ROLLED_BACK"}
+
+        digest = canonical.host.digest(canonical.host.json_bytes(proof))
+        inputs = (canonical, self.root, self.root, reports, compose, proof, self.session, folder,
+                  {"previousSha256": roles.digest(ORIGINAL)}, self.env, {"serving": {}}, {"preflight": {}}, coordination)
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(recovery, "recovery_inputs", return_value=inputs),
+            patch.object(recovery, "verify_checkpoint_file", side_effect=lambda *_: events.append("checkpoint")),
+            patch.object(recovery, "inspect_evidence", return_value=proof),
+            patch.object(recovery, "native_runtime_closed", side_effect=lambda *_: events.append("native-closed")),
+            patch.object(recovery, "recovery_advisory", side_effect=owner),
+            patch.object(recovery, "recovery_environment", return_value={}),
+            patch.object(canonical, "owner_context"),
+            patch.object(canonical, "read_deadline", return_value=(original_clock, 0)),
+            patch.object(canonical, "held_owner_command", side_effect=command),
+            patch.object(canonical, "assert_qa_rollback_legacy_resolved", side_effect=historical_exit),
+            patch.object(canonical, "launch_owned_role_cutover", side_effect=launch),
+        ):
+            result = recovery.recover("plan", "pin", "env", digest)
+            self.assertEqual(result, {"phase": "ROLLED_BACK"})
+            self.assertEqual(events, ["checkpoint", "checkpoint", "native-closed", "exclusive",
+                                      "public-maintenance", "historical-exit", "native-closed", "transition",
+                                      "canonical-rollback", "released"])
+            with self.assertRaises(RuntimeError):
+                recovery.recover("plan", "pin", "env", digest)
+            self.assertEqual(clock_archive.read_bytes(), original_clock)
 
     def test_qa_role_rollback_uses_verified_original_env_only_for_historical_exit(self):
         reports, coordination = self.root / "reports", self.root / "coordination"

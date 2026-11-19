@@ -478,15 +478,24 @@ def verify_runtime_graph(containers, original, *, environment=None):
         env_label = "com.docker.compose.project.environment_file"
         require(environment is not None and labels.get(env_label) == str(environment)
                 and labels.get(depends) == "")
-        labels[depends] = "clamav:service_healthy:false,postgres:service_healthy:false"
-        if container_config_digest(backend) != expected:
+        dependencies = ("clamav:service_healthy:false,postgres:service_healthy:false",
+                        "postgres:service_healthy:false,clamav:service_healthy:false")
+
+        def matches_original_dependencies():
+            for value in dependencies:
+                labels[depends] = value
+                if container_config_digest(backend) == expected:
+                    return True
+            return False
+
+        if not matches_original_dependencies():
             original_env = containers["frontend"]["Config"]["Labels"].get(env_label, "")
             qa_root = Path("/srv/sabalanerp-qa")
             require(environment.is_relative_to(qa_root) and Path(original_env).is_relative_to(qa_root)
                     and original_env == containers["inquiry"]["Config"]["Labels"].get(env_label)
                     and original_env == containers["nginx"]["Config"]["Labels"].get(env_label))
             labels[env_label] = original_env
-        require(container_config_digest(backend) == expected)
+            require(matches_original_dependencies())
     scanner = containers["clamav"]["State"]
     require(scanner["Running"] is True and scanner["Health"]["Status"] == "healthy")
 

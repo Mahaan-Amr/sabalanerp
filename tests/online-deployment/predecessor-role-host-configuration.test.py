@@ -257,6 +257,9 @@ class HostConfigurationTest(unittest.TestCase):
         recreated = copy.deepcopy(rows)
         recreated["backend"]["Config"]["Labels"].update({env_label: str(operation_env), depends: ""})
         roles.verify_runtime_graph(recreated, pinned, environment=operation_env)
+        rows["backend"]["Config"]["Labels"][depends] = "postgres:service_healthy:false,clamav:service_healthy:false"
+        pinned = roles.original_graph(rows)
+        roles.verify_runtime_graph(recreated, pinned, environment=operation_env)
         with self.assertRaises(roles.RoleHostConfigurationError):
             roles.verify_runtime_graph(recreated, pinned, environment=Path(original_env))
         recreated["backend"]["Config"]["Env"].append("UNEXPECTED_RUNTIME_CHANGE=1")

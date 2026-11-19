@@ -384,6 +384,68 @@ async function verifyCutoverMigrationLedger(client: Client, directory: string, e
 
 const routineKey = (name: string, argumentTypes: string) => JSON.stringify([name, argumentTypes]);
 
+async function verifyCutoverWriteGuards(client: Client) {
+  const invokerBodies = new Map([
+    ['guard_customer_card_membership', 'b0fb4eefc31a3ad60f828fb1a8c6c1f84fa494115745b06cfa5d0b6910a2642a'],
+    ['init_customer_card', 'e88a499f9c9a2a9198941f6c213f2698ce77c113c13d8ec2c603c725640defec'],
+    ['performance_preserve_first_write', '866b4741e2eae78e8e36de87d7f926bdb2fb4947f76695c3cc9551438b81dbc8'],
+    ['protect_runtime_reference_row', 'c0ed3289e2a85d54e88be27d3a11f3747a82dcfcd3b019b2b0297ae957d3a42a'],
+  ]);
+  const { rows: invokers } = await client.query(`
+    SELECT p.proname AS name, pg_get_functiondef(p.oid) AS definition
+    FROM pg_proc p
+    WHERE p.pronamespace = 'public'::regnamespace AND NOT p.prosecdef
+      AND p.pronargs = 0 AND p.proname = ANY($1::text[])
+  `, [[...invokerBodies.keys()]]);
+  if (invokers.length !== invokerBodies.size
+    || invokers.some(row => sha256(row.definition.replace(/\r\n/g, '\n')) !== invokerBodies.get(row.name))) {
+    fail('A protected cutover write-guard routine differs from the reviewed definition.');
+  }
+
+  // tgtype contains a bit for row scope plus the timing and events.
+  const beforeUpdate = 19;
+  const beforeInsert = 7;
+  const expected = [
+    ['crm_customer_cards', 'crm_customer_card_guard', 31, 'guard_customer_card_membership'],
+    ['crm_customers', 'crm_customer_card_init', 5, 'init_customer_card'],
+    ['performance_disclosure_revision', 'performance_first_write_guard', 27, 'performance_preserve_first_write'],
+    ...['partner_sale_cases', 'sabalan_to_partner_sale_records', 'sales_contracts']
+      .map(table => [table, 'partner_number', beforeInsert, 'partner_reserve_number']),
+    ...[
+      'external_driver_documents', 'external_vehicle_documents', 'partner_commercial_accounts', 'partner_commercial_numbers',
+      'partner_duplicate_customer_matches', 'partner_identity_evidence', 'partner_terms_policies', 'simple_performance_profiles',
+    ].map(table => [table, 'restrict_runtime_reference_update', beforeUpdate, 'protect_runtime_reference_row']),
+    ...[
+      'performance_accepted_results', 'performance_consequence_handoffs', 'performance_criterion_versions',
+      'performance_cycles', 'performance_drafts', 'performance_evaluations', 'performance_export_receipts',
+      'performance_policy_versions', 'performance_privacy_cases', 'performance_reviews', 'performance_submissions',
+      'performance_template_versions',
+    ].map(table => [table, 'performance_canonical_write_fence', beforeInsert, 'performance_guard_canonical_write']),
+    ...[
+      'performance_accepted_results', 'performance_criterion_versions', 'performance_cycles', 'performance_drafts',
+      'performance_evaluation_sections', 'performance_evaluations', 'performance_policy_versions',
+      'performance_template_versions',
+    ].map(table => [table, 'performance_canonical_update_fence', beforeUpdate, 'performance_guard_canonical_write']),
+  ];
+  const names = [...new Set(expected.map(([, name]) => name))];
+  const { rows: bindings } = await client.query(`
+    SELECT c.relname AS "table", t.tgname AS "trigger", t.tgtype::int AS event, p.proname AS routine,
+      t.tgenabled = 'O' AND NOT t.tgisinternal AND t.tgnargs = 0
+        AND t.tgattr::text = '' AND t.tgqual IS NULL AND t.tgconstraint = 0
+        AND t.tgoldtable IS NULL AND t.tgnewtable IS NULL
+        AND p.pronargs = 0 AND p.pronamespace = 'public'::regnamespace AS valid
+    FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid
+    JOIN pg_proc p ON p.oid = t.tgfoid
+    WHERE c.relnamespace = 'public'::regnamespace AND t.tgname = ANY($1::text[])
+  `, [names]);
+  const observed = bindings.map(row => JSON.stringify([row.table, row.trigger, row.event, row.routine])).sort();
+  const reviewed = expected.map(row => JSON.stringify(row)).sort();
+  if (bindings.some(row => !row.valid) || JSON.stringify(observed) !== JSON.stringify(reviewed)) {
+    fail('A protected cutover write-guard trigger differs from the reviewed binding.');
+  }
+}
+
+
 async function verifyCutoverViews(client: Client, views: CutoverCatalog['views']) {
   const approved = new Map(views.map(view => [view.name, view]));
   const { rows } = await client.query(`
@@ -473,6 +535,7 @@ async function inspectCutover(client: Client, directory: string, manifest: Cutov
         || sha256(row.definition.replace(/\r\n/g, '\n')) !== routine.definitionSha256;
     })) fail('A privileged routine differs from the reviewed cutover inventory.');
 
+  await verifyCutoverWriteGuards(client);
   const views = await verifyCutoverViews(client, manifest.views);
   const viewCount = views.size;
   const tableCount = tables.size;

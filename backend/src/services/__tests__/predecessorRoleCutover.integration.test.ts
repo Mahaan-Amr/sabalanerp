@@ -62,6 +62,18 @@ test('first split preflight requires the exact catalog and per-object grants', {
     await database.$executeRaw`UPDATE public._prisma_migrations SET checksum = ${checksum}
       WHERE migration_name = '20261117150000_customer_allocation_runtime_admission'`;
 
+    await database.$executeRaw`ALTER TABLE public.simple_performance_profiles DISABLE TRIGGER restrict_runtime_reference_update`;
+    await assert.rejects(before(), /cutover write-guard trigger differs/);
+    await database.$executeRaw`ALTER TABLE public.simple_performance_profiles ENABLE TRIGGER restrict_runtime_reference_update`;
+
+    const [referenceGuard] = await database.$queryRaw<Array<{ definition: string }>>`
+      SELECT pg_get_functiondef('public.protect_runtime_reference_row()'::regprocedure) AS definition
+    `;
+    await database.$executeRaw`CREATE OR REPLACE FUNCTION public.protect_runtime_reference_row() RETURNS trigger
+      LANGUAGE plpgsql AS $guard$ BEGIN RETURN NEW; END $guard$`;
+    await assert.rejects(before(), /cutover write-guard routine differs/);
+    await database.$executeRawUnsafe(referenceGuard.definition);
+
     // This fixture stages the intended grants only on its disposable database.
     const manifest = JSON.parse(await readFile(catalogFile, 'utf8')) as {
       tables: Record<string, string[]>;

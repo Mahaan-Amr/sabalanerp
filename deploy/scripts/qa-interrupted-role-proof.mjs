@@ -113,7 +113,7 @@ export function proveInterruptedRoleCutover({
 }
 
 function proveInterruptedRollback({ session, journalBytes, checkpoint, configuration, currentEnvironment,
-  nativeChildren, deadlines, clock, monotonicNs, database, openingIntentExists }, evidenceSha, read, get, transaction) {
+  nativeChildren, deadlines, clock, monotonicNs, database, openingIntentExists }, evidenceSha, recordedAttemptSha, read, get, transaction) {
   const { deploymentId, releaseId, targetCommit, phase } = session;
   assert.equal(phase, 'ROLLBACK_STARTED');
   assert.ok(session.purpose === 'predecessor-role-cutover' && session.bootstrap === false && !openingIntentExists);
@@ -141,7 +141,11 @@ function proveInterruptedRollback({ session, journalBytes, checkpoint, configura
   assert.equal(sha(historicalClock), attempt.originalRollbackDeadlineSha256);
   assert.ok(assertDeadline(JSON.parse(historicalClock), 'rollback', clock, monotonicNs, session));
   assert.ok(assertDeadline(deadlines.mutation, 'mutation', clock, monotonicNs, session));
-  const rollbackDeadlineExpired = assertDeadline(deadlines.rollback, 'rollback', clock, monotonicNs, session);
+  const activeDeadlineExpired = assertDeadline(deadlines.rollback, 'rollback', clock, monotonicNs, session);
+  const rollbackArchive = recordedAttemptSha
+    ? read(transaction + '/interrupted-recovery-resume-previous-rollback-deadline.json') : null;
+  const rollbackDeadline = rollbackArchive ? JSON.parse(rollbackArchive) : deadlines.rollback;
+  const rollbackDeadlineExpired = assertDeadline(rollbackDeadline, 'rollback', clock, monotonicNs, session);
   const originalBinding = { deploymentId, releaseId, targetCommit, checkpointSha256: checkpoint.checksum,
     checkpointMetadataSha256: checkpoint.canonicalMetadataSha256 };
   for (const [key, value] of Object.entries(originalBinding)) {
@@ -166,22 +170,38 @@ function proveInterruptedRollback({ session, journalBytes, checkpoint, configura
   }
   const restoration = nativeChildren.find(child => child.result.action === 'restore-predecessor-role-grants');
   assertNativeChild(restoration, 'restore-predecessor-role-grants', 0, 'CLOSED', phase, originalBinding);
-  assert.ok(!fs.readdirSync(transaction).some(name => /restored-(?:intent|proof)\.json$/.test(name)
-    || name.startsWith('interrupted-recovery-resume')));
-  return {
+  const resumedFiles = fs.readdirSync(transaction).filter(name => name.startsWith('interrupted-recovery-resume'));
+  assert.ok(!fs.readdirSync(transaction).some(name => /restored-(?:intent|proof)\.json$/.test(name)));
+  const proof = {
     format: 'sabalan-qa-interrupted-role-rollback-evidence/v1', ...originalBinding,
     priorAttemptSha256: sha(attemptBytes), journalSha256: sha(journalBytes), journalHead: entries.at(-1).hash,
     journalEntries: entries.length, restoredEnvironmentSha256: configuration.previousSha256,
     restoreGrantsChildIntentSha256: restoration.result.intentSha256,
     receiptSha256: sha(read(transaction + '/receipt.json')), leaseExpiresAt: database.leaseExpiresAt,
-    rollbackDeadline: deadlines.rollback.deadlineNs,
+    rollbackDeadline: rollbackDeadline.deadlineNs,
     ready: database.expired && rollbackDeadlineExpired,
   };
+  if (!recordedAttemptSha) {
+    assert.equal(resumedFiles.length, 0);
+    return proof;
+  }
+  assert.deepEqual(resumedFiles.sort(), ['interrupted-recovery-resume-attempt.json',
+    'interrupted-recovery-resume-previous-rollback-deadline.json']);
+  const resumedRaw = read(transaction + '/interrupted-recovery-resume-attempt.json');
+  const resumed = JSON.parse(resumedRaw);
+  assert.ok(sha(resumedRaw) === recordedAttemptSha && resumed.format === 'sabalan-qa-interrupted-role-recovery-resume-attempt/v1');
+  assert.equal(resumed.originalRollbackDeadlineSha256, sha(rollbackArchive));
+  assert.deepEqual(resumed.evidence, proof);
+  assert.equal(resumed.evidenceSha256, sha(JSON.stringify(proof, Object.keys(proof).sort()) + '\n'));
+  assert.ok(BigInt(deadlines.rollback.startedNs) >= BigInt(rollbackDeadline.deadlineNs));
+  return { ...proof, format: 'sabalan-qa-recorded-role-resume-evidence/v1', recordedAttemptSha,
+    rollbackDeadline: deadlines.rollback.deadlineNs, ready: proof.ready && !activeDeadlineExpired };
 }
 
 function inspect() {
-  const [plan, planSha, originalEnv, evidenceSha] = process.argv.slice(2);
-  assert.ok(process.argv.length === 5 || (process.argv.length === 6 && /^[a-f0-9]{64}$/.test(evidenceSha)));
+  const [plan, planSha, originalEnv, evidenceSha, recordedAttemptSha] = process.argv.slice(2);
+  assert.ok(process.argv.length === 5 || ((process.argv.length === 6 || process.argv.length === 7)
+    && /^[a-f0-9]{64}$/.test(evidenceSha) && (!recordedAttemptSha || /^[a-f0-9]{64}$/.test(recordedAttemptSha))));
   const root = '/opt/sabalanerp';
   const qa = '/srv/sabalanerp-qa';
   const reports = qa + '/reports';
@@ -251,7 +271,7 @@ function inspect() {
     monotonicNs: process.hrtime.bigint(), database: JSON.parse(db.split('\n').find(line => line.startsWith('{'))),
     openingIntentExists: fs.existsSync(reports + '/predecessor-role-cutover-open-intent.json'),
   };
-  const result = evidenceSha ? proveInterruptedRollback(input, evidenceSha, read, get, transaction)
+  const result = evidenceSha ? proveInterruptedRollback(input, evidenceSha, recordedAttemptSha, read, get, transaction)
     : { format: 'sabalan-qa-interrupted-role-evidence/v1', ...proveInterruptedRoleCutover(input) };
   console.log(JSON.stringify(result));
 }

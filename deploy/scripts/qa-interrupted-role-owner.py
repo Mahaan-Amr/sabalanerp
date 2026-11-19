@@ -62,12 +62,16 @@ def recovery_advisory(deployment_id, *, canonical_label=False):
                   f" AND pid={postgres_pid}") == "0")
 
 
-def inspect_evidence(plan, digest, environment, *, prior_evidence=None):
+def inspect_evidence(plan, digest, environment, *, prior_evidence=None, recorded_attempt=None):
     args = ["node", str(DIRECTORY / "qa-interrupted-role-proof.mjs"), plan, digest, environment]
     kind = "sabalan-qa-interrupted-role-evidence/v1"
     if prior_evidence is not None:
         args.append(prior_evidence)
         kind = "sabalan-qa-interrupted-role-rollback-evidence/v1"
+    if recorded_attempt is not None:
+        require(prior_evidence is not None)
+        args.append(recorded_attempt)
+        kind = "sabalan-qa-recorded-role-resume-evidence/v1"
     proof = json.loads(subprocess.check_output(
         args, encoding="utf8", timeout=60, stderr=subprocess.DEVNULL, pass_fds=(9,)))
     require(proof["format"] == kind)
@@ -140,14 +144,14 @@ def verify_checkpoint_file(file, expected):
         require(pin(before) == pin(os.fstat(fd)) == pin(file.lstat()))
 
 
-def recovery_inputs(plan, plan_sha, original_env, evidence_sha, *, prior_evidence=None):
+def recovery_inputs(plan, plan_sha, original_env, evidence_sha, *, prior_evidence=None, recorded_attempt=None):
     canonical = load_canonical_owner()
     host = canonical.host
     root = Path("/opt/sabalanerp")
     qa = Path("/srv/sabalanerp-qa")
     reports = qa / "reports"
     compose = root / "docker-compose.rehearsal.yml"
-    proof = inspect_evidence(plan, plan_sha, original_env, prior_evidence=prior_evidence)
+    proof = inspect_evidence(plan, plan_sha, original_env, prior_evidence=prior_evidence, recorded_attempt=recorded_attempt)
     if evidence_sha is not None:
         require(host.digest(host.json_bytes(proof)) == evidence_sha)
     operation = proof["deploymentId"]
@@ -238,6 +242,49 @@ def recover(plan, plan_sha, original_env, evidence_sha, *, prior_evidence=None):
     return outcome
 
 
+def finish_recorded_resume(plan, plan_sha, original_env, prior_evidence, recorded_attempt, receipt_file, receipt_sha):
+    (canonical, root, qa, reports, compose, proof, session, folder, configuration, env,
+     serving, foreground, coordination) = recovery_inputs(plan, plan_sha, original_env, None,
+                                                            prior_evidence=prior_evidence, recorded_attempt=recorded_attempt)
+    require(proof["ready"] is True)
+    host = canonical.host
+    operation = proof["deploymentId"]
+    handoff = folder / "interrupted-recovery-resume-owner-handoff.json"
+    require(not os.path.lexists(handoff))
+    receipt_path = Path(receipt_file)
+    require(receipt_path.parent.parent == qa / "private"
+            and receipt_path.parent.name.startswith("qa-recorded-resume-custody.") and receipt_path.name == "readback.json")
+    host.private_directory(receipt_path.parent)
+    raw, _ = host.read_private(receipt_path)
+    require(host.digest(raw) == receipt_sha)
+    archive = operation + ".sabrec"
+    files = (Path("/var/lib/docker/volumes/sabalanerp_backend_recovery/_data/packages") / archive,
+             qa / "remote" / operation.removeprefix("deploy-") / archive)
+    pins = {}
+    for file in files:
+        observed = file.lstat()
+        require(file.resolve(strict=True) == file and stat.S_ISREG(observed.st_mode) and observed.st_size == 1358636732)
+        pins[str(file)] = [observed.st_dev, observed.st_ino, observed.st_size, observed.st_mtime_ns, observed.st_ctime_ns]
+    require(json.loads(raw) == {"format": "sabalan-qa-recorded-rollback-readback/v1", "attemptSha256": recorded_attempt,
+                                "checkpointSha256": proof["checkpointSha256"], "files": pins})
+    with recovery_advisory(operation, canonical_label=True) as holder:
+        os.environ.update(recovery_environment(session, serving["serving"], holder, plan, plan_sha))
+        os.environ["DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX"] = host.json_bytes(session["preservedClamav"]).strip().hex()
+        canonical.owner_context(root, env, reports, coordination)
+        clock, end = canonical.read_deadline(reports, session, "rollback")
+        require(str(end) == proof["rollbackDeadline"] and time.monotonic_ns() < end)
+        require(canonical.held_owner_command(root, canonical.canonical_shell(env, compose, "public-maintenance")))
+        host.write_private(handoff, host.json_bytes({"format": "sabalan-qa-role-resume-owner-handoff/v1",
+                           "attemptSha256": recorded_attempt, "readbackSha256": receipt_sha, "clockSha256": host.digest(clock),
+                           "observedHolder": holder, "ownerPid": os.getpid()}))
+        print("QA_RECOVERY_RECORDED_CLOCK_OWNER_BOUND", file=sys.stderr, flush=True)
+        canonical.assert_qa_rollback_legacy_resolved(root, env, reports, compose, configuration["previousSha256"])
+        native_runtime_closed(coordination)
+        require(time.monotonic_ns() < end)
+        print("QA_RECOVERY_CANONICAL_ROLLBACK_RESUMED", file=sys.stderr, flush=True)
+        return canonical.launch_owned_role_cutover(root, env, reports, compose, "ROLLBACK_STARTED", foreground["preflight"])
+
+
 if __name__ == "__main__":
     try:
         if len(sys.argv) == 5 and sys.argv[1] == "--check-owner-lock":
@@ -251,6 +298,10 @@ if __name__ == "__main__":
                               "nativeRuntimeClosed": True}))
         elif len(sys.argv) == 7 and sys.argv[1] == "--resume-rollback":
             print(json.dumps(recover(*sys.argv[2:6], prior_evidence=sys.argv[6])))
+        elif len(sys.argv) == 7 and sys.argv[1] == "--check-recorded-resume":
+            print(json.dumps(recovery_inputs(*sys.argv[2:5], None, prior_evidence=sys.argv[5], recorded_attempt=sys.argv[6])[5]))
+        elif len(sys.argv) == 9 and sys.argv[1] == "--finish-recorded-resume":
+            print(json.dumps(finish_recorded_resume(*sys.argv[2:])))
         else:
             require(len(sys.argv) == 6 and sys.argv[1] == "--recover")
             print(json.dumps(recover(*sys.argv[2:])))

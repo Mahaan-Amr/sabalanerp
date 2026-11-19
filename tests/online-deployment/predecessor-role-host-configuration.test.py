@@ -708,7 +708,7 @@ class HostConfigurationTest(unittest.TestCase):
             patch.dict(os.environ, clock_environment),
             patch.object(canonical, "installed_role_backend", return_value=({}, coordination)),
             patch.object(canonical, "owner_context", side_effect=lambda *_: canonical.host.context(
-                self.root, reports, coordination, "MUTATION_STARTED")),
+                self.root, reports, coordination, self.session["phase"])),
             patch.object(canonical, "held_owner_command", side_effect=command),
         ):
             start = time.monotonic_ns()
@@ -742,6 +742,15 @@ class HostConfigurationTest(unittest.TestCase):
             with self.assertRaises(canonical.host.RoleHostConfigurationError):
                 canonical.assert_qa_rollback_legacy_resolved(self.root, self.env, reports, compose, previous_sha)
             self.assertEqual(len(observed), 2)
+            self.session["phase"] = "ROLLBACK_STARTED"
+            private_write(reports / "active-deployment-session.json", roles.json_bytes(self.session))
+            private_write(self.env, applied)
+            with self.assertRaises(canonical.host.RoleHostConfigurationError):
+                canonical.assert_qa_rollback_legacy_resolved(self.root, self.env, reports, compose, previous_sha)
+            private_write(self.env, ORIGINAL)
+            canonical.assert_qa_rollback_legacy_resolved(self.root, self.env, reports, compose, previous_sha)
+            self.assertEqual(observed[-1], self.env)
+            self.assertEqual(len(observed), 3)
 
     def test_canonical_transport_reuses_original_control_image_and_lease_heartbeat(self):
         binary = self.root / "bin"

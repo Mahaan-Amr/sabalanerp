@@ -638,7 +638,8 @@ def assert_qa_rollback_legacy_resolved(root, env, report_dir, compose, previous_
     host.require(compose == root / "docker-compose.rehearsal.yml" and compose.resolve(strict=True) == compose
                  and host.matches(r"[a-f0-9]{64}", previous_sha))
     session = json.loads(host.read_private(report_dir / "active-deployment-session.json")[0])
-    host.require(session["purpose"] == "predecessor-role-cutover" and session["phase"] == "MUTATION_STARTED")
+    host.require(session["purpose"] == "predecessor-role-cutover"
+                 and session["phase"] in ("MUTATION_STARTED", "ROLLBACK_STARTED"))
     _, coordination = installed_role_backend(root, env, compose, session["controlImage"])
     session, _, binding = owner_context(root, env, report_dir, coordination)
     _, end = read_deadline(report_dir, session, "rollback")
@@ -657,6 +658,7 @@ def assert_qa_rollback_legacy_resolved(root, env, report_dir, compose, previous_
     if host.digest(current) == previous_sha:
         assert_resolved(env)
         return
+    host.require(session["phase"] == "MUTATION_STARTED")
     private = (root / ".deploy-state" / ("predecessor-role-host-" + binding["deploymentId"])
                / "configuration-private.json")
     snapshot, previous = host.load_snapshot(private, env, binding)

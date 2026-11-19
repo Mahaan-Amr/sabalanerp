@@ -19,6 +19,9 @@ const customerCardInsertName = '20261120120000_grant_runtime_customer_card_inser
 const retireAttachmentScanStatusName = '20261117120000_retire_attachment_scan_status';
 const partnerReadinessProjectionName = '20261117160000_partner_release_readiness_completed_projection';
 const allocationControllerTransitionName = '20261116133000_customer_allocation_controller_transition';
+const protectPartnerNumberReservationName = '20261120121000_protect_partner_number_reservation';
+const runtimeDisclosureRevisionName = '20261120122000_protect_runtime_disclosure_revision';
+const runtimeReferenceRowLocksName = '20261120123000_protect_runtime_reference_row_locks';
 const nextReleaseCatalog = {
   '20261116120000_customer_allocation_intents': {
     tables: ['accounting_customer_allocation_intents'],
@@ -68,7 +71,16 @@ const nextReleaseCatalog = {
     functions: ['customer_allocation_runtime_admitted'],
   },
   [partnerReadinessProjectionName]: { tables: [], functions: [] },
+  [protectPartnerNumberReservationName]: { tables: ['partner_commercial_numbers'], functions: ['partner_reserve_number'] },
   [customerCardInsertName]: { tables: ['crm_customer_cards'], functions: [] },
+  [runtimeDisclosureRevisionName]: {
+    tables: ['performance_disclosure_revision'],
+    functions: ['performance_guard_canonical_write', 'performance_preserve_first_write'],
+  },
+  [runtimeReferenceRowLocksName]: {
+    tables: ['external_driver_documents', 'external_vehicle_documents', 'partner_commercial_accounts', 'partner_commercial_numbers', 'partner_duplicate_customer_matches', 'partner_identity_evidence', 'partner_terms_policies', 'simple_performance_profiles'],
+    functions: ['protect_runtime_reference_row'],
+  },
 };
 // This is the exact source delta from the retained 2026-11-12 production
 // release. It is intentionally separate from the frozen historical bootstrap.
@@ -115,10 +127,15 @@ const currentRelease = {
   [personalPickupSourceName]: ['02d234097b5a2d70cbfeebbf36a9bc0dedbfe3a316ef936c38d0160eca15286f', 1],
   [personalPickupDispatchName]: ['acbf6c974b30a77cfb0131d30fd3d960e0523053ee21a7d777ca759ea7539a3d', 5],
   [customerCardInsertName]: ['2123e56ded01fbe3f01e046e3425dcba4f4cc96d1a01fcfcb78070d944f97baa', 1],
+  [protectPartnerNumberReservationName]: ['3719c6d5f57a69ade6fa88310068943bc945e075a504463eecef08a81c82b02d', 3],
+  [runtimeDisclosureRevisionName]: ['79e5cd2c01edbfd88c56d671e73cd7eec80961b38f9ccb343c38f61451eacfc2', 4],
+
+  [runtimeReferenceRowLocksName]: ['85364edd5944addeb6606ba5ad6209e0f0d4bd5bcd71a492715469b91c1d1688', 2],
+
 } as const;
 export const protectedCurrentReleaseNames: readonly string[] = Object.freeze(Object.keys(currentRelease));
 // Each release extends the ledger while preserving the prior release-set hashes.
-const protectedReleaseEpochEnds = Object.freeze([12, 22, 24, 25, 35, 36, 37, 38, 41, 42]);
+const protectedReleaseEpochEnds = Object.freeze([12, 22, 24, 25, 35, 36, 37, 38, 41, 42, 43, 44, 45]);
 const releaseSetSha256 = (files: CurrentFile[], index: number) => sha(files.slice(0,
   protectedReleaseEpochEnds.find(end => index < end)!).map(file => file.sha256).join('\n'));
 
@@ -157,12 +174,13 @@ export function compileProtectedCurrentRelease(files: ReadonlyArray<readonly [st
     if (!Buffer.isBuffer(bytes) || sha(bytes) !== sha256) failure('PROTECTED_CURRENT_RELEASE_SQL_IDENTITY_MISMATCH');
     const sql = bytes.toString('utf8');
     let statements = splitCurrentReleaseSql(sql);
-    if (name === '20261108000100_start_new_waybill_numbers_at_one' || name === retireAttachmentScanStatusName) {
+    if (name === '20261108000100_start_new_waybill_numbers_at_one'
+      || name === retireAttachmentScanStatusName || name === protectPartnerNumberReservationName) {
       const opening = statements[0]?.replace(/^(?:--[^\r\n]*\r?\n\s*)+/, '');
       if (statements.length !== expectedCount + 2 || opening !== 'BEGIN;' || statements.at(-1) !== 'COMMIT;') {
         failure('PROTECTED_CURRENT_RELEASE_TRANSACTION_WRAPPER_UNPROVEN');
       }
-      // The byte-pinned source wraps the same two statements in a transaction;
+      // The byte-pinned source wraps its statements in a transaction;
       // this runner supplies that transaction together with its history receipt.
       statements = statements.slice(1, -1);
     }

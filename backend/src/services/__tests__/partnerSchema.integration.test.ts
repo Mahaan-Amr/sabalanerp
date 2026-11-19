@@ -50,8 +50,7 @@ test('approved inquiry evidence gets an exact database-clock 48-hour window', ()
 
 const hash = `sha256-v1:${'a'.repeat(64)}`;
 test('a partial Case pair cannot pass the database commit boundary', () => transaction(async (db, id) => {
-  await seedProfile(db, id);
-  await db.query('INSERT INTO partner_commercial_accounts (id,"profileId") VALUES ($1,$1)', [id]);
+  await seedPairParents(db, id);
   await assert.rejects(async () => {
     await db.query(`INSERT INTO partner_sale_cases (id,"caseNumber","profileId","customerId","internalRecordId","customerContractId","headRevision","integrityHash")
       VALUES ($1,$2,$1,$1,$3,$4,1,$5)`, [id, `${id}-case`, `${id}-internal`, `${id}-customer`, hash]);
@@ -64,11 +63,14 @@ async function seedProfile(db: any, id: string) {
   await db.query('INSERT INTO partner_profiles (id,"userId") VALUES ($1,$1)', [id]);
 }
 
-async function seedPair(db: any, id: string) {
+async function seedPairParents(db: any, id: string) {
   await seedProfile(db, id);
   await db.query('INSERT INTO partner_commercial_accounts (id,"profileId") VALUES ($1,$1)', [id]);
   await db.query(`INSERT INTO crm_customers (id,"firstName","lastName","ownerUserId","updatedAt") VALUES ($1,'Schema','Fixture',$1,now());`, [id]);
   await db.query(`INSERT INTO departments (id,name,"namePersian","updatedAt") VALUES ($1,$1,$1,now())`, [id]);
+}
+
+async function writePair(db: any, id: string) {
   await db.query(`INSERT INTO partner_sale_cases (id,"caseNumber","profileId","customerId","internalRecordId","customerContractId","headRevision","integrityHash")
     VALUES ($1,$2,$1,$1,$3,$4,1,$5)`, [id, `${id}-case`, `${id}-internal`, `${id}-customer`, hash]);
   await db.query(`INSERT INTO partner_case_revisions ("caseId",revision,"integrityHash","graphHash",graph,"partySnapshots","wholesaleEnvelope",
@@ -84,6 +86,11 @@ async function seedPair(db: any, id: string) {
     VALUES ($1,1,$2,$3,2,'m','measured-v1')`, [id, `${id}-row`, hash]);
   await db.query(`INSERT INTO partner_case_events (id,"caseId","caseRevision","integrityHash",sequence,"stateRevision",type,"toState","actorId","commandId","correlationId","effectiveDate",evidence)
     VALUES ($2,$1,1,$3,1,1,'CASE_CREATED','DRAFT',$1,$1,$1,CURRENT_DATE,'{}')`, [id, `${id}-event`, hash]);
+}
+
+async function seedPair(db: any, id: string) {
+  await seedPairParents(db, id);
+  await writePair(db, id);
 }
 
 test('a complete reciprocal pair validates and cannot replace its immutable links', () => transaction(async (db, id) => {
@@ -105,6 +112,41 @@ test('a complete reciprocal pair validates and cannot replace its immutable link
   }).schemaVersion, 1);
   assert.equal((await db.query('SELECT count(*)::int AS count FROM partner_commercial_numbers WHERE "caseId"=$1',[id])).rows[0].count, 3);
   await assert.rejects(db.query('UPDATE partner_sale_cases SET "internalRecordId"=$2,"stateRevision"=2 WHERE id=$1', [id, `${id}-other`]), { code: '23514' });
+}));
+
+test('restricted Partner pair creation reserves numbers through its existing triggers', () => transaction(async (db, id) => {
+  const runtimeRole = `partner_number_runtime_${randomUUID().replaceAll('-', '')}`;
+  const ordinarySeller = `${id}-ordinary-seller`;
+  await seedPairParents(db, id);
+  await db.query(`INSERT INTO users (id,email,username,password,"firstName","lastName",role,"updatedAt")
+    VALUES ($1,$2,$1,'!disabled','Schema','Fixture','USER',now())`, [ordinarySeller, `${ordinarySeller}@example.invalid`]);
+  await db.query(`CREATE ROLE ${runtimeRole} NOLOGIN;
+    GRANT USAGE ON SCHEMA public TO ${runtimeRole};
+    GRANT SELECT, INSERT ON partner_sale_cases, partner_case_revisions, sabalan_to_partner_sale_records, sales_contracts,
+      partner_product_rows, partner_case_row_bindings, partner_case_events TO ${runtimeRole};
+    GRANT SELECT ON crm_customer_cards, partner_commercial_numbers, crm_customers, partner_profiles,
+      partner_commercial_accounts TO ${runtimeRole};
+    GRANT UPDATE ON crm_customers, partner_profiles TO ${runtimeRole};
+    GRANT SELECT, INSERT, UPDATE ON accounting_dashboard_change_versions TO ${runtimeRole};
+    SET LOCAL ROLE ${runtimeRole}`);
+  await writePair(db, id);
+  await db.query(`INSERT INTO sales_contracts (id,"contractNumber",title,"titlePersian",content,"customerId","departmentId",
+    "createdBy","responsibleSellerId","updatedAt") VALUES ($2,$2,'Schema','آزمون','Fixture',$1,$1,$3,$3,now())`,
+  [id, `${id}-ordinary`, ordinarySeller]);
+  await db.query('SET CONSTRAINTS ALL IMMEDIATE');
+  const { rows } = await db.query('SELECT purpose, number FROM partner_commercial_numbers WHERE "caseId"=$1 ORDER BY purpose', [id]);
+  assert.deepEqual(rows, [
+    { purpose: 'CASE', number: `${id}-case` },
+    { purpose: 'CUSTOMER', number: `${id}-customer-number` },
+    { purpose: 'INTERNAL', number: `${id}-internal-number` },
+  ]);
+  const { rows: privileges } = await db.query(`SELECT
+    has_function_privilege(current_user, 'public.partner_reserve_number()', 'EXECUTE') AS fixture_execute,
+    has_function_privilege('sabalan_application_runtime', 'public.partner_reserve_number()', 'EXECUTE') AS runtime_execute,
+    has_function_privilege('sabalan_allocation_controller', 'public.partner_reserve_number()', 'EXECUTE') AS controller_execute`);
+  assert.deepEqual(privileges, [{ fixture_execute: false, runtime_execute: false, controller_execute: false }]);
+  await assert.rejects(db.query(`INSERT INTO partner_commercial_numbers (number, "caseId", purpose)
+    VALUES ($2,$1,'CASE')`, [id, `${id}-direct`]), { code: '42501' });
 }));
 
 test('retail receipt evidence cannot reference a Sabalan payment plan', () => transaction(async (db, id) => {

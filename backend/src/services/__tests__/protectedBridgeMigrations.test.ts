@@ -67,6 +67,9 @@ test('the complete current release is admitted only with its reviewed ordered SQ
     '20261118120000_personal_pickup_source',
     '20261118120100_personal_pickup_dispatch',
     '20261120120000_grant_runtime_customer_card_insert',
+    '20261120121000_protect_partner_number_reservation',
+    '20261120122000_protect_runtime_disclosure_revision',
+    '20261120123000_protect_runtime_reference_row_locks',
   ];
   const files = names.map(name => [name, fs.readFileSync(path.join(directory, name, 'migration.sql'))] as const);
   const release = compileProtectedCurrentRelease(files);
@@ -91,7 +94,7 @@ test('the complete current release is admitted only with its reviewed ordered SQ
   assert.deepEqual(release[32].functions, ['require_active_grouped_allocation_child']);
   assert.equal(release[24].statements.length, 5);
   assert.ok(release[24].statements.every(sql => /^ALTER TABLE/.test(sql)));
-  const [sepidarReference, personalPickupSource, personalPickupDispatch, customerCardInsert] = release.slice(-4);
+  const [sepidarReference, personalPickupSource, personalPickupDispatch, customerCardInsert, partnerNumberReservation] = release.slice(38, 43);
   assert.equal(sepidarReference.statements.length, 2);
   assert.deepEqual(sepidarReference.tables, ['logistics_loadings']);
   assert.deepEqual(personalPickupSource.statements, [`ALTER TYPE "GuardDriverSource" ADD VALUE 'PERSONAL_PICKUP';`]);
@@ -100,6 +103,15 @@ test('the complete current release is admitted only with its reviewed ordered SQ
   assert.equal(customerCardInsert.statements.length, 1);
   assert.deepEqual(customerCardInsert.tables, ['crm_customer_cards']);
   assert.deepEqual(customerCardInsert.functions, []);
+  assert.equal(partnerNumberReservation.statements.length, 3);
+  assert.deepEqual(partnerNumberReservation.tables, ['partner_commercial_numbers']);
+  assert.deepEqual(partnerNumberReservation.functions, ['partner_reserve_number']);
+  assert.equal(release[43].statements.length, 4);
+  assert.deepEqual(release[43].tables, ['performance_disclosure_revision']);
+  assert.deepEqual(release[43].functions, ['performance_guard_canonical_write', 'performance_preserve_first_write']);
+  assert.equal(release[44].statements.length, 2);
+  assert.deepEqual(release[44].tables, ['external_driver_documents', 'external_vehicle_documents', 'partner_commercial_accounts', 'partner_commercial_numbers', 'partner_duplicate_customer_matches', 'partner_identity_evidence', 'partner_terms_policies', 'simple_performance_profiles']);
+  assert.deepEqual(release[44].functions, ['protect_runtime_reference_row']);
   for (let migrationIndex = 22; migrationIndex < files.length; migrationIndex++) {
     const changedMigration = files.map(([name, bytes], index) => index === migrationIndex
       ? [name, Buffer.concat([bytes, Buffer.from('\n-- drift')])] as const : [name, bytes] as const);

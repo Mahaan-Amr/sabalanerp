@@ -3,8 +3,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
+import type { Prisma } from '@prisma/client';
 import { compileProtectedBridgeMigration, compileProtectedCurrentRelease,
-  assertProtectedCurrentReleaseRetryEvidence } from '../protectedBridgeMigrations';
+  assertProtectedCurrentReleaseRetryEvidence, protectedCurrentReleaseRuntimeAclProof } from '../protectedBridgeMigrations';
 
 test('same-operation retry rejects changed quantity, duty, waybill, or pickup evidence', () => {
   const owner = { deploymentId: 'operation-1', releaseId: 'release-1', leaseToken: 'lease-1' };
@@ -101,13 +102,17 @@ test('the complete current release is admitted only with its reviewed ordered SQ
   assert.equal(personalPickupDispatch.statements.length, 5);
   assert.deepEqual(personalPickupDispatch.tables.sort(), ['dispatch_confirmation_sessions', 'guard_driver_queue_turns']);
   assert.equal(customerCardInsert.statements.length, 1);
-  assert.deepEqual(customerCardInsert.tables, ['crm_customer_cards']);
-  assert.deepEqual(customerCardInsert.functions, []);
+  assert.deepEqual(customerCardInsert.tables, ['crm_customer_cards', 'crm_customers']);
+  assert.deepEqual(customerCardInsert.functions, ['guard_customer_card_membership', 'init_customer_card']);
   assert.equal(partnerNumberReservation.statements.length, 3);
-  assert.deepEqual(partnerNumberReservation.tables, ['partner_commercial_numbers']);
+  assert.deepEqual(partnerNumberReservation.tables, ['partner_commercial_numbers', 'partner_sale_cases',
+    'sabalan_to_partner_sale_records', 'sales_contracts']);
   assert.deepEqual(partnerNumberReservation.functions, ['partner_reserve_number']);
   assert.equal(release[43].statements.length, 4);
-  assert.deepEqual(release[43].tables, ['performance_disclosure_revision']);
+  assert.deepEqual(release[43].tables, ['performance_disclosure_revision', 'performance_policy_versions',
+    'performance_criterion_versions', 'performance_template_versions', 'performance_cycles', 'performance_evaluations',
+    'performance_evaluation_sections', 'performance_drafts', 'performance_submissions', 'performance_reviews',
+    'performance_accepted_results', 'performance_export_receipts', 'performance_consequence_handoffs', 'performance_privacy_cases']);
   assert.deepEqual(release[43].functions, ['performance_guard_canonical_write', 'performance_preserve_first_write']);
   assert.equal(release[44].statements.length, 2);
   assert.deepEqual(release[44].tables, ['external_driver_documents', 'external_vehicle_documents', 'partner_commercial_accounts', 'partner_commercial_numbers', 'partner_duplicate_customer_matches', 'partner_identity_evidence', 'partner_terms_policies', 'simple_performance_profiles']);
@@ -117,6 +122,82 @@ test('the complete current release is admitted only with its reviewed ordered SQ
       ? [name, Buffer.concat([bytes, Buffer.from('\n-- drift')])] as const : [name, bytes] as const);
     assert.throws(() => compileProtectedCurrentRelease(changedMigration), /SQL_IDENTITY_MISMATCH/);
   }
+});
+
+test('protected migration receipts verify exact ACLs across the dormant to restricted login cutover', async () => {
+  const runtime = 'sabalan_application_runtime';
+  const owner = 'postgres';
+  const database = 'sabalan';
+  const grant = (grantee: string, privilege: string) => ({ grantee, privilege, grantable: false, grantor: owner });
+  const table = (name: string, runtimePrivileges: string[]) => {
+    const ownerPrivileges = ['DELETE', 'INSERT', 'REFERENCES', 'SELECT', 'TRIGGER', 'TRUNCATE', 'UPDATE'];
+    return { kind: 'table', name, owner, ownerPrivileges, securityDefiner: false, columnAcl: false,
+      grants: [...ownerPrivileges.map(verb => grant(owner, verb)), ...runtimePrivileges.map(verb => grant(runtime, verb))] };
+  };
+  const routine = (name: string, securityDefiner: boolean) => ({ kind: 'function', name, owner, securityDefiner,
+    columnAcl: false, ownerPrivileges: ['EXECUTE'],
+    grants: [grant(owner, 'EXECUTE'), ...(securityDefiner ? [] : [grant('', 'EXECUTE')])] });
+  type ObjectAcl = ReturnType<typeof table>;
+  const query = (login: boolean, objects: ObjectAcl[], admitted = true) => ({
+    async $queryRaw<T>(sql: TemplateStringsArray | Prisma.Sql): Promise<T> {
+      const rows = 'strings' in sql ? objects : [{ admitted, owner, database, login }];
+      return rows as T;
+    },
+  });
+  const legacy = { DEPLOYMENT_CHECKPOINT_RUNTIME_USER: owner, BACKEND_RUNTIME_ROLE: 'control',
+    DATABASE_URL: `postgresql://${owner}@localhost/${database}` };
+  const split = { ...legacy, DEPLOYMENT_CHECKPOINT_RUNTIME_USER: runtime };
+  const names = new Set(['20261120120000_grant_runtime_customer_card_insert',
+    '20261120121000_protect_partner_number_reservation']);
+  const routines = [routine('guard_customer_card_membership', false), routine('init_customer_card', false),
+    routine('partner_reserve_number', true)];
+  const stagedTables = [table('crm_customer_cards', ['DELETE', 'INSERT', 'SELECT']), table('partner_commercial_numbers', ['SELECT'])];
+  const dormantTables = [table('crm_customer_cards', []), table('partner_commercial_numbers', [])];
+  const dormant = await protectedCurrentReleaseRuntimeAclProof(query(false, [...dormantTables, ...routines]), names, legacy);
+  assert.ok(dormant);
+  const active = await protectedCurrentReleaseRuntimeAclProof(query(true, [...stagedTables, ...routines]), names, split);
+  assert.deepEqual(active, dormant);
+
+  assert.equal(await protectedCurrentReleaseRuntimeAclProof({ $queryRaw() {
+    throw new Error('Historical receipts must have no ACL query or proof fields');
+  } }, new Set(['20261118120100_personal_pickup_dispatch']), legacy), undefined);
+  await assert.rejects(protectedCurrentReleaseRuntimeAclProof(query(false, [...dormantTables, ...routines]), names, split),
+    /RUNTIME_ROLE_UNPROVEN/);
+  await assert.rejects(protectedCurrentReleaseRuntimeAclProof(query(true, [...stagedTables, ...routines]), names, legacy),
+    /RUNTIME_ROLE_UNPROVEN/);
+  await assert.rejects(protectedCurrentReleaseRuntimeAclProof(query(true, [...stagedTables, ...routines], false), names, split),
+    /RUNTIME_ROLE_UNPROVEN/);
+  await assert.rejects(protectedCurrentReleaseRuntimeAclProof(query(false, [...stagedTables, ...routines]), names, legacy),
+    /RUNTIME_ACL_DRIFT/);
+
+  const [cards, registry] = stagedTables;
+  const [membership, init, reserve] = routines;
+  for (const changed of [
+    [table(cards.name, ['DELETE', 'SELECT']), registry, ...routines],
+    [cards, table(registry.name, ['SELECT', 'UPDATE']), ...routines],
+    [{ ...cards, columnAcl: true }, registry, ...routines],
+    [{ ...cards, grants: cards.grants.map(entry => ({ ...entry, grantable: entry.grantee === runtime })) }, registry, ...routines],
+    [{ ...cards, grants: cards.grants.map(entry => ({ ...entry, grantor: runtime })) }, registry, ...routines],
+    [cards, registry, { ...membership, grants: [grant(owner, 'EXECUTE')] }, init, reserve],
+    ...['', runtime, 'sabalan_allocation_controller', 'foreign_role'].map(grantee => [
+      ...stagedTables, membership, init, { ...reserve, grants: [...reserve.grants, grant(grantee, 'EXECUTE')] },
+    ]),
+  ]) {
+    await assert.rejects(protectedCurrentReleaseRuntimeAclProof(query(true, changed), names, split), /RUNTIME_ACL_DRIFT/);
+  }
+
+  const fullNames = new Set([...names, '20261120122000_protect_runtime_disclosure_revision',
+    '20261120123000_protect_runtime_reference_row_locks']);
+  const fullTables = [cards, table(registry.name, ['SELECT', 'UPDATE']),
+    ...['external_driver_documents', 'external_vehicle_documents', 'partner_commercial_accounts',
+      'partner_duplicate_customer_matches', 'simple_performance_profiles'].map(name => table(name, ['INSERT', 'SELECT', 'UPDATE'])),
+    ...['partner_identity_evidence', 'partner_terms_policies', 'performance_disclosure_revision']
+      .map(name => table(name, ['SELECT', 'UPDATE']))];
+  const fullRoutines = [...routines, routine('performance_guard_canonical_write', true),
+    routine('performance_preserve_first_write', false), routine('protect_runtime_reference_row', false)];
+  assert.ok(await protectedCurrentReleaseRuntimeAclProof(query(true, [...fullTables, ...fullRoutines]), fullNames, split));
+  await assert.rejects(protectedCurrentReleaseRuntimeAclProof(query(true, [registry, ...fullTables.filter(object => object.name !== registry.name),
+    ...fullRoutines]), fullNames, split), /RUNTIME_ACL_DRIFT/);
 });
 
 test('protected bootstrap accepts only the reviewed complete SQL bytes, including original comments and line endings', () => {

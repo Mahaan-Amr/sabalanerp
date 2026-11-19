@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
+import { configuredProtectedDatabaseRoleRecovery } from './protectedDatabaseRoleRecovery';
 import { assertRuntimeControlOwnership } from './runtimeControlOwnership';
 
 const known = {
@@ -71,10 +72,18 @@ const nextReleaseCatalog = {
     functions: ['customer_allocation_runtime_admitted'],
   },
   [partnerReadinessProjectionName]: { tables: [], functions: [] },
-  [protectPartnerNumberReservationName]: { tables: ['partner_commercial_numbers'], functions: ['partner_reserve_number'] },
-  [customerCardInsertName]: { tables: ['crm_customer_cards'], functions: [] },
+  [protectPartnerNumberReservationName]: {
+    tables: ['partner_commercial_numbers', 'partner_sale_cases', 'sabalan_to_partner_sale_records', 'sales_contracts'],
+    functions: ['partner_reserve_number'],
+  },
+  [customerCardInsertName]: {
+    tables: ['crm_customer_cards', 'crm_customers'], functions: ['guard_customer_card_membership', 'init_customer_card'],
+  },
   [runtimeDisclosureRevisionName]: {
-    tables: ['performance_disclosure_revision'],
+    tables: ['performance_disclosure_revision', 'performance_policy_versions', 'performance_criterion_versions',
+      'performance_template_versions', 'performance_cycles', 'performance_evaluations', 'performance_evaluation_sections',
+      'performance_drafts', 'performance_submissions', 'performance_reviews', 'performance_accepted_results',
+      'performance_export_receipts', 'performance_consequence_handoffs', 'performance_privacy_cases'],
     functions: ['performance_guard_canonical_write', 'performance_preserve_first_write'],
   },
   [runtimeReferenceRowLocksName]: {
@@ -280,6 +289,7 @@ async function assertLease(tx: Prisma.TransactionClient, owner: Owner, shareLock
 
 async function catalog(tx: Prisma.TransactionClient, input: {
   tables: string[]; functions: string[]; pickupSource?: boolean; personalPickupSource?: boolean; partnerReadinessProjection?: boolean;
+  appliedNames?: ReadonlySet<string>;
 }) {
   const tables = await tx.$queryRaw<Array<{ name: string; details: unknown }>>(Prisma.sql`
     SELECT c.relname AS name, jsonb_build_object('kind',c.relkind,'persistence',c.relpersistence,'owner',pg_get_userbyid(c.relowner),
@@ -319,7 +329,8 @@ async function catalog(tx: Prisma.TransactionClient, input: {
     ? { pickupSource: await pickupSourceProof(tx, input.personalPickupSource ? 'PERSONAL_PICKUP' : 'CUSTOMER_PICKUP') } : {};
   const partnerReadinessProjection = input.partnerReadinessProjection
     ? { partnerReadinessProjection: await partnerReadinessProjectionProof(tx) } : {};
-  return sha(JSON.stringify(canonical({ tables, functions, ...pickupSource, ...partnerReadinessProjection })));
+  const runtimeAcl = input.appliedNames ? await protectedCurrentReleaseRuntimeAclProof(tx, input.appliedNames) : undefined;
+  return sha(JSON.stringify(canonical({ tables, functions, ...pickupSource, ...partnerReadinessProjection, ...runtimeAcl })));
 }
 
 /** Also required when discovery finds no pending work. A successful no-op
@@ -377,15 +388,122 @@ const quantityNames = new Set([protectedCurrentReleaseNames[1], protectedCurrent
 const dutyName = protectedCurrentReleaseNames[9], waybillName = protectedCurrentReleaseNames[10];
 function currentCatalogScope(files: CurrentFile[], through: number) {
   const applied = files.slice(0, through + 1);
+  const appliedNames = new Set(applied.map(file => file.name));
   const functions = new Set(applied.flatMap(file => file.functions));
   if (applied.some(file => file.name === allocationControllerTransitionName)) {
     functions.delete('keep_customer_allocation_control_closed');
   }
-  return { tables: [...new Set(applied.flatMap(file => file.tables))].sort(),
+  return { appliedNames, tables: [...new Set(applied.flatMap(file => file.tables))].sort(),
     functions: [...functions].sort(),
     pickupSource: applied.some(file => file.name === pickupSourceName),
     personalPickupSource: applied.some(file => file.name === personalPickupSourceName),
     partnerReadinessProjection: applied.some(file => file.name === partnerReadinessProjectionName) };
+}
+
+type CatalogGrant = { grantee: string; privilege: string; grantable: boolean; grantor: string };
+type RuntimeAclObject = {
+  kind: 'table' | 'function'; name: string; owner: string; securityDefiner: boolean;
+  columnAcl: boolean; ownerPrivileges: string[]; grants: CatalogGrant[];
+};
+type RuntimeAclCatalog = {
+  $queryRaw<T>(query: TemplateStringsArray | Prisma.Sql, ...values: unknown[]): Promise<T>;
+};
+
+/** Check the live ACL before committing a receipt, and again when proving a retry.
+ * The protected role cutover can legally change these exact table grants once.
+ * Both admitted states commit to the same reviewed policy. */
+export async function protectedCurrentReleaseRuntimeAclProof(tx: RuntimeAclCatalog,
+  appliedNames: ReadonlySet<string>, env: NodeJS.ProcessEnv = process.env) {
+  if (!appliedNames.has(customerCardInsertName)) return undefined;
+
+  const tableGrants: Record<string, string[]> = { crm_customer_cards: ['DELETE', 'INSERT', 'SELECT'] };
+  const routineDefiners: Record<string, boolean> = { guard_customer_card_membership: false, init_customer_card: false };
+  if (appliedNames.has(protectPartnerNumberReservationName)) {
+    tableGrants.partner_commercial_numbers = ['SELECT'];
+    routineDefiners.partner_reserve_number = true;
+  }
+  if (appliedNames.has(runtimeDisclosureRevisionName)) {
+    tableGrants.performance_disclosure_revision = ['SELECT', 'UPDATE'];
+    routineDefiners.performance_guard_canonical_write = true;
+    routineDefiners.performance_preserve_first_write = false;
+  }
+  if (appliedNames.has(runtimeReferenceRowLocksName)) {
+    Object.assign(tableGrants, {
+      external_driver_documents: ['INSERT', 'SELECT', 'UPDATE'],
+      external_vehicle_documents: ['INSERT', 'SELECT', 'UPDATE'],
+      partner_commercial_accounts: ['INSERT', 'SELECT', 'UPDATE'],
+      partner_commercial_numbers: ['SELECT', 'UPDATE'],
+      partner_duplicate_customer_matches: ['INSERT', 'SELECT', 'UPDATE'],
+      partner_identity_evidence: ['SELECT', 'UPDATE'],
+      partner_terms_policies: ['SELECT', 'UPDATE'],
+      simple_performance_profiles: ['INSERT', 'SELECT', 'UPDATE'],
+    });
+    routineDefiners.protect_runtime_reference_row = false;
+  }
+
+  const split = configuredProtectedDatabaseRoleRecovery(env);
+  const runtime = split?.roles.runtime ?? 'sabalan_application_runtime';
+  const [identity] = await tx.$queryRaw<Array<{ admitted: boolean; owner: string; database: string; login: boolean }>>`
+    SELECT current_user AS owner, current_database() AS database, runtime.rolcanlogin AS login,
+      (current_user = session_user AND control.rolname = session_user AND control.rolsuper AND control.rolcanlogin
+        AND NOT (runtime.rolsuper OR runtime.rolcreatedb OR runtime.rolcreaterole OR runtime.rolinherit
+          OR runtime.rolreplication OR runtime.rolbypassrls)
+        AND runtime.rolconfig IS NULL AND (runtime.rolcanlogin OR auth.rolpassword IS NULL)
+        AND NOT EXISTS (SELECT FROM pg_catalog.pg_auth_members WHERE member = runtime.oid OR roleid = runtime.oid)
+        AND NOT EXISTS (SELECT FROM pg_catalog.pg_db_role_setting WHERE setrole = runtime.oid)
+        AND NOT EXISTS (SELECT FROM pg_catalog.pg_shdepend
+          WHERE refclassid = 'pg_catalog.pg_authid'::regclass AND refobjid = runtime.oid AND deptype = 'o')) AS admitted
+    FROM pg_catalog.pg_roles runtime JOIN pg_catalog.pg_authid auth USING (oid)
+    JOIN pg_catalog.pg_database db ON db.datname = current_database()
+    JOIN pg_catalog.pg_roles control ON control.oid = db.datdba
+    WHERE runtime.rolname = ${runtime}
+  `;
+  if (!identity?.admitted || identity.login !== Boolean(split) || (split && identity.database !== split.source)) {
+    failure('PROTECTED_CURRENT_RELEASE_RUNTIME_ROLE_UNPROVEN');
+  }
+
+  const objects = await tx.$queryRaw<RuntimeAclObject[]>(Prisma.sql`
+    WITH objects AS (
+      SELECT 'table' AS kind, c.relname AS name, c.relowner AS owner, c.relacl AS acl, 'r'::"char" AS code,
+        false AS security_definer, EXISTS (SELECT FROM pg_catalog.pg_attribute a
+          WHERE a.attrelid = c.oid AND a.attacl IS NOT NULL) AS column_acl
+      FROM pg_catalog.pg_class c WHERE c.relnamespace = 'public'::regnamespace AND c.relkind IN ('r', 'p')
+        AND c.relname IN (${Prisma.join(Object.keys(tableGrants))})
+      UNION ALL
+      SELECT 'function', p.proname, p.proowner, p.proacl, 'f'::"char", p.prosecdef, false
+      FROM pg_catalog.pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.prokind = 'f'
+        AND p.pronargs = 0 AND p.proname IN (${Prisma.join(Object.keys(routineDefiners))})
+    )
+    SELECT kind, name, pg_catalog.pg_get_userbyid(owner) AS owner, security_definer AS "securityDefiner",
+      column_acl AS "columnAcl", ARRAY(SELECT d.privilege_type
+        FROM pg_catalog.aclexplode(pg_catalog.acldefault(code, owner)) d WHERE d.grantee = owner) AS "ownerPrivileges",
+      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'grantee', CASE WHEN a.grantee = 0 THEN '' ELSE pg_catalog.pg_get_userbyid(a.grantee) END,
+        'privilege', a.privilege_type, 'grantable', a.is_grantable, 'grantor', pg_catalog.pg_get_userbyid(a.grantor)))
+        FROM pg_catalog.aclexplode(COALESCE(acl, pg_catalog.acldefault(code, owner))) a), '[]'::jsonb) AS grants
+    FROM objects
+  `);
+  const grantKey = (grant: CatalogGrant) => JSON.stringify([grant.grantee, grant.privilege, grant.grantable, grant.grantor]);
+  if (objects.length !== Object.keys(tableGrants).length + Object.keys(routineDefiners).length) {
+    failure('PROTECTED_CURRENT_RELEASE_RUNTIME_ACL_DRIFT');
+  }
+  for (const object of objects) {
+    const expected: CatalogGrant[] = object.ownerPrivileges.map(privilege =>
+      ({ grantee: identity.owner, privilege, grantable: false, grantor: identity.owner }));
+    if (object.kind === 'table' && split) {
+      expected.push(...tableGrants[object.name].map(privilege =>
+        ({ grantee: runtime, privilege, grantable: false, grantor: identity.owner })));
+    }
+    if (object.kind === 'function' && !routineDefiners[object.name]) {
+      expected.push({ grantee: '', privilege: 'EXECUTE', grantable: false, grantor: identity.owner });
+    }
+    if (object.owner !== identity.owner || object.columnAcl
+      || object.securityDefiner !== (object.kind === 'function' && routineDefiners[object.name])
+      || JSON.stringify(object.grants.map(grantKey).sort()) !== JSON.stringify(expected.map(grantKey).sort())) {
+      failure('PROTECTED_CURRENT_RELEASE_RUNTIME_ACL_DRIFT');
+    }
+  }
+  return { runtimeAcl: { tableGrants, routineDefiners } };
 }
 
 async function partnerReadinessProjectionProof(tx: Prisma.TransactionClient) {

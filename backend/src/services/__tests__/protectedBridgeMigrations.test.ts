@@ -71,6 +71,9 @@ test('the complete current release is admitted only with its reviewed ordered SQ
     '20261120121000_protect_partner_number_reservation',
     '20261120122000_protect_runtime_disclosure_revision',
     '20261120123000_protect_runtime_reference_row_locks',
+    '20261120124000_runtime_dispatch_permissions',
+    '20261120125000_runtime_driver_assignment_permissions',
+    '20261120126000_runtime_partner_receipt_permissions',
   ];
   const files = names.map(name => [name, fs.readFileSync(path.join(directory, name, 'migration.sql'))] as const);
   const release = compileProtectedCurrentRelease(files);
@@ -187,14 +190,25 @@ test('protected migration receipts verify exact ACLs across the dormant to restr
   }
 
   const fullNames = new Set([...names, '20261120122000_protect_runtime_disclosure_revision',
-    '20261120123000_protect_runtime_reference_row_locks']);
+    '20261120123000_protect_runtime_reference_row_locks',
+    '20261120124000_runtime_dispatch_permissions', '20261120125000_runtime_driver_assignment_permissions', '20261120126000_runtime_partner_receipt_permissions']);
   const fullTables = [cards, table(registry.name, ['SELECT', 'UPDATE']),
     ...['external_driver_documents', 'external_vehicle_documents', 'partner_commercial_accounts',
       'partner_duplicate_customer_matches', 'simple_performance_profiles'].map(name => table(name, ['INSERT', 'SELECT', 'UPDATE'])),
+    ...['logistics_loading_lines', 'shipment_quantity_evidence']
+      .map(name => table(name, ['DELETE', 'INSERT', 'SELECT', 'UPDATE'])),
+    ...['driver_vehicle_assignments', 'external_driver_vehicle_assignments']
+      .map(name => table(name, ['INSERT', 'SELECT', 'UPDATE'])),
+    ...['partner_case_events', 'partner_payment_installments', 'partner_payment_plans', 'partner_retail_receipt_allocations', 'partner_retail_receipts']
+      .map(name => table(name, ['INSERT', 'SELECT', 'UPDATE'])),
     ...['partner_identity_evidence', 'partner_terms_policies', 'performance_disclosure_revision']
       .map(name => table(name, ['SELECT', 'UPDATE']))];
   const fullRoutines = [...routines, routine('performance_guard_canonical_write', true),
-    routine('performance_preserve_first_write', false), routine('protect_runtime_reference_row', false)];
+    routine('performance_preserve_first_write', false), routine('protect_runtime_reference_row', false),
+    routine('protect_runtime_loading_line_write', false),
+    routine('prevent_shipment_quantity_evidence_mutation', false),
+    routine('protect_runtime_driver_assignment_identity', false),
+    routine('protect_runtime_partner_receipt_assembly', false)];
   assert.ok(await protectedCurrentReleaseRuntimeAclProof(query(true, [...fullTables, ...fullRoutines]), fullNames, split));
   await assert.rejects(protectedCurrentReleaseRuntimeAclProof(query(true, [registry, ...fullTables.filter(object => object.name !== registry.name),
     ...fullRoutines]), fullNames, split), /RUNTIME_ACL_DRIFT/);

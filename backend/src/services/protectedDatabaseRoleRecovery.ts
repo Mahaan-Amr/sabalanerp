@@ -360,7 +360,7 @@ type CutoverCatalog = {
 };
 const cutoverRoles = { runtime: 'sabalan_application_runtime', controller: 'sabalan_allocation_controller' };
 const sha256 = (content: string | Buffer) => createHash('sha256').update(content).digest('hex');
-const cutoverCatalogSha256 = '96e0486ffbcd5bd78194e34bbb84ed54a6c2b74d64f9ae460ebc8c3290cd5a95';
+const cutoverCatalogSha256 = '35ba8aa2bedbf2121594e1c2c6462a2d519a33ab2483584c23ebc98a364c2126';
 
 async function verifyCutoverMigrationLedger(client: Client, directory: string, expectedDigest: string) {
   const names = (await fs.readdir(directory, { withFileTypes: true }))
@@ -390,6 +390,10 @@ async function verifyCutoverWriteGuards(client: Client) {
     ['init_customer_card', 'e88a499f9c9a2a9198941f6c213f2698ce77c113c13d8ec2c603c725640defec'],
     ['performance_preserve_first_write', '866b4741e2eae78e8e36de87d7f926bdb2fb4947f76695c3cc9551438b81dbc8'],
     ['protect_runtime_reference_row', 'c0ed3289e2a85d54e88be27d3a11f3747a82dcfcd3b019b2b0297ae957d3a42a'],
+    ['protect_runtime_loading_line_write', 'f2c6a5d9934c0aa36e6d010fd7dfb6f64944e59d7daa31706a1ff4a41fc6fc55'],
+    ['prevent_shipment_quantity_evidence_mutation', '0fc10e545c38f05c41cbd7022075225e56e45e36a9401d214b4c2713f7342843'],
+    ['protect_runtime_driver_assignment_identity', '88a2ba7cd000769f77db8e9132cb2e57d4e4d0123a6f02c395c10ecfa2dcb0a0'],
+    ['protect_runtime_partner_receipt_assembly', '552cfa5d04ceced32093d7a87cc0f1601ca525de802c1ce126fa7739f3098535'],
   ]);
   const { rows: invokers } = await client.query(`
     SELECT p.proname AS name, pg_get_functiondef(p.oid) AS definition
@@ -406,6 +410,11 @@ async function verifyCutoverWriteGuards(client: Client) {
   const beforeUpdate = 19;
   const beforeInsert = 7;
   const expected = [
+    ['logistics_loading_lines', 'restrict_runtime_loading_line_write', 23, 'protect_runtime_loading_line_write'],
+    ['shipment_quantity_evidence', 'shipment_quantity_evidence_immutable', 27, 'prevent_shipment_quantity_evidence_mutation'],
+    ['partner_retail_receipt_allocations', 'restrict_runtime_receipt_assembly', beforeInsert, 'protect_runtime_partner_receipt_assembly'],
+    ...['driver_vehicle_assignments', 'external_driver_vehicle_assignments']
+      .map(table => [table, 'restrict_runtime_driver_assignment_update', beforeUpdate, 'protect_runtime_driver_assignment_identity']),
     ['crm_customer_cards', 'crm_customer_card_guard', 31, 'guard_customer_card_membership'],
     ['crm_customers', 'crm_customer_card_init', 5, 'init_customer_card'],
     ['performance_disclosure_revision', 'performance_first_write_guard', 27, 'performance_preserve_first_write'],
@@ -414,6 +423,8 @@ async function verifyCutoverWriteGuards(client: Client) {
     ...[
       'external_driver_documents', 'external_vehicle_documents', 'partner_commercial_accounts', 'partner_commercial_numbers',
       'partner_duplicate_customer_matches', 'partner_identity_evidence', 'partner_terms_policies', 'simple_performance_profiles',
+      'shipment_quantity_evidence', 'partner_case_events', 'partner_payment_installments', 'partner_payment_plans',
+      'partner_retail_receipt_allocations', 'partner_retail_receipts',
     ].map(table => [table, 'restrict_runtime_reference_update', beforeUpdate, 'protect_runtime_reference_row']),
     ...[
       'performance_accepted_results', 'performance_consequence_handoffs', 'performance_criterion_versions',

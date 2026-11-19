@@ -10,6 +10,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import stat
 import subprocess
 import sys
 import tempfile
@@ -617,6 +618,59 @@ def allocation_controller_password(backend, *, expected_sha256=None):
     return host.read_controller_password(Path(directory), pin, host.backend_runtime_url(backend), expected_sha256=expected_sha256)
 
 
+def installed_role_backend(root, env, compose, backend_image):
+    ids = subprocess.check_output(canonical_compose(env, compose, "ps", "--all", "--quiet", "backend"),
+                                  cwd=root, stderr=subprocess.DEVNULL, timeout=30).decode("ascii").split()
+    host.require(len(ids) == 1 and host.matches(r"[a-f0-9]{64}", ids[0]))
+    rows = read_owner_json(root, (*DOCKER, "inspect", ids[0]))
+    host.require(len(rows) == 1 and rows[0]["Id"] == ids[0]
+                 and rows[0]["Image"] == backend_image)
+    mounts = [mount for mount in rows[0]["Mounts"] if mount["Destination"] == "/app/recovery-coordination"]
+    host.require(len(mounts) == 1 and mounts[0]["RW"] is True)
+    return rows[0], Path(mounts[0]["Source"])
+
+
+def assert_qa_rollback_legacy_resolved(root, env, report_dir, compose, previous_sha):
+    """Verify the historical legacy exit against the original QA plan."""
+    host.verify_lock(root)
+    host.require(compose == root / "docker-compose.rehearsal.yml" and compose.resolve(strict=True) == compose
+                 and host.matches(r"[a-f0-9]{64}", previous_sha))
+    session = json.loads(host.read_private(report_dir / "active-deployment-session.json")[0])
+    host.require(session["purpose"] == "predecessor-role-cutover" and session["phase"] == "MUTATION_STARTED")
+    _, coordination = installed_role_backend(root, env, compose, session["controlImage"])
+    session, _, binding = owner_context(root, env, report_dir, coordination)
+    _, end = read_deadline(report_dir, session, "rollback")
+    host.require(time.monotonic_ns() < end and not os.path.lexists(report_dir / "predecessor-role-cutover-open-intent.json")
+                 and held_owner_command(root, canonical_shell(env, compose, "public-maintenance"))
+                 and held_owner_command(root, canonical_shell(env, compose, "renewal")))
+    report = root / ".deploy-state" / ("legacy-backend-drain-" + binding["deploymentId"] + ".json")
+
+    def assert_resolved(original_env):
+        command = (sys.executable, str(DIRECTORY / "legacy-backend-signal.py"),
+                   "--assert-resolved", str(compose), str(original_env),
+                   binding["rollbackReleaseSet"]["backend"], str(report))
+        host.require(held_owner_command(root, command) and time.monotonic_ns() < end)
+
+    current, info = host.read_private(env)
+    if host.digest(current) == previous_sha:
+        assert_resolved(env)
+        return
+    private = (root / ".deploy-state" / ("predecessor-role-host-" + binding["deploymentId"])
+               / "configuration-private.json")
+    snapshot, previous = host.load_snapshot(private, env, binding)
+    host.require(snapshot["previousSha256"] == previous_sha and snapshot["targetSha256"] == host.digest(current)
+                 and stat.S_IMODE(info.st_mode) == snapshot["environmentMode"]
+                 and info.st_gid == snapshot["environmentGid"])
+    # Only the historical assertion receives these bytes. The caller's native
+    # closure check and subsequent rollback still use the installed environment.
+    with tempfile.TemporaryDirectory(prefix=".legacy-role-qa-", dir=report_dir) as private_dir:
+        original = Path(private_dir) / "original.env"
+        fd = os.open(original, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o400)
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(previous)
+        assert_resolved(original)
+
+
 def launch_owned_role_cutover(root, env, report_dir, compose, phase, preflight):
     """CLI handoff from the exact canonical shell after its owned checkpoint."""
     host.require(os.geteuid() == 0 and root.resolve() == root
@@ -630,15 +684,7 @@ def launch_owned_role_cutover(root, env, report_dir, compose, phase, preflight):
                      compose.name == "docker-compose.rehearsal.yml"
                      and os.environ.get("DEPLOYMENT_QA_REHEARSAL_PLAN_FILE")
                      and host.matches(r"[a-f0-9]{64}", os.environ.get("DEPLOYMENT_QA_REHEARSAL_PLAN_SHA256")))))
-    ids = subprocess.check_output(canonical_compose(env, compose, "ps", "--all", "--quiet", "backend"),
-                                  cwd=root, stderr=subprocess.DEVNULL, timeout=30).decode("ascii").split()
-    host.require(len(ids) == 1 and host.matches(r"[a-f0-9]{64}", ids[0]))
-    rows = read_owner_json(root, (*DOCKER, "inspect", ids[0]))
-    host.require(len(rows) == 1 and rows[0]["Id"] == ids[0]
-                 and rows[0]["Image"] == preflight["images"]["backend"])
-    mounts = [mount for mount in rows[0]["Mounts"] if mount["Destination"] == "/app/recovery-coordination"]
-    host.require(len(mounts) == 1 and mounts[0]["RW"] is True)
-    coordination = Path(mounts[0]["Source"])
+    backend, coordination = installed_role_backend(root, env, compose, preflight["images"]["backend"])
     credential = None
     try:
         if phase == "MUTATION_STARTED":
@@ -647,7 +693,7 @@ def launch_owned_role_cutover(root, env, report_dir, compose, phase, preflight):
             authority_sha256 = os.environ.get("ROLE_CUTOVER_AUTHORITY_SHA256", "")
             require_controller = session.get("allocationControllerProvisioning") is True
             host.require((host.matches(r"[a-f0-9]{64}", authority_sha256) if require_controller else authority_sha256 == ""))
-            controller, observed_sha256 = allocation_controller_password(rows[0], expected_sha256=authority_sha256 or None)
+            controller, observed_sha256 = allocation_controller_password(backend, expected_sha256=authority_sha256 or None)
             host.require(observed_sha256 == authority_sha256 and bool(controller) == require_controller)
             host.require(runtime != controller)
             payload = runtime + controller
@@ -662,6 +708,10 @@ def launch_owned_role_cutover(root, env, report_dir, compose, phase, preflight):
 
 if __name__ == "__main__":
     try:
+        if len(sys.argv) == 7 and sys.argv[1] == "--assert-qa-rollback-legacy-resolved":
+            root, env, report_dir, compose = map(Path, sys.argv[2:6])
+            assert_qa_rollback_legacy_resolved(root, env, report_dir, compose, sys.argv[6])
+            sys.exit(0)
         if len(sys.argv) == 4 and sys.argv[1] == "--controller-authority-preflight":
             root = Path(sys.argv[2])
             host.verify_lock(root)

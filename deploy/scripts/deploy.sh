@@ -486,9 +486,19 @@ verify_public_maintenance() {
 
 assert_native_runtime_closed() {
   # An interrupted legacy signal is a durable hold, never inferred closure.
-  python3 "${OPERATIONS_ROOT}/deploy/scripts/legacy-backend-signal.py" --assert-resolved \
-    "${REPO_ROOT}/${COMPOSE_FILE}" "${ENV_FILE}" "${DEPLOYMENT_PREVIOUS_BACKEND_IMAGE:-}" \
-    "${REPO_ROOT}/.deploy-state/legacy-backend-drain-${DEPLOYMENT_ID}.json" || return 1
+  if [ "${ROLE_CUTOVER:-0}" -eq 1 ] && [ "${COMPOSE_FILE}" = docker-compose.rehearsal.yml ] \
+    && [ "${DEPLOYMENT_PHASE}" = MUTATION_STARTED ]; then
+    (
+      export ADVISORY_PID ADVISORY_APPLICATION_NAME ADVISORY_LOCK_KEY DEPLOYMENT_MODE
+      python3 "${OPERATIONS_ROOT}/deploy/scripts/predecessor-role-cutover-canonical.py" \
+        --assert-qa-rollback-legacy-resolved "${REPO_ROOT}" "${ENV_FILE}" "${SESSION_HOST_PATH%/*}" \
+        "${REPO_ROOT}/${COMPOSE_FILE}" "${ROLE_CUTOVER_ENV_SHA256}"
+    ) || return 1
+  else
+    python3 "${OPERATIONS_ROOT}/deploy/scripts/legacy-backend-signal.py" --assert-resolved \
+      "${REPO_ROOT}/${COMPOSE_FILE}" "${ENV_FILE}" "${DEPLOYMENT_PREVIOUS_BACKEND_IMAGE:-}" \
+      "${REPO_ROOT}/.deploy-state/legacy-backend-drain-${DEPLOYMENT_ID}.json" || return 1
+  fi
   # Stream the frozen operations bundle's read-only checker, so configuration
   # mode can inspect an older image without requiring a newly built executable.
   # FD9 excludes every cooperating runtime/control owner during the check.

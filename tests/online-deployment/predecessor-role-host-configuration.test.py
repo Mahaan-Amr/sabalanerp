@@ -591,6 +591,68 @@ class HostConfigurationTest(unittest.TestCase):
         self.assertTrue(receipt["stdoutClosed"] and receipt["stderrClosed"] and receipt["childClosed"])
         self.assertFalse(receipt["canOpenTraffic"])
 
+    def test_qa_role_rollback_uses_verified_original_env_only_for_historical_exit(self):
+        reports, coordination = self.root / "reports", self.root / "coordination"
+        compose = self.root / "docker-compose.rehearsal.yml"
+        compose.touch()
+        previous_sha = roles.digest(ORIGINAL)
+        observed = []
+
+        def command(root, args):
+            self.assertEqual(root, self.root)
+            if args[2] != "--assert-resolved":
+                self.assertIn(args[-1], ("public-maintenance", "renewal"))
+                return True
+            observed_path = Path(args[4])
+            observed.append(observed_path)
+            self.assertEqual(observed_path.read_bytes(), ORIGINAL)
+            if observed_path != self.env:
+                self.assertEqual(observed_path.stat().st_mode & 0o777, 0o400)
+            self.assertEqual(args[5], GRAPH["backend"])
+            return True
+
+        clock_environment = {"DEPLOYMENT_ID": self.session["deploymentId"],
+                             "DEPLOYMENT_LEASE_TOKEN": self.session["leaseToken"]}
+        with (
+            self.owner() as credential,
+            patch.dict(os.environ, clock_environment),
+            patch.object(canonical, "installed_role_backend", return_value=({}, coordination)),
+            patch.object(canonical, "owner_context", side_effect=lambda *_: canonical.host.context(
+                self.root, reports, coordination, "MUTATION_STARTED")),
+            patch.object(canonical, "held_owner_command", side_effect=command),
+        ):
+            start = time.monotonic_ns()
+            private_write(canonical.clock_file(reports, self.session, "mutation"), roles.json_bytes({
+                "format": "sabalan-predecessor-role-deadline-v1", **canonical.clock_binding(self.session),
+                "kind": "mutation", "clock": canonical.clock_identity(), "startedNs": str(start),
+                "deadlineNs": str(start + 900 * canonical.NS), "budgetSeconds": 900,
+            }))
+            canonical.start_deadline(self.root, reports, "rollback", 900)
+            canonical.assert_qa_rollback_legacy_resolved(self.root, self.env, reports, compose, previous_sha)
+            self.assertEqual(observed, [self.env])
+            self.transaction(credential)
+            applied = self.env.read_bytes()
+            self.assertNotEqual(applied, ORIGINAL)
+            canonical.assert_qa_rollback_legacy_resolved(self.root, self.env, reports, compose, previous_sha)
+            self.assertEqual(self.env.read_bytes(), applied)
+            self.assertEqual(len(observed), 2)
+            self.assertNotEqual(observed[1], self.env)
+            self.assertFalse(observed[1].parent.exists())
+            with self.assertRaises(canonical.host.RoleHostConfigurationError):
+                canonical.assert_qa_rollback_legacy_resolved(self.root, self.env, reports, compose, "1" * 64)
+            open_intent = reports / "predecessor-role-cutover-open-intent.json"
+            private_write(open_intent, b"{}")
+            with self.assertRaises(canonical.host.RoleHostConfigurationError):
+                canonical.assert_qa_rollback_legacy_resolved(self.root, self.env, reports, compose, previous_sha)
+            open_intent.unlink()
+            with patch.object(canonical.time, "monotonic_ns", return_value=start + 901 * canonical.NS):
+                with self.assertRaises(canonical.host.RoleHostConfigurationError):
+                    canonical.assert_qa_rollback_legacy_resolved(self.root, self.env, reports, compose, previous_sha)
+            private_write(self.env, applied + b"\n# changed out of band")
+            with self.assertRaises(canonical.host.RoleHostConfigurationError):
+                canonical.assert_qa_rollback_legacy_resolved(self.root, self.env, reports, compose, previous_sha)
+            self.assertEqual(len(observed), 2)
+
     def test_canonical_transport_reuses_original_control_image_and_lease_heartbeat(self):
         binary = self.root / "bin"
         binary.mkdir()

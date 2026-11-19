@@ -1,5 +1,5 @@
 {
-  "migrationSha256": "b78b5b36be7e82c1599840a2b49a71d5c997a787b57e0b67e228a21bf76a6e49",
+  "migrationSha256": "b81ddfbb8e9c52a7c33a6bbe38b2762c107c4c00be4e7ccc96d88cf85b1ab9ec",
   "tables": {
     "NONE": [
       "_prisma_migrations",
@@ -95,9 +95,7 @@
       "dispatch_statement_adjustments",
       "driver_biometric_templates",
       "effective_authorization_audit",
-      "external_driver_documents",
       "external_driver_personnel_continuity_links",
-      "external_vehicle_documents",
       "guard_driver_queue_events",
       "guard_physical_exits",
       "hr_candidate_access_attempts",
@@ -127,7 +125,6 @@
       "partner_case_tracking_codes",
       "partner_cohort_memberships",
       "partner_command_outcomes",
-      "partner_commercial_accounts",
       "partner_commercial_identities",
       "partner_commercial_terms",
       "partner_conversion_dispositions",
@@ -136,7 +133,6 @@
       "partner_correction_saves",
       "partner_customer_output_snapshots",
       "partner_customer_transfer_events",
-      "partner_duplicate_customer_matches",
       "partner_financial_adjustments",
       "partner_fulfillment_lineages",
       "partner_inquiry_approvals",
@@ -191,7 +187,6 @@
       "security_vehicle_attachments",
       "shipment_statement_operations_events",
       "simple_performance_audits",
-      "simple_performance_profiles",
       "simple_performance_value_revisions",
       "support_sla_policy_versions",
       "support_ticket_attachment_accesses",
@@ -208,7 +203,11 @@
       "hr_recruitment_requests",
       "hr_work_schedule_changes",
       "logistics_driver_requests",
+      "partner_commercial_numbers",
+      "partner_identity_evidence",
       "partner_operations_controls",
+      "partner_terms_policies",
+      "performance_disclosure_revision",
       "security_shift_plan_slots",
       "shipment_statement_operations_controls"
     ],
@@ -290,6 +289,8 @@
       "dispatch_pickup_verifications",
       "dispatch_priced_allocation_events",
       "driver_biometric_enrollments",
+      "external_driver_documents",
+      "external_vehicle_documents",
       "finish_types",
       "guard_driver_queue_turns",
       "hr_application_form_revisions",
@@ -340,9 +341,11 @@
       "notification_policy_versions",
       "notification_preferences",
       "partner_case_revisions",
+      "partner_commercial_accounts",
       "partner_correction_opportunities",
       "partner_customer_artifacts",
       "partner_customer_transfers",
+      "partner_duplicate_customer_matches",
       "partner_inquiries",
       "partner_inquiry_notification_deliveries",
       "partner_inquiry_rows",
@@ -407,6 +410,7 @@
       "shifts",
       "simple_performance_evaluations",
       "simple_performance_profile_assignments",
+      "simple_performance_profiles",
       "stone_materials",
       "support_ticket_attachments",
       "support_ticket_diagnostic_bundles",
@@ -458,14 +462,10 @@
       "logistics_drivers",
       "notification_preference_audits",
       "partner_cohort_events",
-      "partner_commercial_numbers",
-      "partner_identity_evidence",
       "partner_outbox_attempts",
       "partner_release_readiness_publications",
       "partner_retail_receipt_allocations",
-      "partner_terms_policies",
       "performance_consequence_policy_versions",
-      "performance_disclosure_revision",
       "performance_peer_family_jobs",
       "performance_peer_family_versions",
       "personnel_bulk_operations",
@@ -626,13 +626,25 @@
       "execute": "runtime"
     },
     {
+      "name": "partner_reserve_number",
+      "arguments": "",
+      "definitionSha256": "934747c7456aa95a32354f416e2fd374fa4af99ad95df8fcf21cd400caf259fa",
+      "execute": "owner"
+    },
+    {
+      "name": "performance_guard_canonical_write",
+      "arguments": "",
+      "definitionSha256": "8bb63ff82006bfbbd963332de3218050b337fd8552ba4c29e4b6996d0c047929",
+      "execute": "owner"
+    },
+    {
       "name": "require_active_grouped_allocation_child",
       "arguments": "",
       "definitionSha256": "48422ac006743d051f2bb7c5e87e97376352d86ce334fe24892d4bdef0fce7d3",
       "execute": "owner"
     }
   ],
-  "invokerRoutinesSha256": "a682a77a97407908be9148415ea436139830bf07023a56c551b3c6babfd69117",
+  "invokerRoutinesSha256": "0daebdbe51e6cfd3c2b13b435695edb4eb12e23dd0f94a3bb9346264eae018ac",
   "views": [
     {
       "name": "partner_release_readiness_completed",

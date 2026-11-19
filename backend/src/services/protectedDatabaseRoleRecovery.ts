@@ -360,7 +360,7 @@ type CutoverCatalog = {
 };
 const cutoverRoles = { runtime: 'sabalan_application_runtime', controller: 'sabalan_allocation_controller' };
 const sha256 = (content: string | Buffer) => createHash('sha256').update(content).digest('hex');
-const cutoverCatalogSha256 = '84791a48ad007025f12c58cd36e3498f36ca7aca882490d13e624cd8e00f3df6';
+const cutoverCatalogSha256 = '96e0486ffbcd5bd78194e34bbb84ed54a6c2b74d64f9ae460ebc8c3290cd5a95';
 
 async function verifyCutoverMigrationLedger(client: Client, directory: string, expectedDigest: string) {
   const names = (await fs.readdir(directory, { withFileTypes: true }))
@@ -461,6 +461,8 @@ async function inspectCutover(client: Client, directory: string, manifest: Cutov
     [routineKey('customer_allocation_controller_close', 'text, text, text, text')]: 'controller',
     [routineKey('customer_allocation_controller_lock', 'text, text')]: 'controller',
     [routineKey('customer_allocation_runtime_admitted', 'text, text')]: 'runtime',
+    [routineKey('partner_reserve_number', '')]: 'owner',
+    [routineKey('performance_guard_canonical_write', '')]: 'owner',
     [routineKey('require_active_grouped_allocation_child', '')]: 'owner',
   };
   if (definerRoutines.size !== Object.keys(approvedExecutors).length || routineDefinitions.length !== definerRoutines.size

@@ -31,9 +31,9 @@ test('first split preflight requires the exact catalog and per-object grants', {
     const baseline = await before();
     assert.deepEqual(baseline, {
       stage: 'before-grants',
-      catalogSha256: '84791a48ad007025f12c58cd36e3498f36ca7aca882490d13e624cd8e00f3df6',
-      migrationSha256: '394eef12319ac5c1fdf2316d66a51826d0207fcf9916e8281bb160f1f40aba39',
-      migrations: 480, tables: 571, views: 1, sequences: 5, securityDefinerRoutines: 5,
+      catalogSha256: '96e0486ffbcd5bd78194e34bbb84ed54a6c2b74d64f9ae460ebc8c3290cd5a95',
+      migrationSha256: 'b81ddfbb8e9c52a7c33a6bbe38b2762c107c4c00be4e7ccc96d88cf85b1ab9ec',
+      migrations: 484, tables: 571, views: 1, sequences: 5, securityDefinerRoutines: 7,
     });
     await assert.rejects(staged(), /Cutover privilege drift/);
 
@@ -82,6 +82,34 @@ test('first split preflight requires the exact catalog and per-object grants', {
     const sequences = manifest.sequences.map(name => 'public.' + quote(name)).join(', ');
     await database.$executeRawUnsafe(`GRANT USAGE ON SEQUENCE ${sequences} TO sabalan_application_runtime`);
     assert.deepEqual(await staged(), { ...baseline, stage: 'grants-staged' });
+
+    await database.simplePerformanceProfile.create({ data: {
+      id: 'role-lock-probe', stableKey: 'role-lock-probe', nameFa: 'QA role probe', version: 1, createdByUserId: 'fixture',
+    } });
+
+    await database.$transaction(async tx => {
+      await tx.$executeRaw`SET LOCAL ROLE sabalan_application_runtime`;
+      const referenceRelations = [
+        'external_driver_documents', 'external_vehicle_documents', 'partner_commercial_accounts',
+        'partner_commercial_numbers', 'partner_duplicate_customer_matches', 'partner_identity_evidence',
+        'partner_terms_policies', 'simple_performance_profiles',
+      ];
+      for (const table of referenceRelations) {
+        await tx.$queryRawUnsafe(`SELECT 1 FROM public.${quote(table)} WHERE false FOR SHARE`);
+      }
+      assert.equal((await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT id FROM public.simple_performance_profiles WHERE id = 'role-lock-probe' FOR UPDATE
+      `)[0].id, 'role-lock-probe');
+      await tx.$queryRaw`SELECT revision FROM public.performance_disclosure_revision WHERE id = 1 FOR UPDATE`;
+      assert.deepEqual(await tx.$queryRaw`
+        SELECT has_function_privilege(current_user, 'public.partner_reserve_number()', 'EXECUTE') AS reserve,
+          has_function_privilege(current_user, 'public.performance_guard_canonical_write()', 'EXECUTE') AS disclosure
+      `, [{ reserve: false, disclosure: false }]);
+    });
+    await assert.rejects(database.$transaction(async tx => {
+      await tx.$executeRaw`SET LOCAL ROLE sabalan_application_runtime`;
+      await tx.simplePerformanceProfile.update({ where: { id: 'role-lock-probe' }, data: { nameFa: 'no write' } });
+    }), /Restricted runtime may lock this reference but may not update it/);
 
     const targetCommit = 'a'.repeat(40);
     const now = new Date();

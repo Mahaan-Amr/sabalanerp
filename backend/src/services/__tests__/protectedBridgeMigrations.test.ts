@@ -74,6 +74,7 @@ test('the complete current release is admitted only with its reviewed ordered SQ
     '20261120124000_runtime_dispatch_permissions',
     '20261120125000_runtime_driver_assignment_permissions',
     '20261120126000_runtime_partner_receipt_permissions',
+    '20261120127000_runtime_partner_inquiry_evidence_locks',
   ];
   const files = names.map(name => [name, fs.readFileSync(path.join(directory, name, 'migration.sql'))] as const);
   const release = compileProtectedCurrentRelease(files);
@@ -191,7 +192,8 @@ test('protected migration receipts verify exact ACLs across the dormant to restr
 
   const fullNames = new Set([...names, '20261120122000_protect_runtime_disclosure_revision',
     '20261120123000_protect_runtime_reference_row_locks',
-    '20261120124000_runtime_dispatch_permissions', '20261120125000_runtime_driver_assignment_permissions', '20261120126000_runtime_partner_receipt_permissions']);
+    '20261120124000_runtime_dispatch_permissions', '20261120125000_runtime_driver_assignment_permissions', '20261120126000_runtime_partner_receipt_permissions',
+    '20261120127000_runtime_partner_inquiry_evidence_locks']);
   const fullTables = [cards, table(registry.name, ['SELECT', 'UPDATE']),
     ...['external_driver_documents', 'external_vehicle_documents', 'partner_commercial_accounts',
       'partner_duplicate_customer_matches', 'simple_performance_profiles'].map(name => table(name, ['INSERT', 'SELECT', 'UPDATE'])),
@@ -200,6 +202,9 @@ test('protected migration receipts verify exact ACLs across the dormant to restr
     ...['driver_vehicle_assignments', 'external_driver_vehicle_assignments']
       .map(name => table(name, ['INSERT', 'SELECT', 'UPDATE'])),
     ...['partner_case_events', 'partner_payment_installments', 'partner_payment_plans', 'partner_retail_receipt_allocations', 'partner_retail_receipts']
+      .map(name => table(name, ['INSERT', 'SELECT', 'UPDATE'])),
+    ...['partner_conversion_dispositions', 'partner_inquiry_approvals', 'partner_inquiry_assignments',
+      'partner_profile_responder_assignments', 'sales_contract_draft_audits', 'sales_contract_seller_audits']
       .map(name => table(name, ['INSERT', 'SELECT', 'UPDATE'])),
     ...['partner_identity_evidence', 'partner_terms_policies', 'performance_disclosure_revision']
       .map(name => table(name, ['SELECT', 'UPDATE']))];

@@ -26,6 +26,7 @@ const runtimeReferenceRowLocksName = '20261120123000_protect_runtime_reference_r
 const runtimeDispatchPermissionsName = '20261120124000_runtime_dispatch_permissions';
 const runtimeDriverAssignmentName = '20261120125000_runtime_driver_assignment_permissions';
 const runtimePartnerReceiptName = '20261120126000_runtime_partner_receipt_permissions';
+const runtimePartnerInquiryEvidenceName = '20261120127000_runtime_partner_inquiry_evidence_locks';
 const nextReleaseCatalog = {
   '20261116120000_customer_allocation_intents': {
     tables: ['accounting_customer_allocation_intents'],
@@ -105,6 +106,11 @@ const nextReleaseCatalog = {
     tables: ['partner_case_events', 'partner_payment_installments', 'partner_payment_plans', 'partner_retail_receipt_allocations', 'partner_retail_receipts'],
     functions: ['protect_runtime_partner_receipt_assembly'],
   },
+  [runtimePartnerInquiryEvidenceName]: {
+    tables: ['partner_conversion_dispositions', 'partner_inquiry_approvals', 'partner_inquiry_assignments',
+      'partner_profile_responder_assignments', 'sales_contract_draft_audits', 'sales_contract_seller_audits'],
+    functions: ['protect_runtime_reference_row'],
+  },
 };
 // This is the exact source delta from the retained 2026-11-12 production
 // release. It is intentionally separate from the frozen historical bootstrap.
@@ -158,10 +164,11 @@ const currentRelease = {
   [runtimeDispatchPermissionsName]: ['9b895b031f0a369ac65cd1011afd6e8a9b53294d5d3034b2f55ad8929df18dbb', 4],
   [runtimeDriverAssignmentName]: ['3a1329ef8fb845b5ac18f03224e4b0d596a414918f29a0dfaa62c00fe443eb6b', 1],
   [runtimePartnerReceiptName]: ['7983529ea9ea7995598e300bb99f35dbfd6959a278488bc4b230898ea04d1257', 3],
+  [runtimePartnerInquiryEvidenceName]: ['c31b8cc6d35b468d0165fb4ab676213ba0b1c3d1aa32f94dfe51ec25e776e2e4', 1],
 } as const;
 export const protectedCurrentReleaseNames: readonly string[] = Object.freeze(Object.keys(currentRelease));
 // Each release extends the ledger while preserving the prior release-set hashes.
-const protectedReleaseEpochEnds = Object.freeze([12, 22, 24, 25, 35, 36, 37, 38, 41, 42, 43, 44, 45, 46, 47, 48]);
+const protectedReleaseEpochEnds = Object.freeze([12, 22, 24, 25, 35, 36, 37, 38, 41, 42, 43, 44, 45, 46, 47, 48, 49]);
 const releaseSetSha256 = (files: CurrentFile[], index: number) => sha(files.slice(0,
   protectedReleaseEpochEnds.find(end => index < end)!).map(file => file.sha256).join('\n'));
 
@@ -482,6 +489,18 @@ export async function protectedCurrentReleaseRuntimeAclProof(tx: RuntimeAclCatal
       partner_retail_receipts: ['INSERT', 'SELECT', 'UPDATE'],
     });
     routineDefiners.protect_runtime_partner_receipt_assembly = false;
+  }
+
+  if (appliedNames.has(runtimePartnerInquiryEvidenceName)) {
+    Object.assign(tableGrants, {
+      partner_conversion_dispositions: ['INSERT', 'SELECT', 'UPDATE'],
+      partner_inquiry_approvals: ['INSERT', 'SELECT', 'UPDATE'],
+      partner_inquiry_assignments: ['INSERT', 'SELECT', 'UPDATE'],
+      partner_profile_responder_assignments: ['INSERT', 'SELECT', 'UPDATE'],
+      sales_contract_draft_audits: ['INSERT', 'SELECT', 'UPDATE'],
+      sales_contract_seller_audits: ['INSERT', 'SELECT', 'UPDATE'],
+    });
+    routineDefiners.protect_runtime_reference_row = false;
   }
 
   const split = configuredProtectedDatabaseRoleRecovery(env);

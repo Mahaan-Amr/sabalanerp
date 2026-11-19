@@ -254,6 +254,8 @@ test('UFPR is a fixed direct acquisition source with unchanged publisher verific
   attempted,succeeded:attempted+15,next:attempted+7200,resultSha256:'b'.repeat(64)};
  const qualified={...receipt,sourceMigration,ufprCycle};
  assert.equal(validateReceipt(qualified,image,versions).acquisitionOrigin,origin);
+ assert.throws(()=>validateReceipt({...qualified,acquisitionOrigin:undefined},image,versions),/Unreviewed UFPR/);
+ assert.throws(()=>validateReceipt({...qualified,acquisitionOrigin:'https://mirrors.fe.up.pt/pub/clamav'},image,versions),/Unreviewed UFPR/);
  assert.throws(()=>validateReceipt({...qualified,ufprCycle:{...ufprCycle,
   containerStartedAt:new Date((attempted+1)*1000).toISOString()}},image,versions),/scheduled update/);
  const unrelatedImage='sha256:'+'e'.repeat(64);

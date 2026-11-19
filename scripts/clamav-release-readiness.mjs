@@ -138,11 +138,11 @@ export function validateReceipt(value,image,versions,now=Date.now()) {
   || !Number.isFinite(Date.parse(value.checkedAt)) || now-Date.parse(value.checkedAt)<0 || now-Date.parse(value.checkedAt)>24*3600000
   || ['main','daily','bytecode'].some(name=>value.versions?.[name]!==versions[name])) throw new Error('ClamAV readiness is missing, stale or does not match the image and published signatures');
  if(value.acquisitionOrigin!==undefined && !['https://database.clamav.net',mirrorOrigin,ufprOrigin].includes(value.acquisitionOrigin))throw new Error('Unreviewed acquisition origin');
+ if((image===ufprImage)!==(value.acquisitionOrigin===ufprOrigin))throw new Error('Unreviewed UFPR acquisition image or origin');
  if(value.acquisitionTransport!==undefined && (value.acquisitionTransport!=='backup-host-http-v1' || value.acquisitionOrigin!==mirrorOrigin))throw new Error('Unreviewed acquisition transport');
  if(reviewedMirror(value.acquisitionOrigin)){validateSourceMigration(value.sourceMigration);}
  else if(value.sourceMigration!==undefined)throw new Error('Acquisition evidence does not match its origin');
  if(value.acquisitionOrigin===ufprOrigin){
-  if(image!==ufprImage)throw new Error('Unreviewed UFPR acquisition image');
   validateUfprCycle(value.ufprCycle, Date.parse(value.checkedAt));
  } else if(value.ufprCycle!==undefined)throw new Error('Unexpected UFPR updater evidence');
  return value;
@@ -503,7 +503,7 @@ if(process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href) {
   else if(command==='rollback-proof') validateRollbackProof(JSON.parse(await fs.readFile(input,'utf8')),image,await publishedVersions());
   else if(command==='verify') {
    const receipt=validateReceipt(JSON.parse(await fs.readFile(input,'utf8')),image,await publishedVersions());
-   if(receipt.acquisitionOrigin===ufprOrigin && process.env.DEPLOYMENT_CLAMAV_OPERATION!=='incident-recovery')throw new Error('UFPR target requires protected incident recovery');
+   if(image===ufprImage && process.env.DEPLOYMENT_CLAMAV_OPERATION!=='incident-recovery')throw new Error('UFPR target requires protected incident recovery');
    if(receipt.bankSha256!==await fileDigest(path.join(path.dirname(input),'target-bank.tar'))) throw new Error('Prepared signature bank checksum mismatch');
   }
   else throw new Error('Use inspect/export <inactive-container> [output-directory] or verify <receipt> <immutable-image>');

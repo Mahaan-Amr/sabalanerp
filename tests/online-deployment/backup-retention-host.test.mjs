@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
-import {validateOriginalBackupRetentionResponse,readOriginalBackupRetentionSettings} from '../../deploy/scripts/backup-retention-host.mjs';
+import {validateOriginalBackupRetentionResponse,readOriginalBackupRetentionSettings,backupRetentionQaSelectorEnvironment} from '../../deploy/scripts/backup-retention-host.mjs';
 const canonical=value=>Array.isArray(value)?value.map(canonical):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonical(value[key])])):value;
 const bytes=value=>Buffer.from(JSON.stringify(canonical(value)));
 const request={format:'sabalan-restricted-backup-retention-request/v1',deploymentId:'deployment_example',requestId:'a'.repeat(64),protectedCheckpointIds:['held_point']};
@@ -38,4 +38,21 @@ test('QA rehearsal uses only the pinned QA backup accounts and response root',()
  for(const change of [value=>{value.DEPLOYMENT_BACKUP_USER='sabalan-backup';},value=>{value.DEPLOYMENT_BACKUP_OPERATIONS_USER='sabalan-backup-ops';},value=>{value.DEPLOYMENT_BACKUP_TARGET='production';}]){
   const changed={...settings};change(changed);assert.throws(()=>readOriginalBackupRetentionSettings(encode(changed)));
  }
+});
+
+test('QA backup retention rechecks the canonical role target and preserves unapproved Docker overrides for refusal', () => {
+  const canonicalRole = { DOCKER_HOST: 'unix:///var/run/docker.sock', COMPOSE_PROJECT_NAME: 'sabalanerp' };
+  const qa = { DEPLOYMENT_QA_REHEARSAL_PLAN_SHA256: 'a'.repeat(64) };
+  const inherited = { ...qa, ...canonicalRole };
+  assert.deepEqual(backupRetentionQaSelectorEnvironment(inherited), qa);
+  assert.deepEqual(inherited, { ...qa, ...canonicalRole });
+  assert.deepEqual(backupRetentionQaSelectorEnvironment({ ...inherited, COMPOSE_FILE: '/other/graph.yml' }),
+    { ...qa, COMPOSE_FILE: '/other/graph.yml' });
+  for (const rejected of [
+    { ...inherited, DOCKER_HOST: 'tcp://other-engine:2375' },
+    { ...inherited, COMPOSE_PROJECT_NAME: 'other-project' },
+    { ...qa, DOCKER_HOST: canonicalRole.DOCKER_HOST },
+  ]) {
+    assert.deepEqual(backupRetentionQaSelectorEnvironment(rejected), rejected);
+  }
 });

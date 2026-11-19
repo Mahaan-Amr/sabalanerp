@@ -46,6 +46,13 @@ function deploymentLock(){
  assert.ok([...fs.readFileSync('/proc/self/fdinfo/9','utf8').matchAll(/^lock:\s+\d+:\s+FLOCK\s+ADVISORY\s+WRITE\s+\S+\s+[0-9a-f]+:[0-9a-f]+:(\d+)\s+0\s+EOF\s*$/gm)].some(row=>row[1]===String(fd.ino)));
  return String(fd.dev)+':'+String(fd.ino);
 }
+export function backupRetentionQaSelectorEnvironment(inherited) {
+  // Same-image role cutover pins the native socket and project before reaching
+  // this helper. Let the QA selector re-observe both through its native defaults.
+  if (inherited.DOCKER_HOST !== 'unix:///var/run/docker.sock' || inherited.COMPOSE_PROJECT_NAME !== 'sabalanerp') return inherited;
+  const { DOCKER_HOST, COMPOSE_PROJECT_NAME, ...selectorEnvironment } = inherited;
+  return selectorEnvironment;
+}
 async function main(){
  assert.equal(process.platform,'linux');assert.equal(process.getuid(),0);assert.equal(process.cwd(),'/opt/sabalanerp');
  const inspect=process.argv[2]==='--inspect';let envFile,deploymentId,stage,receiptFile,protectedIdsFile;
@@ -59,7 +66,7 @@ async function main(){
   assert.ok(typeof planFile==='string'&&path.isAbsolute(planFile));
   assert.match(qaPlanSha256??'',/^[a-f0-9]{64}$/);
   assert.equal(execFileSync(process.execPath,[fileURLToPath(new URL('./qa-rehearsal-target.mjs',import.meta.url)),planFile,qaPlanSha256,process.cwd(),path.resolve(envFile)],
-   {encoding:'utf8',timeout:60_000,stdio:['ignore','pipe','ignore']}).trim(),'docker-compose.rehearsal.yml');
+   {encoding:'utf8',timeout:60_000,stdio:['ignore','pipe','ignore'],env:backupRetentionQaSelectorEnvironment(process.env)}).trim(),'docker-compose.rehearsal.yml');
  }
  const keySha=sha(privateFile(key,65536)),transferKeySha=sha(privateFile(transferKey,65536)),knownSha=sha(privateFile(knownHosts,1024*1024,undefined,0o022));
  assert.notEqual(keySha,transferKeySha,'BACKUP_OPERATION_AND_TRANSFER_KEYS_MUST_DIFFER');

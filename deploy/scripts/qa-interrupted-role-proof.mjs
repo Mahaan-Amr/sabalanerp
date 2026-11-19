@@ -15,6 +15,48 @@ const recoveryActions = [
   ['recreate-backend', 1, 'HELD'],
 ];
 
+function readJournal(journalBytes, deploymentId) {
+  const entries = journalBytes.toString('utf8').trimEnd().split('\n').map(line => JSON.parse(line));
+  let head = null;
+  entries.forEach(({ hash, ...entry }, index) => {
+    assert.ok(entry.deploymentId === deploymentId && entry.sequence === index + 1);
+    assert.equal(entry.previousHash, head);
+    assert.equal(hash, sha(JSON.stringify(entry)));
+    head = hash;
+  });
+  return entries;
+}
+
+function assertDeadline(deadline, kind, clock, monotonicNs, session) {
+  assert.ok(deadline.format === 'sabalan-predecessor-role-deadline-v1' && deadline.kind === kind);
+  assert.deepEqual(deadline.clock, clock);
+  assert.ok(deadline.deploymentId === session.deploymentId && deadline.releaseId === session.releaseId
+    && deadline.targetCommit === session.targetCommit && deadline.leaseTokenSha256 === sha(session.leaseToken));
+  assert.equal(deadline.budgetSeconds, 900);
+  assert.ok(BigInt(deadline.deadlineNs) - BigInt(deadline.startedNs) === 900_000_000_000n);
+  return BigInt(deadline.deadlineNs) <= monotonicNs;
+}
+
+function assertNativeChild({ intentBytes, result: child }, action, returnCode, outcome, phase, binding) {
+  const intent = JSON.parse(intentBytes);
+  assert.equal(child.intentSha256, sha(intentBytes));
+  for (const field of ['action', 'attemptId', 'deploymentId', 'releaseId', 'phase',
+    'checkpointSha256', 'checkpointMetadataSha256', 'canOpenTraffic']) {
+    assert.equal(intent[field], child[field]);
+  }
+  assert.equal(child.action, action);
+  assert.equal(child.canOpenTraffic, false);
+  assert.equal(child.phase, phase);
+  for (const field of ['deploymentId', 'releaseId', 'checkpointSha256', 'checkpointMetadataSha256']) {
+    assert.equal(child[field], binding[field]);
+  }
+  assert.ok(child.childClosed && child.stdoutClosed && child.stderrClosed && child.intentUnchanged);
+  assert.ok(!child.credentialEchoed && !child.deadlineExceeded && !child.heartbeatFailed
+    && !child.inputFailed && !child.outputOverflow && !child.streamFailed && child.interruptSignals.length === 0);
+  assert.equal(child.returnCode, returnCode);
+  assert.equal(child.outcome, outcome);
+}
+
 /** Only accepts the observed interrupted cutover shape. This proof cannot claim or renew a lease. */
 export function proveInterruptedRoleCutover({
   session, journalBytes, checkpoint, configuration, currentEnvironment, nativeChildren,
@@ -30,30 +72,17 @@ export function proveInterruptedRoleCutover({
   assert.equal(database.runtimeSessions, 0);
   assert.equal(database.advisoryHolders, 0);
 
-  const entries = journalBytes.toString('utf8').trimEnd().split('\n').map(line => JSON.parse(line));
+  const entries = readJournal(journalBytes, deploymentId);
   const phases = [];
-  let journalHead = null;
-  entries.forEach(({ hash, ...entry }, index) => {
-    assert.ok(entry.deploymentId === deploymentId && entry.sequence === index + 1);
-    assert.equal(entry.previousHash, journalHead);
-    assert.equal(hash, sha(JSON.stringify(entry)));
+  for (const entry of entries) {
     if (entry.phase !== phases.at(-1)) phases.push(entry.phase);
-    journalHead = hash;
-  });
+  }
   assert.deepEqual(phases, expectedPhases);
   assert.ok(entries.slice(entries.findIndex(entry => entry.phase === phase) + 1)
     .every(entry => entry.event === 'lease-heartbeat'));
 
-  const leaseTokenSha256 = sha(leaseToken);
   for (const kind of ['mutation', 'rollback']) {
-    const deadline = deadlines[kind];
-    assert.ok(deadline.format === 'sabalan-predecessor-role-deadline-v1' && deadline.kind === kind);
-    assert.deepEqual(deadline.clock, clock);
-    assert.ok(deadline.deploymentId === deploymentId && deadline.releaseId === releaseId
-      && deadline.targetCommit === targetCommit && deadline.leaseTokenSha256 === leaseTokenSha256);
-    assert.equal(deadline.budgetSeconds, 900);
-    assert.ok(BigInt(deadline.deadlineNs) - BigInt(deadline.startedNs) === 900_000_000_000n
-      && BigInt(deadline.deadlineNs) <= monotonicNs);
+    assert.ok(assertDeadline(deadlines[kind], kind, clock, monotonicNs, session));
   }
 
   const identity = { deploymentId, releaseId, targetCommit };
@@ -76,30 +105,83 @@ export function proveInterruptedRoleCutover({
   for (const [action, returnCode, outcome] of recoveryActions) {
     const matches = nativeChildren.filter(child => child.result.action === action);
     assert.equal(matches.length, 1);
-    const [{ intentBytes, result: child }] = matches;
-    const intent = JSON.parse(intentBytes);
-    assert.equal(child.intentSha256, sha(intentBytes));
-    for (const field of ['action', 'attemptId', 'deploymentId', 'releaseId', 'phase',
-      'checkpointSha256', 'checkpointMetadataSha256', 'canOpenTraffic']) {
-      assert.equal(intent[field], child[field]);
-    }
-    assert.equal(child.canOpenTraffic, false);
-    assert.ok(child.deploymentId === deploymentId && child.releaseId === releaseId && child.phase === phase);
-    assert.ok(child.checkpointSha256 === checkpointSha256 && child.checkpointMetadataSha256 === checkpointMetadataSha256);
-    assert.ok(child.childClosed && child.stdoutClosed && child.stderrClosed && child.intentUnchanged);
-    assert.ok(!child.credentialEchoed && !child.deadlineExceeded && !child.heartbeatFailed
-      && !child.inputFailed && !child.outputOverflow && !child.streamFailed && child.interruptSignals.length === 0);
-    assert.equal(child.returnCode, returnCode);
-    assert.equal(child.outcome, outcome);
+    assertNativeChild(matches[0], action, returnCode, outcome, phase, configuration.binding);
   }
 
   return { deploymentId, releaseId, targetCommit, checkpointSha256, checkpointMetadataSha256,
-    journalSha256: sha(journalBytes), journalHead, journalEntries: entries.length };
+    journalSha256: sha(journalBytes), journalHead: entries.at(-1).hash, journalEntries: entries.length };
+}
+
+function proveInterruptedRollback({ session, journalBytes, checkpoint, configuration, currentEnvironment,
+  nativeChildren, deadlines, clock, monotonicNs, database, openingIntentExists }, evidenceSha, read, get, transaction) {
+  const { deploymentId, releaseId, targetCommit, phase } = session;
+  assert.equal(phase, 'ROLLBACK_STARTED');
+  assert.ok(session.purpose === 'predecessor-role-cutover' && session.bootstrap === false && !openingIntentExists);
+  assert.ok(database.active && !database.completed && database.phase === phase && database.deploymentId === deploymentId
+    && database.leaseToken === session.leaseToken && database.runtimeSessions === 0 && database.advisoryHolders === 0
+    && database.restrictedLogins === 0);
+  const attemptBytes = read(transaction + '/interrupted-recovery-attempt.json');
+  const attempt = JSON.parse(attemptBytes);
+  const prior = attempt.evidence;
+  const priorBytes = JSON.stringify(prior, Object.keys(prior).sort()) + '\n';
+  assert.ok(attempt.format === 'sabalan-qa-interrupted-role-recovery-attempt/v1'
+    && attempt.evidenceSha256 === evidenceSha && sha(priorBytes) === evidenceSha
+    && prior.format === 'sabalan-qa-interrupted-role-evidence/v1');
+  const entries = readJournal(journalBytes, deploymentId);
+  const originalLines = journalBytes.toString('utf8').split('\n').slice(0, prior.journalEntries);
+  assert.equal(sha(originalLines.join('\n') + '\n'), prior.journalSha256);
+  assert.equal(entries[prior.journalEntries - 1].hash, prior.journalHead);
+  const advance = entries.slice(prior.journalEntries);
+  assert.ok(advance.length >= 3);
+  assert.ok(advance[0].phase === 'MUTATION_STARTED' && advance[0].event === 'lease-heartbeat');
+  assert.ok(advance[1].phase === phase && advance[1].event === 'phase-transition');
+  assert.ok(advance.slice(2).every(entry => entry.phase === phase && entry.event === 'lease-heartbeat'));
+
+  const historicalClock = read(transaction + '/interrupted-recovery-original-rollback-deadline.json');
+  assert.equal(sha(historicalClock), attempt.originalRollbackDeadlineSha256);
+  assert.ok(assertDeadline(JSON.parse(historicalClock), 'rollback', clock, monotonicNs, session));
+  assert.ok(assertDeadline(deadlines.mutation, 'mutation', clock, monotonicNs, session));
+  const rollbackDeadlineExpired = assertDeadline(deadlines.rollback, 'rollback', clock, monotonicNs, session);
+  const originalBinding = { deploymentId, releaseId, targetCommit, checkpointSha256: checkpoint.checksum,
+    checkpointMetadataSha256: checkpoint.canonicalMetadataSha256 };
+  for (const [key, value] of Object.entries(originalBinding)) {
+    assert.equal(prior[key], value);
+    assert.equal(configuration.binding[key], value);
+  }
+  assert.ok(checkpoint.localVerified && checkpoint.remoteVerified && checkpoint.localRestoreVerified);
+  assert.deepEqual(checkpoint.rollbackReleaseSet, session.rollbackReleaseSet);
+  assert.deepEqual(configuration.binding.rollbackReleaseSet, session.rollbackReleaseSet);
+  const previous = Buffer.from(configuration.previous, 'base64');
+  assert.ok(previous.length > 0 && sha(previous) === configuration.previousSha256 && previous.equals(currentEnvironment));
+  const receipt = get(transaction + '/receipt.json');
+  assert.deepEqual(receipt, { format: 'sabalan-predecessor-role-host-config-v1', ...configuration.binding,
+    stageReceiptSha256: configuration.stageReceiptSha256, state: 'RESTORED' });
+
+  assert.equal(nativeChildren.length, 4);
+  assert.equal(fs.readdirSync(transaction).filter(name => /^native-.+-intent\.json$/.test(name)).length, 4);
+  for (const [action, status, outcome] of recoveryActions) {
+    const matches = nativeChildren.filter(child => child.result.action === action);
+    assert.equal(matches.length, 1);
+    assertNativeChild(matches[0], action, status, outcome, 'MUTATION_STARTED', originalBinding);
+  }
+  const restoration = nativeChildren.find(child => child.result.action === 'restore-predecessor-role-grants');
+  assertNativeChild(restoration, 'restore-predecessor-role-grants', 0, 'CLOSED', phase, originalBinding);
+  assert.ok(!fs.readdirSync(transaction).some(name => /restored-(?:intent|proof)\.json$/.test(name)
+    || name.startsWith('interrupted-recovery-resume')));
+  return {
+    format: 'sabalan-qa-interrupted-role-rollback-evidence/v1', ...originalBinding,
+    priorAttemptSha256: sha(attemptBytes), journalSha256: sha(journalBytes), journalHead: entries.at(-1).hash,
+    journalEntries: entries.length, restoredEnvironmentSha256: configuration.previousSha256,
+    restoreGrantsChildIntentSha256: restoration.result.intentSha256,
+    receiptSha256: sha(read(transaction + '/receipt.json')), leaseExpiresAt: database.leaseExpiresAt,
+    rollbackDeadline: deadlines.rollback.deadlineNs,
+    ready: database.expired && rollbackDeadlineExpired,
+  };
 }
 
 function inspect() {
-  const [plan, planSha, originalEnv] = process.argv.slice(2);
-  assert.equal(process.argv.length, 5);
+  const [plan, planSha, originalEnv, evidenceSha] = process.argv.slice(2);
+  assert.ok(process.argv.length === 5 || (process.argv.length === 6 && /^[a-f0-9]{64}$/.test(evidenceSha)));
   const root = '/opt/sabalanerp';
   const qa = '/srv/sabalanerp-qa';
   const reports = qa + '/reports';
@@ -150,11 +232,13 @@ function inspect() {
     'exec psql -XAt -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d sabalanerp_qa_432'], 'BEGIN READ ONLY;\n' +
     "SELECT json_build_object('deploymentId',id,'leaseToken',\"leaseToken\",'phase',phase," +
     "'active',\"activeKey\" IS NOT NULL,'expired',\"leaseExpiresAt\"<clock_timestamp()," +
-    "'completed',\"completedAt\" IS NOT NULL,'advisoryHolders',(SELECT count(*) FROM pg_locks" +
+    "'completed',\"completedAt\" IS NOT NULL,'leaseExpiresAt',\"leaseExpiresAt\"," +
+    "'restrictedLogins',(SELECT count(*) FROM pg_roles WHERE rolcanlogin AND rolname IN " +
+    "('sabalan_application_runtime','sabalan_allocation_controller')),'advisoryHolders',(SELECT count(*) FROM pg_locks" +
     " WHERE locktype='advisory' AND classid=0 AND objid=741936425 AND objsubid=1),'runtimeSessions'," +
     "(SELECT count(*) FROM pg_stat_activity WHERE usename IN ('sabalan_application_runtime','sabalan_allocation_controller')))" +
     " FROM deployment_operations WHERE id='" + operation + "';\nROLLBACK;\n");
-  const result = proveInterruptedRoleCutover({
+  const input = {
     session, journalBytes: read(reports + '/active-deployment.jsonl'),
     checkpoint: get(coordination + '/deployment-checkpoint.json'),
     configuration, currentEnvironment: read(configuration.environment),
@@ -166,8 +250,10 @@ function inspect() {
     clock: { bootId: fs.readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim(), timeNamespace: fs.readlinkSync('/proc/self/ns/time') },
     monotonicNs: process.hrtime.bigint(), database: JSON.parse(db.split('\n').find(line => line.startsWith('{'))),
     openingIntentExists: fs.existsSync(reports + '/predecessor-role-cutover-open-intent.json'),
-  });
-  console.log(JSON.stringify({ format: 'sabalan-qa-interrupted-role-evidence/v1', ...result }));
+  };
+  const result = evidenceSha ? proveInterruptedRollback(input, evidenceSha, read, get, transaction)
+    : { format: 'sabalan-qa-interrupted-role-evidence/v1', ...proveInterruptedRoleCutover(input) };
+  console.log(JSON.stringify(result));
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

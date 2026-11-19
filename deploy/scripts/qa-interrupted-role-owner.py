@@ -62,11 +62,15 @@ def recovery_advisory(deployment_id, *, canonical_label=False):
                   f" AND pid={postgres_pid}") == "0")
 
 
-def inspect_evidence(plan, digest, environment):
+def inspect_evidence(plan, digest, environment, *, prior_evidence=None):
+    args = ["node", str(DIRECTORY / "qa-interrupted-role-proof.mjs"), plan, digest, environment]
+    kind = "sabalan-qa-interrupted-role-evidence/v1"
+    if prior_evidence is not None:
+        args.append(prior_evidence)
+        kind = "sabalan-qa-interrupted-role-rollback-evidence/v1"
     proof = json.loads(subprocess.check_output(
-        ["node", str(DIRECTORY / "qa-interrupted-role-proof.mjs"), plan, digest, environment],
-        encoding="utf8", timeout=60, stderr=subprocess.DEVNULL, pass_fds=(9,)))
-    require(proof["format"] == "sabalan-qa-interrupted-role-evidence/v1")
+        args, encoding="utf8", timeout=60, stderr=subprocess.DEVNULL, pass_fds=(9,)))
+    require(proof["format"] == kind)
     return proof
 
 
@@ -114,7 +118,7 @@ def recovery_environment(session, serving, holder, plan, plan_sha):
               "DEPLOYMENT_MODE": "configuration", "DEPLOYMENT_ID": session["deploymentId"],
               "DEPLOYMENT_RELEASE_ID": session["releaseId"], "DEPLOYMENT_OWNER": session["owner"],
               "DEPLOYMENT_LEASE_TOKEN": session["leaseToken"], "DEPLOYMENT_TARGET_COMMIT": session["targetCommit"],
-              "DEPLOYMENT_PHASE": "MUTATION_STARTED", "DEPLOYMENT_TARGET_BACKEND_IMAGE": graph["backend"],
+              "DEPLOYMENT_PHASE": session["phase"], "DEPLOYMENT_TARGET_BACKEND_IMAGE": graph["backend"],
               "DEPLOYMENT_CLAMAV_REPAIR": "false", "DEPLOYMENT_CLAMAV_OPERATION": "repair",
               "DEPLOYMENT_CLAMAV_TARGET_IMAGE": graph["clamav"], "ADVISORY_PID": str(holder["clientPid"]),
               "ADVISORY_APPLICATION_NAME": holder["applicationName"], "ADVISORY_LOCK_KEY": str(ADVISORY_KEY),
@@ -136,15 +140,16 @@ def verify_checkpoint_file(file, expected):
         require(pin(before) == pin(os.fstat(fd)) == pin(file.lstat()))
 
 
-def recovery_inputs(plan, plan_sha, original_env, evidence_sha):
+def recovery_inputs(plan, plan_sha, original_env, evidence_sha, *, prior_evidence=None):
     canonical = load_canonical_owner()
     host = canonical.host
     root = Path("/opt/sabalanerp")
     qa = Path("/srv/sabalanerp-qa")
     reports = qa / "reports"
     compose = root / "docker-compose.rehearsal.yml"
-    proof = inspect_evidence(plan, plan_sha, original_env)
-    require(host.digest(host.json_bytes(proof)) == evidence_sha)
+    proof = inspect_evidence(plan, plan_sha, original_env, prior_evidence=prior_evidence)
+    if evidence_sha is not None:
+        require(host.digest(host.json_bytes(proof)) == evidence_sha)
     operation = proof["deploymentId"]
     folder = root / ".deploy-state" / ("predecessor-role-host-" + operation)
     session = json.loads(host.read_private(reports / "active-deployment-session.json")[0])
@@ -153,27 +158,47 @@ def recovery_inputs(plan, plan_sha, original_env, evidence_sha):
     serving_record = json.loads(host.read_private(folder / "canonical-serving-environment.json")[0])
     foreground = json.loads(host.read_private(folder / "foreground-plan.json")[0])
     _, coordination = canonical.installed_role_backend(root, env, compose, session["controlImage"])
-    _, checkpoint, binding = host.context(root, reports, coordination, "MUTATION_STARTED")
+    phase = "ROLLBACK_STARTED" if prior_evidence is not None else "MUTATION_STARTED"
+    _, checkpoint, binding = host.context(root, reports, coordination, phase)
     require(serving_record["binding"] == foreground["binding"] == binding)
     require(serving_record["preflight"] == foreground["preflight"])
+    if prior_evidence is not None:
+        graph = binding["rollbackReleaseSet"]
+        identifiers = subprocess.check_output(canonical.canonical_compose(env, compose, "ps", "--all", "--quiet",
+                                              *sorted(graph)), cwd=root, stderr=subprocess.DEVNULL, timeout=30).split()
+        rows = host.container_state(canonical.read_owner_json(root, (*canonical.DOCKER, "inspect", *map(bytes.decode, identifiers))), graph)
+        preimage_raw, _ = host.read_private(folder / "backend-runtime-preimage.json")
+        preimage = json.loads(preimage_raw)
+        require(preimage["binding"] == binding
+                and {key: row["id"] for key, row in preimage["containers"].items()} == foreground["preflight"]["containers"])
+        host.verify_runtime_graph(rows, preimage["containers"], environment=env)
+        backend = rows["backend"]
+        require(host.digest(host.backend_runtime_url(backend).encode()) == configuration["targetRuntimeSha256"]
+                and backend["Id"] != preimage["containers"]["backend"]["id"] and not backend["State"]["Running"]
+                and backend["State"]["ExitCode"] == 75)
     native_runtime_closed(coordination)
     return canonical, root, qa, reports, compose, proof, session, folder, configuration, env, serving_record, foreground, coordination
 
 
-def recover(plan, plan_sha, original_env, evidence_sha):
+def recover(plan, plan_sha, original_env, evidence_sha, *, prior_evidence=None):
     (canonical, root, qa, reports, compose, proof, session, folder, configuration, env,
-     serving_record, foreground, coordination) = recovery_inputs(plan, plan_sha, original_env, evidence_sha)
+     serving_record, foreground, coordination) = recovery_inputs(plan, plan_sha, original_env, evidence_sha,
+                                                                    prior_evidence=prior_evidence)
     host = canonical.host
     operation = proof["deploymentId"]
-    attempt = folder / "interrupted-recovery-attempt.json"
-    archive_clock = folder / "interrupted-recovery-original-rollback-deadline.json"
+    resuming = prior_evidence is not None
+    require(not resuming or proof["ready"] is True)
+    attempt = folder / ("interrupted-recovery-resume-attempt.json" if resuming else "interrupted-recovery-attempt.json")
+    archive_clock = folder / ("interrupted-recovery-resume-previous-rollback-deadline.json" if resuming
+                              else "interrupted-recovery-original-rollback-deadline.json")
     require(not os.path.lexists(attempt) and not os.path.lexists(archive_clock))
     archive = operation + ".sabrec"
     print("QA_RECOVERY_CHECKPOINT_READBACK_STARTED", file=sys.stderr, flush=True)
     verify_checkpoint_file(Path("/var/lib/docker/volumes/sabalanerp_backend_recovery/_data/packages") / archive,
                            proof["checkpointSha256"])
     verify_checkpoint_file(qa / "remote" / operation.removeprefix("deploy-") / archive, proof["checkpointSha256"])
-    require(inspect_evidence(plan, plan_sha, original_env) == proof)
+    checked = recovery_inputs(plan, plan_sha, original_env, evidence_sha, prior_evidence=prior_evidence)
+    require(checked[5] == proof and checked[6] == session)
     print("QA_RECOVERY_CHECKPOINT_READBACK_VERIFIED", file=sys.stderr, flush=True)
     native_runtime_closed(coordination)
 
@@ -188,7 +213,8 @@ def recover(plan, plan_sha, original_env, evidence_sha):
         require(canonical.held_owner_command(root, canonical.canonical_shell(env, compose, "public-maintenance")))
         host.write_private(archive_clock, original_clock)
         host.write_private(attempt, host.json_bytes({
-            "format": "sabalan-qa-interrupted-role-recovery-attempt/v1",
+            "format": "sabalan-qa-interrupted-role-recovery-resume-attempt/v1" if resuming
+                      else "sabalan-qa-interrupted-role-recovery-attempt/v1",
             "evidence": proof, "evidenceSha256": evidence_sha, "observedHolder": holder,
             "ownerPid": os.getpid(), "originalRollbackDeadlineSha256": host.digest(original_clock),
         }))
@@ -204,8 +230,10 @@ def recover(plan, plan_sha, original_env, evidence_sha):
         native_runtime_closed(coordination)
         require(time.monotonic_ns() < end)
         os.environ["DEPLOYMENT_PHASE"] = "ROLLBACK_STARTED"
-        require(canonical.held_owner_command(root, canonical.canonical_shell(env, compose, "control", "transition")))
-        print("QA_RECOVERY_CANONICAL_ROLLBACK_ENTERED", file=sys.stderr, flush=True)
+        if not resuming:
+            require(canonical.held_owner_command(root, canonical.canonical_shell(env, compose, "control", "transition")))
+        print("QA_RECOVERY_CANONICAL_ROLLBACK_RESUMED" if resuming else "QA_RECOVERY_CANONICAL_ROLLBACK_ENTERED",
+              file=sys.stderr, flush=True)
         outcome = canonical.launch_owned_role_cutover(root, env, reports, compose, "ROLLBACK_STARTED", foreground["preflight"])
     return outcome
 
@@ -217,6 +245,12 @@ if __name__ == "__main__":
         elif len(sys.argv) == 6 and sys.argv[1] == "--check-recovery-inputs":
             inputs = recovery_inputs(*sys.argv[2:])
             print(json.dumps({**inputs[5], "nativeRuntimeClosed": True}))
+        elif len(sys.argv) == 6 and sys.argv[1] == "--check-rollback-inputs":
+            inputs = recovery_inputs(*sys.argv[2:5], None, prior_evidence=sys.argv[5])
+            print(json.dumps({**inputs[5], "evidenceSha256": inputs[0].host.digest(inputs[0].host.json_bytes(inputs[5])),
+                              "nativeRuntimeClosed": True}))
+        elif len(sys.argv) == 7 and sys.argv[1] == "--resume-rollback":
+            print(json.dumps(recover(*sys.argv[2:6], prior_evidence=sys.argv[6])))
         else:
             require(len(sys.argv) == 6 and sys.argv[1] == "--recover")
             print(json.dumps(recover(*sys.argv[2:])))

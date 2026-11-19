@@ -1,4 +1,5 @@
 import contextlib
+import copy
 import fcntl
 import hashlib
 import importlib.util
@@ -237,6 +238,30 @@ class HostConfigurationTest(unittest.TestCase):
         authority.chmod(0o750)
         with self.assertRaises(roles.RoleHostConfigurationError):
             roles.read_controller_password(authority, pin, CONTROL_URL)
+
+    def test_qa_no_deps_recreation_keeps_the_original_runtime_graph_pinned(self):
+        env_label = "com.docker.compose.project.environment_file"
+        depends = "com.docker.compose.depends_on"
+        original_env = "/srv/sabalanerp-qa/restore-runs/run/qa.env"
+        operation_env = Path("/srv/sabalanerp-qa/private/cutover/qa.env")
+        rows = {
+            name: {"Id": str(index) * 64, "Created": "created",
+                   "State": {"Running": True, "Health": {"Status": "healthy"}, "StartedAt": "start", "Pid": 9},
+                   "Config": {"Hostname": str(index) * 12, "Env": [],
+                              "Labels": {"com.docker.compose.service": name, env_label: original_env}},
+                   "HostConfig": {}, "Mounts": [], "NetworkSettings": {"Networks": {}}}
+            for index, name in enumerate(SERVICES, 1)
+        }
+        rows["backend"]["Config"]["Labels"][depends] = "clamav:service_healthy:false,postgres:service_healthy:false"
+        pinned = roles.original_graph(rows)
+        recreated = copy.deepcopy(rows)
+        recreated["backend"]["Config"]["Labels"].update({env_label: str(operation_env), depends: ""})
+        roles.verify_runtime_graph(recreated, pinned, environment=operation_env)
+        with self.assertRaises(roles.RoleHostConfigurationError):
+            roles.verify_runtime_graph(recreated, pinned, environment=Path(original_env))
+        recreated["backend"]["Config"]["Env"].append("UNEXPECTED_RUNTIME_CHANGE=1")
+        with self.assertRaises(roles.RoleHostConfigurationError):
+            roles.verify_runtime_graph(recreated, pinned, environment=operation_env)
 
     def test_recreate_pinned_backend_and_prove_exact_runtime_and_rollback(self):
         original = {name: str(i) * 64 for i, name in enumerate(SERVICES, 1)}

@@ -187,7 +187,7 @@ def read_owner_json(root, command):
 
 
 def refresh_original_nginx(root, report_dir, coordination_dir, phase, proof, planned_nginx_id, *, inspect,
-                           renewal, maintenance, restart, wait_for_healthy):
+                           renewal, maintenance, restart, wait_for_healthy, environment=None):
     """Refresh only the exact original nginx. This proof cannot reopen traffic."""
     session, checkpoint, binding = host.context(root, report_dir, coordination_dir, phase)
     private, _ = host.transaction_paths(root, binding["deploymentId"])
@@ -199,7 +199,7 @@ def refresh_original_nginx(root, report_dir, coordination_dir, phase, proof, pla
 
     def observe():
         rows = host.container_state(inspect(), binding["rollbackReleaseSet"])
-        host.verify_runtime_graph(rows, original["containers"])
+        host.verify_runtime_graph(rows, original["containers"], environment=environment)
         backend = rows["backend"]
         nginx = rows["nginx"]
         addresses = [entry["IPAddress"] for entry in backend["NetworkSettings"]["Networks"].values()]
@@ -316,7 +316,8 @@ def acknowledge_role_gates(root, report_dir, coordination_dir, phase, proof, ngi
     return acknowledgement
 
 
-def start_original_siblings(root, report_dir, coordination_dir, phase, proof, planned, *, inspect, renewal, maintenance, deadline_ns):
+def start_original_siblings(root, report_dir, coordination_dir, phase, proof, planned, *, inspect, renewal, maintenance,
+                            deadline_ns, environment=None):
     session, checkpoint, binding = host.context(root, report_dir, coordination_dir, phase)
     private, _ = host.transaction_paths(root, binding["deploymentId"])
     original = json.loads(host.read_private(private.with_name("backend-runtime-preimage.json"))[0])
@@ -325,7 +326,7 @@ def start_original_siblings(root, report_dir, coordination_dir, phase, proof, pl
 
     def inspect_original():
         rows = host.container_state(inspect(), binding["rollbackReleaseSet"])
-        host.verify_runtime_graph(rows, original["containers"])
+        host.verify_runtime_graph(rows, original["containers"], environment=environment)
         host.require(rows["backend"]["Id"] == proof["backendId"])
         return rows
 
@@ -437,7 +438,8 @@ def run_canonical_foreground(root, env, report_dir, coordination_dir, preflight,
     )
 
     start_original_siblings(root, report_dir, coordination_dir, phase, proof, preflight["containers"],
-                            inspect=inspect, renewal=renew, maintenance=maintenance, deadline_ns=deadline_ns)
+                            inspect=inspect, renewal=renew, maintenance=maintenance, deadline_ns=deadline_ns,
+                            environment=env)
 
     def restart(identifier):
         native.run_native_child(root, report_dir, coordination_dir, phase, "refresh-nginx",
@@ -456,11 +458,11 @@ def run_canonical_foreground(root, env, report_dir, coordination_dir, preflight,
 
     nginx = refresh_original_nginx(root, report_dir, coordination_dir, phase, proof, preflight["containers"]["nginx"],
                                    inspect=inspect, renewal=renew, maintenance=maintenance, restart=restart,
-                                   wait_for_healthy=wait_for_health)
+                                   wait_for_healthy=wait_for_health, environment=env)
     original = json.loads(host.read_private(private.with_name("backend-runtime-preimage.json"))[0])
     host.require(original["binding"] == binding)
     final_rows = host.container_state(inspect(), graph)
-    host.verify_runtime_graph(final_rows, original["containers"])
+    host.verify_runtime_graph(final_rows, original["containers"], environment=env)
     host.require(final_rows["backend"]["Id"] == proof["backendId"]
                  and [row["IPAddress"] for row in final_rows["backend"]["NetworkSettings"]["Networks"].values()] == [proof["backendAddress"]])
     final_backend = host.backend_observation(final_rows)
@@ -580,7 +582,7 @@ def publish_canonical_terminal(root, env, report_dir, coordination_dir, gate_ack
                                       cwd=root, stderr=subprocess.DEVNULL, timeout=30).decode("ascii").split()
         host.require(len(ids) == 6 and all(host.matches(r"[a-f0-9]{64}", value) for value in ids))
         rows = host.container_state(read_owner_json(root, (*DOCKER, "inspect", *ids)), binding["rollbackReleaseSet"])
-        host.verify_runtime_graph(rows, original["containers"])
+        host.verify_runtime_graph(rows, original["containers"], environment=env)
         host.require(rows["backend"]["Id"] == runtime["backendId"] == expected["backendId"]
                      and [network["IPAddress"] for network in rows["backend"]["NetworkSettings"]["Networks"].values()] == [runtime["backendAddress"]]
                      and rows["nginx"]["Id"] == nginx["nginxId"] == expected["nginxId"]

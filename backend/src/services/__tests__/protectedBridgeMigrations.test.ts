@@ -66,6 +66,7 @@ test('the complete current release is admitted only with its reviewed ordered SQ
     '20261118100000_sepidar_loading_reference',
     '20261118120000_personal_pickup_source',
     '20261118120100_personal_pickup_dispatch',
+    '20261120120000_grant_runtime_customer_card_insert',
   ];
   const files = names.map(name => [name, fs.readFileSync(path.join(directory, name, 'migration.sql'))] as const);
   const release = compileProtectedCurrentRelease(files);
@@ -90,12 +91,15 @@ test('the complete current release is admitted only with its reviewed ordered SQ
   assert.deepEqual(release[32].functions, ['require_active_grouped_allocation_child']);
   assert.equal(release[24].statements.length, 5);
   assert.ok(release[24].statements.every(sql => /^ALTER TABLE/.test(sql)));
-  const [sepidarReference, personalPickupSource, personalPickupDispatch] = release.slice(-3);
+  const [sepidarReference, personalPickupSource, personalPickupDispatch, customerCardInsert] = release.slice(-4);
   assert.equal(sepidarReference.statements.length, 2);
   assert.deepEqual(sepidarReference.tables, ['logistics_loadings']);
   assert.deepEqual(personalPickupSource.statements, [`ALTER TYPE "GuardDriverSource" ADD VALUE 'PERSONAL_PICKUP';`]);
   assert.equal(personalPickupDispatch.statements.length, 5);
   assert.deepEqual(personalPickupDispatch.tables.sort(), ['dispatch_confirmation_sessions', 'guard_driver_queue_turns']);
+  assert.equal(customerCardInsert.statements.length, 1);
+  assert.deepEqual(customerCardInsert.tables, ['crm_customer_cards']);
+  assert.deepEqual(customerCardInsert.functions, []);
   for (let migrationIndex = 22; migrationIndex < files.length; migrationIndex++) {
     const changedMigration = files.map(([name, bytes], index) => index === migrationIndex
       ? [name, Buffer.concat([bytes, Buffer.from('\n-- drift')])] as const : [name, bytes] as const);

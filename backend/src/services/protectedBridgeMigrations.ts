@@ -15,6 +15,7 @@ const pickupSourceName = '20261116100000_customer_pickup_driver_source';
 const pickupDispatchName = '20261116100100_customer_pickup_dispatch';
 const personalPickupSourceName = '20261118120000_personal_pickup_source';
 const personalPickupDispatchName = '20261118120100_personal_pickup_dispatch';
+const customerCardInsertName = '20261120120000_grant_runtime_customer_card_insert';
 const retireAttachmentScanStatusName = '20261117120000_retire_attachment_scan_status';
 const partnerReadinessProjectionName = '20261117160000_partner_release_readiness_completed_projection';
 const allocationControllerTransitionName = '20261116133000_customer_allocation_controller_transition';
@@ -67,6 +68,7 @@ const nextReleaseCatalog = {
     functions: ['customer_allocation_runtime_admitted'],
   },
   [partnerReadinessProjectionName]: { tables: [], functions: [] },
+  [customerCardInsertName]: { tables: ['crm_customer_cards'], functions: [] },
 };
 // This is the exact source delta from the retained 2026-11-12 production
 // release. It is intentionally separate from the frozen historical bootstrap.
@@ -112,10 +114,11 @@ const currentRelease = {
   '20261118100000_sepidar_loading_reference': ['a117dd1bbb05c3d4ad96edc5204864f36b4617328ff68d671b9a4b0d7360e757', 2],
   [personalPickupSourceName]: ['02d234097b5a2d70cbfeebbf36a9bc0dedbfe3a316ef936c38d0160eca15286f', 1],
   [personalPickupDispatchName]: ['acbf6c974b30a77cfb0131d30fd3d960e0523053ee21a7d777ca759ea7539a3d', 5],
+  [customerCardInsertName]: ['2123e56ded01fbe3f01e046e3425dcba4f4cc96d1a01fcfcb78070d944f97baa', 1],
 } as const;
 export const protectedCurrentReleaseNames: readonly string[] = Object.freeze(Object.keys(currentRelease));
 // Each release extends the ledger while preserving the prior release-set hashes.
-const protectedReleaseEpochEnds = Object.freeze([12, 22, 24, 25, 35, 36, 37, 38, 41]);
+const protectedReleaseEpochEnds = Object.freeze([12, 22, 24, 25, 35, 36, 37, 38, 41, 42]);
 const releaseSetSha256 = (files: CurrentFile[], index: number) => sha(files.slice(0,
   protectedReleaseEpochEnds.find(end => index < end)!).map(file => file.sha256).join('\n'));
 

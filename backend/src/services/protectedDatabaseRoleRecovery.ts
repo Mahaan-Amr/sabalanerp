@@ -360,7 +360,7 @@ type CutoverCatalog = {
 };
 const cutoverRoles = { runtime: 'sabalan_application_runtime', controller: 'sabalan_allocation_controller' };
 const sha256 = (content: string | Buffer) => createHash('sha256').update(content).digest('hex');
-const cutoverCatalogSha256 = '35ba8aa2bedbf2121594e1c2c6462a2d519a33ab2483584c23ebc98a364c2126';
+const cutoverCatalogSha256 = '1500b28bbde6809652bcae34eb8f421b67528f266c9c31660af66c11f230e375';
 
 async function verifyCutoverMigrationLedger(client: Client, directory: string, expectedDigest: string) {
   const names = (await fs.readdir(directory, { withFileTypes: true }))
@@ -425,6 +425,8 @@ async function verifyCutoverWriteGuards(client: Client) {
       'partner_duplicate_customer_matches', 'partner_identity_evidence', 'partner_terms_policies', 'simple_performance_profiles',
       'shipment_quantity_evidence', 'partner_case_events', 'partner_payment_installments', 'partner_payment_plans',
       'partner_retail_receipt_allocations', 'partner_retail_receipts',
+      'partner_conversion_dispositions', 'partner_inquiry_approvals', 'partner_inquiry_assignments',
+      'partner_profile_responder_assignments', 'sales_contract_draft_audits', 'sales_contract_seller_audits',
     ].map(table => [table, 'restrict_runtime_reference_update', beforeUpdate, 'protect_runtime_reference_row']),
     ...[
       'performance_accepted_results', 'performance_consequence_handoffs', 'performance_criterion_versions',

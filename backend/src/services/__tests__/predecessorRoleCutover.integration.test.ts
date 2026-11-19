@@ -31,9 +31,9 @@ test('first split preflight requires the exact catalog and per-object grants', {
     const baseline = await before();
     assert.deepEqual(baseline, {
       stage: 'before-grants',
-      catalogSha256: '35ba8aa2bedbf2121594e1c2c6462a2d519a33ab2483584c23ebc98a364c2126',
-      migrationSha256: '3018e47e5bbf9d337fe51ea3d669dfe5e0b261c56150fd4051dc629370a40a01',
-      migrations: 487, tables: 571, views: 1, sequences: 5, securityDefinerRoutines: 7,
+      catalogSha256: '1500b28bbde6809652bcae34eb8f421b67528f266c9c31660af66c11f230e375',
+      migrationSha256: '29112f7b85061e1bbb96995b7877212ec4a1d076690d6b7f789afde5434cd903',
+      migrations: 488, tables: 571, views: 1, sequences: 5, securityDefinerRoutines: 7,
     });
     await assert.rejects(staged(), /Cutover privilege drift/);
 

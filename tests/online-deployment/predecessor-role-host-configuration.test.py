@@ -1,4 +1,5 @@
 import contextlib
+import copy
 import fcntl
 import hashlib
 import importlib.util
@@ -235,6 +236,48 @@ class HostConfigurationTest(unittest.TestCase):
         with self.assertRaises(roles.RoleHostConfigurationError):
             roles.read_controller_password(authority, pin, CONTROL_URL)
 
+    def test_runtime_graph_requires_exact_config_when_qa_recreates_with_its_owned_environment(self):
+        env_label = "com.docker.compose.project.environment_file"
+        depends = "com.docker.compose.depends_on"
+        original_env = "/srv/sabalanerp-qa/restore-runs/run/qa.env"
+        owned_env = Path("/srv/sabalanerp-qa/private/cutover/qa.env")
+        containers = {
+            name: {"Id": str(index) * 64, "Created": "created",
+                   "State": {"Running": True, "Health": {"Status": "healthy"}, "StartedAt": "start", "Pid": 9},
+                   "Config": {"Hostname": str(index) * 12, "Env": [],
+                              "Labels": {"com.docker.compose.service": name, env_label: original_env}},
+                   "HostConfig": {}, "Mounts": [], "NetworkSettings": {"Networks": {}}}
+            for index, name in enumerate(SERVICES, 1)
+        }
+        containers["backend"]["Config"]["Labels"][depends] = "clamav:service_healthy:false,postgres:service_healthy:false"
+        pinned = roles.original_graph(containers)
+        recreated = copy.deepcopy(containers)
+        recreated["backend"]["Config"]["Labels"].update({env_label: str(owned_env), depends: ""})
+        roles.verify_runtime_graph(recreated, pinned, environment=owned_env)
+        self.assertEqual(recreated["backend"]["Config"]["Labels"][depends], "")
+        self.assertEqual(recreated["backend"]["Config"]["Labels"][env_label], str(owned_env))
+
+        with self.assertRaises(roles.RoleHostConfigurationError):
+            roles.verify_runtime_graph(recreated, pinned, environment=Path(original_env))
+        for name in SERVICES:
+            with self.subTest(drift=name), self.assertRaises(roles.RoleHostConfigurationError):
+                changed = copy.deepcopy(recreated)
+                changed[name]["Config"]["Env"].append("UNEXPECTED_RUNTIME_CHANGE=1")
+                roles.verify_runtime_graph(changed, pinned, environment=owned_env)
+        foreign_env = Path("/srv/foreign/private/cutover/qa.env")
+        changed = copy.deepcopy(recreated)
+        changed["backend"]["Config"]["Labels"][env_label] = str(foreign_env)
+        with self.assertRaises(roles.RoleHostConfigurationError):
+            roles.verify_runtime_graph(changed, pinned, environment=foreign_env)
+        changed = copy.deepcopy(recreated)
+        changed["backend"]["Config"]["Labels"][depends] = "clamav:service_started:false"
+        with self.assertRaises(roles.RoleHostConfigurationError):
+            roles.verify_runtime_graph(changed, pinned, environment=owned_env)
+        containers["inquiry"]["Config"]["Labels"][env_label] = str(owned_env)
+        recreated["inquiry"]["Config"]["Labels"][env_label] = str(owned_env)
+        with self.assertRaises(roles.RoleHostConfigurationError):
+            roles.verify_runtime_graph(recreated, roles.original_graph(containers), environment=owned_env)
+
     def test_recreate_pinned_backend_and_prove_exact_runtime_and_rollback(self):
         original = {name: str(i) * 64 for i, name in enumerate(SERVICES, 1)}
         backend_id = original["backend"]
@@ -248,6 +291,12 @@ class HostConfigurationTest(unittest.TestCase):
             rows = []
             for name, image in GRAPH.items():
                 identifier = backend_id if name == "backend" else original[name]
+                labels = {"com.docker.compose.service": name, "com.docker.compose.project": "sabalanerp",
+                          "com.docker.compose.project.environment_file": str(self.env)}
+                if name == "backend":
+                    labels["com.docker.compose.depends_on"] = (
+                        "postgres:service_healthy:false,clamav:service_healthy:false" if identifier == original[name] else ""
+                    )
                 if nginx_replaced and name == "nginx":
                     identifier = "d" * 64
                 rows.append({
@@ -256,7 +305,7 @@ class HostConfigurationTest(unittest.TestCase):
                               "Health": {"Status": "healthy"}, "StartedAt": "2000-01-01", "Pid": 7,
                               "Restarting": False, "Dead": False},
                     "Config": {"Hostname": identifier[:12], "Env": ["DATABASE_URL=" + installed] if name == "backend" else [],
-                               "Labels": {"com.docker.compose.service": name, "com.docker.compose.project": "sabalanerp"}},
+                               "Labels": labels},
                     "HostConfig": {}, "Mounts": [], "NetworkSettings": {"Networks": {
                         "sabalanerp_app_network": {"NetworkID": "f" * 64, "IPAddress": "172.24.0.5"},
                     }},
@@ -374,10 +423,16 @@ class HostConfigurationTest(unittest.TestCase):
             rows = []
             for name in SERVICES:
                 identifier = backend_id if name == "backend" else original[name]
+                labels = {"com.docker.compose.service": name, "com.docker.compose.project": "sabalanerp",
+                          "com.docker.compose.project.environment_file": str(self.env)}
+                if name == "backend":
+                    labels["com.docker.compose.depends_on"] = (
+                        "clamav:service_healthy:false,postgres:service_healthy:false" if identifier == original[name] else ""
+                    )
                 rows.append({
                     "Id": identifier, "Image": GRAPH[name], "Created": "2026-11-17",
                     "Config": {"Hostname": identifier[:12], "Env": ["DATABASE_URL=" + installed] if name == "backend" else [],
-                               "Labels": {"com.docker.compose.service": name, "com.docker.compose.project": "sabalanerp"}},
+                               "Labels": labels},
                     "HostConfig": {}, "Mounts": [],
                     "State": {"StartedAt": nginx_started if name == "nginx" else "2026-11-17",
                               "Pid": 17, "Health": {"Status": "healthy"},
@@ -430,7 +485,7 @@ class HostConfigurationTest(unittest.TestCase):
             proxy_args = (self.root, self.root / "reports", self.root / "coordination",
                           self.session["phase"], target, original["nginx"])
             options = {"inspect": inspect, "renewal": boundary, "maintenance": lambda: True,
-                       "restart": failed_refresh, "wait_for_healthy": lambda: None}
+                       "restart": failed_refresh, "wait_for_healthy": lambda: None, "environment": self.env}
             with self.assertRaises(canonical.host.RoleHostConfigurationError):
                 canonical.refresh_original_nginx(*proxy_args, **options)
             with self.assertRaises(canonical.host.RoleHostConfigurationError):

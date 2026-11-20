@@ -465,10 +465,36 @@ def original_graph(containers):
     }
 
 
-def verify_runtime_graph(containers, original):
+def verify_runtime_graph(containers, original, *, environment):
     actual = original_graph(containers)
     require(all(actual[name] == original[name] for name in SERVICES - {"backend"}))
-    require(actual["backend"]["configSha256"] == original["backend"]["configSha256"])
+    expected = original["backend"]["configSha256"]
+    if actual["backend"]["configSha256"] != expected:
+        # Compose --no-deps empties this label. Its two dependencies can appear in either order.
+        backend = copy.deepcopy(containers["backend"])
+        labels = backend["Config"]["Labels"]
+        depends = "com.docker.compose.depends_on"
+        env_label = "com.docker.compose.project.environment_file"
+        require(labels.get(env_label) == str(environment) and labels.get(depends) == "")
+        dependencies = ("clamav:service_healthy:false,postgres:service_healthy:false",
+                        "postgres:service_healthy:false,clamav:service_healthy:false")
+
+        def matches_original_dependencies():
+            for value in dependencies:
+                labels[depends] = value
+                if container_config_digest(backend) == expected:
+                    return True
+            return False
+
+        if not matches_original_dependencies():
+            # QA may use an owned private copy of the source environment file.
+            original_env = containers["frontend"]["Config"]["Labels"].get(env_label, "")
+            qa_root = Path("/srv/sabalanerp-qa")
+            require(environment.is_relative_to(qa_root) and Path(original_env).is_relative_to(qa_root)
+                    and original_env == containers["inquiry"]["Config"]["Labels"].get(env_label)
+                    and original_env == containers["nginx"]["Config"]["Labels"].get(env_label))
+            labels[env_label] = original_env
+            require(matches_original_dependencies())
     scanner = containers["clamav"]["State"]
     require(scanner["Running"] is True and scanner["Health"]["Status"] == "healthy")
 
@@ -533,7 +559,7 @@ def _continue_backend(root, env, report_dir, coordination_dir, pinned_containers
         write_private(baseline_path, json_bytes(baseline))
     original = baseline["containers"]
     require(baseline["binding"] == binding and {name: row["id"] for name, row in original.items()} == pinned_containers)
-    verify_runtime_graph(containers, original)
+    verify_runtime_graph(containers, original, environment=env)
 
     expected_runtime = saved["previousRuntimeSha256"] if restoring else saved["targetRuntimeSha256"]
     backend = containers["backend"]
@@ -553,7 +579,7 @@ def _continue_backend(root, env, report_dir, coordination_dir, pinned_containers
         require(recreate_backend(("up", "-d", "--no-deps", "--no-build", "--force-recreate", "--pull", "never",
                                   "--wait", "--wait-timeout", "180", "backend")) is True)
         containers = get_graph()
-        verify_runtime_graph(containers, original)
+        verify_runtime_graph(containers, original, environment=env)
         require(containers["backend"]["Id"] != backend["Id"])
         backend = containers["backend"]
 

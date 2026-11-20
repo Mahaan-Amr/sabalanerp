@@ -115,7 +115,7 @@ test('a complete reciprocal pair validates and cannot replace its immutable link
 }));
 
 test('restricted Partner pair creation reserves numbers through its existing triggers', () => transaction(async (db, id) => {
-  const runtimeRole = `partner_number_runtime_${randomUUID().replaceAll('-', '')}`;
+  const runtimeRole = `partner_number_runtime_${randomUUID().replace(/-/g, '')}`;
   const ordinarySeller = `${id}-ordinary-seller`;
   await seedPairParents(db, id);
   await db.query(`INSERT INTO users (id,email,username,password,"firstName","lastName",role,"updatedAt")

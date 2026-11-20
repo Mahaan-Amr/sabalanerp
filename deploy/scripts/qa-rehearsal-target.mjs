@@ -176,8 +176,13 @@ export function validateQaRuntimeEnvironment(environment, inherited) {
     'TAXPAYER_DELIVERY_BROKER_ENDPOINT', 'TAXPAYER_BROKER_URL',
     'BIOMETRIC_CONNECTOR_MODE', 'BIOMETRIC_WORKSTATIONS_JSON',
   ]) assert.ok(Object.hasOwn(environment, name));
+  // The role-cutover controller pins both values to the same native engine and
+  // project checked below. Other overrides can redirect the observation.
+  const pinnedRoleTarget = inherited.DOCKER_HOST === 'unix:///var/run/docker.sock'
+    && inherited.COMPOSE_PROJECT_NAME === 'sabalanerp';
   for (const name of keys(inherited)) {
-    assert.ok(!name.startsWith('COMPOSE_') && name !== 'DOCKER_HOST' && name !== 'DOCKER_CONTEXT');
+    const isRolePin = pinnedRoleTarget && (name === 'DOCKER_HOST' || name === 'COMPOSE_PROJECT_NAME');
+    assert.ok(isRolePin || (!name.startsWith('COMPOSE_') && name !== 'DOCKER_HOST' && name !== 'DOCKER_CONTEXT'));
     if (Object.hasOwn(environment, name)) assert.equal(inherited[name], environment[name]);
   }
   for (const name of keys(environment)) {

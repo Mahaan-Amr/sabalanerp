@@ -153,6 +153,25 @@ test('QA target refuses shell variables that would override private Compose valu
     { QA_REHEARSAL_FAIL_BACKEND_COMMIT: 'c'.repeat(40) }));
 });
 
+test('QA target accepts the role controller pins and refuses other Docker targeting overrides', () => {
+  const pins = {
+    DOCKER_HOST: 'unix:///var/run/docker.sock',
+    COMPOSE_PROJECT_NAME: 'sabalanerp',
+  };
+  assert.doesNotThrow(() => validateQaRuntimeEnvironment(qaEnvironment, pins));
+  for (const inherited of [
+    { DOCKER_HOST: pins.DOCKER_HOST },
+    { COMPOSE_PROJECT_NAME: pins.COMPOSE_PROJECT_NAME },
+    { ...pins, DOCKER_HOST: 'tcp://other.example:2375' },
+    { ...pins, COMPOSE_PROJECT_NAME: 'sabalanerp-local' },
+    { ...pins, DOCKER_CONTEXT: 'remote' },
+    { ...pins, COMPOSE_FILE: 'override.yml' },
+  ]) {
+    assert.throws(() => validateQaRuntimeEnvironment(qaEnvironment, inherited));
+  }
+  assert.throws(() => validateQaRuntimeEnvironment({ ...qaEnvironment, ...pins }, pins));
+});
+
 test('QA target refuses interpolation in a protected path even when the inherited variable is otherwise allowed', () => {
   const environment = { ...qaEnvironment, DEPLOYMENT_SECRET_DIR: '/srv/sabalanerp-qa/${QA_ESCAPE}' };
   assert.throws(() => validateQaTargetBinding({

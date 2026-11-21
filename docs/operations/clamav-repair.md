@@ -14,6 +14,17 @@ An explicitly authorized acquisition-source migration may be prepared with `node
 
 This is a maintenance-only repair, independent of attendance R3. No schema, attendance, correction, PDF or shared-duty behavior is changed. Cloud execution, deployment and automatic attendance require separate authorization. Local test success does not prove cloud readiness.
 
+
+### UFPR incident staging from the managed FEUP installation
+
+The controller requires the existing PostgreSQL and adopted Inquiry schemas, the existing dispatch storage mount, and the advisory lease before maintenance. Shipment statement cutover must be disabled. In this operation the controller verifies the schemas read-only and retains the journal’s existing schema phase. It leaves the PostgreSQL container in place and does not run the PostgreSQL or Inquiry migrators, contract graph writers, financial reconciliation writers, or shipment cutover.
+
+UFPR admission requires the exact reviewed amd64 image, direct acquisition and the canonical scheduler bank, runtime directory and 7,200-second interval. For the reviewed managed FEUP predecessor, the incident snapshot reads the actual scheduler, FreshClam cooldown, last result and vendor migration archive under the existing updater lock. The controller compares those same bytes against the stopped original before accepting its checkpoint.
+
+With separate staging authorization, take the snapshot and a private capture of the matching FEUP bank. Run `node scripts/clamav-incident-recovery.mjs prepare-ufpr <staging-original-snapshot> <captured-FEUP-bank> <new-inactive-UFPR-bank>`. The new bank carries the exact active scheduler and cooldown plus a private copy of the original evidence. Use the output only if preparation completes successfully. Keep the staging snapshot checksum in the separately reviewed release inputs as `DEPLOYMENT_CLAMAV_UFPR_STAGING_ORIGINAL_SHA256`. Allow the candidate to reach its existing next slot naturally, then export its real successful result using the existing readiness command. Keep the live FEUP bank intact and use a fresh observation of it as the release incident snapshot.
+
+Before maintenance, the controller checks the staging-original checksum, exact archived state, current predecessor vendor provenance, current signatures, and the target's actual updater result. It requires the target to honor the original eligible attempt and to retain a next slot no earlier than the latest live FEUP slot. The exact receipt must leave enough time for the configured checkpoint timeout, the 900-second mutation deadline and a 600-second allowance for drain, capture and retention. The captured receipt is checked again before mutation with the full 900-second runway. Any subsequent update requires new evidence. Incident closure still requires observing a later naturally scheduled successful cycle after reopening.
+
 ## Local runtime
 
 Local Compose uses `deploy/clamav/Dockerfile.local` and the fixed HTTPS C3SL/UFPR

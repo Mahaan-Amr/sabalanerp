@@ -7,7 +7,7 @@ import { execFile, spawn } from 'node:child_process';
 import { pipeline } from 'node:stream/promises';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
-import { validateIncidentSnapshot, requireIncidentSession } from './clamav-incident-policy.mjs';
+import { validateIncidentSnapshot, requireIncidentSession, incidentAcquisitionStateNames } from './clamav-incident-policy.mjs';
 const exec = promisify(execFile);
 const fail = (message) => { throw new Error(message); };
 const validId = id => /^[a-zA-Z0-9_-]{1,160}$/.test(id) ? id : fail('Unsafe deployment id');
@@ -47,6 +47,17 @@ export async function captureUnit({bank,unit,id,image}) {
   if(Object.keys(proof.bankFiles || {}).length!==3) fail('Rollback bank evidence is incomplete');
   for(const [file,expected] of Object.entries(proof.bankFiles)) {
    if(!/^(main|daily|bytecode)[.](cvd|cld)$/.test(file) || (await digest(path.join(bank,file))).sha256!==expected) fail('Rollback bank changed after rehearsal; refusing maintenance mutation');
+  }
+  if(incident && proof.acquisition){
+   const original=proof.acquisition;
+   const hashes={
+    '.source-state/migration.json':original.migrationSha256,
+    ...Object.fromEntries(incidentAcquisitionStateNames.map(name=>[name,original.stateFileHashes[name]])),
+    ...Object.fromEntries(incidentAcquisitionStateNames.map(name=>['.source-state/vendor-cdn/'+name,original.sourceMigration.originalStateFiles[name].sha256])),
+   };
+   for(const [file,sha256] of Object.entries(hashes)){
+    if((await digest(path.join(bank,file))).sha256!==sha256)fail('Original FEUP acquisition state changed after the incident snapshot');
+   }
   }
  }
  const files={};

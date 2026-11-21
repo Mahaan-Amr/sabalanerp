@@ -129,7 +129,7 @@ def assert_volume(name, project, empty):
 def run():
     require(sys.platform == 'linux' and len(sys.argv) == 6)
     mode, compose_file, env_file, old_id, old_image = sys.argv[1:]
-    require(mode in ('stage', 'attest'))
+    require(mode in ('stage', 'attest', 'verify-mounted'))
     require(re.fullmatch(r'[a-f0-9]{64}', old_id))
     require(re.fullmatch(r'sha256:[a-f0-9]{64}', old_image))
     compose_path, env_path = Path(compose_file), Path(env_file)
@@ -150,7 +150,7 @@ def run():
     observed_id = command(compose + ['ps', '-a', '-q', 'backend']).strip()
     require(re.fullmatch(r'[a-f0-9]{12,64}', observed_id) and old_id.startswith(observed_id))
     [old] = json.loads(command(['docker', 'inspect', old_id]))
-    running = mode == 'stage'
+    running = mode in ('stage', 'verify-mounted')
     rows = database_rows(compose)
     mount = [item for item in old.get('Mounts') or [] if item.get('Destination') == TARGET]
     if mount:
@@ -161,6 +161,7 @@ def run():
         assert_volume(name, project, False)
         print('mounted')
         return
+    require(mode != 'verify-mounted')
     assert_old_layer(old, old_id, old_image, project, running, rows)
     assert_empty_legacy_path(old_id)
     names = command(['docker', 'volume', 'ls', '--format', '{{.Name}}']).splitlines()

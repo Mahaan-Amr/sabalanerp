@@ -29,8 +29,8 @@ const rollbackEnvironment={PERFORMANCE_RELEASE_COMMIT:'a'.repeat(40),PERFORMANCE
  if(kind==='python3'){
   const [script,mode,compose,environment,previousImage,plan,session]=a;
   if(script?.endsWith('/deploy/scripts/dispatch-volume-transition.py')){
-   if(!['stage','attest','transition'].includes(mode)||compose!==path.join(root,'docker-compose.prod.yml')||environment!==path.join(root,'.env.prod')||previousImage!==backendId||plan!==image('backend')||a.length!==6)throw Error('Dispatch transition fixture identity mismatch');
-   console.log('legacy');return;
+   if(!['stage','attest','transition','verify-mounted'].includes(mode)||compose!==path.join(root,'docker-compose.prod.yml')||environment!==path.join(root,'.env.prod')||previousImage!==backendId||plan!==image('backend')||a.length!==6)throw Error('Dispatch transition fixture identity mismatch');
+   console.log(process.env.DEPLOYMENT_CLAMAV_OPERATION==='incident-recovery'?'mounted':'legacy');return;
   }
   if(!script?.endsWith('/deploy/scripts/legacy-backend-signal.py')||!['--preflight','--forward','--assert-resolved','--assert-current-stopped','--assert-unleased-drain-allowed'].includes(mode))throw Error('Unexpected fixture python command');
   if(failure==='legacy-signal'&&mode==='--preflight')process.exit(48);
@@ -85,9 +85,14 @@ const rollbackEnvironment={PERFORMANCE_RELEASE_COMMIT:'a'.repeat(40),PERFORMANCE
    const versions={main:63,daily:28157,bytecode:339};
    if(command==='rollback-proof')policy.validateRollbackProof(JSON.parse(fs.readFileSync(input)),expected,versions);
    else if(command==='scope')policy.validateRepairPaths(['deploy/clamav/inspect-native.sh']);
-   else if(command==='verify'){
+   else if(command==='verify'||command==='verify-incident'){
     const receipt=policy.validateReceipt(JSON.parse(fs.readFileSync(input)),expected,versions);
     if(receipt.bankSha256!==hash(fs.readFileSync(path.join(path.dirname(input),'target-bank.tar'))))throw Error('Target binding mismatch');
+    if(command==='verify-incident'){
+     const snapshot=JSON.parse(fs.readFileSync(a[4]));
+     policy.validateIncidentTarget(receipt,snapshot,Number(a[5]));
+     console.log(hash(fs.readFileSync(input)));return;
+    }
    } else if(command==='inspect-rollback'){
     const proof=JSON.parse(fs.readFileSync(expected));policy.validateRollbackProof(proof,proof.image,versions);
     if(failure==='qualification' || (failure==='rollback-qualifier' && phase()==='ROLLBACK_STARTED'))process.exit(41);
@@ -183,6 +188,7 @@ const rollbackEnvironment={PERFORMANCE_RELEASE_COMMIT:'a'.repeat(40),PERFORMANCE
     const active=read('active.json');if(failure==='lease-expired')active.leaseExpiresAt=new Date(0).toISOString();
     requireBoundary({session:read('reports/active-deployment-session.json'),active,maintenance:read('maintenance.json'),id,token:env('DEPLOYMENT_LEASE_TOKEN'),phase:'MUTATION_STARTED'});
    }});
+   if(failure==='post-mutation'&&env('DEPLOYMENT_CLAMAV_OPERATION')==='incident-recovery')process.exit(44);
   }
   return;
  }
@@ -213,6 +219,8 @@ const rollbackEnvironment={PERFORMANCE_RELEASE_COMMIT:'a'.repeat(40),PERFORMANCE
   const {verifyUnit}=await import(require('node:url').pathToFileURL(path.join(repository,'backend/scripts/clamav-checkpoint.mjs')));
   await verifyUnit({unit,id,checkpoint});save('checkpoint.json',checkpoint);return;
  }
+ if(a.includes('node_modules/prisma/build/index.js')&&a.includes('status'))return;
+ if(a.some(value=>value.includes('verifyInquiryBaseline(path.join')))return;
  if(a.includes('dist/scripts/deployment-inquiry.js')){
   if(!a.includes('scripts/with-backend-control-ownership.sh')||phase()!=='MIGRATIONS_APPLIED')throw Error('Inquiry ownership boundary unproven');
   return;
@@ -236,6 +244,7 @@ const rollbackEnvironment={PERFORMANCE_RELEASE_COMMIT:'a'.repeat(40),PERFORMANCE
   if(!prior.some(row=>row.kind==='python3'&&row.args[1]==='--assert-resolved'))throw Error('Native closure before signal resolution');
   return;
  }
+ if(a.includes('exec')&&a.some(value=>value.includes('pg_isready')))return;
  if(a.includes('exec')){
   const text=a.at(-1);
   if(text.includes('pg_sleep(21600)')){fs.writeFileSync(path.join(root,'advisory.pid'),String(process.pid));setInterval(()=>{},1000);return;}

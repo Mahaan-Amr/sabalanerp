@@ -254,6 +254,17 @@ test('UFPR is a fixed direct acquisition source with unchanged publisher verific
   attempted,succeeded:attempted+15,next:attempted+7200,resultSha256:'b'.repeat(64)};
  const qualified={...receipt,sourceMigration,ufprCycle};
  assert.equal(validateReceipt(qualified,image,versions).acquisitionOrigin,origin);
+ const {validateIncidentTarget}=await import('../../scripts/clamav-release-readiness.mjs');
+ const current=Math.floor(Date.now()/1000);
+ const snapshot={acquisition:{origin:sourceMigration.targetOrigin,sourceMigration,
+  attempted:attempted-1,next:attempted+7199}};
+ assert.equal(validateIncidentTarget(qualified,snapshot,5000,current),qualified);
+ assert.throws(()=>validateIncidentTarget(qualified,snapshot,7200,current),/next scheduled slot/);
+ assert.throws(()=>validateIncidentTarget(qualified,{acquisition:{...snapshot.acquisition,next:ufprCycle.next+1}},0,current),/original.*schedule/);
+ const wrongVendor={...sourceMigration,originalStateFiles:{...originalStateFiles,
+  'freshclam.dat':{sha256:'b'.repeat(64)}}};
+ assert.throws(()=>validateIncidentTarget({...qualified,sourceMigration:wrongVendor},snapshot,0,current),/original.*provenance/);
+
  const originalIndex='sha256:d40cb3d0822e616661899426ab55922e0fe6ab00ada574c2b3962635f561d8df';
  assert.throws(()=>validateReceipt({...qualified,image:originalIndex},originalIndex,versions),/Unreviewed UFPR acquisition image or origin/);
  assert.throws(()=>validateReceipt({...qualified,acquisitionOrigin:undefined},image,versions),/Unreviewed UFPR/);
@@ -262,4 +273,25 @@ test('UFPR is a fixed direct acquisition source with unchanged publisher verific
   containerStartedAt:new Date((attempted+1)*1000).toISOString()}},image,versions),/scheduled update/);
  const unrelatedImage='sha256:'+'e'.repeat(64);
  assert.throws(()=>validateReceipt({...qualified,image:unrelatedImage},unrelatedImage,versions),/Unreviewed UFPR/);
+});
+
+
+test('UFPR readiness rejects a scheduler that reads a different bank or interval',async()=>{
+ const {inspectCandidate}=await import('../../scripts/clamav-release-readiness.mjs');
+ const {readFile}=await import('node:fs/promises');
+ const image='sha256:27b42e1a6c76b8d3ad9e88738c45b2c6e54339cb92dfba66205868a9c357c941';
+ const config=await readFile(new URL('../../deploy/clamav/freshclam.local.conf',import.meta.url),'utf8');
+ const imageEnv=['CLAMAV_ACQUISITION_TRANSPORT=direct'];
+ for(const override of ['CLAMAV_DATABASE_DIRECTORY=/tmp/bank','CLAMAV_UPDATE_INTERVAL_SECONDS=3600',
+  'CLAMAV_RUN_DIRECTORY=/tmp/run','CLAMAV_ACQUISITION_TRANSPORT=direct']){
+  const execute=async(command,args)=>{
+   assert.equal(command,'docker');
+   if(args[0]==='inspect')return {stdout:JSON.stringify([{Image:image,State:{Running:true},
+    Config:{Env:[...imageEnv,override]},Mounts:[{Destination:'/var/lib/clamav',RW:true}]}])};
+   if(args[0]==='image')return {stdout:JSON.stringify([{Id:image,Config:{Env:imageEnv}}])};
+   if(args.at(-1)==='/etc/clamav/freshclam.conf')return {stdout:config};
+   throw new Error('Unexpected inspection call: '+args.join(' '));
+  };
+  await assert.rejects(inspectCandidate('fixture',execute),/immutable direct acquisition runtime/);
+ }
 });

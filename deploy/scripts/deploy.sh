@@ -158,6 +158,9 @@ start_release_services() {
   if [ -n "${DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX:-}" ]; then
     preserved_clamav_guard health || return 1
     compose up -d --no-deps --no-build --wait --wait-timeout "${wait_seconds}" postgres backend frontend inquiry nginx
+  elif [ "${DEPLOYMENT_CLAMAV_OPERATION}" = incident-recovery ]; then
+    # PostgreSQL stays on its existing container for this scanner operation.
+    compose up -d --no-deps --no-build --wait --wait-timeout "${wait_seconds}" clamav backend frontend inquiry nginx
   elif [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ] && [ "${MUTATION_STARTED}" -eq 0 ]; then
     # A failed preflight/checkpoint must restart the exact old container, never apply target config.
     compose start clamav
@@ -212,6 +215,9 @@ run_backend() {
 
 dispatch_volume_transition() {
   transition_mode="$1"
+  if [ "${DEPLOYMENT_CLAMAV_OPERATION}" = incident-recovery ]; then
+    [ "${transition_mode}" != stage ] || transition_mode=verify-mounted
+  fi
   # Until the helper proves an already mounted volume, recovery must assume
   # the old backend could have unmounted layer files. A failed stage may have
   # allocated the new volume without returning its legacy result yet.
@@ -227,6 +233,9 @@ dispatch_volume_transition() {
     mounted) DISPATCH_TRANSITION_REQUIRED=0;;
     *) echo 'DISPATCH_TRANSITION_UNPROVEN' >&2; return 1;;
   esac
+  if [ "${DEPLOYMENT_CLAMAV_OPERATION}" = incident-recovery ] && [ "${DISPATCH_TRANSITION_REQUIRED}" -ne 0 ]; then
+    echo 'ClamAV incident recovery requires the existing dispatch storage mount.' >&2; return 1
+  fi
   if [ "${transition_mode}" = attest ]; then DISPATCH_TRANSITION_ATTESTED=1; fi
 }
 
@@ -357,6 +366,18 @@ control() {
   run_backend node dist/scripts/deployment-control.js "$@"
 }
 
+verify_incident_target() {
+  node "${OPERATIONS_ROOT}/scripts/clamav-release-readiness.mjs" verify-incident "$1" \
+    "${DEPLOYMENT_CLAMAV_TARGET_IMAGE}" "${DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_FILE}" "$2"
+}
+
+require_bound_incident_target() {
+  actual_receipt_sha256="$(verify_incident_target "$1" "$2")" || return 1
+  [ "${actual_receipt_sha256}" = "${incident_receipt_sha256}" ] || {
+    echo 'ClamAV incident target receipt changed after preflight.' >&2; return 1
+  }
+}
+
 enter_maintenance() {
   if [ "${CAPTURE_ONLY}" -eq 1 ]; then
     # Capture must restart the exact original Nginx container after the
@@ -364,6 +385,7 @@ enter_maintenance() {
     MAINTENANCE_ACTIVE=1
     control maintenance-on
   elif [ "${DEPLOYMENT_CLAMAV_OPERATION}" = incident-recovery ]; then
+    require_bound_incident_target "${DEPLOYMENT_CLAMAV_READY_FILE}" "${incident_runway_seconds}" || return 1
     # Make the durable boundary own every subsequent runtime change. A crash
     # before the shell flag is set is detected through the marker and journal.
     control maintenance-on
@@ -1150,8 +1172,25 @@ DEPLOYMENT_RELEASE_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(printf '%s' "${DEPLOYMENT_TA
 DEPLOYMENT_ID="deploy-${DEPLOYMENT_RELEASE_ID}"
 APP_COMMIT="${DEPLOYMENT_TARGET_COMMIT}"
 export DEPLOYMENT_TARGET_COMMIT DEPLOYMENT_RELEASE_ID DEPLOYMENT_ID DEPLOYMENT_OWNER APP_COMMIT
+checkpoint_timeout="$(env_value DEPLOYMENT_CHECKPOINT_TIMEOUT_SECONDS)"
+checkpoint_timeout="${checkpoint_timeout:-3600}"
+case "${checkpoint_timeout}" in
+  *[!0-9]*|'') echo "DEPLOYMENT_CHECKPOINT_TIMEOUT_SECONDS must be an integer." >&2; exit 1 ;;
+esac
+[ "${checkpoint_timeout}" -ge 600 ] && [ "${checkpoint_timeout}" -le 14400 ] || {
+  echo "DEPLOYMENT_CHECKPOINT_TIMEOUT_SECONDS must be between 600 and 14400 seconds." >&2
+  exit 1
+}
 if [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ]; then
   if [ "${DEPLOYMENT_CLAMAV_OPERATION}" = incident-recovery ]; then
+    shipment_cutover_required="$(env_value SHIPMENT_STATEMENT_CUTOVER_REQUIRED)"
+    case "${shipment_cutover_required:-false}" in
+      false) ;;
+      *) echo 'ClamAV incident recovery requires SHIPMENT_STATEMENT_CUTOVER_REQUIRED=false.' >&2; exit 1 ;;
+    esac
+    [ "${DEPLOYMENT_INITIAL_SCHEMA_BOOTSTRAP:-false}" = false ] || {
+      echo 'ClamAV incident recovery requires an existing deployment schema.' >&2; exit 1
+    }
     [ -f "${DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_FILE:-}" ] || { echo 'A fresh degraded-instance snapshot is required before incident maintenance.' >&2; exit 1; }
     [ -z "${DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_FILE:-}" ] || { echo 'Incident evidence must never be presented as a healthy rollback proof.' >&2; exit 1; }
     node "${OPERATIONS_ROOT}/scripts/clamav-incident-recovery.mjs" verify "$(compose ps -q clamav)" "${DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_FILE}"
@@ -1167,7 +1206,14 @@ if [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ]; then
   fi
   node "${OPERATIONS_ROOT}/scripts/clamav-release-readiness.mjs" scope "${DEPLOYMENT_CLAMAV_BASE_COMMIT:-}"
   [ -f "${DEPLOYMENT_CLAMAV_READY_FILE:-}" ] || { echo "A reviewed, current ClamAV staging receipt is required before maintenance." >&2; exit 1; }
-  node "${OPERATIONS_ROOT}/scripts/clamav-release-readiness.mjs" verify "${DEPLOYMENT_CLAMAV_READY_FILE}" "${DEPLOYMENT_CLAMAV_TARGET_IMAGE}"
+  if [ "${DEPLOYMENT_CLAMAV_OPERATION}" = incident-recovery ]; then
+    # Reserve the full checkpoint and 900-second mutation bounds, plus time
+    # for the protected drain, capture and retention outside the checkpoint job.
+    incident_runway_seconds=$((checkpoint_timeout + 900 + 600))
+    incident_receipt_sha256="$(verify_incident_target "${DEPLOYMENT_CLAMAV_READY_FILE}" "${incident_runway_seconds}")"
+  else
+    node "${OPERATIONS_ROOT}/scripts/clamav-release-readiness.mjs" verify "${DEPLOYMENT_CLAMAV_READY_FILE}" "${DEPLOYMENT_CLAMAV_TARGET_IMAGE}"
+  fi
   [ "$(docker image inspect --format '{{.Id}}' "${DEPLOYMENT_CLAMAV_TARGET_IMAGE}")" = "${DEPLOYMENT_CLAMAV_TARGET_IMAGE}" ] || {
     echo "The ClamAV target must be the locally available immutable image id from staging." >&2; exit 1;
   }
@@ -1199,7 +1245,11 @@ DEPLOYMENT_INQUIRY_IMAGE="${inquiry_repository}:${DEPLOYMENT_TARGET_COMMIT}"
 # survive later environment changes and never use a cross-tab version cookie.
 DEPLOYMENT_BROWSER_BUILD_ID="erp_$(printf '%s' "${DEPLOYMENT_RELEASE_ID}" | tr '[:upper:]' '[:lower:]')"
 export DEPLOYMENT_BROWSER_BUILD_ID
-DEPLOYMENT_NGINX_IMAGE="nginx:1.27-alpine"
+if [ "${DEPLOYMENT_CLAMAV_OPERATION}" = incident-recovery ]; then
+  DEPLOYMENT_NGINX_IMAGE="${DEPLOYMENT_PREVIOUS_NGINX_IMAGE}"
+else
+  DEPLOYMENT_NGINX_IMAGE="nginx:1.27-alpine"
+fi
 DEPLOYMENT_POSTGRES_IMAGE="${DEPLOYMENT_PREVIOUS_POSTGRES_IMAGE}"
 DEPLOYMENT_CLAMAV_IMAGE="${DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE}"
 export DEPLOYMENT_BACKEND_IMAGE DEPLOYMENT_FRONTEND_IMAGE DEPLOYMENT_INQUIRY_IMAGE DEPLOYMENT_NGINX_IMAGE DEPLOYMENT_POSTGRES_IMAGE DEPLOYMENT_CLAMAV_IMAGE
@@ -1218,7 +1268,7 @@ done
 DEPLOYMENT_BACKEND_IMAGE="$(docker image inspect --format '{{.Id}}' "${DEPLOYMENT_BACKEND_IMAGE}")"
 DEPLOYMENT_FRONTEND_IMAGE="$(docker image inspect --format '{{.Id}}' "${DEPLOYMENT_FRONTEND_IMAGE}")"
 DEPLOYMENT_INQUIRY_IMAGE="$(docker image inspect --format '{{.Id}}' "${DEPLOYMENT_INQUIRY_IMAGE}")"
-DEPLOYMENT_NGINX_IMAGE="$(docker image inspect --format '{{.Id}}' nginx:1.27-alpine)"
+DEPLOYMENT_NGINX_IMAGE="$(docker image inspect --format '{{.Id}}' "${DEPLOYMENT_NGINX_IMAGE}")"
 export DEPLOYMENT_BACKEND_IMAGE DEPLOYMENT_FRONTEND_IMAGE DEPLOYMENT_INQUIRY_IMAGE DEPLOYMENT_NGINX_IMAGE
 for release_image in "${DEPLOYMENT_BACKEND_IMAGE}" "${DEPLOYMENT_FRONTEND_IMAGE}" "${DEPLOYMENT_INQUIRY_IMAGE}"; do
   [ "$(docker image inspect --format '{{ index .Config.Labels "io.sabalan.performance.source-commit" }}' "${release_image}")" = "${PERFORMANCE_SOURCE_COMMIT}" ] || exit 1
@@ -1317,6 +1367,16 @@ if [ "${CAPTURE_ONLY}" -eq 1 ]; then
   # The already healthy original PostgreSQL is a capture prerequisite. Compose
   # up could apply this operation's environment and replace its configuration.
   verify_capture_only_configuration
+elif [ "${DEPLOYMENT_CLAMAV_OPERATION}" = incident-recovery ]; then
+  # Prove an existing usable schema and adopted Inquiry ledger while still open.
+  compose exec -T postgres sh -c 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+  run_backend_timed 60 node node_modules/prisma/build/index.js migrate status --schema prisma/schema.prisma
+  run_backend_timed 60 node -e '
+    const path = require("node:path");
+    const { verifyInquiryBaseline } = require("./dist/services/inquiryMigrationPlan.js");
+    verifyInquiryBaseline(path.join(process.env.INQUIRY_RECOVERY_SOURCE_DIR || "/app/recovery-sources/inquiry", "inquiry.db"))
+      .catch(error => { console.error(error.message); process.exitCode = 1; });
+  '
 else
   compose up -d --no-deps postgres
 fi
@@ -1328,6 +1388,9 @@ control prepare
 SESSION_PREPARED=1
 
 if ! try_acquire_advisory; then
+  if [ "${DEPLOYMENT_CLAMAV_OPERATION}" = incident-recovery ]; then
+    echo 'ClamAV incident recovery requires the advisory lease before maintenance.' >&2; exit 1
+  fi
   echo "Database connections are saturated; entering journaled maintenance to drain the previous backend automatically." >&2
   if [ "${CAPTURE_ONLY}" -eq 1 ]; then capture_pause_started="$(node -e 'process.stdout.write(process.hrtime.bigint().toString())')"; DEPLOYMENT_CAPTURE_PAUSE_STARTED_NS="${capture_pause_started}"; export DEPLOYMENT_CAPTURE_PAUSE_STARTED_NS; fi
   enter_maintenance
@@ -1345,7 +1408,9 @@ control acquire
 acquire_code=$?
 set -e
 if [ "${acquire_code}" -eq 4 ]; then
-  [ "${CAPTURE_ONLY}" -eq 0 ] || { echo "Capture-only requires an existing canonical DB lease schema; no bootstrap mutation is permitted." >&2; exit 1; }
+  if [ "${CAPTURE_ONLY}" -eq 1 ] || [ "${DEPLOYMENT_CLAMAV_OPERATION}" = incident-recovery ]; then
+    echo 'This operation requires an existing canonical DB lease schema.' >&2; exit 1
+  fi
   BOOTSTRAP=1
   DEPLOYMENT_INITIAL_SCHEMA_BOOTSTRAP=true
   export DEPLOYMENT_INITIAL_SCHEMA_BOOTSTRAP
@@ -1388,15 +1453,7 @@ assert_qa_remote_checkpoint_mount
 run_original_owned_with_heartbeat host_backup_retention BEFORE_CHECKPOINT
 bind_host_backup_retention_receipt BEFORE_CHECKPOINT
 echo "Creating, decrypt-validating, uploading, and reading back the coordinated checkpoint..."
-checkpoint_timeout="$(env_value DEPLOYMENT_CHECKPOINT_TIMEOUT_SECONDS)"
-checkpoint_timeout="${checkpoint_timeout:-3600}"
-case "${checkpoint_timeout}" in
-  *[!0-9]*|'') echo "DEPLOYMENT_CHECKPOINT_TIMEOUT_SECONDS must be an integer." >&2; exit 1 ;;
-esac
-[ "${checkpoint_timeout}" -ge 600 ] && [ "${checkpoint_timeout}" -le 14400 ] || {
-  echo "DEPLOYMENT_CHECKPOINT_TIMEOUT_SECONDS must be between 600 and 14400 seconds." >&2
-  exit 1
-}
+
 if [ "${CAPTURE_ONLY}" -eq 1 ]; then
   # Retain the original checkpoint owner; exceeding the qualification budget
   # never kills/adopts a live backup. Its actual pause is measured on reopen.
@@ -1435,6 +1492,9 @@ LEGACY_BACKEND_SIGNAL_PENDING=1
 assert_original_legacy_still_stopped
 LEGACY_BACKEND_SIGNAL_PENDING=0
 assert_qa_remote_checkpoint_mount
+if [ "${DEPLOYMENT_CLAMAV_OPERATION}" = incident-recovery ]; then
+  require_bound_incident_target "${REPO_ROOT}/.deploy-state/$(clamav_unit_name)/target.json" 900
+fi
 phase MUTATION_STARTED
 MUTATION_STARTED=1
 mutation_started_at="$(date +%s)"
@@ -1448,6 +1508,10 @@ if [ "${CONFIGURATION_ACTIVE}" -eq 1 ]; then
   node "${OPERATIONS_ROOT}/scripts/deployment-biometric-configuration.mjs" persist "${REPO_ROOT}"
 fi
 
+if [ "${DEPLOYMENT_CLAMAV_OPERATION}" = incident-recovery ]; then
+  echo 'Retaining the verified application schemas and business data.'
+  phase MIGRATIONS_APPLIED
+else
 echo "Applying migrations with a two-connection deployment identity..."
 remaining="$(remaining_mutation_seconds)" || exit 1
 if [ "${BOOTSTRAP}" -eq 1 ]; then
@@ -1576,6 +1640,8 @@ evidence_apply_name="contract-financial-evidence-apply-${DEPLOYMENT_ID}.json"
 remaining="$(remaining_mutation_seconds)" || exit 1
 run_backend_timed "${remaining}" node dist/scripts/reconcile-contract-financial-evidence.js --apply --deployment-checkpoint \
   --output="/app/deployment-reports/${evidence_apply_name}"
+
+fi
 
 phase RELEASE_STARTED
 refresh_performance_database_identity

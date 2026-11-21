@@ -1,3 +1,4 @@
+import { validateIncidentSnapshot, incidentAcquisitionStateNames } from '../backend/scripts/clamav-incident-policy.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import crypto from 'node:crypto';
@@ -95,7 +96,7 @@ export async function publishedVersions(resolve=resolveTxt) {
  return versions;
 }
 export function validateRepairPaths(files) {
- const allowed=new Set(['backend/Dockerfile','backend/package.json','package.json','docker-compose.prod.yml','docker-compose.local.yml','deploy/scripts/deploy.sh','backend/src/scripts/deployment-checkpoint.ts','backend/src/scripts/deployment-rollback.ts','backend/src/scripts/deployment-control.ts','backend/scripts/clamav-checkpoint.mjs','backend/scripts/clamav-checkpoint.d.mts','backend/scripts/clamav-incident-policy.mjs','scripts/clamav-release-readiness.mjs','scripts/clamav-incident-recovery.mjs','scripts/clamav-source-migration.mjs','docs/operations/clamav-repair.md']);
+ const allowed=new Set(['backend/Dockerfile','backend/package.json','package.json','docker-compose.prod.yml','docker-compose.local.yml','deploy/scripts/deploy.sh','deploy/scripts/dispatch-volume-transition.py','backend/src/scripts/deployment-checkpoint.ts','backend/src/scripts/deployment-rollback.ts','backend/src/scripts/deployment-control.ts','backend/scripts/clamav-checkpoint.mjs','backend/scripts/clamav-checkpoint.d.mts','backend/scripts/clamav-incident-policy.mjs','scripts/clamav-release-readiness.mjs','scripts/clamav-incident-recovery.mjs','scripts/clamav-source-migration.mjs','docs/operations/clamav-repair.md']);
  for(const file of files) if(!allowed.has(file) && !/^deploy\/clamav\/[a-zA-Z0-9_.-]+$/.test(file) && !/^tests\/clamav-repair\/[a-zA-Z0-9_.-]+$/.test(file)) throw new Error('ClamAV maintenance release contains unrelated source or migrations');
 }
 export function validateRepairPackage(previousValue,targetValue,file) {
@@ -147,6 +148,58 @@ export function validateReceipt(value,image,versions,now=Date.now()) {
   validateUfprCycle(value.ufprCycle, Date.parse(value.checkedAt));
  } else if(value.ufprCycle!==undefined)throw new Error('Unexpected UFPR updater evidence');
  return value;
+}
+
+export function validateIncidentTarget(receipt, snapshot, runwaySeconds, nowSeconds=Math.floor(Date.now()/1000)) {
+ if(receipt.acquisitionOrigin!==ufprOrigin)return receipt;
+ const original=snapshot.acquisition;
+ if(original?.origin!==mirrorOrigin)throw new Error('UFPR incident requires a verified original FEUP acquisition state');
+ assert.deepEqual(receipt.sourceMigration,original.sourceMigration,'UFPR vendor archive differs from the original FEUP provenance');
+ const cycle=receipt.ufprCycle;
+ if(cycle.attempted<original.attempted || cycle.attempted<original.sourceMigration.firstEligibleAttempt
+  || cycle.next<original.next)throw new Error('UFPR receipt would supersede the original FEUP schedule with an earlier slot');
+ if(!Number.isSafeInteger(runwaySeconds) || runwaySeconds<0 || cycle.next-nowSeconds<=runwaySeconds){
+  throw new Error('UFPR receipt does not leave sufficient runway before its next scheduled slot');
+ }
+ return receipt;
+}
+
+async function verifyUfprArchive(bank,receipt,snapshot) {
+ const prefix='.source-state/feup-predecessor/';
+ const stageSnapshotPath=prefix+'snapshot.json';
+ const stagePin=process.env.DEPLOYMENT_CLAMAV_UFPR_STAGING_ORIGINAL_SHA256;
+ if(!/^[a-f0-9]{64}$/.test(stagePin||''))throw new Error('UFPR staging requires the independently reviewed original snapshot checksum');
+ const stagedBytes=(await exec('tar',['-xOf',bank,'./'+stageSnapshotPath],{encoding:'buffer',maxBuffer:65536})).stdout;
+ if(crypto.createHash('sha256').update(stagedBytes).digest('hex')!==stagePin)throw new Error('UFPR staging original snapshot checksum differs');
+ const staged=JSON.parse(stagedBytes);
+ const observedAt=Date.parse(staged.checkedAt);
+ validateIncidentSnapshot(staged,snapshot.image,observedAt);
+ if(Date.now()-observedAt>24*3600000 || observedAt>Date.parse(snapshot.checkedAt)
+  || staged.acquisition.migrationSha256!==snapshot.acquisition.migrationSha256
+  || staged.configArchiveSha256!==snapshot.configArchiveSha256
+  || staged.acquisition.attempted>snapshot.acquisition.attempted
+  || observedAt>Date.parse(receipt.ufprCycle.containerStartedAt)
+  || staged.acquisition.next>receipt.ufprCycle.attempted){
+  throw new Error('UFPR staging did not preserve the observed FEUP source and its next eligible attempt');
+ }
+ assert.deepEqual(staged.acquisition.sourceMigration,snapshot.acquisition.sourceMigration,'UFPR staging original vendor provenance changed');
+
+ const state='.sabalan-updater-state',result='.sabalan-freshclam-result';
+ const expected={
+  [state]:crypto.createHash('sha256').update(`${receipt.ufprCycle.attempted} ${receipt.ufprCycle.succeeded} 0 ${receipt.ufprCycle.next}\n`).digest('hex'),
+  [result]:receipt.ufprCycle.resultSha256,
+  [stageSnapshotPath]:stagePin,
+  ...Object.fromEntries(incidentAcquisitionStateNames.map(name=>[prefix+name,staged.acquisition.stateFileHashes[name]])),
+  '.source-state/migration.json':snapshot.acquisition.migrationSha256,
+  ...Object.fromEntries(Object.entries(receipt.sourceMigration.originalStateFiles).map(([name,record])=>['.source-state/vendor-cdn/'+name,record.sha256])),
+ };
+ // GNU tar selects only the fixed members and hashes them in one streaming pass.
+ // The output has exactly one line per expected regular file, including duplicates.
+ const members=Object.keys(expected).map(name=>'./'+name);
+ const command='digest=$(sha256sum) && printf "%s %s\n" "${digest%% *}" "$TAR_FILENAME"';
+ const reported=(await exec('tar',['-xf',bank,'--to-command='+command,'--',...members])).stdout.trim().split('\n');
+ const expectedLines=Object.entries(expected).map(([name,digest])=>digest+' ./'+name);
+ assert.deepEqual(reported.sort(),expectedLines.sort(),'UFPR bank contents differ from the qualified update or original vendor provenance');
 }
 
 export function validateTransportIdentity(container,image) {
@@ -212,14 +265,36 @@ async function inspectBank(container,inspect,run,execute) {
  if(!detected)throw new Error('Scanner did not reject the streamed EICAR fixture');
  return {checkedAt:new Date().toISOString(),image,engine,versions,loadedDaily:Number(loaded[2]),updaterHealthy:true,signatureVerified:true,loadVerified:true,eicarRejected:true};
 }
+export function validateManagedScheduler(environment) {
+ if(!Array.isArray(environment))throw new Error('Managed scanner environment is missing');
+ const canonical={
+  CLAMAV_DATABASE_DIRECTORY:'/var/lib/clamav',
+  CLAMAV_UPDATE_INTERVAL_SECONDS:'7200',
+  CLAMAV_RUN_DIRECTORY:'/run/sabalan-clamav',
+ };
+ for(const [key,expected] of Object.entries(canonical)){
+  const values=environment.filter(value=>value.startsWith(key+'='));
+  if(values.length>1 || (values.length===1 && values[0]!==key+'='+expected)){
+   throw new Error('Managed scanner environment is not the immutable direct acquisition runtime: '+key);
+  }
+ }
+}
+
 async function verifyUfprImage(container,inspection,run) {
  const image=JSON.parse(await run(['image','inspect',inspection.Image]))[0];
- const exact=values=>{
-  const modes=values?.filter(value=>value.startsWith('CLAMAV_ACQUISITION_TRANSPORT='));
-  return modes?.length===1 && modes[0]==='CLAMAV_ACQUISITION_TRANSPORT=direct';
+ const direct=environment=>{
+  validateManagedScheduler(environment);
+  const modes=environment.filter(value=>value.startsWith('CLAMAV_ACQUISITION_TRANSPORT='));
+  return modes.length===1 && modes[0]==='CLAMAV_ACQUISITION_TRANSPORT=direct';
  };
- if(inspection.Image!==ufprImage || image?.Id!==ufprImage || !exact(image.Config?.Env) || !exact(inspection.Config?.Env)) {
-  throw new Error('UFPR mirror requires the immutable direct acquisition image');
+ const bank='/var/lib/clamav';
+ const protectedPaths=[bank,'/etc/clamav','/run/sabalan-clamav','/usr/local/bin','/usr/local/share'];
+ const overlaps=(left,right)=>left===right || left==='/' || right==='/' || left.startsWith(right+'/') || right.startsWith(left+'/');
+ const mounts=inspection.Mounts ?? [];
+ if(inspection.Image!==ufprImage || image?.Id!==ufprImage || !direct(image.Config?.Env) || !direct(inspection.Config?.Env)
+  || mounts.filter(mount=>mount.Destination===bank && mount.RW===true).length!==1
+  || mounts.some(mount=>mount.Destination!==bank && protectedPaths.some(file=>overlaps(file,mount.Destination)))){
+  throw new Error('UFPR mirror requires the immutable direct acquisition runtime');
  }
  await run(['exec',container,'/usr/local/bin/sabalan-clamav-acquisition-transport']);
 }
@@ -243,7 +318,10 @@ async function observeUfprCycle(container, inspection, run, installed) {
  assert.equal(await run(stateArgs),state,'UFPR updater changed while reading its result');
  const cycle=validateUfprCycle({containerStartedAt:installed?.ufprCycle?.containerStartedAt ?? inspection.State.StartedAt,
   attempted,succeeded,next,resultSha256},Date.now());
- if(installed)assert.deepEqual(cycle,installed.ufprCycle,'Activated UFPR bank no longer matches its qualified updater result');
+ if(installed){
+  assert.deepEqual(cycle,installed.ufprCycle,'Activated UFPR bank no longer matches its qualified updater result');
+  if(cycle.next<=Math.floor(Date.now()/1000))throw new Error('Activated UFPR bank has reached its next scheduled slot');
+ }
  return cycle;
 }
 export async function inspectCandidate(container,execute=exec,resolve=resolveTxt,installed) {
@@ -502,10 +580,28 @@ if(process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href) {
    } finally {await exec('docker',['exec',input,'rm','-f',temporary]);}
   }
   else if(command==='rollback-proof') validateRollbackProof(JSON.parse(await fs.readFile(input,'utf8')),image,await publishedVersions());
-  else if(command==='verify') {
-   const receipt=validateReceipt(JSON.parse(await fs.readFile(input,'utf8')),image,await publishedVersions());
-   if(image===ufprImage && process.env.DEPLOYMENT_CLAMAV_OPERATION!=='incident-recovery')throw new Error('UFPR target requires protected incident recovery');
-   if(receipt.bankSha256!==await fileDigest(path.join(path.dirname(input),'target-bank.tar'))) throw new Error('Prepared signature bank checksum mismatch');
+  else if(command==='verify'||command==='verify-incident') {
+   const receiptBytes=await fs.readFile(input);
+   const receipt=validateReceipt(JSON.parse(receiptBytes),image,await publishedVersions());
+   const incident=process.env.DEPLOYMENT_CLAMAV_OPERATION==='incident-recovery';
+   if(image===ufprImage && (!incident || command!=='verify-incident'))throw new Error('UFPR target requires protected incident recovery');
+   const bank=path.join(path.dirname(input),'target-bank.tar');
+   if(receipt.bankSha256!==await fileDigest(bank))throw new Error('Prepared signature bank checksum mismatch');
+   if(command==='verify-incident'){
+    if(!incident)throw new Error('Incident readiness requires the protected incident operation');
+    const [snapshotFile,runway]=process.argv.slice(5);
+    const snapshotBytes=await fs.readFile(snapshotFile);
+    if(crypto.createHash('sha256').update(snapshotBytes).digest('hex')!==process.env.DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256){
+     throw new Error('ClamAV incident original snapshot changed after preflight');
+    }
+    const snapshot=validateIncidentSnapshot(JSON.parse(snapshotBytes),process.env.DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE);
+    validateIncidentTarget(receipt,snapshot,Number(runway));
+    if(receipt.acquisitionOrigin===ufprOrigin){
+     await verifyUfprArchive(bank,receipt,snapshot);
+     validateIncidentTarget(receipt,snapshot,Number(runway));
+    }
+    console.log(crypto.createHash('sha256').update(receiptBytes).digest('hex'));
+   }
   }
   else throw new Error('Use inspect/export <inactive-container> [output-directory] or verify <receipt> <immutable-image>');
  } catch(error){console.error(error.message);process.exitCode=1;}

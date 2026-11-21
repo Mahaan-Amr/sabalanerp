@@ -17,7 +17,7 @@ test('protected release captures the stopped bank before checkpoint, applies tar
 // Execute the real controller against fail-closed CLI adapters. All files, leases,
 // image state and backup transport are private fixtures; no real deployment occurs.
 for(const scenario of ['qualification','remote-tamper','post-mutation','rollback-qualifier','after-open','success','storage-preflight','legacy-signal','runtime-not-closed','incident-success','incident-remote-tamper','incident-post-mutation','incident-after-open','incident-stale-target','incident-updater-refusal','incident-install-interrupted','incident-lease-expired',
- 'incident-before-maintenance','incident-acquire-failure','incident-after-acquire','incident-marker-interrupted',
+ 'incident-cutover-required','incident-before-maintenance','incident-acquire-failure','incident-after-acquire','incident-marker-interrupted',
  ...['PREFLIGHT','LEASE_ACQUIRED','MAINTENANCE_REQUESTED-before','MAINTENANCE_REQUESTED','TRAFFIC_BLOCKED','SERVICES_DRAINED','LOCAL_CHECKPOINT_VERIFIED','REMOTE_CHECKPOINT_VERIFIED'].map(phase=>'incident-resume-'+phase)]) test(`complete controller fixture: ${scenario}`,{timeout:120000},async()=>{
  const incident=scenario.startsWith('incident-'), failure=scenario.replace(/^incident-/,'');
  const resumed=failure.startsWith('resume-');
@@ -65,11 +65,12 @@ for(const scenario of ['qualification','remote-tamper','post-mutation','rollback
   }
   const environment=path.join(root,'.env.prod');
   fs.writeFileSync(environment,`DEPLOYMENT_SECRET_DIR=${root}/secrets\nDEPLOYMENT_REMOTE_MOUNT_HOST=${root}/remote\nDEPLOYMENT_REPORT_DIR_HOST=${root}/reports\nDEPLOYMENT_OWNER=fixture\nDEPLOYMENT_BACKEND_IMAGE_REPOSITORY=fixture/backend\nDEPLOYMENT_FRONTEND_IMAGE_REPOSITORY=fixture/frontend\nDEPLOYMENT_INQUIRY_IMAGE_REPOSITORY=fixture/inquiry\nDOMAIN=fixture.invalid\nINQUIRY_DOMAIN=inquiry.fixture.invalid\n`);
+  if(failure==='cutover-required')fs.appendFileSync(environment,'SHIPMENT_STATEMENT_CUTOVER_REQUIRED=true\n');
   for(const kind of ['git','docker','node','python3'])fs.writeFileSync(path.join(root,'bin',kind),`#!/bin/sh\nexec ${quote(process.execPath)} ${quote(fixture)} ${kind} "$@"\n`,{mode:0o755});
   const shims={sh:`case "$1" in */deploy/scripts/storage-preflight.sh) printf '%s\\n' '{"kind":"storage-preflight","args":[]}' >> '${root}/commands.jsonl'; [ "$TEST_RELEASE_FAILURE" != storage-preflight ] || exit 47; exit 0;; *) exec /bin/sh "$@";; esac`,flock:'exit 0',curl:'printf 503',df:"printf 'Filesystem 1024-blocks Used Available Capacity Mounted\\nfixture 900000000 1 899999999 1%% /\\n'",sleep:'exec /bin/sleep 0.02',timeout:'shift; exec "$@"'};
   for(const [name,body]of Object.entries(shims))fs.writeFileSync(path.join(root,'bin',name),'#!/bin/sh\n'+body+'\n',{mode:0o755});
   const result=spawnSync('/bin/sh',[path.join(repository,'deploy/scripts/deploy.sh'),environment],{cwd:root,encoding:'utf8',timeout:110000,env:{...process.env,PATH:path.join(root,'bin')+':'+process.env.PATH,TEST_RELEASE_ROOT:root,TEST_SOURCE_ROOT:repository,TEST_RELEASE_FAILURE:failure,TEST_TYPESCRIPT_JS:typescript,DEPLOYMENT_REPO_ROOT:root,DEPLOYMENT_MODE:'release',DEPLOYMENT_CLAMAV_OPERATION:resumed?'repair':incident?'incident-recovery':'repair',DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_FILE:incident?path.join(root,'incident.json'):'',DEPLOYMENT_CLAMAV_TARGET_IMAGE:resumed?'':targetImage,DEPLOYMENT_CLAMAV_BASE_COMMIT:'a'.repeat(40),DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_FILE:incident?'':path.join(root,'proof.json'),DEPLOYMENT_CLAMAV_READY_FILE:path.join(root,'candidate/target.json')}});
-  const expected=resumed?1:{qualification:41,'remote-tamper':43,'post-mutation':44,'rollback-qualifier':44,'after-open':46,success:0,'storage-preflight':47,'legacy-signal':48,'runtime-not-closed':1,'stale-target':90,'updater-refusal':90,'install-interrupted':90,'lease-expired':90,'before-maintenance':22,'acquire-failure':23,'after-acquire':24,'marker-interrupted':25}[failure];
+  const expected=resumed?1:{qualification:41,'remote-tamper':43,'post-mutation':44,'rollback-qualifier':44,'after-open':46,success:0,'storage-preflight':47,'legacy-signal':48,'runtime-not-closed':1,'stale-target':90,'updater-refusal':90,'install-interrupted':90,'lease-expired':90,'cutover-required':1,'before-maintenance':22,'acquire-failure':23,'after-acquire':24,'marker-interrupted':25}[failure];
   assert.equal(result.status,expected,`${result.stdout}\n${result.stderr}`);
   const commands=fs.readFileSync(path.join(root,'commands.jsonl'),'utf8').trim().split('\n').map(line=>JSON.parse(line));
   const includes=text=>commands.filter(c=>c.args.includes(text));
@@ -94,8 +95,15 @@ for(const scenario of ['qualification','remote-tamper','post-mutation','rollback
   if(['post-mutation','rollback-qualifier','after-open','success','install-interrupted','lease-expired'].includes(failure))assert.ok(activation>remotePhase&&remotePhase>=0,'activation requires both verified checkpoints');
   else assert.equal(activation,-1,'failed qualification or checkpoint must never activate');
   assert.equal(includes('dist/scripts/deployment-rollback.js').length,['post-mutation','rollback-qualifier','install-interrupted','lease-expired'].includes(failure)?1:0,'never replay rollback or restore old data after public writes');
-  const beforeBoundary=['before-maintenance','acquire-failure','after-acquire','storage-preflight','legacy-signal','resume-PREFLIGHT','resume-LEASE_ACQUIRED','resume-MAINTENANCE_REQUESTED-before'].includes(failure);
-  if(['qualification','stale-target','updater-refusal'].includes(failure)||(beforeBoundary&&failure!=='after-acquire'))assert.equal(controls('maintenance-on').length,0);
+  if(incident&&failure==='success'){
+   for(const writer of ['dist/scripts/deployment-owned-migrations.js','dist/scripts/deployment-inquiry.js',
+    'dist/scripts/migrate-all-contract-product-graphs.js','--apply']){
+    assert.equal(includes(writer).length,0,`incident must leave business data unchanged: ${writer}`);
+   }
+   assert.equal(includes('node_modules/prisma/build/index.js').filter(command=>command.args.includes('status')).length,1);
+  }
+  const beforeBoundary=['cutover-required','before-maintenance','acquire-failure','after-acquire','storage-preflight','legacy-signal','resume-PREFLIGHT','resume-LEASE_ACQUIRED','resume-MAINTENANCE_REQUESTED-before'].includes(failure);
+  if(['qualification','stale-target','updater-refusal'].includes(failure)||beforeBoundary)assert.equal(controls('maintenance-on').length,0);
   else if(failure==='remote-tamper'||failure==='rollback-qualifier'||failure==='after-open'||failure==='runtime-not-closed'||(incident&&(['remote-tamper','post-mutation','install-interrupted','lease-expired','marker-interrupted','after-acquire'].includes(failure)||resumed))){
    assert.ok(fs.existsSync(path.join(root,'maintenance.json')),'failed rollback verification or post-open failure retains maintenance');
    assert.equal(controls('maintenance-off').length,failure==='after-open'?1:0);

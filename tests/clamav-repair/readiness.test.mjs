@@ -239,7 +239,7 @@ test('UFPR is a fixed direct acquisition source with unchanged publisher verific
  assert.throws(()=>validateAcquisitionConfiguration(config.replace('ScriptedUpdates yes','ScriptedUpdates no')));
  assert.throws(()=>validateAcquisitionConfiguration(config.replace('TestDatabases yes','TestDatabases no')));
  assert.throws(()=>validateAcquisitionConfiguration(config+'HTTPProxyServer sabalan-clamav-egress\nHTTPProxyPort 10808\n','backup-host-http-v1'));
- const image='sha256:d40cb3d0822e616661899426ab55922e0fe6ab00ada574c2b3962635f561d8df';
+ const image='sha256:27b42e1a6c76b8d3ad9e88738c45b2c6e54339cb92dfba66205868a9c357c941';
  const versions={main:63,daily:28188,bytecode:339};
  const receipt={image,acquisitionOrigin:origin,engine:'1.4.6',checkedAt:new Date().toISOString(),
   updaterHealthy:true,signatureVerified:true,loadVerified:true,eicarRejected:true,loadedDaily:versions.daily,versions};
@@ -254,6 +254,8 @@ test('UFPR is a fixed direct acquisition source with unchanged publisher verific
   attempted,succeeded:attempted+15,next:attempted+7200,resultSha256:'b'.repeat(64)};
  const qualified={...receipt,sourceMigration,ufprCycle};
  assert.equal(validateReceipt(qualified,image,versions).acquisitionOrigin,origin);
+ const originalIndex='sha256:d40cb3d0822e616661899426ab55922e0fe6ab00ada574c2b3962635f561d8df';
+ assert.throws(()=>validateReceipt({...qualified,image:originalIndex},originalIndex,versions),/Unreviewed UFPR acquisition image or origin/);
  assert.throws(()=>validateReceipt({...qualified,acquisitionOrigin:undefined},image,versions),/Unreviewed UFPR/);
  assert.throws(()=>validateReceipt({...qualified,acquisitionOrigin:'https://mirrors.fe.up.pt/pub/clamav'},image,versions),/Unreviewed UFPR/);
  assert.throws(()=>validateReceipt({...qualified,ufprCycle:{...ufprCycle,

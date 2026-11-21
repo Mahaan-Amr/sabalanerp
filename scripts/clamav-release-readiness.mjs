@@ -12,7 +12,8 @@ import {mirrorOrigin, validateSourceMigration} from './clamav-source-migration.m
 const exec=promisify(execFile);
 const managedVerifier='managed-1.4.6-v1', nativeVerifier='native-1.4-daemon-v1';
 const ufprOrigin='https://clamavdb.c3sl.ufpr.br';
-const ufprImage='sha256:d40cb3d0822e616661899426ab55922e0fe6ab00ada574c2b3962635f561d8df';
+// Pin the complete linux/amd64 executable manifest used in the verified runtime archive.
+const ufprImage='sha256:27b42e1a6c76b8d3ad9e88738c45b2c6e54339cb92dfba66205868a9c357c941';
 const reviewedMirror=origin=>origin===mirrorOrigin || origin===ufprOrigin;
 const updateRefusal=line=>!/^(WARNING: )?Cool-down expired, ok to try again\.$/.test(line) && /cool.?down|rate.?limit|blocked|ERROR:|HTTP[^0-9]*(429|403)/i.test(line);
 export function validateNativeUpdater(sample,config,logs,versions,clamdConfig='') {

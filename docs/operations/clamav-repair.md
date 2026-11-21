@@ -29,6 +29,8 @@ fixed UFPR image built from the same pinned engine with the direct acquisition
 transport. Qualification checks the effective image configuration, exact
 publisher versions, genuine scheduled FreshClam success, matching loaded bank,
 and the previous vendor-state hashes archived during the original FEUP migration.
+The incident target pins the exact linux/amd64 OCI runtime manifest. Verify the
+manifest, config, and all filesystem layers before staging the image.
 Keep the existing updater schedule and cooldown when preparing this replacement. Local
 recreation reuses `clamav_database` with the exact existing `freshclam.dat`,
 updater schedule and result evidence. Do not clear or advance those files:

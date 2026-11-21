@@ -13,7 +13,7 @@ const fail = (message) => { throw new Error(message); };
 const validId = id => /^[a-zA-Z0-9_-]{1,160}$/.test(id) ? id : fail('Unsafe deployment id');
 export const immutableImage = value => /^(?:[a-zA-Z0-9./:_-]+@)?sha256:[a-f0-9]{64}$/.test(value || '') ? value : fail('An immutable ClamAV image digest is required');
 export function requireBoundary({session, active, maintenance, id, token, phase}) {
- if (!['SERVICES_DRAINED','MUTATION_STARTED','ROLLBACK_STARTED'].includes(phase)
+ if (!['SERVICES_DRAINED','REMOTE_CHECKPOINT_VERIFIED','MUTATION_STARTED','ROLLBACK_STARTED'].includes(phase)
    || !token || session?.deploymentId !== id || session?.leaseToken !== token || session?.phase !== phase
    || active?.id !== id || active?.leaseToken !== token || active?.phase !== phase
    || !Number.isFinite(new Date(active.leaseExpiresAt).getTime()) || new Date(active.leaseExpiresAt).getTime() <= Date.now() || maintenance?.deploymentId !== id) fail('ClamAV operation requires the owned lease, journal phase and maintenance boundary');
@@ -62,10 +62,11 @@ export async function captureUnit({bank,unit,id,image,target}) {
  await exec('tar',['-cpf',path.join(unit,'bank.tar'),'-C',bank,'.']);
  const incident = await fs.stat(path.join(unit,'incident-snapshot.json')).catch(()=>null);
  if (incident && await fs.stat(path.join(unit,'rollback-proof.json')).catch(()=>null)) fail('Incident evidence cannot be substituted for a healthy rollback proof');
+ const incidentCapturedAt = incident ? new Date().toISOString() : undefined;
  const evidenceFile = incident ? 'incident-snapshot.json' : 'rollback-proof.json';
  if(await fs.stat(path.join(unit,evidenceFile)).catch(()=>null)) {
   const proof=JSON.parse(await fs.readFile(path.join(unit,evidenceFile),'utf8'));
-  if (incident) validateIncidentSnapshot(proof, image);
+  if (incident) validateIncidentSnapshot(proof, image, Date.parse(incidentCapturedAt));
   if(proof.image!==image || proof.configArchiveSha256!==(await digest(path.join(unit,'config.tar'))).sha256) fail('Rehearsed rollback configuration/image differs from the drained snapshot');
   if(Object.keys(proof.bankFiles || {}).length!==3) fail('Rollback bank evidence is incomplete');
   for(const [file,expected] of Object.entries(proof.bankFiles)) {
@@ -89,7 +90,7 @@ export async function captureUnit({bank,unit,id,image,target}) {
    files[file]=await digest(path.join(unit,file));
  }
  await verifyTargetReceipt(unit,files,target);
- const metadata={version:1,deploymentId:id,image,files};
+ const metadata={version:1,deploymentId:id,image,files,...(incidentCapturedAt ? {incidentCapturedAt} : {})};
  await fs.writeFile(path.join(unit,'unit.json'),JSON.stringify(metadata)+'\n',{mode:0o600,flag:'wx'});
  return metadata;
 }
@@ -111,6 +112,19 @@ export async function verifyUnit({unit,id,checkpoint,target}) {
  }
  await verifyTargetReceipt(unit,metadata.files,target);
  return metadata;
+}
+export async function verifyIncidentCapture({unit,id,checkpoint,target,snapshotSha256,now=Date.now()}) {
+ if (!checkpoint) fail('Original incident capture requires the verified coordinated checkpoint');
+ const metadata=await verifyUnit({unit,id,checkpoint,target});
+ const capturedAt=Date.parse(metadata.incidentCapturedAt);
+ if (!Number.isFinite(capturedAt) || capturedAt>now || !/^[a-f0-9]{64}$/.test(snapshotSha256 || '')
+  || metadata.files['incident-snapshot.json']?.sha256!==snapshotSha256) {
+  fail('Original incident snapshot capture binding is missing or changed');
+ }
+ const bytes=await fs.readFile(path.join(unit,'incident-snapshot.json'));
+ if (crypto.createHash('sha256').update(bytes).digest('hex')!==snapshotSha256) fail('Original incident snapshot capture binding changed');
+ validateIncidentSnapshot(JSON.parse(bytes),metadata.image,capturedAt);
+ return capturedAt;
 }
 export async function recoverUnit({unit,id,checkpoint,readArchive}) {
  validId(id);
@@ -198,7 +212,9 @@ async function main() {
   const session=JSON.parse(await fs.readFile(path.join(reports,'active-deployment-session.json'),'utf8'));
   const active=await prisma.deploymentOperation.findUnique({where:{activeKey:'production'}});
   const maintenance=JSON.parse(await fs.readFile(path.join(coordination,'deployment-maintenance.json'),'utf8'));
-  const phase=process.argv[2]==='capture'?'SERVICES_DRAINED':'MUTATION_STARTED';
+  const command=process.argv[2];
+  const phase={capture:'SERVICES_DRAINED','verify-incident-capture':'REMOTE_CHECKPOINT_VERIFIED',activate:'MUTATION_STARTED'}[command];
+  if (!phase) fail('Unsupported ClamAV checkpoint command');
   requireBoundary({session,active,maintenance,id,token:process.env.DEPLOYMENT_LEASE_TOKEN,phase});
   const unit=path.join(coordination,`clamav-checkpoint-${id}`);
   const target=boundIncidentTarget(session);
@@ -207,7 +223,17 @@ async function main() {
    const expected = target ? process.env.DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256 : process.env.DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_SHA256;
    if((await digest(path.join(unit,evidence))).sha256!==expected) fail('Original-instance evidence changed after preflight');
    await captureUnit({bank:'/app/recovery-sources/clamav',unit,id,image:process.env.DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE,target});
-  } else if(process.argv[2]==='activate') {
+  } else if (command==='verify-incident-capture') {
+   if (!target) fail('An owned incident operation is required');
+   const capturedAt=await verifyIncidentCapture({unit,id,checkpoint:active.checkpointJson,target,snapshotSha256:session.clamavIncidentSnapshotSha256});
+   const liveSession=JSON.parse(await fs.readFile(path.join(reports,'active-deployment-session.json'),'utf8'));
+   const liveMaintenance=JSON.parse(await fs.readFile(path.join(coordination,'deployment-maintenance.json'),'utf8'));
+   const liveActive=await prisma.deploymentOperation.findUnique({where:{activeKey:'production'}});
+   requireBoundary({session:liveSession,active:liveActive,maintenance:liveMaintenance,id,token:process.env.DEPLOYMENT_LEASE_TOKEN,phase});
+   boundIncidentTarget(liveSession);
+   console.log(capturedAt);
+   return;
+  } else if(command==='activate') {
     const checkpoint=JSON.parse(await fs.readFile(path.join(coordination,'deployment-checkpoint.json'),'utf8'));
     if(!target){
       await verifyUnit({unit,id,checkpoint});

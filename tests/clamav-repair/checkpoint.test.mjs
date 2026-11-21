@@ -154,3 +154,40 @@ test('incident capture and activation require the preflight receipt even when re
   assert.equal(fs.readFileSync(path.join(bank,'daily.cvd'),'utf8'),'replacement-target');
  } finally {fs.rmSync(root,{recursive:true,force:true});}
 });
+
+test('the authenticated capture time keeps exact original evidence verifiable after slow remote readback', async () => {
+ const {createHash}=await import('node:crypto');
+ const {verifyIncidentCapture}=await import('../../backend/scripts/clamav-checkpoint.mjs');
+ const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
+ const now=Date.now();
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'clamav-capture-time-'));
+ try {
+  const id='slow-readback',bank=path.join(root,'bank'),unit=path.join(root,'unit');
+  const image='sha256:'+'a'.repeat(64);
+  fs.mkdirSync(bank); fs.mkdirSync(unit);
+  const bankFiles={};
+  for (const name of ['main','daily','bytecode']) {
+   const file=name+'.cvd';
+   fs.writeFileSync(path.join(bank,file),name);
+   bankFiles[file]=hash(name);
+  }
+  fs.writeFileSync(path.join(unit,'config.tar'),'config');
+  const snapshot={kind:'DEGRADED_CLAMAV_INCIDENT_V1',image,engine:'1.4.6',
+   checkedAt:new Date(now-120000).toISOString(),versions:{main:63,daily:28190,bytecode:339},
+   bankFiles,configArchiveSha256:hash('config'),issues:['SIGNATURES_STALE'],reopenOriginal:false};
+  const bytes=JSON.stringify(snapshot);
+  fs.writeFileSync(path.join(unit,'incident-snapshot.json'),bytes);
+  const unitMetadata=await captureUnit({bank,unit,id,image});
+  const unitFile=path.join(unit,'unit.json');
+  const entries={...unitMetadata.files,'unit.json':{sha256:hash(fs.readFileSync(unitFile)),size:fs.statSync(unitFile).size}};
+  const checkpoint={deploymentId:id,localVerified:true,remoteVerified:true,rollbackReleaseSet:{clamav:image},
+   manifest:{components:Object.entries(entries).map(([file,entry])=>({path:'recovery-coordination/clamav-checkpoint-'+id+'/'+file,...entry}))}};
+  const input={unit,id,checkpoint,snapshotSha256:hash(bytes),now:now+5400000};
+  const at=await verifyIncidentCapture(input);
+  assert.ok(at>=now && at<now+60000);
+  await assert.rejects(()=>verifyIncidentCapture({...input,snapshotSha256:'0'.repeat(64)}),/snapshot.*binding/i);
+  await assert.rejects(()=>verifyIncidentCapture({...input,checkpoint:{...checkpoint,remoteVerified:false}}),/verified coordinated checkpoint/);
+  fs.writeFileSync(unitFile,JSON.stringify({...unitMetadata,incidentCapturedAt:new Date(now-30000).toISOString()}));
+  await assert.rejects(()=>verifyIncidentCapture(input),/encrypted checkpoint manifest/);
+ } finally {fs.rmSync(root,{recursive:true,force:true});}
+});

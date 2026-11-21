@@ -661,12 +661,14 @@ if(process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href) {
    if(receipt.bankSha256!==await fileDigest(bank))throw new Error('Prepared signature bank checksum mismatch');
    if(command==='verify-incident'){
     if(!incident)throw new Error('Incident readiness requires the protected incident operation');
-    const [snapshotFile,runway]=process.argv.slice(5);
+    const [snapshotFile,runway,captureTime]=process.argv.slice(5);
     const snapshotBytes=await fs.readFile(snapshotFile);
     if(crypto.createHash('sha256').update(snapshotBytes).digest('hex')!==process.env.DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256){
      throw new Error('ClamAV incident original snapshot changed after preflight');
     }
-    const snapshot=validateIncidentSnapshot(JSON.parse(snapshotBytes),process.env.DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE);
+    const observedAt=captureTime===undefined ? Date.now() : Number(captureTime);
+    if (!Number.isSafeInteger(observedAt) || observedAt>Date.now()) throw new Error('Invalid original incident capture time');
+    const snapshot=validateIncidentSnapshot(JSON.parse(snapshotBytes),process.env.DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE,observedAt);
     validateIncidentTarget(receipt,snapshot,Number(runway));
     if(receipt.acquisitionOrigin===ufprOrigin){
      await verifyUfprArchive(bank,receipt,snapshot);

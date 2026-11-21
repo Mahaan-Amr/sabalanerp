@@ -6,7 +6,10 @@ const hash=b=>crypto.createHash('sha256').update(b).digest('hex');
 const read=file=>JSON.parse(fs.readFileSync(path.join(root,file),'utf8'));
 const save=(file,value)=>fs.writeFileSync(path.join(root,file),JSON.stringify(value));
 const record=value=>fs.appendFileSync(log,JSON.stringify(value)+'\n');
-const env=key=>(a.find(value=>value.startsWith(key+'='))||'').slice(key.length+1);
+const env=key=>{
+ const exported=a.find((value,index)=>a[index-1]==='-e' && (value===key || value.startsWith(key+'=')));
+ return exported===key ? process.env[key] || '' : (exported || '').slice(key.length+1);
+};
 const phase=()=>fs.existsSync(path.join(root,'reports/active-deployment-session.json'))?read('reports/active-deployment-session.json').phase:'';
 const failure=process.env.TEST_RELEASE_FAILURE;
 const copy=(source,destination)=>fs.cpSync(source,destination,{recursive:true});
@@ -96,6 +99,14 @@ const rollbackEnvironment={PERFORMANCE_RELEASE_COMMIT:'a'.repeat(40),PERFORMANCE
     if(receipt.bankSha256!==hash(fs.readFileSync(path.join(path.dirname(input),'target-bank.tar'))))throw Error('Target binding mismatch');
     if(command==='verify-incident'){
      const snapshot=JSON.parse(fs.readFileSync(a[4]));
+     const {validateIncidentSnapshot}=await import(require('node:url').pathToFileURL(path.join(repository,'backend/scripts/clamav-incident-policy.mjs')));
+     let observedAt=Date.now();
+     if (phase()==='REMOTE_CHECKPOINT_VERIFIED') {
+      const unit=read('coordination/clamav-checkpoint-'+read('reports/active-deployment-session.json').deploymentId+'/unit.json');
+      observedAt=Date.parse(unit.incidentCapturedAt);
+      if (Number(a[6])!==observedAt) throw Error('Controller did not use the authenticated capture time');
+     } else if (a[6]!==undefined) throw Error('Preflight must use current time');
+     validateIncidentSnapshot(snapshot,snapshot.image,observedAt);
      policy.validateIncidentTarget(receipt,snapshot,Number(a[5]));
      console.log(hash(fs.readFileSync(input)));return;
     }
@@ -130,6 +141,9 @@ const rollbackEnvironment={PERFORMANCE_RELEASE_COMMIT:'a'.repeat(40),PERFORMANCE
    if(format==='{{.Image}} {{.State.Running}}'&&name==='postgres'){
     console.log((failure==='resume-wrong-postgres'?image('inquiry'):image('postgres'))+' '+(failure!=='resume-stopped-postgres'));return;
    }
+   if(name==='clamav' && format==='{{.State.Status}}'){
+    console.log(read('runtime.json').clamavRunning===false?'exited':'running');return;
+   }
    console.log(format==='{{.Image}}'?image(name):format==='{{.Id}}'?(name==='backend'?backendId:name):format==='{{.State.Running}}'?'false':'10.0.0.2');
   } else console.log(JSON.stringify([{Id:backendId,Image:image('backend'),Config:{Env:Object.entries(rollbackEnvironment).map(([k,v])=>k+'='+v)},State:{Running:true},Mounts:[]}]));
   return;
@@ -153,9 +167,12 @@ const rollbackEnvironment={PERFORMANCE_RELEASE_COMMIT:'a'.repeat(40),PERFORMANCE
  }
  if(a.includes('config')){console.log(a.includes('json')?JSON.stringify({name:'fixture',services:{backend:{volumes:[{type:'volume',source:'backend_storage_dispatch_documents',target:'/app/storage/dispatch-documents'}]}},volumes:{backend_storage_dispatch_documents:{name:'fixture_dispatch_documents'}}}):'services: {}');return;}
  if(a.some(value=>value.includes('exec python3 - --assert-closed'))){if(failure==='runtime-not-closed')process.exit(49);return;}
+ if(a.includes('stop') && a.includes('clamav')){
+  const state=read('runtime.json');state.clamavRunning=false;save('runtime.json',state);return;
+ }
  if(a.includes('build')||a.includes('create')||a.includes('stop')||a.includes('start'))return;
  if(a.includes('up')){
-  if(a.includes('clamav')){const state=read('runtime.json');state.clamav=process.env.DEPLOYMENT_CLAMAV_IMAGE;save('runtime.json',state);}return;
+  if(a.includes('clamav')){const state=read('runtime.json');state.clamav=process.env.DEPLOYMENT_CLAMAV_IMAGE;state.clamavRunning=true;save('runtime.json',state);}return;
  }
  if(a.includes('dist/scripts/deployment-control.js')){
   const command=a[a.indexOf('dist/scripts/deployment-control.js')+1],session='reports/active-deployment-session.json';
@@ -184,9 +201,9 @@ const rollbackEnvironment={PERFORMANCE_RELEASE_COMMIT:'a'.repeat(40),PERFORMANCE
  }
  const id=env('DEPLOYMENT_ID'),unit=path.join(coordination,'clamav-checkpoint-'+id);
  if(a.includes('scripts/clamav-checkpoint.mjs')){
-  const {requireBoundary,boundIncidentTarget,captureUnit,restoreUnit,verifyUnit}=await import(require('node:url').pathToFileURL(path.join(repository,'backend/scripts/clamav-checkpoint.mjs')));
+  const {requireBoundary,boundIncidentTarget,captureUnit,restoreUnit,verifyUnit,verifyIncidentCapture}=await import(require('node:url').pathToFileURL(path.join(repository,'backend/scripts/clamav-checkpoint.mjs')));
   const command=a[a.indexOf('scripts/clamav-checkpoint.mjs')+1];
-  requireBoundary({session:read('reports/active-deployment-session.json'),active:read('active.json'),maintenance:read('maintenance.json'),id,token:env('DEPLOYMENT_LEASE_TOKEN'),phase:command==='capture'?'SERVICES_DRAINED':'MUTATION_STARTED'});
+  requireBoundary({session:read('reports/active-deployment-session.json'),active:read('active.json'),maintenance:read('maintenance.json'),id,token:env('DEPLOYMENT_LEASE_TOKEN'),phase:{capture:'SERVICES_DRAINED','verify-incident-capture':'REMOTE_CHECKPOINT_VERIFIED',activate:'MUTATION_STARTED'}[command]});
   const binding=()=>boundIncidentTarget(read('reports/active-deployment-session.json'),Object.fromEntries(['DEPLOYMENT_CLAMAV_OPERATION',
    'DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256','DEPLOYMENT_CLAMAV_INCIDENT_RECEIPT_SHA256','DEPLOYMENT_CLAMAV_TARGET_IMAGE'].map(key=>[key,env(key)])));
   const target=binding();
@@ -195,8 +212,11 @@ const rollbackEnvironment={PERFORMANCE_RELEASE_COMMIT:'a'.repeat(40),PERFORMANCE
    if(failure==='target-coordinate-capture')fs.appendFileSync(path.join(unit,'target.json'),'\n');
    if(hash(fs.readFileSync(path.join(unit,incident?'incident-snapshot.json':'rollback-proof.json')))!==env(incident?'DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256':'DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_SHA256'))throw Error('Original evidence changed');
    await captureUnit({bank,unit,id,image:image('clamav'),target});
-  }
-  else {
+  } else if (command==='verify-incident-capture') {
+   const capturedAt=await verifyIncidentCapture({unit,id,checkpoint:read('checkpoint.json'),target,
+    snapshotSha256:env('DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256')});
+   console.log(capturedAt);
+  } else {
    const checkpoint=read('checkpoint.json');await verifyUnit({unit,id,checkpoint});
    const receipt=JSON.parse(fs.readFileSync(path.join(unit,'target.json')));
    if(receipt.image!==env('DEPLOYMENT_CLAMAV_TARGET_IMAGE')||receipt.bankSha256!==hash(fs.readFileSync(path.join(unit,'target-bank.tar'))))throw Error('Activation binding mismatch');

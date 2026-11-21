@@ -378,11 +378,11 @@ control() {
 
 verify_incident_target() {
   node "${OPERATIONS_ROOT}/scripts/clamav-release-readiness.mjs" verify-incident "$1" \
-    "${DEPLOYMENT_CLAMAV_TARGET_IMAGE}" "${DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_FILE}" "$2"
+    "${DEPLOYMENT_CLAMAV_TARGET_IMAGE}" "${DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_FILE}" "$2" ${3:+"$3"}
 }
 
 require_bound_incident_target() {
-  actual_receipt_sha256="$(verify_incident_target "$1" "$2")" || return 1
+  actual_receipt_sha256="$(verify_incident_target "$@")" || return 1
   [ "${actual_receipt_sha256}" = "${DEPLOYMENT_CLAMAV_INCIDENT_RECEIPT_SHA256}" ] || {
     echo 'ClamAV incident target receipt changed after preflight.' >&2; return 1
   }
@@ -1533,7 +1533,11 @@ assert_original_legacy_still_stopped
 LEGACY_BACKEND_SIGNAL_PENDING=0
 assert_qa_remote_checkpoint_mount
 if [ "${DEPLOYMENT_CLAMAV_OPERATION}" = incident-recovery ]; then
-  require_bound_incident_target "${REPO_ROOT}/.deploy-state/$(clamav_unit_name)/target.json" 900
+  # The original was stopped and freshly verified at capture. The target still
+  # uses current time and DNS after the independently verified checkpoint.
+  incident_capture_time="$(run_backend_timed 45 node scripts/clamav-checkpoint.mjs verify-incident-capture)" || exit 1
+  case "${incident_capture_time}" in ''|*[!0-9]*) echo 'Invalid authenticated ClamAV capture time.' >&2; exit 1;; esac
+  require_bound_incident_target "${REPO_ROOT}/.deploy-state/$(clamav_unit_name)/target.json" 900 "${incident_capture_time}"
 fi
 phase MUTATION_STARTED
 MUTATION_STARTED=1

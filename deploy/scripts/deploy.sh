@@ -1370,7 +1370,7 @@ if [ "${CAPTURE_ONLY}" -eq 1 ]; then
 elif [ "${DEPLOYMENT_CLAMAV_OPERATION}" = incident-recovery ]; then
   # Prove an existing usable schema and adopted Inquiry ledger while still open.
   compose exec -T postgres sh -c 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
-  run_backend_timed 60 node node_modules/prisma/build/index.js migrate status --schema prisma/schema.prisma
+  run_backend_timed 60 node dist/scripts/deployment-owned-migrations.js --verify-current
   run_backend_timed 60 node -e '
     const path = require("node:path");
     const { verifyInquiryBaseline } = require("./dist/services/inquiryMigrationPlan.js");

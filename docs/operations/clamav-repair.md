@@ -17,7 +17,7 @@ This is a maintenance-only repair, independent of attendance R3. No schema, atte
 
 ### UFPR incident staging from the managed FEUP installation
 
-The controller requires the existing PostgreSQL and adopted Inquiry schemas, the existing dispatch storage mount, and the advisory lease before maintenance. Shipment statement cutover must be disabled. In this operation the controller verifies the schemas read-only and retains the journal’s existing schema phase. It leaves the PostgreSQL container in place and does not run the PostgreSQL or Inquiry migrators, contract graph writers, financial reconciliation writers, or shipment cutover.
+The controller requires the existing PostgreSQL and adopted Inquiry schemas, the existing dispatch storage mount, and the advisory lease before maintenance. Shipment statement cutover must be disabled. The controller verifies the schemas read-only, including every successful PostgreSQL migration name and checksum from the deployed source and the absence of pending migrations. It retains the journal’s existing schema phase. It leaves the PostgreSQL container in place and does not run the PostgreSQL or Inquiry migrators, contract graph writers, financial reconciliation writers, or shipment cutover.
 
 UFPR admission requires the exact reviewed amd64 image, direct acquisition and the canonical scheduler bank, runtime directory and 7,200-second interval. For the reviewed managed FEUP predecessor, the incident snapshot reads the actual scheduler, FreshClam cooldown, last result and vendor migration archive under the existing updater lock. The controller compares those same bytes against the stopped original before accepting its checkpoint.
 

@@ -219,7 +219,33 @@ const rollbackEnvironment={PERFORMANCE_RELEASE_COMMIT:'a'.repeat(40),PERFORMANCE
   const {verifyUnit}=await import(require('node:url').pathToFileURL(path.join(repository,'backend/scripts/clamav-checkpoint.mjs')));
   await verifyUnit({unit,id,checkpoint});save('checkpoint.json',checkpoint);return;
  }
- if(a.includes('node_modules/prisma/build/index.js')&&a.includes('status'))return;
+ if(a.includes('dist/scripts/deployment-owned-migrations.js')&&a.includes('--verify-current')){
+  installTsHook();
+  const directory=path.join(repository,'backend/prisma/migrations');
+  const history=fs.readdirSync(directory,{withFileTypes:true}).filter(entry=>entry.isDirectory()).map(entry=>({
+   name:entry.name,checksum:hash(fs.readFileSync(path.join(directory,entry.name,'migration.sql'))),finished:new Date(),rolledBack:null
+  }));
+  if(failure==='ledger-checksum')history[0].checksum='0'.repeat(64);
+  if(failure==='ledger-pending')history.pop();
+  const script=path.join(repository,'backend/src/scripts/deployment-owned-migrations.ts');
+  const Module=require('node:module');
+  const load=Module._load;
+  const argv=process.argv;
+  try {
+   await new Promise(resolve=>{
+    Module._load=function(request,parent,isMain){
+     if(parent?.filename===script){
+      if(request==='../lib/prisma')return {prisma:{$queryRaw:async()=>history},disconnectDatabase:resolve};
+      if(request==='../services/protectedBridgeMigrations')throw Error('Read-only verification must not load migration writers');
+     }
+     return load.apply(this,arguments);
+    };
+    process.argv=[process.execPath,script,'--verify-current'];
+    require(script);
+   });
+  } finally { Module._load=load; process.argv=argv; }
+  return;
+ }
  if(a.some(value=>value.includes('verifyInquiryBaseline(path.join')))return;
  if(a.includes('dist/scripts/deployment-inquiry.js')){
   if(!a.includes('scripts/with-backend-control-ownership.sh')||phase()!=='MIGRATIONS_APPLIED')throw Error('Inquiry ownership boundary unproven');

@@ -30,6 +30,7 @@ async function observeFeupAcquisition(container, inspection, run) {
  const entrypoint=['/sbin/tini','-g','--','/usr/local/bin/sabalan-clamav-entrypoint'];
  const [bank]=inspection.Mounts ?? [];
  if(inspection.Image!==feupIncidentImage || inspection.Path!==entrypoint[0]
+  || JSON.stringify(inspection.Args)!==JSON.stringify(entrypoint.slice(1))
   || JSON.stringify(inspection.Config?.Entrypoint)!==JSON.stringify(entrypoint)
   || !Array.isArray(inspection.Config.Env) || inspection.Config.Env.some(value=>value.startsWith('CLAMAV_'))
   || inspection.Mounts?.length!==1 || bank?.Type!=='volume' || !bank.Name || bank.Destination!=='/var/lib/clamav' || bank.RW!==true){
@@ -39,7 +40,8 @@ async function observeFeupAcquisition(container, inspection, run) {
  if(validateAcquisitionConfiguration(config)!==mirrorOrigin)throw new Error('Original managed FEUP acquisition origin changed');
  const runtimeFiles={
   '/etc/clamav/freshclam.conf':'b50f8ee088bb1b1e0596907da47d70308bb0139a6696cba346ce7acd33fff322',
-  '/usr/local/bin/sabalan-clamav-updater':'b7cd178a8f41a805c621fcb8b7675e946b8139d62644791d4797a536306f0d5b',
+  '/usr/local/bin/sabalan-clamav-updater':'5483d8ebe8944c6f67fbf7a793f1759ab215ef71b614cb3a9e36fdbaefd2d367',
+  '/usr/local/bin/sabalan-clamav-update-once':'b7cd178a8f41a805c621fcb8b7675e946b8139d62644791d4797a536306f0d5b',
   '/usr/local/bin/sabalan-clamav-entrypoint':'34b4de22e797628a3d4156d51d62ba5d9066897a4ffa7e639d90af19ff7a2539',
  };
  const actualHashes=await run(['exec',container,'sha256sum',...Object.keys(runtimeFiles)]);

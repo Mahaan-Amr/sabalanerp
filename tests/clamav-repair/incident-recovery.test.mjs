@@ -86,6 +86,7 @@ test('incident snapshot qualifies the retained direct FEUP runtime without a tra
    JSON.stringify(migration)].join('\n');
   const fixture={
    inspection:{Image:feupIncidentImage,Id:'retained-feup',State:{Running:true,StartedAt:'2026-11-21T00:00:00Z'},Path:'/sbin/tini',
+    Args:['-g','--','/usr/local/bin/sabalan-clamav-entrypoint'],
     Config:{Env:['PATH=/usr/local/bin:/usr/bin'],Entrypoint:['/sbin/tini','-g','--','/usr/local/bin/sabalan-clamav-entrypoint']},
     Mounts:[{Type:'volume',Name:'clamav_data',Destination:'/var/lib/clamav',RW:true}]},
    config:['DatabaseDirectory /var/lib/clamav','DatabaseOwner clamav',
@@ -95,7 +96,8 @@ test('incident snapshot qualifies the retained direct FEUP runtime without a tra
     'NotifyClamd /etc/clamav/clamd.conf','ConnectTimeout 30','ReceiveTimeout 60','MaxAttempts 3',''].join('\n'),
    runtimeHashes:{
     '/etc/clamav/freshclam.conf':'b50f8ee088bb1b1e0596907da47d70308bb0139a6696cba346ce7acd33fff322',
-    '/usr/local/bin/sabalan-clamav-updater':'b7cd178a8f41a805c621fcb8b7675e946b8139d62644791d4797a536306f0d5b',
+    '/usr/local/bin/sabalan-clamav-updater':'5483d8ebe8944c6f67fbf7a793f1759ab215ef71b614cb3a9e36fdbaefd2d367',
+    '/usr/local/bin/sabalan-clamav-update-once':'b7cd178a8f41a805c621fcb8b7675e946b8139d62644791d4797a536306f0d5b',
     '/usr/local/bin/sabalan-clamav-entrypoint':'34b4de22e797628a3d4156d51d62ba5d9066897a4ffa7e639d90af19ff7a2539'},
    acquisitionEvidence,
   };
@@ -130,10 +132,12 @@ test('incident snapshot qualifies the retained direct FEUP runtime without a tra
   const invalidPolicy=/acquisition source or verification policy differs/;
   await Promise.all([
    ['override', {...fixture,inspection:{...fixture.inspection,Config:{...fixture.inspection.Config,Env:['CLAMAV_UPDATE_INTERVAL_SECONDS=7200']}}},invalidRuntime],
+   ['args', {...fixture,inspection:{...fixture.inspection,Args:[...fixture.inspection.Args,'unexpected']}},invalidRuntime],
    ['entrypoint', {...fixture,inspection:{...fixture.inspection,Path:'/bin/sh'}},invalidRuntime],
    ['mount', {...fixture,inspection:{...fixture.inspection,Mounts:[...fixture.inspection.Mounts,{Type:'bind',Destination:'/usr/local/bin',RW:true}]}},invalidRuntime],
    ['bank-bind', {...fixture,inspection:{...fixture.inspection,Mounts:[{...fixture.inspection.Mounts[0],Type:'bind'}]}},invalidRuntime],
    ['updater', {...fixture,runtimeHashes:{...fixture.runtimeHashes,'/usr/local/bin/sabalan-clamav-updater':'a'.repeat(64)}},/runtime files differ/],
+   ['update-once', {...fixture,runtimeHashes:{...fixture.runtimeHashes,'/usr/local/bin/sabalan-clamav-update-once':'a'.repeat(64)}},/runtime files differ/],
    ['proxy', {...fixture,config:fixture.config+'HTTPProxyServer changed.invalid\n'},invalidPolicy],
    ['publisher', {...fixture,config:fixture.config.replace('TestDatabases yes','TestDatabases no')},invalidPolicy],
    ['schedule', {...fixture,acquisitionEvidence:acquisitionEvidence.replace(String(attempted+7200),String(attempted+7201))},/degraded-instance evidence is required/],

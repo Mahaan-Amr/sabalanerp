@@ -6,6 +6,8 @@ REPO_ROOT="${DEPLOYMENT_REPO_ROOT:-$(CDPATH= cd -- "${SCRIPT_DIR}/../.." && pwd)
 OPERATIONS_ROOT="$(CDPATH= cd -- "${SCRIPT_DIR}/../.." && pwd)"
 CAPTURE_ONLY=0
 unset DEPLOYMENT_CAPTURE_PAUSE_STARTED_NS
+# Only the private deployment journal supplies a lease token to control containers.
+export DEPLOYMENT_LEASE_TOKEN=""
 PREBUILT_RELEASE=0
 unset DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX
 PREBUILT_RELEASE_PLAN=""
@@ -190,7 +192,7 @@ run_backend() {
       -e "DEPLOYMENT_MODE=${DEPLOYMENT_MODE}" \
       -e "DEPLOYMENT_RELEASE_ID=${DEPLOYMENT_RELEASE_ID}" \
       -e "DEPLOYMENT_TARGET_COMMIT=${DEPLOYMENT_TARGET_COMMIT}" \
-      -e "DEPLOYMENT_LEASE_TOKEN=${DEPLOYMENT_LEASE_TOKEN:-}" \
+      -e DEPLOYMENT_LEASE_TOKEN \
       -e "DEPLOYMENT_OWNER=${DEPLOYMENT_OWNER}" \
       -e "DEPLOYMENT_PHASE=${DEPLOYMENT_PHASE:-}" \
       -e "DEPLOYMENT_RESULT=${DEPLOYMENT_RESULT:-}" \
@@ -271,7 +273,7 @@ run_backend_timed() {
       -e "DEPLOYMENT_MODE=${DEPLOYMENT_MODE}" \
       -e "DEPLOYMENT_RELEASE_ID=${DEPLOYMENT_RELEASE_ID}" \
       -e "DEPLOYMENT_TARGET_COMMIT=${DEPLOYMENT_TARGET_COMMIT}" \
-      -e "DEPLOYMENT_LEASE_TOKEN=${DEPLOYMENT_LEASE_TOKEN:-}" \
+      -e DEPLOYMENT_LEASE_TOKEN \
       -e "DEPLOYMENT_OWNER=${DEPLOYMENT_OWNER}" \
       -e "DEPLOYMENT_PHASE=${DEPLOYMENT_PHASE:-}" \
       -e "DEPLOYMENT_LEASE_MS=1200000" \
@@ -365,7 +367,13 @@ wait_for_cutover_approval() {
 
 control() {
   case "${1:-}" in prepare|maintenance-on) preserved_clamav_guard identity || return 1;; maintenance-off) preserved_clamav_guard health || return 1;; esac
-  run_backend node dist/scripts/deployment-control.js "$@"
+  case "${1:-}" in
+    # These responses contain the raw lease token. The controller keeps the
+    # corresponding durable events in the host journal.
+    prepare|acquire|bootstrap-enable|bootstrap-adopt|local-transition|heartbeat|transition|finish)
+      run_backend node dist/scripts/deployment-control.js "$@" >/dev/null ;;
+    *) run_backend node dist/scripts/deployment-control.js "$@" ;;
+  esac
 }
 
 verify_incident_target() {
@@ -486,7 +494,7 @@ drain_current_services() {
       "${REPO_ROOT}/.deploy-state/legacy-backend-drain-${DEPLOYMENT_ID}.json" "${SESSION_HOST_PATH}" || return 1
     assert_original_legacy_still_stopped || return 1
   fi
-  compose stop -t 300 frontend backend inquiry
+  compose stop -t 300 frontend backend inquiry || return 1
   assert_native_runtime_closed || return 1
   if [ "${DB_LEASE_ACQUIRED}" -eq 1 ]; then assert_original_legacy_still_stopped || return 1; fi
   remaining_old_sessions="$(compose exec -T postgres sh -c "psql -At -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -c \"SELECT count(*) FROM pg_stat_activity WHERE client_addr = '${old_backend_ip}'::inet\"")"
@@ -496,17 +504,29 @@ drain_current_services() {
 }
 
 drain_release_for_rollback() {
-  rollback_backend_container="$(compose ps -q backend || true)"
+  rollback_backend_container="$(compose ps -q backend)" || return 1
   rollback_backend_ip=""
   if [ -n "${rollback_backend_container}" ]; then
-    rollback_backend_ip="$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "${rollback_backend_container}")"
+    rollback_backend_ip="$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "${rollback_backend_container}")" || return 1
   fi
   NATIVE_RUNTIME_CLOSURE_REQUIRED=1
-  compose stop -t 300 frontend backend inquiry
+  compose stop -t 300 frontend backend inquiry || return 1
   assert_native_runtime_closed || return 1
-  if [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ]; then compose stop -t 60 clamav; fi
+  if [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ]; then
+    rollback_clamav_container="$(compose ps -aq clamav)" || return 1
+    compose stop -t 60 clamav || return 1
+    current_clamav_container="$(compose ps -aq clamav)" || return 1
+    [ "${current_clamav_container}" = "${rollback_clamav_container}" ] || return 1
+    if [ -n "${rollback_clamav_container}" ]; then
+      rollback_clamav_status="$(docker inspect --format '{{.State.Status}}' "${rollback_clamav_container}")" || return 1
+      case "${rollback_clamav_status}" in
+        created|exited|dead) ;;
+        *) echo 'ClamAV shutdown was not proven; rollback cannot restore its bank.' >&2; return 1 ;;
+      esac
+    fi
+  fi
   if [ -n "${rollback_backend_ip}" ]; then
-    rollback_sessions="$(compose exec -T postgres sh -c "psql -At -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -c \"SELECT count(*) FROM pg_stat_activity WHERE client_addr = '${rollback_backend_ip}'::inet\"")"
+    rollback_sessions="$(compose exec -T postgres sh -c "psql -At -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -c \"SELECT count(*) FROM pg_stat_activity WHERE client_addr = '${rollback_backend_ip}'::inet\"")" || return 1
     [ "${rollback_sessions}" = "0" ] || { echo "The failed release retained ${rollback_sessions} database sessions; rollback promotion is unsafe." >&2; return 1; }
   fi
 }
@@ -588,7 +608,7 @@ clamav_unit_name() { printf 'clamav-checkpoint-%s' "${DEPLOYMENT_ID}"; }
 
 capture_clamav_checkpoint() {
   [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ] || return 0
-  compose stop -t 60 clamav
+  compose stop -t 60 clamav || return 1
   clamav_container="$(compose ps -aq clamav)"
   [ "$(docker inspect --format '{{.State.Running}}' "${clamav_container}")" = false ] || return 1
   clamav_unit="${REPO_ROOT}/.deploy-state/$(clamav_unit_name)"
@@ -895,13 +915,12 @@ recover_failure() {
   fi
 
   echo "Mutation had started. Running the single permitted automatic rollback attempt." >&2
-  if drain_release_for_rollback; then
-    DEPLOYMENT_PHASE="ROLLBACK_STARTED"
-    export DEPLOYMENT_PHASE
-    if [ "${BOOTSTRAP}" -eq 1 ]; then control local-transition || true; else control transition || true; fi
-  fi
-
-  if [ "${DEPLOYMENT_PHASE:-}" = "ROLLBACK_STARTED" ] \
+  if drain_release_for_rollback \
+    && {
+      DEPLOYMENT_PHASE="ROLLBACK_STARTED"
+      export DEPLOYMENT_PHASE
+      if [ "${BOOTSTRAP}" -eq 1 ]; then control local-transition; else control transition; fi
+    } \
     && run_backend sh scripts/with-backend-control-ownership.sh node dist/scripts/deployment-rollback.js \
     && run_backend sh scripts/with-backend-control-ownership.sh node dist/scripts/deployment-finalize-recovery.js; then
     switch_to_previous_images
@@ -1028,6 +1047,9 @@ if [ -f "${SESSION_HOST_PATH}" ]; then
   DEPLOYMENT_OWNER="$(session_value owner)"
   DEPLOYMENT_PHASE="$(session_value phase)"
   DEPLOYMENT_TARGET_BACKEND_IMAGE="$(session_value controlImage)"
+  DEPLOYMENT_LEASE_TOKEN="$(session_value leaseToken)" || exit 1
+  [ -n "${DEPLOYMENT_LEASE_TOKEN}" ] || { echo 'Interrupted deployment recovery lacks its journaled lease token.' >&2; exit 1; }
+  export DEPLOYMENT_LEASE_TOKEN
   incident_operation="$(session_value clamavOperation)"
   if [ "${incident_operation}" = incident-recovery ]; then
     DEPLOYMENT_CLAMAV_OPERATION=incident-recovery
@@ -1086,7 +1108,12 @@ if [ -f "${SESSION_HOST_PATH}" ]; then
   try_acquire_advisory || { echo "Interrupted deployment recovery cannot acquire its PostgreSQL advisory lease." >&2; exit 1; }
   control maintenance-on
   MAINTENANCE_ACTIVE=1
-  drain_release_for_rollback
+  drain_release_for_rollback || {
+    echo 'Interrupted deployment drain could not be proven; maintenance and the recovery journal are retained.' >&2
+    cleanup_locks
+    trap - EXIT INT TERM
+    exit 1
+  }
   case "${DEPLOYMENT_PHASE}" in
     PREFLIGHT|LEASE_ACQUIRED|MAINTENANCE_REQUESTED|TRAFFIC_BLOCKED|SERVICES_DRAINED|LOCAL_CHECKPOINT_VERIFIED|REMOTE_CHECKPOINT_VERIFIED)
       if [ "${DEPLOYMENT_MODE}" = release ] && [ "${CAPTURE_ONLY}" -eq 0 ]; then

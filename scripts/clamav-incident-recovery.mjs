@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { pathToFileURL } from 'node:url';
-import { publishedVersions, parseNativeProbe, fileDigest, validateManagedScheduler, validateTransportIdentity, validateAcquisitionConfiguration } from './clamav-release-readiness.mjs';
+import { publishedVersions, parseNativeProbe, fileDigest, validateAcquisitionConfiguration } from './clamav-release-readiness.mjs';
 import { validateIncidentSnapshot, feupIncidentImage, incidentAcquisitionStateNames as stateNames } from '../backend/scripts/clamav-incident-policy.mjs';
 import { mirrorOrigin, validateSourceMigration } from './clamav-source-migration.mjs';
 const execute = promisify(execFile);
@@ -26,13 +26,25 @@ cat .source-state/migration.json
 `;
 
 async function observeFeupAcquisition(container, inspection, run) {
- validateManagedScheduler(inspection.Config.Env);
+ // The exact retained FEUP image predates the transport helper. Bind its direct runtime to the observed predecessor.
+ const entrypoint=['/sbin/tini','-g','--','/usr/local/bin/sabalan-clamav-entrypoint'];
+ const [bank]=inspection.Mounts ?? [];
+ if(inspection.Image!==feupIncidentImage || inspection.Path!==entrypoint[0]
+  || JSON.stringify(inspection.Config?.Entrypoint)!==JSON.stringify(entrypoint)
+  || !Array.isArray(inspection.Config.Env) || inspection.Config.Env.some(value=>value.startsWith('CLAMAV_'))
+  || inspection.Mounts?.length!==1 || bank?.Type!=='volume' || !bank.Name || bank.Destination!=='/var/lib/clamav' || bank.RW!==true){
+  throw new Error('Original direct FEUP runtime differs from the retained instance');
+ }
  const config=await run(['exec',container,'cat','/etc/clamav/freshclam.conf']);
- const transport=/^\s*HTTPProxy/im.test(config)
-  ? validateTransportIdentity(inspection,JSON.parse(await run(['image','inspect',inspection.Image]))[0])
-  : undefined;
- if(validateAcquisitionConfiguration(config,transport)!==mirrorOrigin)throw new Error('Original managed FEUP acquisition origin changed');
- await run(['exec',container,'/usr/local/bin/sabalan-clamav-acquisition-transport']);
+ if(validateAcquisitionConfiguration(config)!==mirrorOrigin)throw new Error('Original managed FEUP acquisition origin changed');
+ const runtimeFiles={
+  '/etc/clamav/freshclam.conf':'b50f8ee088bb1b1e0596907da47d70308bb0139a6696cba346ce7acd33fff322',
+  '/usr/local/bin/sabalan-clamav-updater':'b7cd178a8f41a805c621fcb8b7675e946b8139d62644791d4797a536306f0d5b',
+  '/usr/local/bin/sabalan-clamav-entrypoint':'34b4de22e797628a3d4156d51d62ba5d9066897a4ffa7e639d90af19ff7a2539',
+ };
+ const actualHashes=await run(['exec',container,'sha256sum',...Object.keys(runtimeFiles)]);
+ const expectedHashes=Object.entries(runtimeFiles).map(([file,digest])=>digest+'  '+file).join('\n');
+ if(actualHashes!==expectedHashes)throw new Error('Original direct FEUP runtime files differ from the retained instance');
  const [schedule,...lines]=(await run(['exec',container,'sh','-ec',managedAcquisitionProbe])).split('\n');
  if(!/^\d+ \d+ \d+ \d+$/.test(schedule))throw new Error('Original FEUP update schedule is invalid');
  const [attempted,succeeded,result,next]=schedule.split(' ').map(Number);

@@ -72,6 +72,80 @@ test('explicit source migration preserves exact vendor refusal bytes and initial
 });
 
 
+test('incident snapshot qualifies the retained direct FEUP runtime without a transport helper',{skip:process.platform==='win32'},async()=>{
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'sabalan-retained-feup-'));
+ try {
+  const files=['freshclam.dat','.sabalan-updater-state','.sabalan-freshclam-result'];
+  const attempted=Math.floor(Date.now()/1000)-15;
+  const migration={kind:'CLAMAV_ACQUISITION_SOURCE_MIGRATION_V1',originalOrigin:'https://database.clamav.net',
+   targetOrigin:mirrorOrigin,intervalSeconds:7200,lastActualAttempt:attempted-15000,
+   firstEligibleAttempt:attempted-7800,vendorCooldownUntil:attempted-7800,cdnFallback:false,
+   originalStateFiles:Object.fromEntries(files.map(name=>[name,{sha256:'d'.repeat(64)}]))};
+  const acquisitionEvidence=[`${attempted} 0 1 ${attempted+7200}`,
+   ...[...files,...files.map(name=>'.source-state/vendor-cdn/'+name),'.source-state/migration.json'].map(name=>'d'.repeat(64)+'  '+name),
+   JSON.stringify(migration)].join('\n');
+  const fixture={
+   inspection:{Image:feupIncidentImage,Id:'retained-feup',State:{Running:true,StartedAt:'2026-11-21T00:00:00Z'},Path:'/sbin/tini',
+    Config:{Env:['PATH=/usr/local/bin:/usr/bin'],Entrypoint:['/sbin/tini','-g','--','/usr/local/bin/sabalan-clamav-entrypoint']},
+    Mounts:[{Type:'volume',Name:'clamav_data',Destination:'/var/lib/clamav',RW:true}]},
+   config:['DatabaseDirectory /var/lib/clamav','DatabaseOwner clamav',
+    '# FEUP public mirror of the publisher-signed official CVD/CDIFF databases.',
+    '# Do not fall back to the vendor CDN while its recorded refusal remains active.',
+    'DatabaseMirror '+mirrorOrigin,'DNSDatabaseInfo current.cvd.clamav.net','ScriptedUpdates yes','TestDatabases yes',
+    'NotifyClamd /etc/clamav/clamd.conf','ConnectTimeout 30','ReceiveTimeout 60','MaxAttempts 3',''].join('\n'),
+   runtimeHashes:{
+    '/etc/clamav/freshclam.conf':'b50f8ee088bb1b1e0596907da47d70308bb0139a6696cba346ce7acd33fff322',
+    '/usr/local/bin/sabalan-clamav-updater':'b7cd178a8f41a805c621fcb8b7675e946b8139d62644791d4797a536306f0d5b',
+    '/usr/local/bin/sabalan-clamav-entrypoint':'34b4de22e797628a3d4156d51d62ba5d9066897a4ffa7e639d90af19ff7a2539'},
+   acquisitionEvidence,
+  };
+  const docker=path.join(root,'docker');
+  await fs.writeFile(docker,`#!${process.execPath}
+    const fixture=JSON.parse(process.env.INCIDENT_TEST_FIXTURE);
+    const [action,,command,...args]=process.argv.slice(2);
+    if(action==='inspect')console.log(JSON.stringify([fixture.inspection]));
+    else if(action==='cp')console.log('retained config archive');
+    else if(command==='freshclam')console.log('ClamAV 1.4.6');
+    else if(command==='sigtool')console.log('Version: 42\\nVerification OK');
+    else if(command==='cat')process.stdout.write(fixture.config);
+    else if(command==='sha256sum')for(const file of args)console.log((fixture.runtimeHashes[file]||'b'.repeat(64))+'  '+file);
+    else if(command==='sh' && args[1].includes('basename'))console.log(args[1].match(/clamav\\/(\\w+)\\.c/)[1]+'.cvd');
+    else if(command==='sh' && args[1].includes('flock'))console.log(fixture.acquisitionEvidence);
+    else if(command==='sh' && args[1].includes('updater.pid'))console.log('live');
+    else {console.error('Unexpected command: '+process.argv.slice(2).join(' '));process.exitCode=1;}
+  `,{mode:0o700});
+  const fakeDns=path.join(root,'fixture-dns.mjs');
+  await fs.writeFile(fakeDns,`import dns from 'node:dns/promises';
+    import {syncBuiltinESMExports} from 'node:module';
+    dns.resolveTxt=async()=>[['1.4.6:63:28138:0:0:0:0:339']];syncBuiltinESMExports();`);
+  const script=fileURLToPath(new URL('../../scripts/clamav-incident-recovery.mjs',import.meta.url));
+  const snapshot=(candidate,name)=>promisify(execFile)(process.execPath,['--import',fakeDns,script,'snapshot','retained-feup',path.join(root,name)],
+   {env:{...process.env,PATH:root+path.delimiter+process.env.PATH,INCIDENT_TEST_FIXTURE:JSON.stringify(candidate)}});
+  const {stdout}=await snapshot(fixture,'clean.json');
+  const report=JSON.parse(stdout);
+  assert.equal(report.acquisition.origin,mirrorOrigin);
+  assert.equal(report.acquisition.next,attempted+7200);
+  assert.deepEqual(report.issues,['SIGNATURES_STALE']);
+  const invalidRuntime=/runtime differs from the retained instance/;
+  const invalidPolicy=/acquisition source or verification policy differs/;
+  await Promise.all([
+   ['override', {...fixture,inspection:{...fixture.inspection,Config:{...fixture.inspection.Config,Env:['CLAMAV_UPDATE_INTERVAL_SECONDS=7200']}}},invalidRuntime],
+   ['entrypoint', {...fixture,inspection:{...fixture.inspection,Path:'/bin/sh'}},invalidRuntime],
+   ['mount', {...fixture,inspection:{...fixture.inspection,Mounts:[...fixture.inspection.Mounts,{Type:'bind',Destination:'/usr/local/bin',RW:true}]}},invalidRuntime],
+   ['bank-bind', {...fixture,inspection:{...fixture.inspection,Mounts:[{...fixture.inspection.Mounts[0],Type:'bind'}]}},invalidRuntime],
+   ['updater', {...fixture,runtimeHashes:{...fixture.runtimeHashes,'/usr/local/bin/sabalan-clamav-updater':'a'.repeat(64)}},/runtime files differ/],
+   ['proxy', {...fixture,config:fixture.config+'HTTPProxyServer changed.invalid\n'},invalidPolicy],
+   ['publisher', {...fixture,config:fixture.config.replace('TestDatabases yes','TestDatabases no')},invalidPolicy],
+   ['schedule', {...fixture,acquisitionEvidence:acquisitionEvidence.replace(String(attempted+7200),String(attempted+7201))},/degraded-instance evidence is required/],
+   ['vendor', {...fixture,acquisitionEvidence:acquisitionEvidence.replace('d'.repeat(64)+'  .source-state/vendor-cdn/freshclam.dat','e'.repeat(64)+'  .source-state/vendor-cdn/freshclam.dat')},/vendor provenance is inconsistent/],
+  ].map(async ([name,candidate,error])=>{
+   const destination=name+'.json';
+   await assert.rejects(snapshot(candidate,destination),error);
+   await assert.rejects(fs.stat(path.join(root,destination)),{code:'ENOENT'});
+  }));
+ } finally {await fs.rm(root,{recursive:true});}
+});
+
 test('UFPR preparation copies the observed FEUP cooldown and schedule without modifying the source',{skip:process.platform==='win32'},async()=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'sabalan-ufpr-stage-'));
  const source=path.join(root,'feup'),output=path.join(root,'ufpr');

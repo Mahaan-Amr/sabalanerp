@@ -184,6 +184,7 @@ run_backend() {
       -e "DEPLOYMENT_CLAMAV_REPAIR=${DEPLOYMENT_CLAMAV_REPAIR}" \
       -e "DEPLOYMENT_CLAMAV_OPERATION=${DEPLOYMENT_CLAMAV_OPERATION}" \
       -e "DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256=${DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256:-}" \
+      -e "DEPLOYMENT_CLAMAV_INCIDENT_RECEIPT_SHA256=${DEPLOYMENT_CLAMAV_INCIDENT_RECEIPT_SHA256:-}" \
       -e "DEPLOYMENT_CLAMAV_TARGET_IMAGE=${DEPLOYMENT_CLAMAV_TARGET_IMAGE}" \
       -e "DEPLOYMENT_ID=${DEPLOYMENT_ID}" \
       -e "DEPLOYMENT_MODE=${DEPLOYMENT_MODE}" \
@@ -264,6 +265,7 @@ run_backend_timed() {
       -e "DEPLOYMENT_CLAMAV_REPAIR=${DEPLOYMENT_CLAMAV_REPAIR}" \
       -e "DEPLOYMENT_CLAMAV_OPERATION=${DEPLOYMENT_CLAMAV_OPERATION}" \
       -e "DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256=${DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256:-}" \
+      -e "DEPLOYMENT_CLAMAV_INCIDENT_RECEIPT_SHA256=${DEPLOYMENT_CLAMAV_INCIDENT_RECEIPT_SHA256:-}" \
       -e "DEPLOYMENT_CLAMAV_TARGET_IMAGE=${DEPLOYMENT_CLAMAV_TARGET_IMAGE}" \
       -e "DEPLOYMENT_ID=${DEPLOYMENT_ID}" \
       -e "DEPLOYMENT_MODE=${DEPLOYMENT_MODE}" \
@@ -373,7 +375,7 @@ verify_incident_target() {
 
 require_bound_incident_target() {
   actual_receipt_sha256="$(verify_incident_target "$1" "$2")" || return 1
-  [ "${actual_receipt_sha256}" = "${incident_receipt_sha256}" ] || {
+  [ "${actual_receipt_sha256}" = "${DEPLOYMENT_CLAMAV_INCIDENT_RECEIPT_SHA256}" ] || {
     echo 'ClamAV incident target receipt changed after preflight.' >&2; return 1
   }
 }
@@ -630,7 +632,7 @@ verify_clamav_repair_runtime() {
     installed_receipt="${REPO_ROOT}/.deploy-state/$(clamav_unit_name)/target.json"
     set -- inspect "$(compose ps -q clamav)"
     if [ "${DEPLOYMENT_CLAMAV_OPERATION}" = incident-recovery ]; then
-      set -- inspect "$2" "${installed_receipt}"
+      set -- inspect "$2" "${installed_receipt}" "${DEPLOYMENT_CLAMAV_INCIDENT_RECEIPT_SHA256}"
     fi
     timeout "${clamav_runtime_timeout}" node "${OPERATIONS_ROOT}/scripts/clamav-release-readiness.mjs" "$@" >"${DEPLOYMENT_REPORT_DIR_HOST}/clamav-runtime-${DEPLOYMENT_ID}.json"
   fi
@@ -1070,7 +1072,17 @@ if [ -f "${SESSION_HOST_PATH}" ]; then
     esac
   fi
   switch_to_previous_images
-  compose up -d --no-deps postgres
+  if [ "${DEPLOYMENT_CLAMAV_OPERATION}" = incident-recovery ]; then
+    retained_postgres="$(compose ps -q postgres)" || retained_postgres=
+    if [ -z "${retained_postgres}" ] || [ "$(docker inspect --format '{{.Image}} {{.State.Running}}' "${retained_postgres}")" != "${DEPLOYMENT_PREVIOUS_POSTGRES_IMAGE} true" ]; then
+      echo 'Interrupted ClamAV incident recovery requires the running retained PostgreSQL container and its recorded image. The recovery journal is retained.' >&2
+      cleanup_locks
+      trap - EXIT INT TERM
+      exit 1
+    fi
+  else
+    compose up -d --no-deps postgres
+  fi
   try_acquire_advisory || { echo "Interrupted deployment recovery cannot acquire its PostgreSQL advisory lease." >&2; exit 1; }
   control maintenance-on
   MAINTENANCE_ACTIVE=1
@@ -1210,7 +1222,8 @@ if [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ]; then
     # Reserve the full checkpoint and 900-second mutation bounds, plus time
     # for the protected drain, capture and retention outside the checkpoint job.
     incident_runway_seconds=$((checkpoint_timeout + 900 + 600))
-    incident_receipt_sha256="$(verify_incident_target "${DEPLOYMENT_CLAMAV_READY_FILE}" "${incident_runway_seconds}")"
+    DEPLOYMENT_CLAMAV_INCIDENT_RECEIPT_SHA256="$(verify_incident_target "${DEPLOYMENT_CLAMAV_READY_FILE}" "${incident_runway_seconds}")"
+    export DEPLOYMENT_CLAMAV_INCIDENT_RECEIPT_SHA256
   else
     node "${OPERATIONS_ROOT}/scripts/clamav-release-readiness.mjs" verify "${DEPLOYMENT_CLAMAV_READY_FILE}" "${DEPLOYMENT_CLAMAV_TARGET_IMAGE}"
   fi

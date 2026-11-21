@@ -43,3 +43,9 @@ export function requireIncidentSession(session, operation, snapshotSha256) {
   throw new Error('Incident recovery must match the operation and snapshot bound to its owned session');
  }
 }
+
+export function requireStaleFeupPredecessor(snapshot) {
+ if(snapshot?.acquisition?.origin!==feupOrigin || !snapshot.issues?.includes('SIGNATURES_STALE')){
+  throw new Error('UFPR incident requires an observed FEUP predecessor with SIGNATURES_STALE');
+ }
+}

@@ -17,7 +17,7 @@ test('protected release captures the stopped bank before checkpoint, applies tar
 // Execute the real controller against fail-closed CLI adapters. All files, leases,
 // image state and backup transport are private fixtures; no real deployment occurs.
 for(const scenario of ['qualification','remote-tamper','post-mutation','rollback-qualifier','after-open','success','storage-preflight','legacy-signal','runtime-not-closed','incident-success','incident-remote-tamper','incident-post-mutation','incident-after-open','incident-stale-target','incident-updater-refusal','incident-install-interrupted','incident-lease-expired',
- 'incident-cutover-required','incident-ledger-checksum','incident-ledger-pending','incident-before-maintenance','incident-acquire-failure','incident-after-acquire','incident-marker-interrupted',
+ 'incident-cutover-required','incident-ledger-checksum','incident-ledger-pending','incident-before-maintenance','incident-acquire-failure','incident-after-acquire','incident-marker-interrupted','incident-target-coordinate-capture','incident-resume-missing-postgres','incident-resume-stopped-postgres','incident-resume-wrong-postgres',
  ...['PREFLIGHT','LEASE_ACQUIRED','MAINTENANCE_REQUESTED-before','MAINTENANCE_REQUESTED','TRAFFIC_BLOCKED','SERVICES_DRAINED','LOCAL_CHECKPOINT_VERIFIED','REMOTE_CHECKPOINT_VERIFIED'].map(phase=>'incident-resume-'+phase)]) test(`complete controller fixture: ${scenario}`,{timeout:120000},async()=>{
  const incident=scenario.startsWith('incident-'), failure=scenario.replace(/^incident-/,'');
  const resumed=failure.startsWith('resume-');
@@ -59,8 +59,8 @@ for(const scenario of ['qualification','remote-tamper','post-mutation','rollback
   if(failure==='updater-refusal')fs.writeFileSync(path.join(root,'candidate/target.json'),JSON.stringify({...target,updaterHealthy:false}));
   fs.writeFileSync(path.join(root,'runtime.json'),JSON.stringify({clamav:oldImage,bankRestored:false}));
   if(resumed){
-   const phase=failure.slice(7).replace(/-before$/,'');
-   fs.writeFileSync(path.join(root,'reports/active-deployment-session.json'),JSON.stringify({deploymentId:'fixture-resume',releaseId:'fixture-release',targetCommit:'a'.repeat(40),owner:'fixture',leaseToken:'fixture-lease',phase,bootstrap:false,controlImage:'sha256:'+'8'.repeat(64),clamavOperation:'incident-recovery',clamavIncidentSnapshotSha256:hash(fs.readFileSync(path.join(root,'incident.json'))),rollbackReleaseSet:Object.fromEntries(['backend','frontend','inquiry','nginx','postgres','clamav'].map((name,i)=>[name,'sha256:'+String(i+1).repeat(64)]))}));
+   const phase=failure.endsWith('-postgres')?'MUTATION_STARTED':failure.slice(7).replace(/-before$/,'');
+   fs.writeFileSync(path.join(root,'reports/active-deployment-session.json'),JSON.stringify({deploymentId:'fixture-resume',releaseId:'fixture-release',targetCommit:'a'.repeat(40),owner:'fixture',leaseToken:'fixture-lease',phase,bootstrap:false,controlImage:'sha256:'+'8'.repeat(64),clamavOperation:'incident-recovery',clamavIncidentSnapshotSha256:hash(fs.readFileSync(path.join(root,'incident.json'))),rollbackReleaseSet:Object.fromEntries(['backend','frontend','inquiry','nginx','postgres','clamav'].map((name,i)=>[name,'sha256:'+String(i+1).repeat(64)]))}),{mode:0o600});
    if(!['PREFLIGHT','LEASE_ACQUIRED','MAINTENANCE_REQUESTED-before'].some(value=>failure==='resume-'+value))fs.writeFileSync(path.join(root,'maintenance.json'),JSON.stringify({deploymentId:'fixture-resume'}));
   }
   const environment=path.join(root,'.env.prod');
@@ -70,7 +70,7 @@ for(const scenario of ['qualification','remote-tamper','post-mutation','rollback
   const shims={sh:`case "$1" in */deploy/scripts/storage-preflight.sh) printf '%s\\n' '{"kind":"storage-preflight","args":[]}' >> '${root}/commands.jsonl'; [ "$TEST_RELEASE_FAILURE" != storage-preflight ] || exit 47; exit 0;; *) exec /bin/sh "$@";; esac`,flock:'exit 0',curl:'printf 503',df:"printf 'Filesystem 1024-blocks Used Available Capacity Mounted\\nfixture 900000000 1 899999999 1%% /\\n'",sleep:'exec /bin/sleep 0.02',timeout:'shift; exec "$@"'};
   for(const [name,body]of Object.entries(shims))fs.writeFileSync(path.join(root,'bin',name),'#!/bin/sh\n'+body+'\n',{mode:0o755});
   const result=spawnSync('/bin/sh',[path.join(repository,'deploy/scripts/deploy.sh'),environment],{cwd:root,encoding:'utf8',timeout:110000,env:{...process.env,PATH:path.join(root,'bin')+':'+process.env.PATH,TEST_RELEASE_ROOT:root,TEST_SOURCE_ROOT:repository,TEST_RELEASE_FAILURE:failure,TEST_TYPESCRIPT_JS:typescript,DEPLOYMENT_REPO_ROOT:root,DEPLOYMENT_MODE:'release',DEPLOYMENT_CLAMAV_OPERATION:resumed?'repair':incident?'incident-recovery':'repair',DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_FILE:incident?path.join(root,'incident.json'):'',DEPLOYMENT_CLAMAV_TARGET_IMAGE:resumed?'':targetImage,DEPLOYMENT_CLAMAV_BASE_COMMIT:'a'.repeat(40),DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_FILE:incident?'':path.join(root,'proof.json'),DEPLOYMENT_CLAMAV_READY_FILE:path.join(root,'candidate/target.json')}});
-  const expected=resumed?1:{qualification:41,'remote-tamper':43,'post-mutation':44,'rollback-qualifier':44,'after-open':46,success:0,'storage-preflight':47,'legacy-signal':48,'runtime-not-closed':1,'stale-target':90,'updater-refusal':90,'install-interrupted':90,'lease-expired':90,'cutover-required':1,'ledger-checksum':1,'ledger-pending':1,'before-maintenance':22,'acquire-failure':23,'after-acquire':24,'marker-interrupted':25}[failure];
+  const expected=resumed?1:{qualification:41,'remote-tamper':43,'post-mutation':44,'rollback-qualifier':44,'after-open':46,success:0,'storage-preflight':47,'legacy-signal':48,'runtime-not-closed':1,'stale-target':90,'updater-refusal':90,'install-interrupted':90,'lease-expired':90,'cutover-required':1,'ledger-checksum':1,'ledger-pending':1,'before-maintenance':22,'acquire-failure':23,'after-acquire':24,'marker-interrupted':25,'target-coordinate-capture':90}[failure];
   assert.equal(result.status,expected,`${result.stdout}\n${result.stderr}`);
   const commands=fs.readFileSync(path.join(root,'commands.jsonl'),'utf8').trim().split('\n').map(line=>JSON.parse(line));
   const includes=text=>commands.filter(c=>c.args.includes(text));
@@ -105,13 +105,22 @@ for(const scenario of ['qualification','remote-tamper','post-mutation','rollback
    }
    assert.equal(includes('node_modules/prisma/build/index.js').filter(command=>command.args.includes('status')).length,0);
   }
+  if(failure==='target-coordinate-capture'){
+   assert.match(result.stderr,/Backend incident target receipt differs from preflight/);
+   assert.equal(checkpoint,-1);
+  }
   if(failure==='ledger-checksum'||failure==='ledger-pending')assert.match(result.stderr,/PROTECTED_MIGRATION_(HISTORY_REQUIRES_INSPECTION|CURRENT_LEDGER_INCOMPLETE)/);
   const beforeBoundary=['cutover-required','ledger-checksum','ledger-pending','before-maintenance','acquire-failure','after-acquire','storage-preflight','legacy-signal','resume-PREFLIGHT','resume-LEASE_ACQUIRED','resume-MAINTENANCE_REQUESTED-before'].includes(failure);
   if(['qualification','stale-target','updater-refusal'].includes(failure)||beforeBoundary)assert.equal(controls('maintenance-on').length,0);
-  else if(failure==='remote-tamper'||failure==='rollback-qualifier'||failure==='after-open'||failure==='runtime-not-closed'||(incident&&(['remote-tamper','post-mutation','install-interrupted','lease-expired','marker-interrupted','after-acquire'].includes(failure)||resumed))){
+  else if(failure==='remote-tamper'||failure==='rollback-qualifier'||failure==='after-open'||failure==='runtime-not-closed'||(incident&&(['remote-tamper','post-mutation','install-interrupted','lease-expired','marker-interrupted','after-acquire','target-coordinate-capture'].includes(failure)||resumed))){
    assert.ok(fs.existsSync(path.join(root,'maintenance.json')),'failed rollback verification or post-open failure retains maintenance');
    assert.equal(controls('maintenance-off').length,failure==='after-open'?1:0);
   } else assert.equal(fs.existsSync(path.join(root,'maintenance.json')),false);
+  if(resumed&&failure.endsWith('-postgres')){
+   assert.equal(commands.filter(c=>c.kind==='docker'&&c.args.includes('postgres')&&['up','create','start'].some(verb=>c.args.includes(verb))).length,0);
+   assert.ok(fs.existsSync(path.join(root,'reports/active-deployment-session.json')));
+   assert.match(result.stderr,/running retained PostgreSQL/);
+  }
   if(resumed||beforeBoundary||failure==='marker-interrupted'){
    assert.equal(controls('maintenance-off').length,0,'incident recovery cannot reopen the degraded original');
    assert.equal(commands.filter(c=>c.kind==='docker'&&(c.args.includes('start')||c.args.includes('up'))&&c.args.includes('clamav')).length,0,'incident failure/resume cannot restart the degraded scanner');

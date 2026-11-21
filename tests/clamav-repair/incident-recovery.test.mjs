@@ -185,6 +185,9 @@ test('UFPR preparation copies the observed FEUP cooldown and schedule without mo
     stateFileHashes:Object.fromEntries(Object.entries(files).map(([name,bytes])=>[name,sha256(bytes)]))}};
   const snapshotBytes=Buffer.from(JSON.stringify(snapshot));
   await fs.writeFile(snapshotFile,snapshotBytes);
+  await fs.writeFile(snapshotFile,JSON.stringify({...snapshot,issues:['UPDATER_NOT_LIVE']}));
+  await assert.rejects(prepare(path.join(root,'updater-only')),/SIGNATURES_STALE/);
+  await fs.writeFile(snapshotFile,snapshotBytes);
   const report=JSON.parse((await prepare(output)).stdout);
   assert.deepEqual(report,{stagingOriginalSha256:sha256(snapshotBytes),next});
   const archive=path.join(output,'.source-state','feup-predecessor');
@@ -207,7 +210,7 @@ test('UFPR preparation copies the observed FEUP cooldown and schedule without mo
    loadedDaily:snapshot.versions.daily,updaterHealthy:true,signatureVerified:true,loadVerified:true,eicarRejected:true,
    acquisitionOrigin:'https://clamavdb.c3sl.ufpr.br',sourceMigration,bankSha256:sha256(await fs.readFile(bank)),
    ufprCycle:{containerStartedAt:new Date((current-120)*1000).toISOString(),attempted:stageAttempt,succeeded:stageAttempt+1,
-    next:stageAttempt+7200,resultSha256:sha256(stagedResult)}};
+    next:stageAttempt+7200,resultSha256:sha256(stagedResult),freshclamDatSha256:sha256(files['freshclam.dat'])}};
   await fs.writeFile(receiptFile,JSON.stringify(receipt));
   const fakeDns=path.join(root,'fixture-dns.mjs');
   await fs.writeFile(fakeDns,`import dns from 'node:dns/promises';
@@ -219,6 +222,19 @@ test('UFPR preparation copies the observed FEUP cooldown and schedule without mo
    DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE:feupIncidentImage,DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256:sha256(snapshotBytes),
    DEPLOYMENT_CLAMAV_UFPR_STAGING_ORIGINAL_SHA256:sha256(snapshotBytes)}};
   assert.equal((await run(process.execPath,verifyArgs,verification)).stdout.trim(),sha256(await fs.readFile(receiptFile)));
+  await fs.writeFile(path.join(output,'freshclam.dat'),'changed active FreshClam state');
+  await run('tar',['-cf',bank,'-C',output,'.']);
+  await fs.writeFile(receiptFile,JSON.stringify({...receipt,bankSha256:sha256(await fs.readFile(bank))}));
+  await assert.rejects(run(process.execPath,verifyArgs,verification),/bank contents differ/);
+  await fs.writeFile(path.join(output,'freshclam.dat'),files['freshclam.dat']);
+  const updaterOnlyStage=Buffer.from(JSON.stringify({...snapshot,issues:['UPDATER_NOT_LIVE']}));
+  await fs.chmod(path.join(archive,'snapshot.json'),0o600);
+  await fs.writeFile(path.join(archive,'snapshot.json'),updaterOnlyStage);
+  await run('tar',['-cf',bank,'-C',output,'.']);
+  await fs.writeFile(receiptFile,JSON.stringify({...receipt,bankSha256:sha256(await fs.readFile(bank))}));
+  await assert.rejects(run(process.execPath,verifyArgs,{env:{...verification.env,
+   DEPLOYMENT_CLAMAV_UFPR_STAGING_ORIGINAL_SHA256:sha256(updaterOnlyStage)}}),/SIGNATURES_STALE/);
+  await fs.writeFile(path.join(archive,'snapshot.json'),snapshotBytes);
   await fs.chmod(path.join(archive,'freshclam.dat'),0o600);
   await fs.appendFile(path.join(archive,'freshclam.dat'),'candidate ancestry changed');
   await run('tar',['-cf',bank,'-C',output,'.']);

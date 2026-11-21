@@ -251,16 +251,17 @@ test('UFPR is a fixed direct acquisition source with unchanged publisher verific
   firstEligibleAttempt:9000,vendorCooldownUntil:10000,originalStateFiles,cdnFallback:false};
  const attempted=Math.floor(Date.now()/1000)-60;
  const ufprCycle={containerStartedAt:new Date((attempted-60)*1000).toISOString(),
-  attempted,succeeded:attempted+15,next:attempted+7200,resultSha256:'b'.repeat(64)};
+  attempted,succeeded:attempted+15,next:attempted+7200,resultSha256:'b'.repeat(64),freshclamDatSha256:'c'.repeat(64)};
  const qualified={...receipt,sourceMigration,ufprCycle};
  assert.equal(validateReceipt(qualified,image,versions).acquisitionOrigin,origin);
  const {validateIncidentTarget}=await import('../../scripts/clamav-release-readiness.mjs');
  const current=Math.floor(Date.now()/1000);
- const snapshot={acquisition:{origin:sourceMigration.targetOrigin,sourceMigration,
+ const snapshot={issues:['SIGNATURES_STALE'],acquisition:{origin:sourceMigration.targetOrigin,sourceMigration,
   attempted:attempted-1,next:attempted+7199}};
  assert.equal(validateIncidentTarget(qualified,snapshot,5000,current),qualified);
+ assert.throws(()=>validateIncidentTarget(qualified,{...snapshot,issues:['UPDATER_NOT_LIVE']},0,current),/SIGNATURES_STALE/);
  assert.throws(()=>validateIncidentTarget(qualified,snapshot,7200,current),/next scheduled slot/);
- assert.throws(()=>validateIncidentTarget(qualified,{acquisition:{...snapshot.acquisition,next:ufprCycle.next+1}},0,current),/original.*schedule/);
+ assert.throws(()=>validateIncidentTarget(qualified,{...snapshot,acquisition:{...snapshot.acquisition,next:ufprCycle.next+1}},0,current),/original.*schedule/);
  const wrongVendor={...sourceMigration,originalStateFiles:{...originalStateFiles,
   'freshclam.dat':{sha256:'b'.repeat(64)}}};
  assert.throws(()=>validateIncidentTarget({...qualified,sourceMigration:wrongVendor},snapshot,0,current),/original.*provenance/);
@@ -293,5 +294,74 @@ test('UFPR readiness rejects a scheduler that reads a different bank or interval
    throw new Error('Unexpected inspection call: '+args.join(' '));
   };
   await assert.rejects(inspectCandidate('fixture',execute),/immutable direct acquisition runtime/);
+ }
+});
+
+test('UFPR qualification pins launch arguments, running files and the scheduler process',async()=>{
+ const {inspectCandidate}=await import('../../scripts/clamav-release-readiness.mjs');
+ const {readFile}=await import('node:fs/promises');
+ const {createHash}=await import('node:crypto');
+ const image='sha256:27b42e1a6c76b8d3ad9e88738c45b2c6e54339cb92dfba66205868a9c357c941';
+ const files={
+  '/etc/clamav/freshclam.conf':'freshclam.local.conf',
+  '/etc/clamav/clamd.conf':'clamd.conf',
+  ...Object.fromEntries(['acquisition-transport','entrypoint','updater','update-once','health']
+   .map(name=>['/usr/local/bin/sabalan-clamav-'+name,name+'.sh'])),
+ };
+ const digest=bytes=>createHash('sha256').update(bytes).digest('hex');
+ const config=await readFile(new URL('../../deploy/clamav/freshclam.local.conf',import.meta.url),'utf8');
+ const hashes=Object.fromEntries(await Promise.all(Object.entries(files).map(async ([file,source])=>
+  [file,digest(await readFile(new URL('../../deploy/clamav/'+source,import.meta.url)))])));
+ const command=['/sbin/tini','-g','--','/usr/local/bin/sabalan-clamav-entrypoint'];
+ const now=Math.floor(Date.now()/1000),attempted=now-60;
+ const start=new Date((attempted-60)*1000).toISOString();
+ const updateStarted=epoch=>new Date(epoch*1000).toUTCString().replace(/^(\w+), (\d+) (\w+) (\d+) (.+) GMT$/,'$1 $3 $2 $5 $4');
+ const resultLog=['ClamAV update process started at '+updateStarted(attempted),
+  'main.cvd database is up-to-date (version: 63, sigs: 100)',
+  'daily.cld updated (version: 28157, sigs: 100)',
+  'bytecode.cvd database is up-to-date (version: 339, sigs: 100)',''].join('\n');
+ const sourceMigration={kind:'CLAMAV_ACQUISITION_SOURCE_MIGRATION_V1',originalOrigin:'https://database.clamav.net',
+  targetOrigin:'https://mirrors.fe.up.pt/pub/clamav',intervalSeconds:7200,lastActualAttempt:1800,
+  firstEligibleAttempt:9000,vendorCooldownUntil:10000,cdnFallback:false,
+  originalStateFiles:Object.fromEntries(['freshclam.dat','.sabalan-updater-state','.sabalan-freshclam-result'].map(name=>[name,{sha256:'a'.repeat(64)}]))};
+ let qualified;
+ for(const field of ['healthy','installed','changedCooldown','staleResult','staleCycle','path','args','containerEntrypoint','imageEntrypoint',...Object.keys(files),'scheduler']){
+  const f=nativeFixture(), env=['CLAMAV_ACQUISITION_TRANSPORT=direct'];
+  const execute=async(program,args,options)=>{
+   const answer=stdout=>({stdout,stderr:''});
+   if(args[0]==='inspect')return answer(JSON.stringify([{Id:'ufpr',Image:image,
+    Path:field==='path'?'/bin/sh':command[0],Args:field==='args'?['-c','override']:command.slice(1),
+    State:{Running:true,StartedAt:start},Config:{Env:env,Entrypoint:field==='containerEntrypoint'?['/bin/sh']:command,Cmd:null},
+    Mounts:[{Destination:'/var/lib/clamav',RW:true}]}]));
+   if(args[0]==='image')return answer(JSON.stringify([{Id:image,Config:{Env:env,Entrypoint:field==='imageEntrypoint'?['/bin/sh']:command,Cmd:null}}]));
+   const file=args.at(-1);
+   if(args[2]==='cat' && file==='/etc/clamav/freshclam.conf')return answer(config);
+   if(args[2]==='cat' && file.endsWith('/migration.json'))return answer(JSON.stringify(sourceMigration));
+   if(args[2]==='cat' && file.endsWith('/.sabalan-updater-state'))return answer(attempted+' '+(attempted+5)+' 0 '+(attempted+7200));
+   if(args[2]==='date' && file==='+%z')return answer('+0000');
+   if(args[2]==='cat' && file.endsWith('/.sabalan-freshclam-result')){
+    return answer(Buffer.from(field==='staleResult'?resultLog.replace('28157','28156')
+     :field==='staleCycle'?resultLog.replace(updateStarted(attempted),updateStarted(attempted-7200)):resultLog));
+   }
+   if(args[2]==='sha256sum'){
+    return answer(args.slice(3).map(filename=>
+     (field===filename||(field==='changedCooldown'&&filename==='/var/lib/clamav/freshclam.dat')?'0'.repeat(64):hashes[filename]|| (filename==='/var/lib/clamav/.sabalan-freshclam-result'?digest(resultLog):'a'.repeat(64)))+'  '+filename).join('\n'));
+   }
+   if(args[2]==='sh' && file.includes('/run/sabalan-clamav/updater.pid')){
+    if(field==='scheduler')throw new Error('UFPR scheduler process identity changed');
+    return answer('7 12345');
+   }
+   if(args[2]==='/usr/local/bin/sabalan-clamav-acquisition-transport')return answer('');
+   if(args[2]==='freshclam'||(args[2]==='clamdscan'&&args.includes('--version')))return answer('ClamAV 1.4.6/28157/date');
+   return f.execute(program,args,options);
+  };
+  if(field==='healthy'){
+   qualified=await inspectCandidate('fixture',execute,f.resolve);
+   assert.equal(qualified.image,image);
+  }else if(field==='installed')assert.equal((await inspectCandidate('fixture',execute,f.resolve,qualified)).image,image);
+  else if(field==='changedCooldown')await assert.rejects(inspectCandidate('fixture',execute,f.resolve,qualified),/qualified updater result/);
+  else if(field==='staleResult')await assert.rejects(inspectCandidate('fixture',execute,f.resolve),/current signed bank/);
+  else if(field==='staleCycle')await assert.rejects(inspectCandidate('fixture',execute,f.resolve),/scheduled cycle timestamp/);
+  else await assert.rejects(inspectCandidate('fixture',execute,f.resolve),/UFPR .*runtime|UFPR scheduler/,field);
  }
 });

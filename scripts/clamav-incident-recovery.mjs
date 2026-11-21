@@ -5,7 +5,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { pathToFileURL } from 'node:url';
 import { publishedVersions, parseNativeProbe, fileDigest, validateAcquisitionConfiguration } from './clamav-release-readiness.mjs';
-import { validateIncidentSnapshot, feupIncidentImage, incidentAcquisitionStateNames as stateNames } from '../backend/scripts/clamav-incident-policy.mjs';
+import { validateIncidentSnapshot, requireStaleFeupPredecessor, feupIncidentImage, incidentAcquisitionStateNames as stateNames } from '../backend/scripts/clamav-incident-policy.mjs';
 import { mirrorOrigin, validateSourceMigration } from './clamav-source-migration.mjs';
 const execute = promisify(execFile);
 const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
@@ -112,6 +112,7 @@ export async function inspectIncident(container) {
 async function prepareUfpr(snapshotFile, input, output) {
  const snapshotBytes=await fs.readFile(snapshotFile);
  const snapshot=validateIncidentSnapshot(JSON.parse(snapshotBytes),feupIncidentImage);
+ requireStaleFeupPredecessor(snapshot);
  const original=snapshot.acquisition;
  const source=await fs.realpath(input);
  const outputParent=await fs.realpath(path.dirname(output));

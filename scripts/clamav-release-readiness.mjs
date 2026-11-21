@@ -1,4 +1,4 @@
-import { validateIncidentSnapshot, incidentAcquisitionStateNames } from '../backend/scripts/clamav-incident-policy.mjs';
+import { validateIncidentSnapshot, requireStaleFeupPredecessor, incidentAcquisitionStateNames } from '../backend/scripts/clamav-incident-policy.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import crypto from 'node:crypto';
@@ -15,6 +15,16 @@ const managedVerifier='managed-1.4.6-v1', nativeVerifier='native-1.4-daemon-v1';
 const ufprOrigin='https://clamavdb.c3sl.ufpr.br';
 // Pin the complete linux/amd64 executable manifest used in the verified runtime archive.
 const ufprImage='sha256:27b42e1a6c76b8d3ad9e88738c45b2c6e54339cb92dfba66205868a9c357c941';
+const ufprEntrypoint=['/sbin/tini','-g','--','/usr/local/bin/sabalan-clamav-entrypoint'];
+const ufprRuntimeFiles={
+ '/etc/clamav/freshclam.conf':'7a7fb8de7cef7060c484bd56e3276aa10af505a6cd83b779bb436333ea7cb8ca',
+ '/etc/clamav/clamd.conf':'ec1f9ec4c88037d45fd8dc37edb13b899d0c1089195007d7d243103c4fa39363',
+ '/usr/local/bin/sabalan-clamav-acquisition-transport':'2c7c478435edb4365cd097090f38242e1d6bda8c79b3f60437271a17771047be',
+ '/usr/local/bin/sabalan-clamav-entrypoint':'d2957e10032526f685d25fef895b05359439230d29657ed584b784dc163d2c77',
+ '/usr/local/bin/sabalan-clamav-updater':'5483d8ebe8944c6f67fbf7a793f1759ab215ef71b614cb3a9e36fdbaefd2d367',
+ '/usr/local/bin/sabalan-clamav-update-once':'b7cd178a8f41a805c621fcb8b7675e946b8139d62644791d4797a536306f0d5b',
+ '/usr/local/bin/sabalan-clamav-health':'742f8300ad423c8c0fb7559ca1ba6afb7d1db2a31b80a75946be9cc72d73eb20',
+};
 const reviewedMirror=origin=>origin===mirrorOrigin || origin===ufprOrigin;
 const updateRefusal=line=>!/^(WARNING: )?Cool-down expired, ok to try again\.$/.test(line) && /cool.?down|rate.?limit|blocked|ERROR:|HTTP[^0-9]*(429|403)/i.test(line);
 export function validateNativeUpdater(sample,config,logs,versions,clamdConfig='') {
@@ -152,8 +162,8 @@ export function validateReceipt(value,image,versions,now=Date.now()) {
 
 export function validateIncidentTarget(receipt, snapshot, runwaySeconds, nowSeconds=Math.floor(Date.now()/1000)) {
  if(receipt.acquisitionOrigin!==ufprOrigin)return receipt;
+ requireStaleFeupPredecessor(snapshot);
  const original=snapshot.acquisition;
- if(original?.origin!==mirrorOrigin)throw new Error('UFPR incident requires a verified original FEUP acquisition state');
  assert.deepEqual(receipt.sourceMigration,original.sourceMigration,'UFPR vendor archive differs from the original FEUP provenance');
  const cycle=receipt.ufprCycle;
  if(cycle.attempted<original.attempted || cycle.attempted<original.sourceMigration.firstEligibleAttempt
@@ -174,6 +184,7 @@ async function verifyUfprArchive(bank,receipt,snapshot) {
  const staged=JSON.parse(stagedBytes);
  const observedAt=Date.parse(staged.checkedAt);
  validateIncidentSnapshot(staged,snapshot.image,observedAt);
+ requireStaleFeupPredecessor(staged);
  if(Date.now()-observedAt>24*3600000 || observedAt>Date.parse(snapshot.checkedAt)
   || staged.acquisition.migrationSha256!==snapshot.acquisition.migrationSha256
   || staged.configArchiveSha256!==snapshot.configArchiveSha256
@@ -184,15 +195,24 @@ async function verifyUfprArchive(bank,receipt,snapshot) {
  }
  assert.deepEqual(staged.acquisition.sourceMigration,snapshot.acquisition.sourceMigration,'UFPR staging original vendor provenance changed');
 
- const state='.sabalan-updater-state',result='.sabalan-freshclam-result';
- const expected={
-  [state]:crypto.createHash('sha256').update(`${receipt.ufprCycle.attempted} ${receipt.ufprCycle.succeeded} 0 ${receipt.ufprCycle.next}\n`).digest('hex'),
-  [result]:receipt.ufprCycle.resultSha256,
+ await verifyArchiveFiles(bank,{
+  ...ufprActiveBankHashes(receipt.ufprCycle),
   [stageSnapshotPath]:stagePin,
   ...Object.fromEntries(incidentAcquisitionStateNames.map(name=>[prefix+name,staged.acquisition.stateFileHashes[name]])),
   '.source-state/migration.json':snapshot.acquisition.migrationSha256,
   ...Object.fromEntries(Object.entries(receipt.sourceMigration.originalStateFiles).map(([name,record])=>['.source-state/vendor-cdn/'+name,record.sha256])),
+ });
+}
+
+function ufprActiveBankHashes(cycle) {
+ return {
+  '.sabalan-updater-state':crypto.createHash('sha256').update([cycle.attempted,cycle.succeeded,0,cycle.next].join(' ')+'\n').digest('hex'),
+  '.sabalan-freshclam-result':cycle.resultSha256,
+  'freshclam.dat':cycle.freshclamDatSha256,
  };
+}
+
+async function verifyArchiveFiles(bank,expected) {
  // GNU tar selects only the fixed members and hashes them in one streaming pass.
  // The output has exactly one line per expected regular file, including duplicates.
  const members=Object.keys(expected).map(name=>'./'+name);
@@ -288,15 +308,39 @@ async function verifyUfprImage(container,inspection,run) {
   return modes.length===1 && modes[0]==='CLAMAV_ACQUISITION_TRANSPORT=direct';
  };
  const bank='/var/lib/clamav';
- const protectedPaths=[bank,'/etc/clamav','/run/sabalan-clamav','/usr/local/bin','/usr/local/share'];
+ const protectedPaths=[bank,'/etc/clamav','/run/sabalan-clamav','/usr/local/bin','/usr/local/share',
+  '/bin','/sbin','/usr/bin','/usr/sbin','/lib'];
+ const launchMatches=config=>config?.Cmd===null && JSON.stringify(config.Entrypoint)===JSON.stringify(ufprEntrypoint);
  const overlaps=(left,right)=>left===right || left==='/' || right==='/' || left.startsWith(right+'/') || right.startsWith(left+'/');
  const mounts=inspection.Mounts ?? [];
  if(inspection.Image!==ufprImage || image?.Id!==ufprImage || !direct(image.Config?.Env) || !direct(inspection.Config?.Env)
+  || inspection.Path!==ufprEntrypoint[0] || JSON.stringify(inspection.Args)!==JSON.stringify(ufprEntrypoint.slice(1))
+  || !launchMatches(inspection.Config) || !launchMatches(image.Config)
   || mounts.filter(mount=>mount.Destination===bank && mount.RW===true).length!==1
   || mounts.some(mount=>mount.Destination!==bank && protectedPaths.some(file=>overlaps(file,mount.Destination)))){
   throw new Error('UFPR mirror requires the immutable direct acquisition runtime');
  }
+ const actual=await run(['exec',container,'sha256sum',...Object.keys(ufprRuntimeFiles)]);
+ const expected=Object.entries(ufprRuntimeFiles).map(([file,digest])=>digest+'  '+file).join('\n');
+ if(actual!==expected)throw new Error('UFPR immutable runtime files differ from the reviewed image');
  await run(['exec',container,'/usr/local/bin/sabalan-clamav-acquisition-transport']);
+}
+async function ufprSchedulerIdentity(container,run) {
+ const probe=String.raw`read -r pid < /run/sabalan-clamav/updater.pid
+case "$pid" in ''|*[!0-9]*) exit 1;; esac
+[ "$pid" -gt 1 ]
+uid="$(id -u clamav)"
+[ "$uid" -gt 0 ]
+[ "$(awk '/^Uid:/ {print $3}' "/proc/$pid/status")" = "$uid" ]
+[ "$(tr '\000' '\n' < "/proc/$pid/cmdline")" = "$(printf '%s\n' /bin/sh /usr/local/bin/sabalan-clamav-updater)" ]
+stat="$(sed 's/.*) //' "/proc/$pid/stat")"
+case "$stat" in [RSDI]' '*) ;; *) exit 1;; esac
+printf '%s %s\n' "$pid" "$(printf '%s\n' "$stat" | cut -d' ' -f20)"`;
+ const process=await run(['exec',container,'sh','-ec',probe]).catch(error=>{
+  throw new Error('UFPR scheduler process identity is not the reviewed unprivileged updater',{cause:error});
+ });
+ if(!/^[1-9]\d* [1-9]\d*$/.test(process))throw new Error('UFPR scheduler process identity is missing');
+ return process;
 }
 function validateUfprCycle(cycle, observedAt) {
  const start=Date.parse(cycle?.containerStartedAt);
@@ -304,25 +348,42 @@ function validateUfprCycle(cycle, observedAt) {
   || ![cycle.attempted,cycle.succeeded,cycle.next].every(Number.isSafeInteger)
   || cycle.attempted<=Math.floor(start/1000) || cycle.succeeded<cycle.attempted
   || cycle.succeeded>Math.floor(observedAt/1000) || cycle.next!==cycle.attempted+7200
-  || !/^[a-f0-9]{64}$/.test(cycle.resultSha256 || '')) {
+  || ![cycle.resultSha256,cycle.freshclamDatSha256].every(digest=>/^[a-f0-9]{64}$/.test(digest || ''))) {
   throw new Error('A successful scheduled update under the reviewed UFPR container is required');
  }
  return cycle;
 }
-async function observeUfprCycle(container, inspection, run, installed) {
+async function observeUfprCycle(container, inspection, run, readResult, installed) {
  const stateArgs=['exec',container,'cat','/var/lib/clamav/.sabalan-updater-state'];
  const state=await run(stateArgs);
  assert.match(state,/^\d+ \d+ 0 \d+$/);
  const [attempted,succeeded,,next]=state.split(' ').map(Number);
- const resultSha256=(await run(['exec',container,'sha256sum','/var/lib/clamav/.sabalan-freshclam-result'])).split(/\s/)[0];
+ const result=await readResult();
+ const resultSha256=crypto.createHash('sha256').update(result).digest('hex');
+ const freshclamDatSha256=(await run(['exec',container,'sha256sum','/var/lib/clamav/freshclam.dat'])).split(/\s/)[0];
  assert.equal(await run(stateArgs),state,'UFPR updater changed while reading its result');
  const cycle=validateUfprCycle({containerStartedAt:installed?.ufprCycle?.containerStartedAt ?? inspection.State.StartedAt,
-  attempted,succeeded,next,resultSha256},Date.now());
+  attempted,succeeded,next,resultSha256,freshclamDatSha256},Date.now());
  if(installed){
   assert.deepEqual(cycle,installed.ufprCycle,'Activated UFPR bank no longer matches its qualified updater result');
   if(cycle.next<=Math.floor(Date.now()/1000))throw new Error('Activated UFPR bank has reached its next scheduled slot');
  }
- return cycle;
+ return {cycle,result:result.toString('utf8')};
+}
+
+function verifyUfprResult(result,versions,cycle,zoneOffset) {
+ const lines=result.split(/\r?\n/);
+ const starts=lines.map(line=>line.match(/^ClamAV update process started at (.+)$/)).filter(Boolean);
+ const started=starts.length===1 && /^[+-]\d{4}$/.test(zoneOffset)
+  ? Date.parse(starts[0][1]+' '+zoneOffset)/1000 : NaN;
+ if(!Number.isFinite(started) || started<cycle.attempted || started>cycle.succeeded){
+  throw new Error('UFPR updater result does not match its scheduled cycle timestamp');
+ }
+ const matches=lines.map(line=>line.match(/^(main|daily|bytecode)[.](?:cvd|cld) (?:database is up-to-date|updated) \(version: (\d+)[,)]/)).filter(Boolean);
+ if(lines.some(updateRefusal) || !Object.keys(versions).every(name=>{
+  const entries=matches.filter(match=>match[1]===name);
+  return entries.length===1 && Number(entries[0][2])===versions[name];
+ }))throw new Error('UFPR updater result does not match the current signed bank');
 }
 export async function inspectCandidate(container,execute=exec,resolve=resolveTxt,installed) {
  // A caller prepares an inactive candidate under separate authorization. This command only inspects it.
@@ -337,14 +398,16 @@ export async function inspectCandidate(container,execute=exec,resolve=resolveTxt
   await run(['exec',container,'/usr/local/bin/sabalan-clamav-acquisition-transport']);
  }
  const acquisitionOrigin=validateAcquisitionConfiguration(configuration,acquisitionTransport);
- let ufprCycle;
+ const readUfprResult=async()=> (await execute('docker',['exec',container,'cat','/var/lib/clamav/.sabalan-freshclam-result'],{encoding:'buffer',maxBuffer:4*1024*1024})).stdout;
+ let ufprCycle, ufprResult, scheduler;
  if(acquisitionOrigin===ufprOrigin){
   await verifyUfprImage(container,inspect,run);
+  scheduler=await ufprSchedulerIdentity(container,run);
   if(installed){
    validateReceipt(installed,inspect.Image,await publishedVersions(resolve));
    assert.equal(installed.acquisitionOrigin,acquisitionOrigin);
   }
-  ufprCycle=await observeUfprCycle(container,inspect,run,installed);
+  ({cycle:ufprCycle,result:ufprResult}=await observeUfprCycle(container,inspect,run,readUfprResult,installed));
  }
  let sourceMigration;
  if(reviewedMirror(acquisitionOrigin)){
@@ -366,7 +429,10 @@ export async function inspectCandidate(container,execute=exec,resolve=resolveTxt
  if(acquisitionOrigin===ufprOrigin){
   if(await run(['exec',container,'cat','/etc/clamav/freshclam.conf'])!==configuration)throw new Error('UFPR acquisition changed during inspection');
   await verifyUfprImage(container,after,run);
-  assert.deepEqual(await observeUfprCycle(container,after,run,installed),ufprCycle,'UFPR updater changed during qualification');
+  assert.equal(await ufprSchedulerIdentity(container,run),scheduler,'UFPR scheduler process changed during qualification');
+  const observed=await observeUfprCycle(container,after,run,readUfprResult,installed);
+  assert.deepEqual(observed.cycle,ufprCycle,'UFPR updater changed during qualification');
+  verifyUfprResult(ufprResult,value.versions,ufprCycle,await run(['exec',container,'date','+%z']));
  }
  return validateReceipt({...value,acquisitionOrigin,...(acquisitionTransport?{acquisitionTransport}:{}),...(sourceMigration?{sourceMigration}:{}),...(ufprCycle?{ufprCycle}:{})},value.image,await publishedVersions(resolve));
 }
@@ -561,7 +627,12 @@ if(process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href) {
   }
   else if(command==='scope') await verifyRepairScope(input);
   else if(command==='inspect') {
-   const installed=image?JSON.parse(await fs.readFile(image,'utf8')):undefined;
+   const pin=process.argv[5];
+   const bytes=image?await fs.readFile(image):undefined;
+   if(pin && (!bytes || crypto.createHash('sha256').update(bytes).digest('hex')!==pin)){
+    throw new Error('Installed ClamAV incident receipt differs from preflight');
+   }
+   const installed=bytes?JSON.parse(bytes):undefined;
    process.stdout.write(JSON.stringify(await inspectCandidate(input,exec,resolveTxt,installed),null,2)+'\n');
   }
   else if(command==='inspect-rollback') process.stdout.write(JSON.stringify(await inspectRollback(input,JSON.parse(await fs.readFile(image,'utf8'))),null,2)+'\n');
@@ -576,6 +647,7 @@ if(process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href) {
     const after=await inspectCandidate(input);
     if(JSON.stringify(receipt.versions)!==JSON.stringify(after.versions)) throw new Error('Bank changed while preparing candidate; review without a forced update');
     assert.deepEqual(after.ufprCycle,receipt.ufprCycle,'UFPR updater changed during bank export');
+    if(after.ufprCycle)await verifyArchiveFiles(bank,ufprActiveBankHashes(after.ufprCycle));
     await fs.writeFile(path.join(image,'target.json'),JSON.stringify({...after,bankSha256:await fileDigest(bank)},null,2)+'\n',{mode:0o600,flag:'wx'});
    } finally {await exec('docker',['exec',input,'rm','-f',temporary]);}
   }

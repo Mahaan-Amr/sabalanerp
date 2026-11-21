@@ -38,6 +38,7 @@ type Session = {
   preservedClamav?: PreservedClamavBinding;
   clamavOperation?: 'repair' | 'incident-recovery';
   clamavIncidentSnapshotSha256?: string;
+  clamavIncidentReceiptSha256?: string;
   rollbackReleaseSet: Record<'backend' | 'frontend' | 'inquiry' | 'nginx' | 'postgres' | 'clamav', string>;
   rollbackPerformanceEnvironment?: Record<string, string>;
 };
@@ -103,8 +104,10 @@ const prepare = async () => {
   const clamavOperation = process.env.DEPLOYMENT_CLAMAV_OPERATION || 'repair';
   if (!['repair', 'incident-recovery'].includes(clamavOperation)) throw new Error('Unknown ClamAV operation.');
   const incidentSha = process.env.DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256;
-  if (clamavOperation === 'incident-recovery' && (process.env.DEPLOYMENT_CLAMAV_REPAIR !== 'true' || !/^[a-f0-9]{64}$/.test(incidentSha || ''))) {
-    throw new Error('Incident recovery requires an explicitly bound degraded-instance snapshot.');
+  const incidentReceiptSha = process.env.DEPLOYMENT_CLAMAV_INCIDENT_RECEIPT_SHA256;
+  if (clamavOperation === 'incident-recovery' && (process.env.DEPLOYMENT_CLAMAV_REPAIR !== 'true'
+    || ![incidentSha, incidentReceiptSha].every(digest => /^[a-f0-9]{64}$/.test(digest || '')))) {
+    throw new Error('Incident recovery requires the degraded-instance snapshot and verified target receipt checksums.');
   }
   const rollbackPerformanceEnvironment = JSON.parse(process.env.DEPLOYMENT_PREVIOUS_PERFORMANCE_ENVIRONMENT || '{}');
   const identityKey = /^PERFORMANCE_(RELEASE_(COMMIT|SOURCE_HASH|SCHEMA_HASH|POLICY_HASH|INFRASTRUCTURE_HASH|BACKEND_IMAGE|FRONTEND_IMAGE|INQUIRY_IMAGE)|RUNTIME_INFRASTRUCTURE_HASH)$/;
@@ -125,7 +128,7 @@ const prepare = async () => {
     bootstrap: false,
     controlImage: required('DEPLOYMENT_CONTROL_IMAGE'),
     clamavOperation: clamavOperation as 'repair' | 'incident-recovery',
-    ...(clamavOperation === 'incident-recovery' ? { clamavIncidentSnapshotSha256: incidentSha } : {}),
+    ...(clamavOperation === 'incident-recovery' ? { clamavIncidentSnapshotSha256: incidentSha, clamavIncidentReceiptSha256: incidentReceiptSha } : {}),
     rollbackPerformanceEnvironment,
     ...(preservedClamav ? {preservedClamav} : {}),
     rollbackReleaseSet: {
@@ -153,6 +156,7 @@ const prepare = async () => {
     clamavOperation: session.clamavOperation,
     ...(preservedClamav ? {preservedClamav} : {}),
     ...(session.clamavIncidentSnapshotSha256 ? { clamavIncidentSnapshotSha256: session.clamavIncidentSnapshotSha256 } : {}),
+    ...(session.clamavIncidentReceiptSha256 ? { clamavIncidentReceiptSha256: session.clamavIncidentReceiptSha256 } : {}),
   });
   return session;
 };

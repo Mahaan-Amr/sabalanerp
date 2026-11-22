@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { validateQaRenderedMounts } from '../../deploy/scripts/qa-rehearsal-target.mjs';
+import { withQaOwnerKeyUid } from './qa-fixtures.mjs';
 
 function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-recovery-mount-'));
@@ -34,30 +35,43 @@ function fixture() {
 test('both QA graphs permit exactly the read-only public owner key beneath QA custody', () => {
   const value = fixture();
   try {
-    for (const scannerRetained of [true, false]) {
-      assert.doesNotThrow(() => validateQaRenderedMounts(value.config, { ...value.options, scannerRetained }));
-    }
-    value.recovery.read_only = false;
-    assert.throws(() => validateQaRenderedMounts(value.config, value.options));
+    withQaOwnerKeyUid(value.publicKey, 0, () => {
+      for (const scannerRetained of [true, false]) {
+        assert.doesNotThrow(() => validateQaRenderedMounts(value.config, { ...value.options, scannerRetained }));
+      }
+      value.recovery.read_only = false;
+      assert.throws(() => validateQaRenderedMounts(value.config, value.options));
+    });
+  } finally { fs.rmSync(value.root, { recursive: true, force: true }); }
+});
+
+test('QA custody refuses a read-only public owner key owned by an unprivileged user', () => {
+  const value = fixture();
+  try {
+    withQaOwnerKeyUid(value.publicKey, 1001, () => {
+      assert.throws(() => validateQaRenderedMounts(value.config, value.options), { actual: 1001, expected: 0 });
+    });
   } finally { fs.rmSync(value.root, { recursive: true, force: true }); }
 });
 
 test('a private key, directory, foreign bind or additional private-key mount is refused', () => {
   const value = fixture();
   try {
-    fs.chmodSync(value.publicKey, 0o666);
-    fs.writeFileSync(value.publicKey, '-----BEGIN PRIVATE KEY-----\nprivate-fixture\n-----END PRIVATE KEY-----\n');
-    fs.chmodSync(value.publicKey, 0o444);
-    assert.throws(() => validateQaRenderedMounts(value.config, value.options));
-    fs.chmodSync(value.publicKey, 0o666); fs.rmSync(value.publicKey); fs.mkdirSync(value.publicKey);
-    assert.throws(() => validateQaRenderedMounts(value.config, value.options));
-    fs.rmSync(value.publicKey, { recursive: true }); fs.writeFileSync(value.publicKey, '-----BEGIN PUBLIC KEY-----\nfixture\n');
-    const original = value.recovery.source;
-    value.recovery.source = path.join(value.root, 'production-owner-private.pem');
-    assert.throws(() => validateQaRenderedMounts(value.config, value.options));
-    value.recovery.source = original;
-    value.config.services.backend.volumes.push({ type: 'bind', read_only: true,
-      target: '/run/deployment-secrets/system-recovery-owner-private.pem', source: original });
-    assert.throws(() => validateQaRenderedMounts(value.config, value.options));
+    withQaOwnerKeyUid(value.publicKey, 0, () => {
+      fs.chmodSync(value.publicKey, 0o666);
+      fs.writeFileSync(value.publicKey, '-----BEGIN PRIVATE KEY-----\nprivate-fixture\n-----END PRIVATE KEY-----\n');
+      fs.chmodSync(value.publicKey, 0o444);
+      assert.throws(() => validateQaRenderedMounts(value.config, value.options));
+      fs.chmodSync(value.publicKey, 0o666); fs.rmSync(value.publicKey); fs.mkdirSync(value.publicKey);
+      assert.throws(() => validateQaRenderedMounts(value.config, value.options));
+      fs.rmSync(value.publicKey, { recursive: true }); fs.writeFileSync(value.publicKey, '-----BEGIN PUBLIC KEY-----\nfixture\n');
+      const original = value.recovery.source;
+      value.recovery.source = path.join(value.root, 'production-owner-private.pem');
+      assert.throws(() => validateQaRenderedMounts(value.config, value.options));
+      value.recovery.source = original;
+      value.config.services.backend.volumes.push({ type: 'bind', read_only: true,
+        target: '/run/deployment-secrets/system-recovery-owner-private.pem', source: original });
+      assert.throws(() => validateQaRenderedMounts(value.config, value.options));
+    });
   } finally { fs.rmSync(value.root, { recursive: true, force: true }); }
 });

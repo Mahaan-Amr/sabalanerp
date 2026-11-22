@@ -7,6 +7,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { validateQaNetworkNamespace, validateQaRenderedConfig, validateQaRenderedMounts, validateQaRuntimeEnvironment, validateQaTargetBinding } from '../../deploy/scripts/qa-rehearsal-target.mjs';
+import { withQaOwnerKeyUid } from './qa-fixtures.mjs';
 
 const repositoryRoot = path.resolve(fileURLToPath(new URL('../../', import.meta.url)));
 
@@ -91,7 +92,8 @@ test('the protected controller selects QA runtime Compose through activation and
   ]) {
     const output = execFileSync('sh', ['-eu', '-c', select + '\n' + 'runtime_compose_file'], {
       encoding: 'utf8',
-      env: { ...process.env, COMPOSE_FILE: file, LEGACY_RELEASE_GRAPH: legacy,
+      env: { ...process.env, OPERATIONS_ROOT: repositoryRoot, DEPLOYMENT_MAINTENANCE_UPLOAD_POLICY: '',
+        COMPOSE_FILE: file, LEGACY_RELEASE_GRAPH: legacy,
         ALLOCATION_EVIDENCE_DIR: activation, CUSTOMER_ALLOCATION_CURRENT_DATA_ROLLBACK: rollback },
     });
     assert.equal(output.trim(), expected);
@@ -177,12 +179,14 @@ test('real rehearsal graphs bind each deployment recovery volume to the QA proje
           if (Object.hasOwn(sources, volume.target)) volume.source = sources[volume.target];
         }
       }
-      assert.doesNotThrow(() => validateQaRenderedMounts(config, {
-        qaRoot, repositoryRoot, environment, scannerRetained,
-      }));
-      assert.throws(() => validateQaRenderedMounts(config, {
-        qaRoot, repositoryRoot, environment, scannerRetained: !scannerRetained,
-      }));
+      withQaOwnerKeyUid(ownerPublic, 0, () => {
+        assert.doesNotThrow(() => validateQaRenderedMounts(config, {
+          qaRoot, repositoryRoot, environment, scannerRetained,
+        }));
+        assert.throws(() => validateQaRenderedMounts(config, {
+          qaRoot, repositoryRoot, environment, scannerRetained: !scannerRetained,
+        }));
+      });
     }
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -249,16 +253,18 @@ test('QA target refuses an escaped rendered secret bind and symlinked custody so
     const secret = volumes.find(volume => volume.target === '/run/deployment-secrets');
     const env = { ...qaEnvironment, DEPLOYMENT_SECRET_DIR: secretDir,
       DEPLOYMENT_REMOTE_MOUNT_HOST: remoteDir, DEPLOYMENT_REPORT_DIR_HOST: reportDir };
-    assert.doesNotThrow(() => validateQaRenderedMounts(config, { qaRoot, repositoryRoot, environment: env }));
-    clamav.type = 'bind'; clamav.source = outside;
-    assert.throws(() => validateQaRenderedMounts(config, { qaRoot, repositoryRoot, environment: env }));
-    clamav.type = 'volume'; clamav.source = 'clamav_database';
-    secret.source = outside;
-    assert.throws(() => validateQaRenderedMounts(config, { qaRoot, repositoryRoot, environment: env }));
-    fs.symlinkSync(outside, path.join(qaRoot, 'linked-secrets'), process.platform === 'win32' ? 'junction' : 'dir');
-    env.DEPLOYMENT_SECRET_DIR = path.join(qaRoot, 'linked-secrets');
-    secret.source = env.DEPLOYMENT_SECRET_DIR;
-    assert.throws(() => validateQaRenderedMounts(config, { qaRoot, repositoryRoot, environment: env }));
+    withQaOwnerKeyUid(ownerPublic, 0, () => {
+      assert.doesNotThrow(() => validateQaRenderedMounts(config, { qaRoot, repositoryRoot, environment: env }));
+      clamav.type = 'bind'; clamav.source = outside;
+      assert.throws(() => validateQaRenderedMounts(config, { qaRoot, repositoryRoot, environment: env }));
+      clamav.type = 'volume'; clamav.source = 'clamav_database';
+      secret.source = outside;
+      assert.throws(() => validateQaRenderedMounts(config, { qaRoot, repositoryRoot, environment: env }));
+      fs.symlinkSync(outside, path.join(qaRoot, 'linked-secrets'), process.platform === 'win32' ? 'junction' : 'dir');
+      env.DEPLOYMENT_SECRET_DIR = path.join(qaRoot, 'linked-secrets');
+      secret.source = env.DEPLOYMENT_SECRET_DIR;
+      assert.throws(() => validateQaRenderedMounts(config, { qaRoot, repositoryRoot, environment: env }));
+    });
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -282,10 +288,12 @@ test('QA target refuses a directory in place of the Partner trust public-key fil
         ? { ...volume, source: trust } : volume.target === '/run/deployment-secrets/system-recovery-owner-public.pem'
           ? { ...volume, source: ownerPublic } : volume) } } };
     const env = { ...qaEnvironment, DEPLOYMENT_SECRET_DIR: secretDir };
-    assert.doesNotThrow(() => validateQaRenderedMounts(config, { qaRoot, repositoryRoot, environment: env }));
-    fs.rmSync(trust);
-    fs.mkdirSync(trust);
-    assert.throws(() => validateQaRenderedMounts(config, { qaRoot, repositoryRoot, environment: env }));
+    withQaOwnerKeyUid(ownerPublic, 0, () => {
+      assert.doesNotThrow(() => validateQaRenderedMounts(config, { qaRoot, repositoryRoot, environment: env }));
+      fs.rmSync(trust);
+      fs.mkdirSync(trust);
+      assert.throws(() => validateQaRenderedMounts(config, { qaRoot, repositoryRoot, environment: env }));
+    });
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

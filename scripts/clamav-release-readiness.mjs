@@ -310,12 +310,16 @@ async function verifyUfprImage(container,inspection,run) {
  const bank='/var/lib/clamav';
  const protectedPaths=[bank,'/etc/clamav','/run/sabalan-clamav','/usr/local/bin','/usr/local/share',
   '/bin','/sbin','/usr/bin','/usr/sbin','/lib'];
- const launchMatches=config=>config?.Cmd===null && JSON.stringify(config.Entrypoint)===JSON.stringify(ufprEntrypoint);
+ const entrypointMatches=config=>JSON.stringify(config?.Entrypoint)===JSON.stringify(ufprEntrypoint);
+ // Image inspect omits an unset Cmd in newer Docker Engine APIs. The
+ // effective container command and actual launch still must match exactly.
+ const imageHasNoCommand=image.Config?.Cmd===null || image.Config?.Cmd===undefined;
  const overlaps=(left,right)=>left===right || left==='/' || right==='/' || left.startsWith(right+'/') || right.startsWith(left+'/');
  const mounts=inspection.Mounts ?? [];
  if(inspection.Image!==ufprImage || image?.Id!==ufprImage || !direct(image.Config?.Env) || !direct(inspection.Config?.Env)
   || inspection.Path!==ufprEntrypoint[0] || JSON.stringify(inspection.Args)!==JSON.stringify(ufprEntrypoint.slice(1))
-  || !launchMatches(inspection.Config) || !launchMatches(image.Config)
+  || inspection.Config?.Cmd!==null || !imageHasNoCommand
+  || !entrypointMatches(inspection.Config) || !entrypointMatches(image.Config)
   || mounts.filter(mount=>mount.Destination===bank && mount.RW===true).length!==1
   || mounts.some(mount=>mount.Destination!==bank && protectedPaths.some(file=>overlaps(file,mount.Destination)))){
   throw new Error('UFPR mirror requires the immutable direct acquisition runtime');

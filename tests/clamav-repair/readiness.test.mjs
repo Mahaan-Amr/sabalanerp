@@ -325,15 +325,18 @@ test('UFPR qualification pins launch arguments, running files and the scheduler 
   firstEligibleAttempt:9000,vendorCooldownUntil:10000,cdnFallback:false,
   originalStateFiles:Object.fromEntries(['freshclam.dat','.sabalan-updater-state','.sabalan-freshclam-result'].map(name=>[name,{sha256:'a'.repeat(64)}]))};
  let qualified;
- for(const field of ['healthy','installed','changedCooldown','staleResult','staleCycle','path','args','containerEntrypoint','imageEntrypoint',...Object.keys(files),'scheduler']){
+ for(const field of ['healthy','installed','changedCooldown','staleResult','staleCycle','path','args','containerEntrypoint','imageEntrypoint',
+  'imageCmdOmitted','imageCmdOverride','containerCmdOmitted','containerCmdOverride',...Object.keys(files),'scheduler']){
   const f=nativeFixture(), env=['CLAMAV_ACQUISITION_TRANSPORT=direct'];
   const execute=async(program,args,options)=>{
    const answer=stdout=>({stdout,stderr:''});
    if(args[0]==='inspect')return answer(JSON.stringify([{Id:'ufpr',Image:image,
     Path:field==='path'?'/bin/sh':command[0],Args:field==='args'?['-c','override']:command.slice(1),
-    State:{Running:true,StartedAt:start},Config:{Env:env,Entrypoint:field==='containerEntrypoint'?['/bin/sh']:command,Cmd:null},
+    State:{Running:true,StartedAt:start},Config:{Env:env,Entrypoint:field==='containerEntrypoint'?['/bin/sh']:command,
+     Cmd:field==='containerCmdOmitted'?undefined:field==='containerCmdOverride'?['override']:null},
     Mounts:[{Destination:'/var/lib/clamav',RW:true}]}]));
-   if(args[0]==='image')return answer(JSON.stringify([{Id:image,Config:{Env:env,Entrypoint:field==='imageEntrypoint'?['/bin/sh']:command,Cmd:null}}]));
+   if(args[0]==='image')return answer(JSON.stringify([{Id:image,Config:{Env:env,Entrypoint:field==='imageEntrypoint'?['/bin/sh']:command,
+    Cmd:field==='imageCmdOmitted'?undefined:field==='imageCmdOverride'?['override']:null}}]));
    const file=args.at(-1);
    if(args[2]==='cat' && file==='/etc/clamav/freshclam.conf')return answer(config);
    if(args[2]==='cat' && file.endsWith('/migration.json'))return answer(JSON.stringify(sourceMigration));
@@ -358,7 +361,7 @@ test('UFPR qualification pins launch arguments, running files and the scheduler 
   if(field==='healthy'){
    qualified=await inspectCandidate('fixture',execute,f.resolve);
    assert.equal(qualified.image,image);
-  }else if(field==='installed')assert.equal((await inspectCandidate('fixture',execute,f.resolve,qualified)).image,image);
+  }else if(field==='installed'||field==='imageCmdOmitted')assert.equal((await inspectCandidate('fixture',execute,f.resolve,qualified)).image,image);
   else if(field==='changedCooldown')await assert.rejects(inspectCandidate('fixture',execute,f.resolve,qualified),/qualified updater result/);
   else if(field==='staleResult')await assert.rejects(inspectCandidate('fixture',execute,f.resolve),/current signed bank/);
   else if(field==='staleCycle')await assert.rejects(inspectCandidate('fixture',execute,f.resolve),/scheduled cycle timestamp/);

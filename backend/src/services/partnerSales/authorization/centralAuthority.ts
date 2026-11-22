@@ -11,14 +11,18 @@ import { resolvePartnerWorkspaceAuthority } from './workspaceAuthority';
 export const resolvePartnerScopedAuthority: ResolvePartnerAuthority<PartnerActionV2> = (tx, input) =>
   resolvePartnerScopedAuthorityInPurpose(tx, input);
 
+export const readResponderScopedAuthority: ResolvePartnerAuthority<PartnerActionV2> = (tx, input) =>
+  resolvePartnerScopedAuthorityInPurpose(tx, input, 'RESPONDER');
+
 /** Purpose restriction only omits unused workspace bridges. Explicit grants,
  * denials, current revisions, root locks and per-decision audit remain unchanged. */
 export const resolvePartnerAccountingScopedAuthority: ResolvePartnerAuthority<PartnerActionV2> = (tx, input) =>
   resolvePartnerScopedAuthorityInPurpose(tx, input, 'ACCOUNTING');
 
 async function resolvePartnerScopedAuthorityInPurpose(tx: Prisma.TransactionClient,
-  input: { actorId: string; root: AuthorizationRoot }, purpose?: 'ACCOUNTING') {
-  const current = await resolveScopedActions(tx, input.actorId, 'PARTNER');
+  input: { actorId: string; root: AuthorizationRoot }, purpose?: 'ACCOUNTING' | 'RESPONDER') {
+  const resolveActions = purpose === 'RESPONDER' ? readScopedActions : resolveScopedActions;
+  const current = await resolveActions(tx, input.actorId, 'PARTNER');
   const workspace = await resolvePartnerWorkspaceAuthority(tx, input.actorId, purpose);
   const explicit = await readExplicitPartnerDecisions(tx, input.actorId);
   const grants: AuthorizationEvidence<PartnerActionV2>['grants'] = [];

@@ -2,10 +2,10 @@ import type { Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { PartnerActionV2Schema, PermissionContextSchema, partnerError, type PartnerActionV2, type PartnerAuthorizationV2Port, type Result } from '@sabalanerp/partner-sales-contracts';
 import { appendAuthorizationDecision, readAuthorizationDecisions } from '../../effectiveAuthorization/audit';
-import type { AuthorizationBinding, AuthorizationEvidence, AuthorizationRoot } from './contracts';
+import type { AuthorizationBinding, AuthorizationEvidence, AuthorizationRoot, AuthorizationSource } from './contracts';
 import { prismaAuthorizationSource } from './prisma';
 import type { PartnerAuthorizationTarget } from './prisma';
-import { resolvePartnerAccountingScopedAuthority, resolvePartnerScopedAuthority } from './centralAuthority';
+import { readResponderScopedAuthority, resolvePartnerAccountingScopedAuthority, resolvePartnerScopedAuthority } from './centralAuthority';
 import { createPartnerAuthorizationV2 } from './service';
 import { readActions } from './capabilities';
 
@@ -14,11 +14,26 @@ import { readActions } from './capabilities';
  * mutate before authorization. Rollback rolls back both mutation and evidence. */
 export function createAuditedPartnerAuthorization(tx: Prisma.TransactionClient, binding: AuthorizationBinding,
   audit: { correlationId: string; reason?: string }, target?: PartnerAuthorizationTarget): PartnerAuthorizationV2Port {
+  const source = prismaAuthorizationSource(tx, binding.purpose === 'ACCOUNTING'
+    ? resolvePartnerAccountingScopedAuthority : resolvePartnerScopedAuthority, target);
+  return auditedPartnerPolicy(tx, binding, audit, source);
+}
+
+/** The workspace runs this projection in a repeatable-read transaction.
+ * Response availability is advisory. Submission reauthorizes under command locks. */
+export function createAuditedResponderProjection(tx: Prisma.TransactionClient, actorId: string,
+  audit: { correlationId: string; reason?: string }) {
+  const source = prismaAuthorizationSource(tx, readResponderScopedAuthority, undefined, 'RESPONDER_SNAPSHOT');
+  const policy = auditedPartnerPolicy(tx, { actorId, purpose: 'RESPONDER', channel: 'API' }, audit, source);
+  return (action: 'INQUIRY_READ' | 'INQUIRY_RESPOND', inquiryId: string) =>
+    policy.authorize(action, { kind: 'INQUIRY', id: inquiryId });
+}
+
+function auditedPartnerPolicy(tx: Prisma.TransactionClient, binding: AuthorizationBinding,
+  audit: { correlationId: string; reason?: string }, source: AuthorizationSource<PartnerActionV2>): PartnerAuthorizationV2Port {
   if (!audit.correlationId.trim() || audit.correlationId.length > 200 || (audit.reason?.length ?? 0) > 2000) {
     throw new Error('Valid authorization audit context required');
   }
-  const source = prismaAuthorizationSource(tx, binding.purpose === 'ACCOUNTING'
-    ? resolvePartnerAccountingScopedAuthority : resolvePartnerScopedAuthority, target);
   return { async authorize(action, root) {
     // Malformed transport input is not a resource decision and must never be
     // copied into retained audit data. The transport owns request-error logs.

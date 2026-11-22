@@ -2403,6 +2403,10 @@ _Avoid_: locking sales edits merely because the contract was sales-approved, dig
 Sales users may view the accounting status of a sales contract as read-only accounting information on the sales contract list and detail pages. The status remains owned by accounting and reflects the current accounting workflow state, including whether the contract is eligible for financial action, already has financial records, or needs accounting correction.
 _Avoid_: letting sales users edit accounting status, or showing a stale sales-owned copy of the accounting workflow state
 
+**پرونده حسابداری قرارداد**:
+نمای حسابداری یک قرارداد که اطلاعات و وضعیت مالی قرارداد، از جمله رکوردهای مالی ذخیره‌شده و کارهای حسابداری ناتمام آن را گرد هم می‌آورد.
+_Avoid_: یکی‌دانستن پرونده با یک رکورد مالی یا با تأیید مالی آن
+
 **دارای رکورد مالی**:
 A sales contract qualifies as دارای رکورد مالی only while it has at least one currently valid financially approved invoice record in `ISSUED` or `POSTED` state. Draft and voided records do not qualify, and an unapproved replacement qualifies only after financial approval; the corresponding filter follows this factual rule even when a higher-priority primary badge such as نیازمند اصلاح is displayed.
 _Avoid_: treating draft creation as financial approval, counting voided records, hiding an urgent correction behind this badge, or excluding a valid approved invoice from the filter because another primary status is displayed

@@ -17,7 +17,7 @@ type Page = { cursor?: string; contractId?: string; summaryOnly?: boolean; limit
 export interface PartnerWorkspaceQueryDependencies<Transaction> {
   actorId: string;
   canReadResponderWorkspace?(transaction: Transaction): Promise<boolean>;
-  transaction<T>(work: (transaction: Transaction) => Promise<T>): Promise<T>;
+  transaction<T>(work: (transaction: Transaction) => Promise<T>, purpose: 'PARTNER_MANAGEMENT' | 'RESPONDER_WORKSPACE'): Promise<T>;
   /** Candidate IDs are private. The service reauthorizes and validates each
    * projected inquiry before it enters the public page. */
   listResponderInquiryIds(transaction: Transaction, page: Page): Promise<{
@@ -101,6 +101,6 @@ export function createPartnerWorkspaceQuery<Transaction>(
       });
       return projected.success ? { ok: true, value: projected.data } as never
         : { ok: false, error: partnerError('INTEGRITY_CONFLICT') } as never;
-    });
+    }, parsed.data.purpose);
   } };
 }

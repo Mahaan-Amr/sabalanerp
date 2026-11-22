@@ -1,5 +1,5 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
-import { partnerCustomerContractLabel, type PartnerManagementWorkspaceViewV2, type ResponderContractSummaryV2, type Result } from '@sabalanerp/partner-sales-contracts';
+import { partnerCustomerContractLabel, partnerError, type PartnerManagementWorkspaceViewV2, type ResponderContractSummaryV2, type Result } from '@sabalanerp/partner-sales-contracts';
 import { createPartnerInquiryQuery } from '../inquiries/query';
 import { createSavedTechnicalConfigurationResolver } from '../inquiries/adapters';
 import type { PartnerInquiryDependencies } from '../inquiries/service';
@@ -8,6 +8,8 @@ import { createPartnerWorkspaceQuery } from './query';
 import { authorizePartnerTechnicalRollout } from '../authorization/technicalRollout';
 import { readPartnerSnapshot } from '../authorization/readSnapshot';
 import { resolvePartnerWorkspaceAuthority } from '../authorization/workspaceAuthority';
+import { createAuditedResponderProjection } from '../authorization/audited';
+import { readAuthorizationDecisionByCorrelation } from '../../effectiveAuthorization/audit';
 import { parseInquiryDefinition } from '../inquiries/definition';
 
 type Transaction = Prisma.TransactionClient;
@@ -16,22 +18,41 @@ export function createPrismaPartnerWorkspaceQuery(input: {
   database: PrismaClient;
   actorId: string;
   correlationId: string;
-  authorize: PartnerInquiryDependencies['authorize'];
+  authorize?: PartnerInquiryDependencies['authorize'];
   resolveConfiguration?: PartnerInquiryDependencies['resolveConfiguration'];
   readManagementWorkspace?(transaction: Transaction, page: { cursor?: string; limit: number; section?: 'PROFILES' | 'TRANSFERS'; history?: boolean; transferStatus?: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED'; search?: string; transferId?: string }):
     Promise<Result<PartnerManagementWorkspaceViewV2>>;
 }) {
+  const { actorId, correlationId } = input;
+  const authorize: PartnerInquiryDependencies['authorize'] = input.authorize ?? (async (transaction, input) => {
+    if (input.purpose !== 'RESPONDER' || input.root.kind !== 'INQUIRY' ||
+        (input.action !== 'INQUIRY_READ' && input.action !== 'INQUIRY_RESPOND')) {
+      return { ok: false, error: partnerError('FORBIDDEN') };
+    }
+    const authorizeProjection = createAuditedResponderProjection(transaction, actorId, { correlationId, reason: input.reason });
+    const result = await authorizeProjection(input.action, input.root.id);
+    if (result.ok === false) return { ok: false as const, error: result.error };
+    const evidence = await readAuthorizationDecisionByCorrelation(transaction, {
+      domain: 'PARTNER', actorId, action: input.action, rootKind: input.root.kind,
+      rootId: input.root.id, purpose: input.purpose, channel: 'API', correlationId, allowed: true,
+    });
+    return evidence ? { ok: true as const, value: { evidenceId: evidence.id,
+      managementOverride: result.value.isAdmin || result.value.scope === 'COMPANY' } }
+      : { ok: false as const, error: partnerError('INTEGRITY_CONFLICT') };
+  });
   const resolveConfiguration = input.resolveConfiguration ?? createSavedTechnicalConfigurationResolver();
   const readManagementWorkspace = input.readManagementWorkspace ?? createPrismaManagementWorkspaceReader(input);
   return createPartnerWorkspaceQuery<Transaction>({
     actorId: input.actorId,
-    transaction: work => readPartnerSnapshot(input.database, work, { multiRootAuthority: true }),
+    transaction: (work, purpose) => readPartnerSnapshot(input.database, work, {
+      multiRootAuthority: purpose === 'PARTNER_MANAGEMENT' || Boolean(input.authorize),
+    }),
     async canReadResponderWorkspace(transaction) {
-      const authority = await resolvePartnerWorkspaceAuthority(transaction, input.actorId);
+      const authority = await resolvePartnerWorkspaceAuthority(transaction, input.actorId, 'RESPONDER');
       return authority.canViewAssigned || authority.canRespondAssigned || authority.canManageInquiries;
     },
     async listResponderInquiryIds(transaction, page) {
-      const authority = await resolvePartnerWorkspaceAuthority(transaction, input.actorId);
+      const authority = await resolvePartnerWorkspaceAuthority(transaction, input.actorId, 'RESPONDER');
       let cursorRank = -1, cursorTime = 0, cursorId = '';
       if (page.cursor) {
         try {
@@ -51,7 +72,7 @@ export function createPrismaPartnerWorkspaceQuery(input: {
       const paidRowIds: string[] = [];
       const rollout = new Map<string, boolean>();
       for (const candidate of candidates) {
-        const allowed = await input.authorize(transaction, { actorId: input.actorId, action: 'INQUIRY_READ',
+        const allowed = await authorize(transaction, { actorId: input.actorId, action: 'INQUIRY_READ',
           purpose: 'RESPONDER', root: { kind: 'INQUIRY', id: candidate.id } });
         if (!allowed.ok) continue;
         if (!rollout.has(candidate.profileId)) rollout.set(candidate.profileId,
@@ -177,7 +198,7 @@ export function createPrismaPartnerWorkspaceQuery(input: {
     },
     readResponderInquiry(transaction, inquiryId) {
       const query = createPartnerInquiryQuery({ actorId: input.actorId,
-        transaction: work => work(transaction), authorize: input.authorize,
+        transaction: work => work(transaction), authorize,
         resolveConfiguration } as PartnerInquiryDependencies);
       return query({ schemaVersion: 2, purpose: 'RESPONDER_INQUIRY', inquiryId });
     },

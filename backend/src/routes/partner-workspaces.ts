@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto';
 import { Router, type Request, type RequestHandler } from 'express';
-import type { Prisma } from '@prisma/client';
 import {
   PartnerQueryV2Schema,
   partnerError,
@@ -9,8 +8,6 @@ import {
 } from '@sabalanerp/partner-sales-contracts';
 import { protect, type AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
-import { createAuditedPartnerAuthorization } from '../services/partnerSales/authorization/audited';
-import { readAuthorizationDecisionByCorrelation } from '../services/effectiveAuthorization/audit';
 import {
   createPrismaPartnerWorkspaceQuery,
 } from '../services/partnerSales/workspaces/prisma';
@@ -61,21 +58,5 @@ export default createPartnerWorkspaceRouter({ queryFor(request) {
     database: prisma,
     actorId,
     correlationId,
-    authorize: async (transaction: Prisma.TransactionClient, input) => {
-      const policy = createAuditedPartnerAuthorization(transaction, {
-        actorId,
-        purpose: input.purpose,
-        channel: 'API',
-      }, { correlationId, ...(input.reason ? { reason: input.reason } : {}) });
-      const result = await policy.authorize(input.action, input.root);
-      if (result.ok === false) return { ok: false as const, error: result.error };
-      const evidence = await readAuthorizationDecisionByCorrelation(transaction, {
-        domain: 'PARTNER', actorId, action: input.action, rootKind: input.root.kind,
-        rootId: input.root.id, purpose: input.purpose, channel: 'API', correlationId, allowed: true,
-      });
-      return evidence ? { ok: true as const, value: { evidenceId: evidence.id,
-        managementOverride: result.value.isAdmin || result.value.scope === 'COMPANY' } }
-        : { ok: false as const, error: partnerError('INTEGRITY_CONFLICT') };
-    },
   });
 } });

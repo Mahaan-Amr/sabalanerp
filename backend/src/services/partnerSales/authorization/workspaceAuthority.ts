@@ -27,7 +27,7 @@ export type PartnerWorkspaceAuthority = {
 export async function resolvePartnerWorkspaceAuthority(
   tx: Prisma.TransactionClient,
   actorId: string,
-  purpose?: 'ACCOUNTING',
+  purpose?: 'ACCOUNTING' | 'RESPONDER',
 ): Promise<PartnerWorkspaceAuthority> {
   const actor = await tx.user.findUnique({
     where: { id: actorId },
@@ -51,6 +51,24 @@ export async function resolvePartnerWorkspaceAuthority(
     if (!grants.some(item => item.action === grant.action && item.rootKind === grant.rootKind &&
         item.purpose === grant.purpose && item.scope === grant.scope)) grants.push(grant);
   };
+
+  const addResponderGrants = () => {
+    if (canViewAssigned) {
+      add({ action: 'INQUIRY_READ', rootKind: 'INQUIRY', purpose: 'RESPONDER', scope: 'ASSIGNED' });
+    }
+    if (canRespondAssigned) {
+      add({ action: 'INQUIRY_RESPOND', rootKind: 'INQUIRY', purpose: 'RESPONDER', scope: 'ASSIGNED' });
+    }
+    if (canManageInquiries) {
+      add({ action: 'INQUIRY_READ', rootKind: 'INQUIRY', purpose: 'RESPONDER', scope: 'COMPANY' });
+      add({ action: 'INQUIRY_RESPOND', rootKind: 'INQUIRY', purpose: 'RESPONDER', scope: 'COMPANY' });
+    }
+  };
+  if (purpose === 'RESPONDER') {
+    addResponderGrants();
+    return { isSystemAdmin, canViewAssigned, canRespondAssigned, canManageInquiries, grants,
+      disabledFeatures: effective.disabledFeatures };
+  }
 
   if ((await readPartnerCommercialAccountingCapabilities(tx, actorId)).view) {
     add({ action: 'ACCOUNTING_READ', rootKind: 'CASE', purpose: 'ACCOUNTING', scope: 'COMPANY' });
@@ -116,15 +134,8 @@ export async function resolvePartnerWorkspaceAuthority(
     add({ action: 'CUSTOMER_TRANSFER_DECIDE', rootKind: 'CUSTOMER', purpose: 'CRM', scope: 'COMPANY' });
   }
 
-  if (canViewAssigned) {
-    add({ action: 'INQUIRY_READ', rootKind: 'INQUIRY', purpose: 'RESPONDER', scope: 'ASSIGNED' });
-  }
-  if (canRespondAssigned) {
-    add({ action: 'INQUIRY_RESPOND', rootKind: 'INQUIRY', purpose: 'RESPONDER', scope: 'ASSIGNED' });
-  }
+  addResponderGrants();
   if (canManageInquiries) {
-    add({ action: 'INQUIRY_READ', rootKind: 'INQUIRY', purpose: 'RESPONDER', scope: 'COMPANY' });
-    add({ action: 'INQUIRY_RESPOND', rootKind: 'INQUIRY', purpose: 'RESPONDER', scope: 'COMPANY' });
     add({ action: 'PROFILE_READ', rootKind: 'PROFILE', purpose: 'ONBOARDING', scope: 'COMPANY' });
     add({ action: 'COMMERCIAL_TERMS_MANAGE', rootKind: 'PROFILE', purpose: 'MANAGEMENT', scope: 'COMPANY' });
     add({ action: 'RESPONDER_ASSIGN', rootKind: 'PROFILE', purpose: 'MANAGEMENT', scope: 'COMPANY' });

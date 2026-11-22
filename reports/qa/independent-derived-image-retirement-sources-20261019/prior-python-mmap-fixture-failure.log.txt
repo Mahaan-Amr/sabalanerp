@@ -1,0 +1,12 @@
+file:///D:/sabalanerp-online-qa/run-private-derived-retirement-local-20261019.mjs:57
+    : reject(Error('VERSIONED_FILE_PUBLICATION_NATIVE_FIXTURE_FAILED ' + JSON.stringify({ code, signal, stdout, stderr, directory }))));
+             ^
+
+Error: VERSIONED_FILE_PUBLICATION_NATIVE_FIXTURE_FAILED {"code":1,"signal":null,"stdout":"","stderr":"Traceback (most recent call last):\n  File \"/app/online-runtime-acceptance/private-derived-retirement-1313b0c8740e64eb52f70319a59f0bde/fixture.py\", line 18, in <module>\n    try:m.retire_files([item]);raise AssertionError('MAPPED_FILE_ACCEPTED')\n        ^^^^^^^^^^^^^^^^^^^^^^\n  File \"/app/online-runtime-acceptance/private-derived-retirement-1313b0c8740e64eb52f70319a59f0bde/retire.py\", line 44, in retire_files\n    occupied(nodes)\n  File \"/app/online-runtime-acceptance/private-derived-retirement-1313b0c8740e64eb52f70319a59f0bde/retire.py\", line 31, in occupied\n    require((s.st_dev,s.st_ino) not in nodes,'DERIVED_OPEN_REFERENCE')\n  File \"/app/online-runtime-acceptance/private-derived-retirement-1313b0c8740e64eb52f70319a59f0bde/retire.py\", line 6, in require\n    if not v:raise RuntimeError(c)\n             ^^^^^^^^^^^^^^^^^^^^^\nRuntimeError: DERIVED_OPEN_REFERENCE\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"/app/online-runtime-acceptance/private-derived-retirement-1313b0c8740e64eb52f70319a59f0bde/fixture.py\", line 19, in <module>\n    except RuntimeError as e:assert str(e)=='DERIVED_MAPPED_REFERENCE'\n                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError\n","directory":"/app/online-runtime-acceptance/private-derived-retirement-1313b0c8740e64eb52f70319a59f0bde"}
+    at ChildProcess.<anonymous> (file:///D:/sabalanerp-online-qa/run-private-derived-retirement-local-20261019.mjs:57:14)
+    at Object.onceWrapper (node:events:639:26)
+    at ChildProcess.emit (node:events:524:28)
+    at maybeClose (node:internal/child_process:1101:16)
+    at ChildProcess._handle.onexit (node:internal/child_process:304:5)
+
+Node.js v22.13.0

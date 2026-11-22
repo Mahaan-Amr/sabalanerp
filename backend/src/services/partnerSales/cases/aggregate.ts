@@ -1,4 +1,5 @@
 import { assertOperationQuantityMinimums, standaloneMinimumQuantities } from '../../operationMinimumGuard';
+import { PARTNER_CREATION_TRANSACTION_OPTIONS } from '../creationTransactionBudget';
 import { collectCalculatedOperationQuantities } from '@sabalanerp/contract-product-graph';
 import { finishCommercialCorrection } from '../../ordinaryContractLifecycle';
 import { inquiryBelongsToCurrentActivation } from './reactivationPricing';
@@ -166,13 +167,10 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
   }
   if (current.customerContract) {
     assertPartnerCommercialAvailable(current.customerContract);
-    const financial = current.customerContract.firstFinancialRecordAt || await tx.accountingFinancialRecord.findFirst({
-      where: { sourceKind: 'PARTNER_INTERNAL_RECORD', sourceId: current.internalRecordId ?? '' }, select: { id: true },
-    });
-    if (financial || current.state === 'COMMITTED' || current.customerContract.status === 'SIGNED') {
-      const { readPartnerCommercialEditPermission } = await import('./commercialEditPermission');
-      const duty = await readPartnerCommercialEditPermission(tx, current.customerContract.id, dependencies.actorId);
-      if (!duty) return { ok: false, error: partnerError('DEPENDENCY_BLOCKED') } as const;
+    const { partnerTechnicalCaseIsEditable } = await import('./commercialEditPermission');
+    if (!await partnerTechnicalCaseIsEditable(tx, { contractId: current.customerContract.id,
+      caseState: current.state, actorId: dependencies.actorId })) {
+      return { ok: false, error: partnerError('DEPENDENCY_BLOCKED') } as const;
     }
   }
   if (command.expected.revision !== current.headRevision) return { ok: false, error: partnerError('ROW_STALE') } as const;
@@ -417,10 +415,14 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
       pricingSubjectId: item.material.pricingSubjectId }));
     if (!usage.ok) return usage;
   }
+  // Unfinished drafts retain obsolete allocations in customerContent for explicit
+  // seller repair. Only current row identities may enter fulfillment bindings;
+  // completed preparation has already required every allocation to be valid.
   for (const delivery of command.intent.deliveries) {
     await tx.partnerCaseDelivery.create({ data: { id: delivery.deliveryId, caseId, revision,
       date: new Date(`${delivery.date}T00:00:00.000Z`), destination: delivery.destination } });
-    await tx.partnerCaseDeliveryItem.createMany({ data: delivery.items.map(item => ({ caseId, revision,
+    const currentItems = delivery.items.filter(item => approvedRows.some(row => row.productRowId === item.productRowId));
+    if (currentItems.length) await tx.partnerCaseDeliveryItem.createMany({ data: currentItems.map(item => ({ caseId, revision,
       deliveryId: delivery.deliveryId, productRowId: item.productRowId, quantity: item.quantity })) });
   }
   await insertPaymentPlan(tx, caseId, revision, 'RETAIL', command.intent.customerPaymentPlan);
@@ -503,7 +505,7 @@ export function createPrismaPartnerCaseService(input: Omit<PartnerCaseDependenci
   return createPartnerCaseService({ ...input, transaction: work => input.database.$transaction(async tx => {
     await lockPartnerOperationsControl(tx);
     return work(tx);
-  }) });
+  }, PARTNER_CREATION_TRANSACTION_OPTIONS) });
 }
 
 /** Atomic Case-pair writer. All private graph, approval and policy evidence is
@@ -686,7 +688,8 @@ export function createPartnerCaseService(dependencies: PartnerCaseDependencies):
       for (const delivery of command.intent.deliveries) {
         await tx.partnerCaseDelivery.create({ data: { id: delivery.deliveryId, caseId, revision: 1,
           date: new Date(`${delivery.date}T00:00:00.000Z`), destination: delivery.destination } });
-        await tx.partnerCaseDeliveryItem.createMany({ data: delivery.items.map(item => ({ caseId, revision: 1,
+        const currentItems = delivery.items.filter(item => approvedRows.some(row => row.productRowId === item.productRowId));
+        if (currentItems.length) await tx.partnerCaseDeliveryItem.createMany({ data: currentItems.map(item => ({ caseId, revision: 1,
           deliveryId: delivery.deliveryId, productRowId: item.productRowId, quantity: item.quantity })) });
       }
       await insertPaymentPlan(tx, caseId, 1, 'RETAIL', command.intent.customerPaymentPlan);

@@ -1,7 +1,7 @@
 import express, { type NextFunction, type Response } from 'express';
 import crypto from 'crypto';
 import path from 'path';
-import multer from 'multer';
+import { createHrHiringUpload } from '../services/hrFileRuntime';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { protect, type AuthRequest } from '../middleware/auth';
@@ -23,7 +23,7 @@ import {
   markCrossWorkspaceDutyAvailableSeen,
 } from '../services/crossWorkspaceDutyInbox';
 import {
-  HR_HIRING_ALLOWED_MIME, HR_HIRING_STORAGE_DIR, removeHiringFile, scanHiringFile,
+  HR_HIRING_ALLOWED_MIME, HR_HIRING_STORAGE_DIR,
   safeHiringStoragePath, sha256File, validateHiringFileSignature,
 } from '../services/hrHiringFileStorage';
 import {
@@ -35,11 +35,11 @@ import { parseCollateralReceiptDate } from '../services/hrCollateralReceiptDate'
 import { ensureCandidatePersonnelIdentityConsistent } from '../services/hrCandidatePersonnelIdentityConflict';
 
 const router = express.Router();
-const hiringFinanceUpload = multer({
-  storage: multer.diskStorage({
+const hiringFinanceUpload = createHrHiringUpload({
+  storage: {
     destination: (_req, _file, callback) => callback(null, HR_HIRING_STORAGE_DIR),
     filename: (_req, file, callback) => callback(null, `${Date.now()}-${crypto.randomBytes(16).toString('hex')}${path.extname(file.originalname).toLowerCase()}`),
-  }),
+  },
   limits: { fileSize: 15 * 1024 * 1024 },
   fileFilter: (_req, file, callback) => callback(null, HR_HIRING_ALLOWED_MIME.has(file.mimetype)),
 });
@@ -47,6 +47,7 @@ const manageHrWork = requireHrFeature('HR_WORK_MANAGEMENT', 'EDIT');
 const dutyOperationalMessage = (code: string) => ({
   SEPARATION_OF_DUTIES_CONFLICT: 'تفکیک وظایف این نوع درخواست اجازه اقدام توسط ثبت‌کننده را نمی‌دهد.',
   REASON_REQUIRED: 'برای رد، بازگرداندن یا واگذاری مجدد، دلیل کوتاه و روشن وارد کنید.',
+  DUTY_LOADING_CANCELLATION_CHANGED: 'اسناد یا وضعیت خروج بارگیری تغییر کرده است. اگر درخواست قابل انجام نیست، آن را با ذکر دلیل رد کنید تا لجستیک بتواند دوباره بررسی کند.',
   DUTY_ALREADY_DECIDED: 'این درخواست لحظاتی پیش توسط کاربر دیگری تعیین تکلیف شد.',
   DUTY_ALREADY_CLAIMED: 'این وظیفه قبلاً توسط کاربر دیگری دریافت شده است. فهرست را به‌روزرسانی کنید.',
   DUTY_CLAIM_CONFLICT: 'دریافت وظیفه متوقف شد؛ وضعیت آن هم‌زمان تغییر کرده است. فهرست را به‌روزرسانی کنید.',
@@ -62,10 +63,10 @@ const dutyOperationalMessage = (code: string) => ({
 }[code] || 'عملیات وظیفه متوقف شد. صفحه را به‌روزرسانی کنید و در صورت تکرار با مدیر همان فضای کاری تماس بگیرید.');
 const asyncHandler = (
   handler: (req: AuthRequest, res: Response, next: NextFunction) => Promise<unknown>,
-) => (req: AuthRequest, res: Response, next: NextFunction) => void handler(req, res, next).catch((error) => {
+) => (req: AuthRequest, res: Response, next: NextFunction) => handler(req, res, next).catch((error) => {
   if (!(error instanceof Error) || !/^(?:(?:HR_)?DUTY_|SOURCE_|ENVELOPE_|ASSIGNEE_|RESPONSIBILITY_|SEPARATION_OF_DUTIES_|CONTRACT_|COLLATERAL_|RESPONSIBLE_SELLER_|ACTION_NOT_ALLOWED|REASON_REQUIRED)/.test(error.message)) return next(error);
   const conflictCodes = new Set([
-    'DUTY_NOT_OPEN', 'DUTY_ALREADY_DECIDED', 'DUTY_RESPONSE_CONFLICT', 'SOURCE_VERSION_CHANGED',
+    'DUTY_NOT_OPEN', 'DUTY_ALREADY_DECIDED', 'DUTY_LOADING_CANCELLATION_CHANGED', 'DUTY_RESPONSE_CONFLICT', 'SOURCE_VERSION_CHANGED',
     'ENVELOPE_VERSION_CHANGED', 'SOURCE_STATE_CHANGED', 'RESPONSIBILITY_CHANGED',
     'DUTY_DESTINATION_CHANGED', 'DUTY_ENVELOPE_CHANGED', 'DUTY_SOURCE_CHANGED',
     'DUTY_ASSIGNMENT_CHANGED',
@@ -250,31 +251,31 @@ router.post('/:id/hiring-finance/original-return', enforceMutationIdempotency, h
   try {
     if (!req.file) throw new Error('COLLATERAL_RETURN_PROOF_REQUIRED');
     validateHiringFileSignature(req.file.path, req.file.mimetype);
-    const scanStatus = await scanHiringFile(req.file.path);
     const digest = await sha256File(req.file.path);
     const returnedTo = String(req.body.returnedTo || '').trim();
     const evidenceNote = String(req.body.evidenceNote || '').trim();
     if (!returnedTo || !evidenceNote) throw new Error('COLLATERAL_RETURN_FIELDS_REQUIRED');
+    hiringFinanceUpload.retain(req, req.file);
     const result = await prisma.$transaction((tx) => recordHrHiringCollateralOriginalReturn(tx, {
       dutyId: req.params.id, actorUserId: req.user!.id, returnedTo, evidenceNote,
       evidence: {
         storageName: req.file!.filename, originalName: req.file!.originalname,
-        mimeType: req.file!.mimetype, size: req.file!.size, sha256: digest, malwareScanStatus: scanStatus,
+        mimeType: req.file!.mimetype, size: req.file!.size, sha256: digest,
       },
     }), { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     res.status(201).json({ success: true, data: result });
-  } catch (error) { removeHiringFile(req.file?.path); throw error; }
+  } catch (error) { await hiringFinanceUpload.discardUnreferenced(req, req.file); throw error; }
 }));
 
 router.post('/:id/hiring-finance/receipt', enforceMutationIdempotency, hiringFinanceUpload.single('file'), asyncHandler(async (req, res) => {
   try {
     if (!req.file) throw new Error('COLLATERAL_SCAN_REQUIRED');
     validateHiringFileSignature(req.file.path, req.file.mimetype);
-    const scanStatus = await scanHiringFile(req.file.path);
     const digest = await sha256File(req.file.path);
     const receivedAt = parseCollateralReceiptDate(req.body.receivedAt);
     const custodyLocation = String(req.body.custodyLocation || '').trim();
     if (!custodyLocation) throw new Error('COLLATERAL_RECEIPT_FIELDS_REQUIRED');
+    hiringFinanceUpload.retain(req, req.file);
     const result = await prisma.$transaction((tx) => recordHrHiringCollateralReceipt(tx, {
       dutyId: req.params.id, actorUserId: req.user!.id,
       amountRials: req.body.amountRials ? normalizeHiringRial(req.body.amountRials) : null,
@@ -283,12 +284,12 @@ router.post('/:id/hiring-finance/receipt', enforceMutationIdempotency, hiringFin
       receivedAt, custodyLocation,
       evidence: {
         storageName: req.file!.filename, originalName: req.file!.originalname,
-        mimeType: req.file!.mimetype, size: req.file!.size, sha256: digest, malwareScanStatus: scanStatus,
+        mimeType: req.file!.mimetype, size: req.file!.size, sha256: digest,
       },
     }), { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     res.status(201).json({ success: true, data: result });
   } catch (error) {
-    removeHiringFile(req.file?.path);
+    await hiringFinanceUpload.discardUnreferenced(req, req.file);
     throw error;
   }
 }));

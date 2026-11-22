@@ -1,0 +1,13 @@
+{
+  "phase": "CLOSED_BEFORE_MUTATION",
+  "controllerBirth": {
+    "pid": 1090357,
+    "startTicks": "121409298",
+    "bootId": "ee1b3aa2-d239-4849-b926-200549c77829"
+  },
+  "controllerExactExitProven": true,
+  "noNativeMutationIntents": true,
+  "noDrillContainers": true,
+  "productionRecoveryPoint": false,
+  "controllerLogSha256": "170e0ce5effdfd280130f5087ab25b554ad3cd7e084927af7d598b37750fd570"
+}

@@ -1,4 +1,5 @@
 import type { Notification, Prisma, PrismaClient } from '@prisma/client';
+import { startBackgroundJob } from './backgroundJobLifecycle';
 import webPush from 'web-push';
 import {
   materializeNotificationEvent,
@@ -11,8 +12,30 @@ import {
 } from './notificationPolicy';
 import { filterCurrentlyAuthorizedNotifications } from './notificationAuthorization';
 import { isPartnerInquiryNotification } from './partnerSales/notifications/definitions';
+import { deliverNotificationToDevice } from './notificationDeviceDelivery';
 
 type NotificationDatabase = PrismaClient | Prisma.TransactionClient;
+
+async function authorizeDeviceDelivery(prisma: PrismaClient, notificationIds: string[], subscription: {
+  id: string; userId: string; endpoint: string; p256dh: string; auth: string;
+}) {
+  const [device, user, preference, notifications] = await Promise.all([
+    prisma.webPushSubscription.findUnique({ where: { id: subscription.id } }),
+    prisma.user.findUnique({ where: { id: subscription.userId }, select: { id: true, role: true, isActive: true } }),
+    prisma.notificationPreference.findUnique({ where: { userId: subscription.userId } }),
+    prisma.notification.findMany({ where: { id: { in: notificationIds }, userId: subscription.userId },
+      include: { event: true, policyVersion: true } }),
+  ]);
+  if (!device || device.userId !== subscription.userId || device.disabledAt
+    || (device.expiresAt && device.expiresAt <= new Date()) || device.endpoint !== subscription.endpoint
+    || device.p256dh !== subscription.p256dh || device.auth !== subscription.auth
+    || !user?.isActive || !preference?.webPushEnabled || notifications.length !== notificationIds.length) return false;
+  const muted = jsonStringArray(preference.mutedCategories, []);
+  if (notifications.some(notification => !deliveryChannels(notification).includes('WEB_PUSH')
+    || (!notificationEventDefinition(notification.type as RegisteredNotificationEventType).mandatory
+      && (muted.includes(notification.type) || muted.includes(notification.type.split('_')[0]))))) return false;
+  return (await filterCurrentlyAuthorizedNotifications(prisma, user, notifications)).length === notifications.length;
+}
 
 const webPushConfigured = Boolean(
   process.env.WEB_PUSH_VAPID_PUBLIC_KEY
@@ -105,6 +128,7 @@ export const publishNotificationEvent = async (
       [...definition.allowedRecipientResolvers],
     ) as NotificationPolicyDraft['recipientResolvers'],
   };
+  if (input.type === 'PURCHASING_UPDATED') { policyDraft.channels = ['IN_APP']; policyDraft.recipientResolvers = ['DIRECT_USER']; }
   if (isPartnerInquiryNotification(input.type)) {
     // Partner inquiry notifications have fixed, non-economic text and are
     // in-app only even if an older/custom stored policy asks for wider delivery.
@@ -219,6 +243,7 @@ export const deliverPendingNotificationOutbox = async (
   });
   let delivered = 0;
   let failed = 0;
+  let unknown = 0;
   for (const notification of notifications) {
     const currentlyAuthorized = (
       await filterCurrentlyAuthorizedNotifications(prisma, notification.user, [notification])
@@ -235,15 +260,17 @@ export const deliverPendingNotificationOutbox = async (
         });
         delivered += 1;
       } catch (error) {
+        const outcomeUnknown=!!error&&typeof error==='object'
+          &&'realtimeOutcomeUnknown'in error&&error.realtimeOutcomeUnknown===true;
         await prisma.notificationDeliveryAttempt.create({
           data: {
             notificationId: notification.id,
             channel: 'REALTIME',
-            status: 'FAILED',
+            status: outcomeUnknown?'UNKNOWN':'FAILED',
             error: error instanceof Error ? error.message : 'Realtime delivery failed',
           },
         });
-        failed += 1;
+        if(outcomeUnknown)unknown+=1;else failed += 1;
       }
     }
 
@@ -273,43 +300,32 @@ export const deliverPendingNotificationOutbox = async (
           || notification.policyVersion?.batching === 'DAILY'
         );
       if (preference?.webPushEnabled && !optionalMuted && !batched) {
-        let pushFailed = false;
         for (const subscription of subscriptions) {
-          try {
-            await webPush.sendNotification(
+          const payload = JSON.stringify(privacySafeWebPushPayload(notification.actionUrl));
+          const outcome = await deliverNotificationToDevice({ database: prisma, notificationIds: [notification.id],
+            subscriptionId: subscription.id, payload,
+            authorize: () => authorizeDeviceDelivery(prisma, [notification.id], subscription),
+            send: () => webPush.sendNotification(
               { endpoint: subscription.endpoint, keys: { p256dh: subscription.p256dh, auth: subscription.auth } },
-              JSON.stringify(privacySafeWebPushPayload(notification.actionUrl)),
-              { TTL: notification.priority === 'URGENT' ? 86_400 : 21_600, urgency: notification.priority === 'URGENT' ? 'high' : 'normal' },
-            );
-            await prisma.webPushSubscription.update({
-              where: { id: subscription.id },
-              data: { lastUsedAt: now },
-            });
-          } catch (error: any) {
-            if ([404, 410].includes(Number(error?.statusCode))) {
-              await prisma.webPushSubscription.delete({ where: { id: subscription.id } });
-            } else {
-              pushFailed = true;
-            }
-          }
-        }
-        if (subscriptions.length) {
-          await prisma.notificationDeliveryAttempt.create({
-            data: {
-              notificationId: notification.id,
-              channel: 'WEB_PUSH',
-              status: pushFailed ? 'FAILED' : 'DELIVERED',
-              error: pushFailed ? 'One or more device deliveries failed' : null,
-            },
+              payload,
+              { TTL: notification.priority === 'URGENT' ? 86_400 : 21_600, urgency: notification.priority === 'URGENT' ? 'high' : 'normal', timeout: 15_000 },
+            ),
           });
-          if (pushFailed) failed += 1;
-          else delivered += 1;
+          if (outcome === 'DELIVERED') {
+            delivered += 1;
+            await prisma.webPushSubscription.updateMany({ where: { id: subscription.id }, data: { lastUsedAt: now } });
+          } else if (outcome === 'UNKNOWN') unknown += 1;
+          else if (outcome === 'EXPIRED') await prisma.webPushSubscription.updateMany({
+            where: { id: subscription.id, endpoint: subscription.endpoint, p256dh: subscription.p256dh, auth: subscription.auth },
+            data: { disabledAt: now },
+          });
         }
       }
     }
   }
 
-  if (failed) {
+  if (unknown) console.error('NOTIFICATION_PROVIDER_OUTCOME_UNKNOWN', { outboxId: candidate.id, devices: unknown });
+  if (failed && !unknown) {
     const delaySeconds = Math.min(300, 2 ** Math.min(candidate.attempts + 1, 8));
     await prisma.notificationOutbox.update({
       where: { id: candidate.id },
@@ -320,13 +336,17 @@ export const deliverPendingNotificationOutbox = async (
         lastError: `${failed} notification deliveries failed`,
       },
     });
+  } else if (unknown) {
+    await prisma.notificationOutbox.update({ where: { id: candidate.id }, data: {
+      status: 'UNKNOWN', claimedAt: null, lastError: 'Provider outcome requires reconciliation; automatic resend prohibited',
+    } });
   } else {
     await prisma.notificationOutbox.update({
       where: { id: candidate.id },
       data: { status: 'PROCESSED', processedAt: now, claimedAt: null, lastError: null },
     });
   }
-  return { delivered, failed, businessCode: failed > 0
+  return { delivered, failed, businessCode: unknown > 0 ? 'PERFORMANCE_NOTIFICATION_PROVIDER_OUTCOME_UNKNOWN' : failed > 0
     ? 'PERFORMANCE_NOTIFICATION_OUTBOX_DELIVERY_RETRY_SCHEDULED'
     : 'PERFORMANCE_NOTIFICATION_OUTBOX_DELIVERY_COMPLETED' };
 };
@@ -348,7 +368,10 @@ export const deliverDailyWebPushDigests = async (
       userId: { in: preferences.map((preference) => preference.userId) },
       priority: 'LOW',
       createdAt: { lte: cutoff },
-      deliveryAttempts: { none: { channel: 'WEB_PUSH', status: 'DELIVERED' } },
+      deliveryAttempts: { none: { OR: [
+        { channel: 'WEB_PUSH', status: 'DELIVERED' },
+        { channel: 'WEB_PUSH_DIGEST_V1', status: 'SETTLED' },
+      ] } },
     },
     include: {
       policyVersion: true,
@@ -384,31 +407,35 @@ export const deliverDailyWebPushDigests = async (
     const subscriptions = await prisma.webPushSubscription.findMany({
       where: { userId, disabledAt: null, OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] },
     });
-    if (!subscriptions.length) continue;
     let successfulDevices = 0;
     for (const subscription of subscriptions) {
-      try {
-        await webPush.sendNotification(
+      const notificationIds = notifications.map(notification => notification.id);
+      const payload = JSON.stringify(privacySafeWebPushPayload('/dashboard'));
+      const outcome = await deliverNotificationToDevice({ database: prisma, notificationIds,
+        subscriptionId: subscription.id, payload,
+        authorize: () => authorizeDeviceDelivery(prisma, notificationIds, subscription),
+        send: () => webPush.sendNotification(
           { endpoint: subscription.endpoint, keys: { p256dh: subscription.p256dh, auth: subscription.auth } },
-          JSON.stringify(privacySafeWebPushPayload('/dashboard')),
-          { TTL: 86_400, urgency: 'normal' },
-        );
+          payload,
+          { TTL: 86_400, urgency: 'normal', timeout: 15_000 },
+        ),
+      });
+      if (outcome === 'UNKNOWN') console.error('NOTIFICATION_DIGEST_PROVIDER_OUTCOME_UNKNOWN');
+      if (outcome === 'DELIVERED') {
         successfulDevices += 1;
-        await prisma.webPushSubscription.update({ where: { id: subscription.id }, data: { lastUsedAt: now } });
-      } catch (error: any) {
-        if ([404, 410].includes(Number(error?.statusCode))) {
-          await prisma.webPushSubscription.delete({ where: { id: subscription.id } });
-        }
-      }
+        await prisma.webPushSubscription.updateMany({ where: { id: subscription.id }, data: { lastUsedAt: now } });
+      } else if (outcome === 'EXPIRED') await prisma.webPushSubscription.updateMany({
+        where: { id: subscription.id, endpoint: subscription.endpoint, p256dh: subscription.p256dh, auth: subscription.auth },
+        data: { disabledAt: now },
+      });
     }
+    // Bound the next scan without confusing a reconciliable device intent with
+    // a successful provider delivery. A crash before this marker is harmless:
+    // the device intents still prohibit resending the same notifications.
+    await prisma.notificationDeliveryAttempt.createMany({ data: notifications.map(notification => ({
+      notificationId: notification.id, channel: 'WEB_PUSH_DIGEST_V1', status: 'SETTLED',
+    })) });
     if (!successfulDevices) continue;
-    await prisma.notificationDeliveryAttempt.createMany({
-      data: notifications.map((notification) => ({
-        notificationId: notification.id,
-        channel: 'WEB_PUSH',
-        status: 'DELIVERED',
-      })),
-    });
     deliveredUsers += 1;
     deliveredNotifications += notifications.length;
   }
@@ -434,17 +461,13 @@ export const startNotificationOutboxDelivery = (
       running = false;
     }
   };
-  void run();
-  const timer = setInterval(() => void run(), 1_000);
-  timer.unref?.();
-  const runDigest = () => void deliverDailyWebPushDigests(prisma).catch((error) => {
+  const stopDelivery = startBackgroundJob({ name: 'notification-outbox', intervalMs: 1_000, run });
+  const runDigest = () => deliverDailyWebPushDigests(prisma).catch((error) => {
     console.error('Daily Web Push digest delivery failed:', error);
   });
-  void runDigest();
-  const digestTimer = setInterval(runDigest, 60_000);
-  digestTimer.unref?.();
+  const stopDigest = startBackgroundJob({ name: 'notification-digest', intervalMs: 60_000, run: runDigest });
   return () => {
-    clearInterval(timer);
-    clearInterval(digestTimer);
+    stopDelivery();
+    stopDigest();
   };
 };

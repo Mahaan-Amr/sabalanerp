@@ -1,0 +1,13 @@
+{
+  "freeze": "reports/qa/http-borrowed-review-20261018.json",
+  "freezeSha256": "c936150d4a7f88c9cb17864e9efa4b7d28cdd58cdc62a2c22aa9b2e2095ecb86",
+  "reports": {
+    "runtime-shared-file-work-cab85a29625d3f79c1d6a1fe4971c919.json": "67d6bce9752f1c877de2acbba500a81a9dfb79bb5e04a8457b17ee8e85eab7b5",
+    "http-borrowed-runtime-regression-20261018.json": "5bd799316d948fe1c3686d09b69d4e85f9017d66600d5082d1ce8be0fef5bf22",
+    "runtime-request-database-20261018-8b3d88f1.json": "58b3a5544c104a47082c62f7c2bc6f33871880c9edc03337317bef0612d571b5",
+    "online-native-44954e427639ebba8ab807331d82a678.json": "0a6d328bb8749bd1cac4458b1f9447d44c62e7591eb31d67d11119834942443e",
+    "http-borrowed-old-fixture-closure-20261018.json": "2921d52ab958e8bdf4ab0a5300124d2e3ed6100d191c57438f30dfdacf34ddc4"
+  },
+  "productionAdmission": false,
+  "wholeProgramComplete": false
+}

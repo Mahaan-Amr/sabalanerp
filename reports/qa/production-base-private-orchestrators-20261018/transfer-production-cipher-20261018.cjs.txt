@@ -1,0 +1,53 @@
+const fs=require('node:fs');
+const path=require('node:path');
+const {Transform}=require('node:stream');
+const {pipeline}=require('node:stream/promises');
+const {sha256File}=require('./recoveryCrypto.cjs');
+const crypto=require('node:crypto');
+const fail=code=>{throw Object.assign(new Error(code),{code});};
+async function syncFile(file){const fd=await fs.promises.open(file,'r');try{await fd.sync();}finally{await fd.close();}}
+async function main(){
+ const [proofFile,componentFile,remoteRoot,key,work]=process.argv.slice(2);
+ if(!/^[a-z][a-z0-9-]{8,120}$/.test(key))fail('TRANSFER_KEY_INVALID');
+ for(const directory of [path.dirname(proofFile),remoteRoot,work]){
+  if(!path.isAbsolute(directory)||await fs.promises.realpath(directory)!==directory||!(await fs.promises.lstat(directory)).isDirectory())fail('TRANSFER_DIRECTORY_ALIAS');
+ }
+ const proof=JSON.parse(await fs.promises.readFile(proofFile,'utf8'));
+ const component=JSON.parse(await fs.promises.readFile(componentFile,'utf8'));
+ if(proof.format!=='sabalan-private-physical-cipher/v1'||proof.localDecryptVerified!==true||proof.healthyApplicationPoint!==false
+  ||component.format!=='sabalan-private-physical-base/v1'||proof.operationId!==component.operationId||proof.sourceSha256!==component.archiveSha256)fail('TRANSFER_SOURCE_UNPROVEN');
+ const source=path.join(path.dirname(proofFile),'base.sabrec');
+ const before=await fs.promises.lstat(source,{bigint:true});
+ if(!before.isFile()||before.uid!==0n||before.nlink!==1n||(before.mode&0o077n)||Number(before.size)!==proof.cipherBytes||await sha256File(source)!==proof.cipherSha256)fail('TRANSFER_CIPHER_CHANGED');
+ const destination=path.join(remoteRoot,key);await fs.promises.mkdir(destination,{mode:0o700});
+ if(await fs.promises.realpath(destination)!==destination||(await fs.promises.lstat(destination)).mode&0o077)fail('TRANSFER_REMOTE_DIRECTORY_UNSAFE');
+ let copied=0;
+ const guard=new Transform({transform(chunk,encoding,callback){
+  copied+=chunk.length;
+  if(copied>proof.cipherBytes){callback(new Error('TRANSFER_SIZE_EXCEEDED'));return;}
+  fs.promises.statfs(destination).then(s=>{
+   if(s.bavail*s.bsize<1024**3+chunk.length)throw new Error('TRANSFER_REMOTE_CAPACITY_LOST');
+   callback(null,chunk);
+  }).catch(callback);
+ }});
+ const staged=path.join(destination,'base.sabrec.uploading'),final=path.join(destination,'base.sabrec');
+ await pipeline(fs.createReadStream(source,{highWaterMark:1024*1024}),guard,fs.createWriteStream(staged,{flags:'wx',mode:0o600}));
+ await syncFile(staged);
+ if(copied!==proof.cipherBytes||await sha256File(staged)!==proof.cipherSha256)fail('TRANSFER_READBACK_MISMATCH');
+ const after=await fs.promises.lstat(source,{bigint:true});
+ for(const field of ['dev','ino','size','mtimeNs','ctimeNs'])if(before[field]!==after[field])fail('TRANSFER_LOCAL_SOURCE_CHANGED');
+ if(fs.existsSync(final))fail('TRANSFER_DESTINATION_EXISTS');
+ await fs.promises.rename(staged,final);
+ const metadata={format:'sabalan-private-physical-transfer/v1',component,encryption:proof,cipherRemoteKey:key+'/base.sabrec',
+  ciphertextReadBackVerified:true,independentDecryptVerified:false,healthyApplicationPoint:false,publicOnlineAdmission:false};
+ const bytes=Buffer.from(JSON.stringify(metadata,null,2)+'\n');
+ const sidecar=path.join(destination,'private-component.json');
+ await fs.promises.writeFile(sidecar,bytes,{flag:'wx',mode:0o600});await syncFile(sidecar);
+ if(!(await fs.promises.readFile(sidecar)).equals(bytes))fail('TRANSFER_METADATA_READBACK_MISMATCH');
+ const observation={remoteKey:metadata.cipherRemoteKey,cipherBytes:copied,cipherSha256:proof.cipherSha256,
+  metadataSha256:crypto.createHash('sha256').update(bytes).digest('hex'),ciphertextReadBackVerified:true,
+  independentDecryptVerified:false,healthyApplicationPoint:false,publicOnlineAdmission:false};
+ const local=path.join(work,'transfer-proof.json');await fs.promises.writeFile(local,JSON.stringify(observation,null,2)+'\n',{flag:'wx',mode:0o600});await syncFile(local);
+ console.log(JSON.stringify(observation));
+}
+main().catch(e=>{console.error(JSON.stringify({ok:false,failureClass:e.code||e.name}));process.exitCode=1;});

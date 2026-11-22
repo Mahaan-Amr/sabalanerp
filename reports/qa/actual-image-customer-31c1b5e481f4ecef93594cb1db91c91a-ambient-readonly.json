@@ -1,0 +1,22 @@
+{
+  "format": "sabalan-actual-image-foreign-change-diagnostic/v1",
+  "operation": "actual-image-customer-31c1b5e481f4ecef93594cb1db91c91a",
+  "readOnly": true,
+  "diagnosticSourceSha256": "fefed361995ac468d360f13a67e912cda9e0911fd67b966ccb7204d4755783ff",
+  "containerId": "896c47ecc774f0b8657d794b4e79c3bcc82572d96706faf5089ecac76bd1b7ab",
+  "image": "fintech-lab:kraken-candidate",
+  "project": "fintech-qa",
+  "events": [
+    {
+      "action": "die",
+      "unixTime": 1792384598,
+      "exitCode": 0
+    },
+    {
+      "action": "destroy",
+      "unixTime": 1792384598
+    }
+  ],
+  "originalAmbientGateRemains": false,
+  "productionAdmission": false
+}

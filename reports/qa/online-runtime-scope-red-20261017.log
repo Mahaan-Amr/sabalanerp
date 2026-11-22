@@ -1,0 +1,9 @@
+Traceback (most recent call last):
+  File "/app/online-runtime-acceptance/online-authority-bundle-e756aac40ebc4f8ab029e4f6864cd048/fixture.py", line 124, in <module>
+    main()
+  File "/app/online-runtime-acceptance/online-authority-bundle-e756aac40ebc4f8ab029e4f6864cd048/fixture.py", line 92, in main
+    loaded = module.load_scope(environment)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/online-runtime-acceptance/online-authority-e756aac40ebc4f8ab029e4f6864cd048/online-runtime-scope.py", line 7, in load_scope
+    raise RuntimeError('ONLINE_RUNTIME_SCOPE_UNPROVEN')
+RuntimeError: ONLINE_RUNTIME_SCOPE_UNPROVEN

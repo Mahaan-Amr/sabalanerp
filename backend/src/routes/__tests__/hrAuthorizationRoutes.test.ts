@@ -68,6 +68,8 @@ try {
     workspacePermission: {
       findMany: async () => [], deleteMany: async () => ({ count: 0 }), upsert: async () => ({}),
     },
+    roleWorkspacePermission: { findMany: async () => [] },
+    roleFeaturePermission: { findMany: async () => [] },
     featurePermission: {
       findMany: async () => [], deleteMany: async () => ({ count: 0 }), upsert: async () => ({}),
     },

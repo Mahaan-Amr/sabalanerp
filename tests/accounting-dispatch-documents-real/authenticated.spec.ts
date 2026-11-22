@@ -31,7 +31,7 @@ test('MANAGE authority is projected by the mounted backend and exposes decision 
   expect(response.status()).toBe(200);
   expect(response.headers()['x-dispatch-documents-permission']).toBe('MANAGE');
   await expect(page.getByRole('heading', { name: 'اسناد ارسال مشتری' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'پذیرش و صدور هر دو سند' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'پذیرش و صدور اسناد', exact: true })).toBeVisible();
 });
 
 test('VIEW authority is projected by the mounted backend without mutation controls', async ({ page }) => {
@@ -41,7 +41,7 @@ test('VIEW authority is projected by the mounted backend without mutation contro
   expect(response.status()).toBe(200);
   expect(response.headers()['x-dispatch-documents-permission']).toBe('VIEW');
   await expect(page.getByText(/فقط برای مشاهده و دریافت اسناد صادرشده/)).toBeVisible();
-  await expect(page.getByRole('button', { name: 'پذیرش و صدور هر دو سند' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'پذیرش و صدور اسناد', exact: true })).toHaveCount(0);
 });
 
 test('unauthorized authority receives a real 403 without case disclosure', async ({ page }) => {

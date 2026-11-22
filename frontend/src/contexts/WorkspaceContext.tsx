@@ -7,6 +7,7 @@ import { workspacePermissionsAPI } from '@/lib/api';
 
 // Workspace Types
 export enum WORKSPACES {
+  PURCHASING = 'purchasing',
   SALES = 'sales',
   CRM = 'crm',
   HR = 'hr',
@@ -55,6 +56,7 @@ export interface WorkspaceInfo {
 
 // Workspace Configuration
 export const WORKSPACE_CONFIG: Record<WORKSPACES, WorkspaceInfo> = {
+  [WORKSPACES.PURCHASING]: { id: WORKSPACES.PURCHASING, name: 'Purchasing', namePersian: 'خرید', description: 'درخواست، سفارش و دریافت خرید', icon: 'FaShoppingCart', color: 'teal', path: '/dashboard/purchasing', permissions: [WORKSPACE_PERMISSIONS.VIEW, WORKSPACE_PERMISSIONS.EDIT, WORKSPACE_PERMISSIONS.ADMIN] },
   [WORKSPACES.SALES]: {
     id: WORKSPACES.SALES,
     name: 'Sales',
@@ -240,6 +242,7 @@ export const WorkspaceProvider: React.FC<WorkspaceProviderProps> = ({ children }
 
   // Determine current workspace from pathname
   const determineCurrentWorkspace = useCallback(() => {
+    if (pathname.startsWith('/dashboard/purchasing')) return WORKSPACES.PURCHASING;
     if (pathname.startsWith('/dashboard/sales')) {
       return WORKSPACES.SALES;
     } else if (pathname.startsWith('/dashboard/crm')) {

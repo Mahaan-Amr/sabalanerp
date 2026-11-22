@@ -14,3 +14,22 @@ test('creation uses a bounded per-call budget and does not retry transaction exp
     customerId: 'test', departmentId: 'test', content: '' }, 'test', undefined, runner), expired);
   assert.equal(attempts, 1);
 });
+
+test('editing uses a bounded per-call budget and never retries an expired save', async () => {
+  const { updateContract } = await import('../contractService');
+  let attempts = 0;
+  const expired = Object.assign(new Error('expired edit'), { code: 'P2028' });
+  const client = {
+    salesContract: { findUnique: async () => ({ id: 'contract', departmentId: 'sales', status: 'DRAFT', isInactive: false }) },
+    user: { findUnique: async () => ({ role: 'ADMIN', departmentId: 'sales' }) },
+    accountingFinancialRecord: { findFirst: async () => null },
+    accountingCorrectionRequest: { findFirst: async () => null },
+    $transaction: async (_work: unknown, options?: { maxWait?: number; timeout?: number }) => {
+      attempts++;
+      assert.deepEqual(options, { maxWait: 5_000, timeout: 15_000 });
+      throw expired;
+    },
+  };
+  await assert.rejects(() => updateContract('contract', {}, 'seller', client as never), expired);
+  assert.equal(attempts, 1);
+});

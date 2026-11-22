@@ -1,4 +1,5 @@
 "use client";
+import { ContractPurchaseAction } from '@/features/purchasing/ContractPurchaseAction';
 import { ContractConfirmationResend } from '@/features/sales/ContractConfirmationResend';
 import { useSmsSuccess } from '@/features/sales/useSmsSuccess';
 import { ContractCancellationNotice } from '@/features/sales/ContractCancellationNotice';
@@ -6,7 +7,7 @@ import ContractDispatchCreditPanel from '@/features/sales/ContractDispatchCredit
 import { ContractRenewal } from '@/features/sales/ContractRenewal';
 import { ContractReactivation } from '@/features/sales/ContractReactivation';
 import { contractLifecycleLabel, contractLifecycleFilterOptions, isCurrentContractFlow, type ContractLifecyclePresentation } from '@/features/sales/contractLifecyclePresentation';
-import { ErpPressable, ErpSelect, ErpTextarea } from "@/components/erp";
+import { ErpButton, ErpField, ErpPressable, ErpSelect, ErpTextarea } from "@/components/erp";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams, useRouter } from "next/navigation";
 import {
@@ -25,6 +26,7 @@ import {
 import {
   ErpBadge,
   ErpEmptyState,
+  ErpDisclosure,
   ErpFieldView,
   ErpInlineState,
   ErpLoading,
@@ -474,7 +476,7 @@ export default function ContractDetailPage() {
   };
 
   const handleSellerChange = async () => {
-    if (!contract || !nextSellerId || !sellerChangeReason.trim()) return;
+    if (!contract || !nextSellerId) return;
     const errorSource = "seller-change";
     const requestSequence = beginOperation(errorSource);
     setOperationPending(errorSource, true);
@@ -482,7 +484,6 @@ export default function ContractDetailPage() {
       const response = await salesAPI.reassignResponsibleSeller(
         contract.id,
         nextSellerId,
-        sellerChangeReason.trim(),
       );
       if (!isLatestOperation(errorSource, requestSequence)) return;
       assertSuccessfulSalesResponse(response);
@@ -498,7 +499,7 @@ export default function ContractDetailPage() {
         getSalesOperationalErrorMessage(reason, {
           failedAction: "تغییر مسئول فروش قرارداد",
           nextStep:
-            "فروشنده جدید و دلیل تغییر را بررسی کنید و دوباره تلاش کنید.",
+            "فروشنده جدید را بررسی کنید و دوباره تلاش کنید.",
           uncertainMutation: true,
         }),
         getSalesOperationalErrorKind(reason),
@@ -987,7 +988,22 @@ export default function ContractDetailPage() {
     });
   }
 
+  const outputActions = actions.filter(action => action.label === "دانلود PDF" || action.label === "پرینت");
+  const headerActions = detailSection === "summary"
+    ? actions.filter(action => !outputActions.includes(action))
+    : actions;
+
   const metrics: ErpMetric[] = [
+    {
+      label: "مبلغ کل",
+      value: formatCurrency(
+        totalAmount,
+        sanitizeUiText(contract.currency, "تومان"),
+      ),
+      icon: FaCreditCard,
+      tone: "success",
+    },
+
     {
       label: "وضعیت",
       value:
@@ -1010,15 +1026,6 @@ export default function ContractDetailPage() {
             : "neutral",
     },
     {
-      label: "مبلغ کل",
-      value: formatCurrency(
-        totalAmount,
-        sanitizeUiText(contract.currency, "تومان"),
-      ),
-      icon: FaCreditCard,
-      tone: "success",
-    },
-    {
       label: "اقلام",
       value: products.length.toLocaleString("fa-IR"),
       hint: "محصول ثبت شده",
@@ -1038,16 +1045,13 @@ export default function ContractDetailPage() {
         onReactivated={() => reactivationRouter.push(`/dashboard/sales/contracts/${contract.id}/edit`)} />
       <ErpPage
       eyebrow="قرارداد فروش"
-      title={sanitizeUiTextWithCandidates(
-        [contract.titlePersian, contract.title, contract.contractNumber],
-        "قرارداد فروش",
-      )}
-      description={`شماره قرارداد: ${sanitizeUiText(contract.contractNumber, "—")}`}
+      title={<>قرارداد <bdi>{sanitizeUiText(contract.contractNumber, "—")}</bdi></>}
+      description={`${sanitizeUiTextWithCandidates([contract.titlePersian, contract.title], "قرارداد فروش")} · ${getCustomerName(contract)}`}
       backHref="/dashboard/sales/contracts"
-      actions={actions}
+      actions={headerActions}
       metrics={metrics}
     >
-      {isCurrentContractFlow(contract) && !contract.firstFinancialRecordAt && contract.commercialExpiresAt && <ErpInlineState kind={contract.status === "EXPIRED" ? "stale" : "empty"} title={`مهلت ثبت اولین رکورد مالی: ${PersianCalendar.formatForDisplay(contract.commercialExpiresAt)}`} />}
+      {(detailSection !== "summary" || contract.status === "EXPIRED") && isCurrentContractFlow(contract) && !contract.firstFinancialRecordAt && contract.commercialExpiresAt && <ErpInlineState kind={contract.status === "EXPIRED" ? "stale" : "empty"} title={`مهلت ثبت اولین رکورد مالی: ${PersianCalendar.formatForDisplay(contract.commercialExpiresAt)}`} />}
       {contract.reactivationActions?.reason && <ErpInlineState kind="stale" title={contract.reactivationActions.reason} />}
       {contract.isInactive && (
         <ErpInlineState
@@ -1093,78 +1097,36 @@ export default function ContractDetailPage() {
         onChange={setDetailSection}
       />
 
-      {detailSection === "summary" && (
-        <ErpSection
-          title="خروجی چاپ قرارداد"
-          description="نوع خروجی فروش را انتخاب کنید و سپس دانلود یا پرینت بگیرید."
-        >
-          <label className="flex max-w-md flex-col gap-1 text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
-            نسخه چاپ
-            <ErpSelect
-              value={printVariant}
-              onChange={(event) =>
-                setPrintVariant(event.target.value as SalesContractPrintVariant)
-              }
-              className="rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3 py-2 text-sm text-[var(--sds-text-primary)] shadow-sm outline-none transition focus:border-[var(--sds-border-strong)] focus:ring-2 focus:ring-[var(--sds-focus-ring)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)]"
-            >
-              <option value="original">
-                {salesContractPrintVariantLabels.original}
-              </option>
-              <option value="summary">
-                {salesContractPrintVariantLabels.summary}
-              </option>
-            </ErpSelect>
-          </label>
+      {detailSection === "summary" && outputActions.length > 0 && (
+        <ErpSection>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
+              <label htmlFor="contract-print-variant" className="shrink-0 text-sm text-[var(--sds-text-secondary)]">نسخه چاپ</label>
+              <ErpSelect
+                id="contract-print-variant"
+                value={printVariant}
+                onChange={(event) => setPrintVariant(event.target.value as SalesContractPrintVariant)}
+                className="sm:w-80"
+              >
+                <option value="original">{salesContractPrintVariantLabels.original}</option>
+                <option value="summary">{salesContractPrintVariantLabels.summary}</option>
+              </ErpSelect>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {outputActions.map(action => <ErpButton key={action.label} {...action} />)}
+            </div>
+          </div>
         </ErpSection>
       )}
 
       <ErpTwoColumn
         main={
           <>
-            {detailSection === 'summary' && !contract.partnerKind && !contract.partnerCaseId && <ErpSection title="مجوز ارسال و ضمانت فروشنده">
-              <ContractDispatchCreditPanel contractId={contractId} refreshKey={contract.updatedAt} onChanged={() => void loadContract()} />
-            </ErpSection>}
             {detailSection === "summary" && (
               <ErpSection
-                title="اطلاعات قرارداد"
-                description="خلاصه وضعیت، مبلغ، تاریخ‌ها و یادداشت‌های ثبت شده."
+                title="مشخصات قرارداد"
               >
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <ErpFieldView
-                    label="شماره قرارداد"
-                    value={sanitizeUiText(contract.contractNumber, "—")}
-                    tone="primary"
-                  />
-                  <ErpFieldView
-                    label="وضعیت"
-                    value={
-                      <ErpBadge
-                        tone={statusTones[contract.status] || "neutral"}
-                      >
-                        {contractLifecycleLabel(contract)}
-                      </ErpBadge>
-                    }
-                  />
-                  <ErpFieldView
-                    label="وضعیت حسابداری"
-                    value={
-                      contract.accounting ? (
-                        <StatusBadge
-                          status={contract.accounting.sourceStatus}
-                          label={
-                            sourceStatusLabels[
-                              contract.accounting.sourceStatus
-                            ] ||
-                            operationalStatusLabel(
-                              contract.accounting.sourceStatus,
-                            )
-                          }
-                        />
-                      ) : (
-                        "ثبت نشده"
-                      )
-                    }
-                  />
                   <ErpFieldView
                     label="تاریخ ایجاد"
                     value={PersianCalendar.formatForDisplay(contract.createdAt)}
@@ -1173,6 +1135,11 @@ export default function ContractDetailPage() {
                     label="آخرین بروزرسانی"
                     value={PersianCalendar.formatForDisplay(contract.updatedAt)}
                   />
+                  {isCurrentContractFlow(contract) && !contract.firstFinancialRecordAt && contract.commercialExpiresAt && (
+                    <ErpFieldView label="مهلت ثبت اولین رکورد مالی"
+                      value={<bdi>{PersianCalendar.formatForDisplay(contract.commercialExpiresAt)}</bdi>}
+                      tone={contract.status === "EXPIRED" ? "warning" : "neutral"} />
+                  )}
                 </div>
                 {contract.notes && (
                   <div className="mt-3 rounded-lg bg-[var(--sds-surface-subtle)] p-3 text-sm leading-6 text-[var(--sds-text-primary)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)]">
@@ -1181,6 +1148,10 @@ export default function ContractDetailPage() {
                 )}
               </ErpSection>
             )}
+
+            {detailSection === 'summary' && !contract.partnerKind && !contract.partnerCaseId && <ErpSection title="مجوز ارسال و ضمانت فروشنده">
+              <ContractDispatchCreditPanel contractId={contractId} refreshKey={contract.updatedAt} onChanged={() => void loadContract()} />
+            </ErpSection>}
 
             {detailSection === "financial" && contract.accounting && (
               <ErpSection
@@ -1306,6 +1277,10 @@ export default function ContractDetailPage() {
                                   : "ابعاد نامشخص"}
                               </p>
                             </div>
+                            <div className="flex flex-wrap items-center gap-2">
+                            <ContractPurchaseAction contractId={contract.id}
+                              rowId={item.rowId || item.productRowId || item.id}
+                              enabled={!contract.isInactive && !['CANCELLED', 'EXPIRED'].includes(contract.status) && Boolean(currentUser && (['ADMIN', 'MANAGER'].includes(currentUser.role) || contract.responsibleSeller?.id === currentUser.id || currentUser.permissions?.workspaces.some(p => ['purchasing', 'inventory'].includes(p.workspace) && ['edit', 'admin'].includes(p.permissionLevel))))} />
                             <ErpBadge tone="primary">
                               {formatCurrency(
                                 itemTotal,
@@ -1315,6 +1290,7 @@ export default function ContractDetailPage() {
                                 ),
                               )}
                             </ErpBadge>
+                            </div>
                           </div>
                           {rowImages.length > 0 && (
                             <div className="mt-3 flex flex-wrap gap-2">
@@ -1645,7 +1621,7 @@ export default function ContractDetailPage() {
           <>
             {detailSection === "summary" && (
               <ErpSection title="مشتری">
-                <div className="space-y-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <ErpFieldView
                     label="نام"
                     value={getCustomerName(contract)}
@@ -1659,10 +1635,7 @@ export default function ContractDetailPage() {
                   )}
                   <ErpFieldView
                     label="نوع مشتری"
-                    value={sanitizeUiText(
-                      contract.customer.customerType,
-                      "نامشخص",
-                    )}
+                    value={({ Individual: "حقیقی", Company: "حقوقی", Government: "دولتی" } as Record<string, string>)[contract.customer.customerType || ""] || sanitizeUiText(contract.customer.customerType, "نامشخص")}
                   />
                   {contract.customer.primaryContact && (
                     <ErpFieldView
@@ -1682,8 +1655,8 @@ export default function ContractDetailPage() {
             )}
 
             {detailSection === "summary" && (
-              <ErpSection title="بخش و کاربران">
-                <div className="space-y-3">
+              <ErpSection title="بخش و مسئولان قرارداد">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <ErpFieldView
                     label="بخش"
                     value={sanitizeUiText(contract.department.namePersian, "—")}
@@ -1738,62 +1711,55 @@ export default function ContractDetailPage() {
             )}
 
             {detailSection === "summary" && canManageSellers && (
-              <ErpSection
-                title="تغییر مسئول فروش قرارداد"
-                description="تغییر مسئول فقط روی پایپ‌لاین فعلی اثر دارد و اعتبار فروش قطعی گذشته را بازنویسی نمی‌کند."
-              >
+              <ErpDisclosure title="تغییر مسئول فروش قرارداد">
+                <p className="mb-4 text-sm leading-6 text-[var(--sds-text-secondary)]">
+                  مسئول جدید با مجوزهای فروش خودش به این قرارداد دسترسی دارد؛ اعتبار فروش قطعی گذشته تغییر نمی‌کند.
+                </p>
                 <div className="space-y-3">
                   <ErpSelect
+                    aria-label="مسئول فروش جدید"
                     value={nextSellerId}
                     onChange={(event) => setNextSellerId(event.target.value)}
                     className="w-full rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3 py-2 text-sm dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]"
                   >
                     <option value="">انتخاب فروشنده جدید</option>
-                    {sellerOptions.map((seller) => (
+                    {sellerOptions.filter((seller) => currentUser?.role === "ADMIN" || seller.departmentId === contract.department.id).map((seller) => (
                       <option key={seller.id} value={seller.id}>
                         {`${seller.firstName || ""} ${seller.lastName || ""}`.trim() ||
                           seller.username}
                       </option>
                     ))}
                   </ErpSelect>
-                  <ErpTextarea
-                    value={sellerChangeReason}
-                    onChange={(event) =>
-                      setSellerChangeReason(event.target.value)
-                    }
-                    placeholder="دلیل تغییر مسئول (الزامی)"
-                    className="min-h-20 w-full rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3 py-2 text-sm dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]"
-                  />
-                  <ErpPressable
-                    type="submit"
-                    disabled={
-                      sellerMutationPending ||
-                      !nextSellerId ||
-                      !sellerChangeReason.trim()
-                    }
+                  <ErpButton
+                    disabled={sellerMutationPending || !nextSellerId}
                     onClick={handleSellerChange}
-                    className="w-full rounded-lg bg-[var(--sds-accent)] px-3 py-2 text-sm font-bold text-[var(--sds-text-inverse)] disabled:opacity-50"
-                  >
-                    {pendingOperations.has("seller-change")
-                      ? "در حال ثبت..."
-                      : "ثبت تغییر مسئول با سابقه حسابرسی"}
-                  </ErpPressable>
+                    label={pendingOperations.has("seller-change") ? "در حال ثبت..." : "ثبت مسئول فروش"}
+                  />
                   {contract.realizedAt && !contract.realizedSeller && (
-                    <ErpPressable
-                      type="submit"
-                      disabled={
-                        sellerMutationPending ||
-                        !nextSellerId ||
-                        !sellerChangeReason.trim()
-                      }
-                      onClick={handleLegacyCreditAssignment}
-                      className="w-full rounded-lg border border-[var(--sds-warning-border)] bg-[var(--sds-warning-surface)] px-3 py-2 text-sm font-bold text-[var(--sds-warning)] disabled:opacity-50"
-                    >
-                      انتساب اعتبار فروش قطعی قدیمی با سابقه حسابرسی
-                    </ErpPressable>
+                    <>
+                      <ErpField label="دلیل انتساب اعتبار فروش قطعی قدیمی" required>
+                        <ErpTextarea
+                          aria-label="دلیل انتساب اعتبار فروش قطعی قدیمی"
+                          value={sellerChangeReason}
+                          onChange={(event) => setSellerChangeReason(event.target.value)}
+                        />
+                      </ErpField>
+                      <ErpPressable
+                        type="submit"
+                        disabled={
+                          sellerMutationPending ||
+                          !nextSellerId ||
+                          !sellerChangeReason.trim()
+                        }
+                        onClick={handleLegacyCreditAssignment}
+                        className="w-full rounded-lg border border-[var(--sds-warning-border)] bg-[var(--sds-warning-surface)] px-3 py-2 text-sm font-bold text-[var(--sds-warning)] disabled:opacity-50"
+                      >
+                        انتساب اعتبار فروش قطعی قدیمی با سابقه حسابرسی
+                      </ErpPressable>
+                    </>
                   )}
                 </div>
-              </ErpSection>
+              </ErpDisclosure>
             )}
 
             {detailSection === "history" && (

@@ -1,0 +1,6 @@
+{
+  "operation": "retire-derived-base-f7a32ceaa5ab48ab9cd83f2771f67583",
+  "childSourceSha256": "846be6afa1dd787a0f0ec5b77f4509614746d8db7c6198f0293c65ffeddc5991",
+  "mountGuardSourceSha256": "165101a51ecc00db4b12ff65a5b2fe55f7037b4407ccdde5e799afa7bda54cd7",
+  "scope": "closed private derived copies, no source checkpoint retention change"
+}

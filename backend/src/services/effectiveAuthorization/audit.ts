@@ -23,6 +23,15 @@ export async function appendAuthorizationDecision(tx: Prisma.TransactionClient, 
   return { id };
 }
 
+/** Persist independently evaluated decisions in the same authorization
+ * transaction. Callers must flush before returning any protected read. */
+export async function appendAuthorizationDecisions(tx: Prisma.TransactionClient, events: readonly AuthorizationDecisionAudit[]) {
+  if (!events.length) return;
+  await tx.effectiveAuthorizationAudit.createMany({ data: events.map(event => ({
+    id: randomUUID(), ...event, evaluatedGrantIds: event.evaluatedGrantIds,
+  })) });
+}
+
 /** Caller must authorize AUDIT_READ on this exact root in this transaction.
  * Kept out of the public central entry point; the scoped domain reader owns it. */
 export async function readAuthorizationDecisions(tx: Prisma.TransactionClient, domain: string, rootKind: string, rootId: string) {

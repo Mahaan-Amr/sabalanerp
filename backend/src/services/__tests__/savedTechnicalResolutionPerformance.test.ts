@@ -37,9 +37,9 @@ test('resolution verifies the referenced revision without traversing unrelated l
   // independent of machine speed. Unrelated evidence must not enter hashing/parsing.
   const unrelated = { payload: { view: { recoveryRevision: 2 },
     get context() { unrelatedTraversals++; return { largeCatalog: 'irrelevant' }; } }, integrityHash: 'invalid' };
-  const database = { salesContractEditSession: { findUnique: async () => ({ ownerUserId: 'actor',
-    recovery: { validatedSnapshots: [unrelated, { ...record, integrityHash: 'corrupt' }, record] } }) } };
-  const result = await resolveSavedTechnicalConfiguration(database as any, { actorId: 'actor', reference });
+  const database = { $queryRaw: async () => [{ ownerUserId: 'actor',
+    recovery: { validatedSnapshots: [unrelated, { ...record, integrityHash: 'corrupt' }, record] } }] };
+  const result = await createSavedTechnicalConfigurationResolver({ history: 'REFERENCED' })(database as any, { actorId: 'actor', reference });
   assert.ok(result.ok, 'a corrupt candidate must not hide a subsequent valid candidate of the same revision');
   assert.equal(result.value.measures?.count, '2');
   assert.equal(unrelatedTraversals, 0);
@@ -51,18 +51,18 @@ test('scoped resolution separates revisions and actors; a new operation rereads 
   let ownerUserId = 'actor';
   let history = [first.record, second.record];
   let reads = 0;
-  const database = { salesContractEditSession: { findUnique: async () => { reads++; return {
-    ownerUserId, recovery: { validatedSnapshots: history } }; } } };
-  const resolve = createSavedTechnicalConfigurationResolver();
+  const database = { $queryRaw: async () => { reads++; return [{
+    ownerUserId, recovery: { validatedSnapshots: history } }]; } };
+  const resolve = createSavedTechnicalConfigurationResolver({ history: 'REFERENCED' });
   const results = await Promise.all([first, second].map(item => resolve(database as any, { actorId: 'actor', reference: item.reference })));
   assert.ok(results.every(item => item.ok));
-  assert.equal(reads, 1);
+  assert.equal(reads, 2, 'one narrow evidence read per distinct revision, shared by all rows of that revision');
   assert.equal((await resolve(database as any, { actorId: 'foreign', reference: first.reference })).ok, false);
   ownerUserId = 'foreign';
-  assert.equal((await createSavedTechnicalConfigurationResolver()(database as any, { actorId: 'actor', reference: first.reference })).ok, false);
+  assert.equal((await createSavedTechnicalConfigurationResolver({ history: 'REFERENCED' })(database as any, { actorId: 'actor', reference: first.reference })).ok, false);
   ownerUserId = 'actor';
   history = [{ ...first.record, integrityHash: 'corrupt' }];
-  assert.equal((await createSavedTechnicalConfigurationResolver()(database as any, { actorId: 'actor', reference: first.reference })).ok, false);
+  assert.equal((await createSavedTechnicalConfigurationResolver({ history: 'REFERENCED' })(database as any, { actorId: 'actor', reference: first.reference })).ok, false);
 });
 
 test('legacy saved views and submitted evidence retain full integrity checks', async () => {
@@ -72,11 +72,29 @@ test('legacy saved views and submitted evidence retain full integrity checks', a
   const legacy = { payload, integrityHash: await canonicalHash(payload) };
   const outcome = { schemaVersion: 1, validatedSnapshots: [legacy] };
   let payloadHash = await canonicalHash(outcome);
-  const database = { salesContractEditSession: { findUnique: async () => null },
+  const database = { $queryRaw: async () => [],
     partnerCommandOutcome: { findUnique: async ({ where }: any) =>
       where.actorId_operation_targetScope_key.actorId === 'actor' ? { outcome, payloadHash } : null } };
   assert.equal((await resolveSavedTechnicalConfiguration(database as any, { actorId: 'actor', reference })).ok, true);
   assert.equal((await resolveSavedTechnicalConfiguration(database as any, { actorId: 'foreign', reference })).ok, false);
   payloadHash = 'corrupt';
   await assert.rejects(resolveSavedTechnicalConfiguration(database as any, { actorId: 'actor', reference }), /integrity conflict/);
+});
+
+
+test('workspace resolution shares the complete journal across distinct revisions instead of issuing a narrow query for every historical inquiry', async () => {
+  const first = await evidence(), second = await evidence(2);
+  let journalReads = 0, narrowReads = 0;
+  const database = { $queryRaw: async (sql: TemplateStringsArray) => {
+    if (!sql.join('').includes('convert_to')) { narrowReads++; return []; }
+    journalReads++; return [{ ownerUserId: 'actor', recovery: Buffer.from(JSON.stringify({
+      validatedSnapshots: [first.record, second.record] })) }];
+  } };
+  const resolve = createSavedTechnicalConfigurationResolver();
+  const results = await Promise.all([first, second, first].map(item => resolve(database as any,
+    { actorId: 'actor', reference: item.reference })));
+  assert(results.every(result => result.ok)); assert.equal(journalReads, 1); assert.equal(narrowReads, 0);
+  assert.equal((await createSavedTechnicalConfigurationResolver()(database as any,
+    { actorId: 'actor', reference: first.reference })).ok, true);
+  assert.equal(journalReads, 2, 'another workspace request must read current evidence again');
 });

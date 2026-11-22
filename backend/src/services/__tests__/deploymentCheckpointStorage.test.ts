@@ -1,3 +1,4 @@
+import { withHealthyDrill } from './deploymentCheckpointDrill.fixture';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -17,6 +18,58 @@ const run = async () => {
     await fs.promises.writeFile(source, 'verified-checkpoint');
     const store = new FilesystemRemoteCheckpointStore(root);
     await store.assertAvailable(1);
+    const enumerationRoot = path.join(root, 'remote-enumeration');
+    await fs.promises.mkdir(path.join(enumerationRoot, 'empty-historical-directory'), { recursive: true });
+    const protectedArchive = path.join(enumerationRoot, 'protected.sabrec');
+    await fs.promises.writeFile(protectedArchive, 'retained-checkpoint');
+    const oldIncomplete = path.join(enumerationRoot, 'old-checkpoint.sabrec.uploading');
+    await fs.promises.writeFile(oldIncomplete, 'incomplete-but-protected');
+    const oldTime = new Date(Date.now() - 48 * 60 * 60 * 1000);
+    await fs.promises.utimes(oldIncomplete, oldTime, oldTime);
+    const originalReaddir = fs.promises.readdir;
+    let enumerationAttempts = 0;
+    try {
+      (fs.promises as any).readdir = async (directory: string, options: any) => {
+        if (directory === enumerationRoot && ++enumerationAttempts === 1) {
+          throw Object.assign(new Error('transient SSHFS directory read'), { code: 'EIO' });
+        }
+        return originalReaddir(directory, options);
+      };
+      await new FilesystemRemoteCheckpointStore(enumerationRoot, { retryDelayMs: 1 }).assertAvailable(1);
+      assert.equal(enumerationAttempts, 2, 'a transient directory error must retry the complete listing');
+      assert.equal(await fs.promises.readFile(protectedArchive, 'utf8'), 'retained-checkpoint');
+      enumerationAttempts = 0;
+      (fs.promises as any).readdir = async (directory: string, options: any) => {
+        if (directory === enumerationRoot) {
+          enumerationAttempts += 1;
+          throw Object.assign(new Error('persistent SSHFS directory failure'), { code: 'EIO' });
+        }
+        return originalReaddir(directory, options);
+      };
+      await assert.rejects(
+        () => new FilesystemRemoteCheckpointStore(enumerationRoot, { retryDelayMs: 1 }).assertAvailable(1),
+        (error: any) => error.code === 'EIO',
+      );
+      assert.equal(enumerationAttempts, 4, 'persistent directory failure must abort after three retries');
+      enumerationAttempts = 0;
+      (fs.promises as any).readdir = async (directory: string, options: any) => {
+        if (directory === enumerationRoot) {
+          enumerationAttempts += 1;
+          throw Object.assign(new Error('directory permission denied'), { code: 'EACCES' });
+        }
+        return originalReaddir(directory, options);
+      };
+      await assert.rejects(
+        () => new FilesystemRemoteCheckpointStore(enumerationRoot, { retryDelayMs: 1 }).assertAvailable(1),
+        (error: any) => error.code === 'EACCES',
+      );
+      assert.equal(enumerationAttempts, 1, 'permission failures must not be hidden by storage retries');
+      assert.equal(await fs.promises.readFile(protectedArchive, 'utf8'), 'retained-checkpoint');
+      assert.equal(await fs.promises.readFile(oldIncomplete, 'utf8'), 'incomplete-but-protected',
+        'availability checks must never delete incomplete upload custody');
+    } finally {
+      fs.promises.readdir = originalReaddir;
+    }
     const partialPath = path.join(root, 'release-1', 'deployment-1.sabrec.uploading');
     await fs.promises.mkdir(path.dirname(partialPath), { recursive: true });
     await fs.promises.writeFile(partialPath, 'verified');
@@ -118,7 +171,7 @@ const run = async () => {
     await fs.promises.mkdir(localRoot);
     await fs.promises.mkdir(remoteRoot);
     const artifacts: CheckpointObject[] = [];
-    for (const [index, validRemote] of [false, true, true, true].entries()) {
+    for (const [index, validRemote] of [false, true, true, true, true, true].entries()) {
       const id = `deployment-${index}`;
       const archivePath = path.join(localRoot, `${id}.sabrec`);
       const metadataPath = `${archivePath}.json`;
@@ -127,8 +180,12 @@ const run = async () => {
       await fs.promises.writeFile(metadataPath, '{}');
       await fs.promises.writeFile(remotePath, `remote-${id}`);
       const checksum = await (await import('../recoveryCrypto')).sha256File(remotePath);
-      await fs.promises.writeFile(`${remotePath}.json`, JSON.stringify({ id, deploymentId: id, checksum: validRemote ? checksum : 'stale', remoteVerified: true }));
-      artifacts.push({ id, archivePath, metadataPath, remotePath, checksum, size: 4096, createdAt: new Date(2026, 0, index + 1).toISOString(), remoteVerified: true });
+      const point = { id, releaseId: id, deploymentId: id, archivePath, metadataPath, remotePath, checksum,
+        size: (await fs.promises.stat(remotePath)).size, createdAt: new Date(2026, 0, index + 1).toISOString(), remoteVerified: true };
+      const remote = index <= 3 ? withHealthyDrill(point) : { ...point, localVerified: true, restoreVerified: true,
+        manifestReadable: true, compatibility: { local: { compatible: true } } };
+      await fs.promises.writeFile(`${remotePath}.json`, JSON.stringify({ ...remote, checksum: validRemote ? checksum : 'stale' }));
+      artifacts.push(point);
     }
     const localStats = await fs.promises.statfs(localRoot);
     await ensureLocalCapacity({
@@ -141,7 +198,9 @@ const run = async () => {
       assert.equal(error.code, 'DEPLOYMENT_LOCAL_CAPACITY_INSUFFICIENT');
     });
     assert.equal(fs.existsSync(artifacts[0].archivePath), true, 'stale remote proof must protect the local checkpoint');
-    assert.equal(fs.existsSync(artifacts[1].archivePath), false, 'a freshly reverified remote checkpoint may be pruned');
+    assert.equal(fs.existsSync(artifacts[1].archivePath), false, 'an older independently healthy checkpoint may be pruned after two healthy replacements');
+    for (const index of [2, 3, 4, 5]) assert.equal(fs.existsSync(artifacts[index].archivePath), true,
+      'keep two healthy points and protect newly uploaded points without independent restore');
   } finally {
     await fs.promises.rm(root, { recursive: true, force: true });
   }

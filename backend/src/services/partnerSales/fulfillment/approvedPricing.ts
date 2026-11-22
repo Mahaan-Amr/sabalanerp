@@ -1,3 +1,4 @@
+import { exactQuantityText } from '../../exactQuantity';
 import { Prisma } from '@prisma/client';
 import { PartnerEventSchema, canonicalHash } from '@sabalanerp/partner-sales-contracts';
 import { latestPartnerFinancialApproval, readPartnerOfficialPurchase } from '../accounting/officialPurchase';
@@ -53,7 +54,7 @@ Promise<LockedPartnerApprovedPricingVersion & { preparationEvidenceHash: string 
       : row.approvalEvidenceId;
     requirePricing(priceRowId, 'شاهد نرخ خدمت یا تایید استعلام لازم است.');
     return { id: priceRowId!, productRowId: row.productRowId, ordinal,
-      contractedQuantity: new Prisma.Decimal(row.quantity).toFixed(3), unit: row.unit,
+      contractedQuantity: exactQuantityText(row.quantity), unit: row.unit,
       canonicalAllInTotal: total, discountEligible: false, componentEvidence: {
         wholesaleUnitPrice: row.wholesaleUnitPrice, ...(row.approvalEvidenceId ? { approvalEvidenceId: row.approvalEvidenceId } : { serviceRateEvidenceId: row.serviceRateEvidenceId! }),
         financialApprovalEvidenceId: approved.financialApprovalEvidenceId }, integrityHash: await canonicalHash({

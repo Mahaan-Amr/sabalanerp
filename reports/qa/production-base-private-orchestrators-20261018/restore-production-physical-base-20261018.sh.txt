@@ -1,0 +1,42 @@
+#!/bin/sh
+set -eu
+umask 077
+data=/var/lib/postgresql/data
+[ -z "$(ls -A "$data")" ]
+tar -xf /restore-input.tar -C "$data"
+pg_verifybackup "$data"
+# Only this new isolated restore copy is changed, after native verification.
+if [ -f "$data/postgresql.auto.conf" ]; then mv "$data/postgresql.auto.conf" "$data/source-postgresql.auto.conf.retained"; fi
+: > "$data/postgresql.auto.conf"
+for signal in standby.signal recovery.signal; do
+ if [ -f "$data/$signal" ]; then mv "$data/$signal" "$data/source-$signal.retained"; fi
+done
+started=0
+stop_owned() {
+ if [ "$started" = 1 ]; then pg_ctl -D "$data" -m fast -w -t 60 stop; started=0; fi
+}
+trap stop_owned EXIT
+trap 'exit 125' INT TERM HUP
+pg_ctl -D "$data" -l /tmp/postgres.log -w -t 120 -o "-c config_file=/restore.conf -c hba_file=/restore.hba -c ident_file=/restore.ident -c data_directory=$data -c listen_addresses='' -c unix_socket_directories=/var/run/postgresql -c archive_mode=off -c archive_command='' -c restore_command='' -c recovery_end_command='' -c archive_cleanup_command='' -c primary_conninfo='' -c primary_slot_name='' -c shared_preload_libraries='' -c local_preload_libraries='' -c session_preload_libraries='' -c ssl=off -c external_pid_file='' -c logging_collector=off -c autovacuum=off -c default_transaction_read_only=on -c shared_buffers=32MB -c max_connections=100 -c max_worker_processes=8 -c max_wal_senders=10 -c max_prepared_transactions=0 -c max_locks_per_transaction=64 -c wal_level=replica -c fsync=on" start
+started=1
+attempt=0
+until pg_isready -q -U sabalanerp -d sabalanerp; do
+ attempt=$((attempt+1))
+ [ "$attempt" -lt 120 ]
+ sleep 1
+done
+export PGCONNECT_TIMEOUT=5
+export PGOPTIONS='-c statement_timeout=10000 -c lock_timeout=1000'
+psql -X -qAt -v ON_ERROR_STOP=1 -U sabalanerp -d sabalanerp -f /restore-check.sql > /tmp/restore-result.json
+[ "$(psql -X -qAt -v ON_ERROR_STOP=1 -U sabalanerp -d sabalanerp -c 'SELECT system_identifier::text FROM pg_control_system()')" = '7609810350852628513' ]
+[ "$(psql -X -qAt -v ON_ERROR_STOP=1 -U sabalanerp -d sabalanerp -c 'SHOW server_version_num')" = '150016' ]
+[ "$(psql -X -qAt -v ON_ERROR_STOP=1 -U sabalanerp -d sabalanerp -c 'SELECT pg_is_in_recovery()')" = 'f' ]
+[ "$(psql -X -qAt -v ON_ERROR_STOP=1 -U sabalanerp -d sabalanerp -c 'SELECT count(*) FROM pg_prepared_xacts')" = '0' ]
+[ "$(psql -X -qAt -v ON_ERROR_STOP=1 -U sabalanerp -d sabalanerp -c 'SELECT count(*) FROM public._prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL')" = '425' ]
+[ "$(psql -X -qAt -v ON_ERROR_STOP=1 -U sabalanerp -d sabalanerp -c 'SELECT count(*) FROM public._prisma_migrations WHERE finished_at IS NULL AND rolled_back_at IS NULL')" = '0' ]
+[ "$(psql -X -qAt -v ON_ERROR_STOP=1 -U sabalanerp -d sabalanerp -c "SELECT md5(string_agg(migration_name||':'||checksum, E'\\n' ORDER BY migration_name COLLATE \"C\")) FROM public._prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL")" = 'e47df486d5c205d3bc44cb782dfbf09d' ]
+stop_owned
+[ ! -f "$data/postmaster.pid" ]
+printf '\nSABALAN_PRODUCTION_BASE_COMPONENT '
+cat /tmp/restore-result.json
+printf '\n'

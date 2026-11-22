@@ -397,6 +397,7 @@ export default function AccountingDispatchDocuments({
         />
       </div>
       <ErpSheet
+        presentation="modal"
         open={Boolean(sheet)}
         onClose={() => setSheet(null)}
         title={

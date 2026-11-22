@@ -1,0 +1,9 @@
+{
+  "operation": "retire-redundant-image-copies-50db8125aff04f68bb1ef1802ae25388",
+  "custodyOperation": "independent-image-custody-65cb95d50af8415aa569267d7ecd99bf",
+  "sources": {
+    "measure.py": "ee5e2d28a2aaa128c3804597b040fa5374cf9a77ac2cef2ca02d972a9f452c75",
+    "mount_guard.py": "165101a51ecc00db4b12ff65a5b2fe55f7037b4407ccdde5e799afa7bda54cd7"
+  },
+  "scope": "retire exact redundant unaccepted-upload copies and verified imported-PG staging files; keep accepted ciphertexts/original archive/proofs"
+}

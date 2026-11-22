@@ -12,7 +12,10 @@ export const DEPLOYMENT_MAINTENANCE_FILE = 'deployment-maintenance.json';
 
 const maintenancePath = (coordinationDir: string) => path.join(coordinationDir, DEPLOYMENT_MAINTENANCE_FILE);
 
-export const deploymentMaintenanceActive = (coordinationDir: string) => fs.existsSync(maintenancePath(coordinationDir));
+export const deploymentMaintenanceActive = (coordinationDir: string) => {
+  try { fs.lstatSync(maintenancePath(coordinationDir)); return true; }
+  catch (error: any) { return error?.code !== 'ENOENT'; }
+};
 
 export const readDeploymentMaintenance = async (coordinationDir: string): Promise<DeploymentMaintenanceState | null> => {
   try {

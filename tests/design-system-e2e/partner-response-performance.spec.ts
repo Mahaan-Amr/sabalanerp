@@ -47,6 +47,7 @@ for (const width of [1280, 390]) for (const lostAcknowledgement of [false, true]
       await expect(review.getByText('نتیجه ثبت هنوز مشخص نیست؛ همان درخواست را دوباره بررسی کنید.', { exact: true })).toBeVisible();
       expect(refreshRequests).toBe(0);
       await review.getByRole('button', { name: 'بررسی همان درخواست', exact: true }).click();
+      await expect.poll(() => commands.length).toBe(2);
       expect(commands[0]).toEqual(commands[1]);
     }
     await expect(page.getByRole('dialog')).toBeHidden();

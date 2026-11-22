@@ -1,0 +1,81 @@
+{
+  "format": "sabalan-online-native-acceptance/v1",
+  "passResult": true,
+  "simultaneousServingPools": 2,
+  "singleWorker": true,
+  "captureCannotStealWorker": true,
+  "servingContinuedDuringWorkerOwnership": true,
+  "disconnectedCommit": {
+    "amount": "123456789.12345678",
+    "quantity": "0.00000001"
+  },
+  "globalInterlockHeldUntilSqlCompletion": true,
+  "grantReuseRefused": true,
+  "substitutedCaptureGateRefused": true,
+  "actualCaptureGateExclusive": true,
+  "fullRuntimeIdNamespaceSeparation": true,
+  "deadWorkerDurableFenceRefused": true,
+  "existingNullWorkerRefusedDuringOrphanSql": true,
+  "retainedWorkerHoldSha256": "2e21648f29da0c8e0c1264e6769a59e0f2ae66d2c3f7bbb42126b5839bcca77f",
+  "legacyFleetBypassRefused": true,
+  "droppedDatabase": "sabalanerp_concurrency_592b93df90bfa51e",
+  "canonicalServicesUnchanged": {
+    "backend": {
+      "id": "a1ea34a8d7d878b906fba7b4fdbe975df13a6b00d63a863eacce34b9827e86ff",
+      "image": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+      "startedAt": "2026-10-15T09:01:40.016187222Z"
+    },
+    "frontend": {
+      "id": "ad23f762dc1b27d2be76c335a3d7a4e20d08832a9a2e055904a4af84a9248c21",
+      "image": "sha256:f0a8954596279ccb01c029de7316022daa109b711a297f716cc9367d4bc9ec53",
+      "startedAt": "2026-10-15T10:11:30.825468888Z"
+    },
+    "postgres": {
+      "id": "e553787e69f44c7bdf7dab94fad43a231f5ba99d988dc783234486a5a844a528",
+      "image": "sha256:3d0f7584ed7d04e27fa050d6683a74746608faf21f202be78460d679cc56461f",
+      "startedAt": "2026-10-12T15:17:49.481269377Z"
+    },
+    "inquiry": {
+      "id": "6d161695e215498048ff24e56e9602ce77871bfb6b390bf1356caecfdf9807d8",
+      "image": "sha256:81eacc768f3c4b82bd0f0a01bef5600ae1321e87cb117bad49ca47dfba79a213",
+      "startedAt": "2026-10-12T15:17:49.463791361Z"
+    }
+  },
+  "unknownRecordRefusals": {
+    "passResult": true,
+    "cases": [
+      {
+        "file": "deployment-runtime-native.json",
+        "existingNullRefused": true,
+        "originalBytesRetained": true
+      },
+      {
+        "file": "deployment-online-worker-native.json",
+        "existingNullRefused": true,
+        "originalBytesRetained": true
+      },
+      {
+        "file": "deployment-bootstrap-native.json",
+        "existingNullRefused": true,
+        "originalBytesRetained": true
+      }
+    ]
+  },
+  "sources": {
+    "backend-runtime-owner.py": "1dee6c11fb3b676680a7951584686885f3ea1426fccf0f4321424727aba28987",
+    "online-runtime-owner.py": "72d1eaabdcf9d4578ed9267be5ce396a0d16213e6fc29a708516f2e7ec1a9977",
+    "online-runtime-scope.py": "481a878633d60690c600c0742ee79dbad587f96f6cb89f10363fa6772548736a",
+    "with-backend-control-ownership.sh": "86ed167417895c184d67893a8e7fab81cca02a7ac12df7d764cea3b8703f476a",
+    "protected-bootstrap-state.py": "dc1e39138182d70382e365115e2ef08d453ceac00200c99b0bf65dfa3ae1d83e",
+    "worker.cjs": "8081b07876f162c38b0239b901d5c4dd2c9b9632d802f37a3b03d6d773a6b002",
+    "fixture.py": "696f7d385517127eb619641f36fb4e93ee9c3f65ff3a65c6a06f0cd3fadcdd23",
+    "records.fixture.py": "a1c58710ae3e79233337dfabe9608bb334b6c49a47486346c66d84176952361a",
+    "streamed-closure.fixture.sh": "4dcc28a0b6affb5d8a7c02cfce2227319aaefcffc08d031a2b4cc2546ba0ba34",
+    "deploy/scripts/backend-runtime-owner.py": "1dee6c11fb3b676680a7951584686885f3ea1426fccf0f4321424727aba28987",
+    "lib/prisma.js": "91c8fbff960236036678f26c42d99f9050316aae784b10d2ff937695bd8453df",
+    "services/runtimeControlOwnership.js": "81c65350ad02963c6c3815a82cc0959458228f511fc12df6bad9af4ef167198c",
+    "services/onlineRuntimeScope.js": "6e3103ce7f4589c5a0063242b459e0e3dc62134ca3e9b112d74fa6da421703fd",
+    "services/runtimeNativeAuthority.js": "3e8456d91203c767d1bdaae9e4e8a71704c941db554a22c298e8487f14753c3d",
+    "services/online-runtime-scope.py": "481a878633d60690c600c0742ee79dbad587f96f6cb89f10363fa6772548736a"
+  }
+}

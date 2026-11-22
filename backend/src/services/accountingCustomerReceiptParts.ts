@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import { requireCustomerSourceSharesWithin } from './customerSemanticCompatibility';
 import { AccountingCustomerTreasuryError, type CustomerTreasuryActor } from './accountingCustomerTreasury';
 import { createReceivableCheckPrisma, recordCustomerReceiptPrisma } from './accountingCustomerTreasuryPrisma';
 import { randomUUID } from 'node:crypto';
@@ -17,6 +18,7 @@ export async function recordCustomerReceiptPartsWithin(tx: Prisma.TransactionCli
   customerAdvanceLedgerId: string; receivableLedgerId: string; parts: CustomerReceiptPart[]; amountRials: bigint;
   occurredAt: Date; reason: string; reference: string; idempotencyKey: string; actor: CustomerTreasuryActor;
 }) {
+  await requireCustomerSourceSharesWithin(tx);
   const invalid = (message: string): never => { throw new AccountingCustomerTreasuryError('RECEIPT_PARTS_INVALID', message, 409); };
   if (!input.parts.length || new Set(input.parts.map(part => part.key)).size !== input.parts.length
     || input.parts.reduce((sum, part) => sum + part.amountRials, 0n) !== input.amountRials || input.idempotencyKey.length < 8) invalid('جمع اجزای دریافت یا شناسه‌های آنها معتبر نیست.');

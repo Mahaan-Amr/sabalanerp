@@ -3,6 +3,7 @@
 import React from "react";
 import {
   FaCalculator,
+  FaShoppingCart,
   FaChartPie,
   FaChevronDown,
   FaChevronUp,
@@ -22,6 +23,7 @@ import {
 } from "@/contexts/WorkspaceContext";
 
 const iconMap = {
+  FaShoppingCart,
   FaFileContract,
   FaUsers,
   FaUserTie,

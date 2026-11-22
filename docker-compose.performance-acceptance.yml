@@ -2,6 +2,9 @@ services:
   frontend:
     build:
       target: runner
+      args:
+        SABALAN_BROWSER_BUILD_ID: ${SABALAN_BROWSER_BUILD_ID:-}
     environment:
       NODE_ENV: production
+      SABALAN_BROWSER_BUILD_ID: ${SABALAN_BROWSER_BUILD_ID:-}
       NEXT_DIST_DIR: .next-build

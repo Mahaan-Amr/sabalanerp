@@ -1,0 +1,21 @@
+{
+  "format": "sabalan-actual-image-customer-intent/v1",
+  "operation": "actual-image-customer-d0d9974abd381699c15ecd416280384a",
+  "inputManifestSha256": "4f057ce0b36cc76f5b62c48af789701413a2bf83a150f3e14da578fdc722a006",
+  "controllerSha256": "9cf56310e2809f336681af285d1bfe8065f629392f5b9993d274d9270331dc1d",
+  "remoteEnvelopeSha256": "357bcaf042853d945fdee84086ee48801f8d88acb6a4f2fdb38b07cbca97e4e7",
+  "remoteFile": "D:\\sabalanerp-online-qa\\actual-image-customer-d0d9974abd381699c15ecd416280384a-remote.py",
+  "preflightSha256": "4a1e2d1669bec7272d4e82042dec4bbda3d265aec6e537951c820e92fb698c94",
+  "sourceHashes": {
+    "qa-financial.sql": "fa14e803759dc0c931a9ceda51e4ee056d7b560e437e7089dea0610852d4122c",
+    "qa-overlap.cjs": "1118719bdef4b703e4461c60cdb8cc9a32dae7ecda125f7ce28a47691ac5971c",
+    "qa-fixture.cjs": "c387ed3c2600b4e27eeb1cd7d61ebeb301c5436ebc5c9434fe1cd1f9cd1673cb",
+    "qa-infrastructure.sql": "d7c53205d4896ae3bb51c4c7c6c9e0b5b66b14d1f9d9715d23faea0aae77828e",
+    "restore.sh": "ff95a5090376dc8c4fcf694d7110ac89712d9ff471a35ab396c5c4ed29be023e",
+    "retire.py": "9134926393675ea4846e4dd925ff6fc132a8592df009672767f081b33fa08b54",
+    "closed_process_references.py": "a6570121bc431553a3f215ccaf73063d642921501fe8ab1b7310a8ec4175ff4a",
+    "mount_guard.py": "165101a51ecc00db4b12ff65a5b2fe55f7037b4407ccdde5e799afa7bda54cd7"
+  },
+  "productionAdmission": false,
+  "fullApplicationRestore": false
+}

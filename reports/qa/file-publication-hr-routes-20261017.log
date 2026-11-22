@@ -1,0 +1,9 @@
+
+> sabalanerp-backend@1.0.0 test:hr-redesign-data-contracts
+> tsx src/services/__tests__/hrRedesignDataContracts.test.ts && tsx src/services/__tests__/hrAuthorizationPolicy.test.ts && tsx src/routes/__tests__/hrRedesignRoutes.test.ts && tsx src/routes/__tests__/hrAuthorizationRoutes.test.ts
+
+HR redesign data contract tests passed.
+HR authorization and named responsibility policy tests passed.
+SMS_IR_API_KEY is not set in environment variables
+HR redesign API and compatibility route tests passed.
+HR authorization administration route tests passed.

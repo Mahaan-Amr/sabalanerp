@@ -18,6 +18,8 @@ Use the existing Docker Compose project named `sabalanerp-local` for all local r
 
 Do not create or start a second Compose project, disposable PostgreSQL container, parallel test stack, or ad-hoc replacement service when `sabalanerp-local` is available. Run migrations and tests against the existing local services with isolated test data or transactions where needed, without creating another Docker stack. Before any Docker action, verify the target with `docker compose -f docker-compose.local.yml ps` or `npm run docker:local:ps`.
 
+For issue #432 only, the owner authorized one isolated Linux rehearsal host with a private six-service Compose project and PostgreSQL service. On that distinct native Docker Engine, use the protected controller's exact `sabalanerp` project identity so its existing identity gates run unchanged; the Engine socket, data root, host checkout, volumes, and loopback-only ingress must remain isolated from production and `sabalanerp-local`. Follow `docs/operations/protected-rehearsal-linux-host.md` before provisioning or running it. Keep all six `sabalanerp-local` instances, their data, and the #436 C:/D: checkpoints intact. This exception grants no production release admission or change to the protected deployment gates.
+
 ### Database connection ownership
 
 The long-running backend owns exactly one application `PrismaClient`, exported by `backend/src/lib/prisma.ts`. Routes, middleware, services, utilities, and background workers must reuse that client or accept it through dependency injection; they must never construct their own client or disconnect the shared client.
@@ -29,6 +31,14 @@ Integration and concurrency tests may own isolated clients only for their tempor
 ### Production deployment safety
 
 Production deployment and rollback must follow `docs/operations/zero-data-loss-deployment.md` and ADR-0039. Never add a force, bypass, partial-promotion, mutable-image rollback, unverified-backup, or public-write path inside the maintenance boundary. A change to deployment, migration, backup, restore, retention, storage cleanup, image identity, or release health gates must preserve the documented lease, checkpoint, remote verification, fail-closed rollback, and recovery-drill invariants.
+
+Before every production update, run reference-aware storage preflight on both production and the independent backup host, before image builds, heavy transfers or maintenance. Remove only proven eligible Sabalan artifacts; preserve running services, foreign projects, supported browser builds, rollback/recovery dependencies, active operations and incident holds. Measure capacity again after cleanup. Never blanket-prune images, containers or volumes to make capacity pass. Keep the newest two complete healthy independently verified recovery points, verifying replacements before pruning. ADR-0131 and `docs/operations/online-deployment.md` record the online-deployment contract and status; online mutations and switching remain blocked until the required evidence exists.
+
+### Shared development and release handoff
+
+For agent work in this device's SabalanERP checkout, use `mahaan` as the integration branch and `origin/mahaan` as the default push target. Fetch `origin` before starting and use the current `origin/mahaan` as the base for new worktrees. If a task uses a separate worktree branch, integrate its verified commits into `mahaan` before pushing. Use an explicitly requested branch when the owner directs otherwise.
+
+Before combining work from another device or developer, and before preparing a production candidate, follow `docs/operations/developer-release-handoff.md`. Preserve each checkout's uncommitted work, reconcile all intended branches against the current remote, and freeze one clean, published commit with its Inquiry submodule identity. Run the affected acceptance checks and hand the exact commit and results to the protected release operator. The operator uses `docs/operations/protected-maintenance-next-update.md`; the developer handoff never substitutes for its deployment gates.
 
 ### Sabalan Design System
 

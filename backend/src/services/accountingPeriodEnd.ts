@@ -157,6 +157,7 @@ export type PeriodEndExceptionCode =
   | 'EVIDENCE_INTEGRITY_FAILED'
   | 'ASSET_NOT_READY_FOR_USE'
   | 'ASSET_COMPONENT_COST_MISMATCH'
+  | 'ASSET_COST_SOURCE_ACCOUNT_INVALID'
   | 'ASSET_LIFECYCLE_INVALID'
   | 'PAYROLL_CONFIDENTIALITY_VIOLATION'
   | 'PAYROLL_SUMMARY_UNBALANCED'
@@ -214,6 +215,8 @@ const preparePosting = (command: EvidenceCommand): PeriodEndPosting | PeriodEndR
   }
   if (evidence.kind === 'ASSET_COST') {
     if (evidence.amountRials <= 0n || evidence.documentIds.length === 0) return exception(evidence.sourceHash, 'ASSET_COMPONENT_COST_MISMATCH', 'بهای دارایی باید مثبت و دارای مدرک منشأ باشد.');
+    if (evidence.creditAccountId === evidence.constructionInProgressAccountId) return exception(evidence.sourceHash,
+      'ASSET_COST_SOURCE_ACCOUNT_INVALID', 'حساب بستانکار تأمین بهای دارایی باید با دارایی در جریان تکمیل متفاوت باشد.');
     return {
       ...base,
       description: `انباشت بهای دارایی در جریان تکمیل ${evidence.assetId}`,
@@ -301,7 +304,7 @@ const preparePosting = (command: EvidenceCommand): PeriodEndPosting | PeriodEndR
 
 export const createAccountingPeriodEndApplication = (
   repository: PeriodEndRepository,
-  dependencies: { now: () => Date },
+  dependencies: { now: () => Date; validateNewEvidence?: (command: EvidenceCommand) => Promise<void> },
 ) => ({
   acceptEvidence: async (command: EvidenceCommand): Promise<PeriodEndResult> => repository.transaction(async (tx) => {
     const { sourceHash, ...unsignedEvidence } = command.evidence;
@@ -316,6 +319,8 @@ export const createAccountingPeriodEndApplication = (
     if (hashPeriodEndEvidence(unsignedEvidence as JsonLike) !== sourceHash) {
       return tx.saveResult(identity, exception(sourceHash, 'EVIDENCE_INTEGRITY_FAILED', 'هش شواهد با محتوای تحویل‌شده مطابقت ندارد.'));
     }
+    // Mutable lifecycle and document checks apply only to new commands, never durable replays.
+    await dependencies.validateNewEvidence?.(command);
     const prepared = preparePosting(command);
     if ('kind' in prepared) return tx.saveResult(identity, prepared);
     const posted = await tx.postVoucher(prepared);

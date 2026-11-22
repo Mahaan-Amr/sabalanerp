@@ -5,7 +5,7 @@ import { FaBan, FaCheck, FaChevronDown, FaClipboardCheck, FaClock, FaPaperclip, 
 import EnhancedDropdown from '@/components/EnhancedDropdown';
 import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpInlineState, ErpSection, ErpSheet, ErpShiftTimeline, ErpSkeleton, ErpStatus, ErpWorkspacePage } from '@/components/erp';
 import { ErpInput, ErpPressable, ErpTextarea } from '@/components/erp';
-import { securityAPI } from '@/lib/api';
+import { securityAPI, resolveBackendAssetUrl } from '@/lib/api';
 import { askSecurityAction } from '@/components/SecurityNoticeHost';
 import PersianCalendar from '@/lib/persian-calendar';
 
@@ -339,7 +339,7 @@ export default function SecuritySupervisorReportsPage() {
             entries={timelineEntries}
             formatTimestamp={dateTimeFa}
             showAttachmentImages
-            attachmentHref={(attachmentId) => `/api/security/shift-log/attachments/${attachmentId}`}
+            attachmentHref={(attachmentId) => resolveBackendAssetUrl(`/api/security/shift-log/attachments/${attachmentId}`)}
             onVoid={readOnly ? undefined : voidEntry}
           />
         </>

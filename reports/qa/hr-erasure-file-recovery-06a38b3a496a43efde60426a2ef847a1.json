@@ -1,0 +1,73 @@
+{
+  "format": "sabalan-hr-erasure-file-recovery-local/v1",
+  "suite": "predecessor",
+  "pass": true,
+  "productionAdmission": false,
+  "candidateBefore": null,
+  "sources": {
+    "scripts/run-hr-erasure-file-recovery-local.mjs": "b53e65688855d9d83687407b8f1879713ee6449bfb65c9d9cc5445af8fcf358b",
+    "backend/prisma/schema.prisma": "9518aeafe0e923d6f0945e82607133de9fab54a6c1a6c3ae5349047d63890827",
+    "backend/node_modules/.prisma/client/schema.prisma": "4152b763b7885d62abc0a447f5d8fab2f911ecfcfb9e35c6c947628a53e2a17a",
+    "backend/prisma/migrations/20261019020000_hr_versioned_file_cleanup/migration.sql": "cb25c720d02d37ad036c95583ef9ba1ba7856bcd483a62ef1c8e03930947b9a9",
+    "backend/src/services/hrVersionedFileCleanupExpansion.json": "0bed9ca608af543b5af27ff3bab52410a90d7cb2909cc889a99a860fa4ddde94",
+    "backend/src/services/__tests__/hrDeletionFileCleanupPredecessor.integration.test.ts": "93355a4134d3ae963af30d0da02a3c229a71ee41b8f12ca13d8f35674126e046",
+    "backend/src/services/hrDeletionFileCleanup.ts": "caf4917cacfa8252fc847446fb5bba1a6b602f9d0c7c70e38aa16b4e5e875855",
+    "backend/src/services/hrLegacyFileCleanupRows.ts": "414d8aabc162d085c7cc47aff74c0d0fa15bc114ee36d84f17846f6d8d352ca9",
+    "backend/src/services/hrDeletionFileTransaction.ts": "50e2cf049f40f06297beabbceeb3bc8de9f8532243507983e8bc642fe5c30e81",
+    "backend/src/services/hrHiringFileStorage.ts": "371d13833470e02874a2010065739f34eb5df418015770c4ce52c7686190f56f"
+  },
+  "bundleSha256": "1393380d7b8d03399ec24c16db4ffdff27b1f55af536bf94f40829a4a9044c60",
+  "schemaSha256": "878c1b08ddbfefcdcf60fd7e8930bfbc0d5a574c80660b4b13aa24a312db5d2d",
+  "database": "qa_hr_erasure_06a38b3a496a43efde60426a2ef847a1",
+  "databaseOid": "20724355",
+  "status": 0,
+  "signal": null,
+  "stdout": "TAP version 13\n# HR_ERASURE_TEST_DATABASE_CLIENT_CLOSED\n# Subtest: current generated client completes successful and failed raw cleanup on the real pre-column schema\nok 1 - current generated client completes successful and failed raw cleanup on the real pre-column schema\n  ---\n  duration_ms: 163.137\n  ...\n1..1\n# tests 1\n# suites 0\n# pass 1\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 320.9605\n",
+  "stderr": "",
+  "failure": "",
+  "canonicalBefore": {
+    "backend": {
+      "id": "a1ea34a8d7d878b906fba7b4fdbe975df13a6b00d63a863eacce34b9827e86ff",
+      "image": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+      "startedAt": "2026-10-15T09:01:40.016187222Z"
+    },
+    "frontend": {
+      "id": "ad23f762dc1b27d2be76c335a3d7a4e20d08832a9a2e055904a4af84a9248c21",
+      "image": "sha256:f0a8954596279ccb01c029de7316022daa109b711a297f716cc9367d4bc9ec53",
+      "startedAt": "2026-10-18T05:09:40.68305388Z"
+    },
+    "inquiry": {
+      "id": "6d161695e215498048ff24e56e9602ce77871bfb6b390bf1356caecfdf9807d8",
+      "image": "sha256:81eacc768f3c4b82bd0f0a01bef5600ae1321e87cb117bad49ca47dfba79a213",
+      "startedAt": "2026-10-12T15:17:49.463791361Z"
+    },
+    "postgres": {
+      "id": "e553787e69f44c7bdf7dab94fad43a231f5ba99d988dc783234486a5a844a528",
+      "image": "sha256:3d0f7584ed7d04e27fa050d6683a74746608faf21f202be78460d679cc56461f",
+      "startedAt": "2026-10-12T15:17:49.481269377Z"
+    }
+  },
+  "isolatedDatabaseRetired": true,
+  "canonicalAfter": {
+    "backend": {
+      "id": "a1ea34a8d7d878b906fba7b4fdbe975df13a6b00d63a863eacce34b9827e86ff",
+      "image": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+      "startedAt": "2026-10-15T09:01:40.016187222Z"
+    },
+    "frontend": {
+      "id": "ad23f762dc1b27d2be76c335a3d7a4e20d08832a9a2e055904a4af84a9248c21",
+      "image": "sha256:f0a8954596279ccb01c029de7316022daa109b711a297f716cc9367d4bc9ec53",
+      "startedAt": "2026-10-18T05:09:40.68305388Z"
+    },
+    "inquiry": {
+      "id": "6d161695e215498048ff24e56e9602ce77871bfb6b390bf1356caecfdf9807d8",
+      "image": "sha256:81eacc768f3c4b82bd0f0a01bef5600ae1321e87cb117bad49ca47dfba79a213",
+      "startedAt": "2026-10-12T15:17:49.463791361Z"
+    },
+    "postgres": {
+      "id": "e553787e69f44c7bdf7dab94fad43a231f5ba99d988dc783234486a5a844a528",
+      "image": "sha256:3d0f7584ed7d04e27fa050d6683a74746608faf21f202be78460d679cc56461f",
+      "startedAt": "2026-10-12T15:17:49.481269377Z"
+    }
+  }
+}

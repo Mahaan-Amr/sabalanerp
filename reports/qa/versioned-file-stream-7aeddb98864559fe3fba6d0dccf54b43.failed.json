@@ -1,0 +1,52 @@
+{
+  "pass": false,
+  "code": 1,
+  "signal": null,
+  "tap": "TAP version 13\n# Subtest: streamed files retain exact independent bytes and old versions across replacement without whole-file buffering\nok 1 - streamed files retain exact independent bytes and old versions across replacement without whole-file buffering\n  ---\n  duration_ms: 4938.228214\n  type: 'test'\n  ...\n# Subtest: an interrupted incoming stream never acknowledges a partial live file and preserves its unknown intent\nok 2 - an interrupted incoming stream never acknowledges a partial live file and preserves its unknown intent\n  ---\n  duration_ms: 452.99543\n  type: 'test'\n  ...\n# Subtest: an early source error is observed while native admission is pending and cannot crash or publish\nok 3 - an early source error is observed while native admission is pending and cannot crash or publish\n  ---\n  duration_ms: 228.030197\n  type: 'test'\n  ...\n# Subtest: actual incoming-stream destruction must complete before its native admission can drain\nok 4 - actual incoming-stream destruction must complete before its native admission can drain\n  ---\n  duration_ms: 623.028441\n  type: 'test'\n  ...\n# Subtest: same-size immutable-object damage between real stream publication and live read-back cannot be acknowledged\nok 5 - same-size immutable-object damage between real stream publication and live read-back cannot be acknowledged\n  ---\n  duration_ms: 457.391033\n  type: 'test'\n  ...\n# Subtest: owner revocation during real stream ingestion refuses publication and retains its unresolved intent\nok 6 - owner revocation during real stream ingestion refuses publication and retains its unresolved intent\n  ---\n  duration_ms: 362.325885\n  type: 'test'\n  ...\n# Subtest: an empty stream is retained as an exact zero-byte immutable object and can be deleted normally\nok 7 - an empty stream is retained as an exact zero-byte immutable object and can be deleted normally\n  ---\n  duration_ms: 860.203049\n  type: 'test'\n  ...\n# Subtest: a source destruction failure after EOF cannot acknowledge a file or discard its persistent intent\nok 8 - a source destruction failure after EOF cannot acknowledge a file or discard its persistent intent\n  ---\n  duration_ms: 388.499093\n  type: 'test'\n  ...\n# Subtest: a stream suppressing close events retains real ownership until its delayed destroy completes\nok 9 - a stream suppressing close events retains real ownership until its delayed destroy completes\n  ---\n  duration_ms: 565.568721\n  type: 'test'\n  ...\n# Subtest: a stream suppressing close events retains real ownership until its delayed destroy fails\nnot ok 10 - a stream suppressing close events retains real ownership until its delayed destroy fails\n  ---\n  duration_ms: 644.04435\n  type: 'test'\n  location: '/app/online-runtime-acceptance/versioned-file-stream-7aeddb98864559fe3fba6d0dccf54b43/fixture.cjs:169:38'\n  failureType: 'testCodeFailure'\n  error: |-\n    Expected values to be strictly deep-equal:\n    + actual - expected\n    \n      {\n    +   ok: true,\n    +   sha256: '066e2480ea15a1a0a1504e0ce581bd159626009fee8765fe3a3c5b07449a5445'\n    -   error: 'ACTUAL_SUPPRESSED_CLOSE_FAILURE',\n    -   ok: false\n      }\n    \n  code: 'ERR_ASSERTION'\n  name: 'AssertionError'\n  expected:\n    ok: false\n    error: 'ACTUAL_SUPPRESSED_CLOSE_FAILURE'\n  actual:\n    ok: true\n    sha256: '066e2480ea15a1a0a1504e0ce581bd159626009fee8765fe3a3c5b07449a5445'\n  operator: 'deepStrictEqual'\n  stack: |-\n    TestContext.<anonymous> (/app/online-runtime-acceptance/versioned-file-stream-7aeddb98864559fe3fba6d0dccf54b43/fixture.cjs:190:14)\n    async Test.run (node:internal/test_runner/test:1054:7)\n    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)\n  ...\n1..10\n# tests 10\n# suites 0\n# pass 9\n# fail 1\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 9648.398714\n",
+  "stderr": "",
+  "workingRoot": "/app/online-runtime-acceptance/versioned-file-stream-7aeddb98864559fe3fba6d0dccf54b43",
+  "sourceHashes": {
+    "recovery-versioned-files.py": "2bc671d85b956666018d67b5987b774111c2e5b1b4078ed0cae96605ef04f99f",
+    "kernelWriteAdmission.ts": "8952c65ddde926fbc5136be933d1c7401ea269191cbcba64dd20ba6d95bdd875",
+    "runtimeBoundaryJournal.ts": "d94912a6fb15d759d8270c067e96c81964f1a5464cc54c26df28636ccbe2e9eb",
+    "runtimeTaskAdmission.ts": "c45592ec5a5693c0aacbe794b481bd4198638dcf460e00240c4cae0e6ac7e9fa",
+    "runtimeWorkContext.ts": "9fcbc84ad7393eecc75ffe9bc8df73ebc051a4ba2050f2f31d6f00f7280c795d",
+    "durableFilePublication.ts": "5c1ecdf41aeae4259daf6ebef0f1556fc39135e9c07b80da1ff831bf64a1095a",
+    "versionedFilePublication.ts": "cbc54d80eef74d6be955280741fb636995b35086e9ac973af4677140cd45ab9c"
+  },
+  "sources": {
+    "fixture.cjs": "f9e6307b8bb5cc74536057647406085836250e66db73bdc21b16700081cd0d4e",
+    "reader.worker.py": "a1e3ee1f5a9573a86e0a2a712bd87ac6823ae52c073598968139a33bd7edc734",
+    "recovery-versioned-files.py": "2bc671d85b956666018d67b5987b774111c2e5b1b4078ed0cae96605ef04f99f",
+    "kernelWriteAdmission.js": "b8dd4d6443eb4f525613fd48d10fa838ccbbd81f43d412674464da31af6c710b",
+    "runtimeBoundaryJournal.js": "c75bd2c91cfeff77f52e6f245fc23c2b88c54397ab3d9bc89f4b316e7b48d5dc",
+    "runtimeTaskAdmission.js": "9e1a08c587f07b76b67becbe9367c7fbcfc79e061b1147dfee212da953196648",
+    "runtimeWorkContext.js": "ed0a47227bb39a5b0e3ea1aae8be6f753bb2d88e0247832b7108f29d1e10156a",
+    "durableFilePublication.js": "3b9ba70126478bbb1922b01e14bb537d6cc1a4c6528a0bec30e07a7e465d259d",
+    "versionedFilePublication.js": "2db86e6677302556af8a9f9ed99470a1d80d168fc622b2d08bc8bb23937edd3c"
+  },
+  "canonicalServicesBefore": {
+    "backend": {
+      "id": "a1ea34a8d7d878b906fba7b4fdbe975df13a6b00d63a863eacce34b9827e86ff",
+      "image": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+      "startedAt": "2026-10-15T09:01:40.016187222Z"
+    },
+    "frontend": {
+      "id": "ad23f762dc1b27d2be76c335a3d7a4e20d08832a9a2e055904a4af84a9248c21",
+      "image": "sha256:f0a8954596279ccb01c029de7316022daa109b711a297f716cc9367d4bc9ec53",
+      "startedAt": "2026-10-18T05:09:40.68305388Z"
+    },
+    "postgres": {
+      "id": "e553787e69f44c7bdf7dab94fad43a231f5ba99d988dc783234486a5a844a528",
+      "image": "sha256:3d0f7584ed7d04e27fa050d6683a74746608faf21f202be78460d679cc56461f",
+      "startedAt": "2026-10-12T15:17:49.481269377Z"
+    },
+    "inquiry": {
+      "id": "6d161695e215498048ff24e56e9602ce77871bfb6b390bf1356caecfdf9807d8",
+      "image": "sha256:81eacc768f3c4b82bd0f0a01bef5600ae1321e87cb117bad49ca47dfba79a213",
+      "startedAt": "2026-10-12T15:17:49.463791361Z"
+    }
+  },
+  "canonicalVerification": "NOT_ACCEPTED",
+  "productionAdmission": false
+}

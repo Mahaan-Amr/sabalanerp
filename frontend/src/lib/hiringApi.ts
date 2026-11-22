@@ -1,20 +1,31 @@
 import axios from "axios";
+import type { AxiosRequestConfig } from 'axios';
+import api from './api';
+import { bindBrowserBuildRequestIdentity } from './browserBuildRequestIdentity';
 
 const rawBase =
   process.env.NEXT_PUBLIC_API_URL ||
   (process.env.NODE_ENV === "production" ? "/api" : "http://localhost:5000");
 const baseURL = `${rawBase.endsWith("/api") ? rawBase : `${rawBase}/api`}/hr-hiring`;
 
-const internal = axios.create({ baseURL });
-internal.interceptors.request.use((config) => {
-  const token =
-    typeof window !== "undefined" ? localStorage.getItem("token") : null;
-  if (token) config.headers.Authorization = `Bearer ${token}`;
+const internal = {
+  get: <T = any>(url: string, config?: AxiosRequestConfig) => api.get<T>(`/hr-hiring${url}`, config),
+  post: <T = any>(url: string, data?: unknown, config?: AxiosRequestConfig) => api.post<T>(`/hr-hiring${url}`, data, config),
+  put: <T = any>(url: string, data?: unknown, config?: AxiosRequestConfig) => api.put<T>(`/hr-hiring${url}`, data, config),
+  patch: <T = any>(url: string, data?: unknown, config?: AxiosRequestConfig) => api.patch<T>(`/hr-hiring${url}`, data, config),
+};
+
+// Invitation verification precedes the applicant session. Bind only the
+// immutable producer identity; never inherit applicant/staff authentication.
+const invitationVerification = axios.create({ baseURL });
+invitationVerification.interceptors.request.use((config) => {
+  bindBrowserBuildRequestIdentity(config.headers);
   return config;
 });
 
 const applicant = axios.create({ baseURL });
 applicant.interceptors.request.use((config) => {
+  bindBrowserBuildRequestIdentity(config.headers);
   const token =
     typeof window !== "undefined"
       ? sessionStorage.getItem("hrApplicantSession")
@@ -252,7 +263,7 @@ export const hiringAPI = {
 
 export const applicantHiringAPI = {
   verify: (mobile: string, otp: string) =>
-    axios.post(`${baseURL}/public/invitations/verify`, { mobile, otp }),
+    invitationVerification.post('/public/invitations/verify', { mobile, otp }),
   get: () => applicant.get("/public/application"),
   getClosedState: () => applicant.get("/public/application/closed-state"),
   saveDraft: (data: any) => applicant.put("/public/application/draft", data),

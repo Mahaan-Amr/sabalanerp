@@ -1,0 +1,21 @@
+{
+  "freeze": "reports/qa/versioned-upload-review-20261018.json",
+  "freezeSha256": "82b6abb7703ac8d40a297aaee163e22831a10c60af4d35d290493f8f8f4c2639",
+  "reports": {
+    "versioned-upload-f848243ad82cc84057eca8155390b88d.json": "f9c5f07ef6aee4363451cc07221e5a53cbcbb64593a7997aa5d519aa04d0aa4b",
+    "versioned-upload-f848243ad82cc84057eca8155390b88d.core.json": "11812f964861d75ef82f06a58c71153220b688d758c9525416d5f0a4678cbfdd",
+    "versioned-upload-9a627bd959f2098c57a295ec8e4fdd45.failed.json": "f2318d01350f878ef57fe708343b266b38db841a57d527a84699a624a8e3e3a9",
+    "versioned-upload-05f8a8c933481cd722054dcf88273625.failed.json": "ff9e40cc9f3a690aa6030122ecb24b35c31552056062bbd2124ff4aef95c633a",
+    "versioned-upload-source-pre-receipt.ts.txt": "94df1f412618e1e3c863b67f4608b253bee6144c9c554a4fc9d3277043bdfbe1",
+    "versioned-file-stream-2e80117787bcca0d97a1a237f06221f7.json": "96d226655db579f948d572d4344a81b689199feadaf911c8986e05f558bf8544",
+    "versioned-file-stream-2e80117787bcca0d97a1a237f06221f7.core.json": "9f0441268ff166a2caf3863134af263bd7d6fa5a9038839d740848a471dadf30",
+    "file-publication-ced07bf9d5a48a10b3c7a0c6e47d3ed2.json": "bfcfb2084248b0c24c1d94932a9ab4d438808fbb22765a799f409913f1d53aef",
+    "file-publication-ced07bf9d5a48a10b3c7a0c6e47d3ed2.tap": "6039a658ae15480f209d0e47d7d698e9c5840b1b301e019d860c282244b68598"
+  },
+  "standardsReview": "PASS",
+  "specReview": "PASS",
+  "strictTypecheck": "PASS",
+  "architectureCheck": "PASS",
+  "productionAdmission": false,
+  "wholeProgramComplete": false
+}

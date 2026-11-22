@@ -1,0 +1,79 @@
+{
+  "accepted": false,
+  "reason": "obsolete fixture expected 503 instead of capture queuing",
+  "root": "/app/online-runtime-acceptance/request-database-9dab4485e22eb6843d4332e26fe4ac31",
+  "databaseRetained": true,
+  "database": "sabalanerp_concurrency_3b71a467f5b1794d",
+  "method": "exact own HTTP client disconnected; original owner unlock/stop; candidate EOF had already closed control reader, debugger invoked original stop/resolveStopped; only pure EOF keepalive cleared AFTER native gate available, original HTTP server closed and zero SQL/prepared; no native termination, gate/journal reset or deleted evidence",
+  "proofs": [
+    {
+      "slot": "sabalanerp-local-backend-candidate-1",
+      "nativeHelpersAbsent": true,
+      "actualGateAvailable": true,
+      "states": [
+        {
+          "claimSha256": "91174476274422c10f910e6cd4a677b8bf8c3c9c49547357b28885c8cc9b62e7",
+          "epoch": 1,
+          "format": "sabalan-runtime-boundary/v1",
+          "phase": "QUIESCENT",
+          "previousStateSha256": "ee9d2ee1e1941ef7378af5a3270235c13a0f328fddd108b804ef82032987c1e5",
+          "updatedAt": "2026-10-18T05:38:36.652Z"
+        },
+        {
+          "claimSha256": "ed2e0c0ed2fca5d84463826861da08c9148212a758d46c6efad26c0ee8999a23",
+          "epoch": 1,
+          "format": "sabalan-runtime-boundary/v1",
+          "phase": "QUIESCENT",
+          "previousStateSha256": "6af44e80f99f4d980ec6d4b9adec5ca6465a2304b46971c5da54cb87cc14aa12",
+          "updatedAt": "2026-10-18T05:38:36.740Z"
+        }
+      ]
+    },
+    {
+      "slot": "sabalanerp-local-backend-retained-1",
+      "nativeHelpersAbsent": true,
+      "actualGateAvailable": true,
+      "states": [
+        {
+          "claimSha256": "91174476274422c10f910e6cd4a677b8bf8c3c9c49547357b28885c8cc9b62e7",
+          "epoch": 1,
+          "format": "sabalan-runtime-boundary/v1",
+          "phase": "QUIESCENT",
+          "previousStateSha256": "ee9d2ee1e1941ef7378af5a3270235c13a0f328fddd108b804ef82032987c1e5",
+          "updatedAt": "2026-10-18T05:38:36.652Z"
+        },
+        {
+          "claimSha256": "ed2e0c0ed2fca5d84463826861da08c9148212a758d46c6efad26c0ee8999a23",
+          "epoch": 1,
+          "format": "sabalan-runtime-boundary/v1",
+          "phase": "QUIESCENT",
+          "previousStateSha256": "6af44e80f99f4d980ec6d4b9adec5ca6465a2304b46971c5da54cb87cc14aa12",
+          "updatedAt": "2026-10-18T05:38:36.740Z"
+        }
+      ]
+    }
+  ],
+  "rows": [
+    {
+      "id": "background",
+      "amount": "123456789.12345678",
+      "quantity": "0.00000001"
+    },
+    {
+      "id": "early-response",
+      "amount": "123456789.12345678",
+      "quantity": "0.00000001"
+    },
+    {
+      "id": "lost-response",
+      "amount": "123456789.12345678",
+      "quantity": "0.00000001"
+    }
+  ],
+  "sessions": [],
+  "prepared": [
+    {
+      "count": "0"
+    }
+  ]
+}

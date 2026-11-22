@@ -83,11 +83,14 @@ export const createProductionApprovedPricingFixture = async (prisma: PrismaClien
   }
   if (projectCanonicalProductGraph(graph, 'accounting').totalAmountToman !== amount) throw new Error('Synthetic pricing graph total changed.');
   const graphHash = createHash('sha256').update(JSON.stringify(graph)).digest('hex');
-  const project = await prisma.projectAddress.create({ data: { customerId: template.candidate.customerId,
+  // The cloned database intentionally omits unrelated historical CRM cards.
+  // A fresh test customer receives its own live card from the normal trigger.
+  const testCustomer = await prisma.crmCustomer.create({ data: { firstName: 'QA', lastName: `dispatch-${randomUUID()}` } });
+  const project = await prisma.projectAddress.create({ data: { customerId: testCustomer.id,
     address: `Issue 260 destination ${contractId}`, projectName: `Issue 260 ${contractId}` } });
-  const contractData = { contractKind: 'collaboration', customerId: template.candidate.customerId,
-    customer: { id: template.candidate.customerId, firstName: template.candidate.customer.firstName,
-      lastName: template.candidate.customer.lastName, companyName: template.candidate.customer.companyName },
+  const contractData = { contractKind: 'collaboration', customerId: testCustomer.id,
+    customer: { id: testCustomer.id, firstName: testCustomer.firstName,
+      lastName: testCustomer.lastName, companyName: testCustomer.companyName },
     projectId: project.id, project: { id: project.id, address: project.address, projectName: project.projectName },
     payment: { currency: template.candidate.currency }, products: [productSnapshot],
     ...(optimizerDerivedSentinel ? { deliveries: [{ products: [{ productRowId, productId: template.item.productId,
@@ -95,7 +98,7 @@ export const createProductionApprovedPricingFixture = async (prisma: PrismaClien
     discount: { enabled: false, baseSubtotal: amount, percent: '0', amount: '0', currency: template.candidate.currency } };
   const contract = await prisma.salesContract.create({ data: { id: contractId, contractNumber: `ISSUE260-${randomUUID()}`,
     title: 'Issue 260 concurrency fixture', titlePersian: 'Issue 260', content: '', status: 'APPROVED',
-    customerId: template.candidate.customerId, departmentId: template.candidate.departmentId,
+    customerId: testCustomer.id, departmentId: template.candidate.departmentId,
     createdBy: template.candidate.createdBy, responsibleSellerId: template.candidate.responsibleSellerId,
     currency: template.candidate.currency, totalAmount: new Prisma.Decimal(amount), contractData: json(contractData),
     items: { create: { id: itemId, productId: template.item.productId, productRowId,

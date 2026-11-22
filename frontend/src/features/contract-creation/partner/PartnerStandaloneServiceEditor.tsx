@@ -1,4 +1,5 @@
 'use client';
+import {useUnarchivedDraftGuard} from '@/lib/useUnarchivedDraftGuard';
 
 import React, { useState } from 'react';
 import { OperationMinimumContext, OperationMinimumCatalogHint } from '../components/product-modal-system/OperationMinimumContext';
@@ -25,6 +26,7 @@ export function PartnerStandaloneServiceEditor({ draft, catalog, onChange }: {
   const [query, setQuery] = useState('');
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState<Record<string, string>>({});
+  useUnarchivedDraftGuard('partner-service-buffer',Object.keys(editingText).some(key=>{const separator=key.lastIndexOf(':');const row=draft.serviceRows?.find(item=>item.serviceRowId===key.slice(0,separator));return Boolean(row)&&editingText[key]!==String(key.slice(separator+1)==='quantity'?row?.quantity??'':row?.retailUnitPrice?.amount??'');}));
   const commit = (serviceRows: NonNullable<PartnerTechnicalDraft['serviceRows']>) => onChange(
     PartnerTechnicalDraftSchema.parse({ ...draft, inputRevision: draft.inputRevision + 1, serviceRows }));
   const update = (id: string, change: Partial<NonNullable<PartnerTechnicalDraft['serviceRows']>[number]>) =>

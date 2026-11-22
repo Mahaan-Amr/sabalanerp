@@ -11,6 +11,7 @@ import { createAuthorizedActorFixture } from './shipmentStatementConcurrency/aut
 import { pricedAllocationIntegrityHash } from '../pricedAllocationLedger';
 import { readShipmentQuantityProjection, shipmentQuantityEvidenceIntegrityHash } from '../shipmentQuantityProjectionStore';
 import { assertStatementAdjustmentRaceEvidence } from './shipmentStatementConcurrency/statementAdjustmentEvidence';
+import { createStatementAdjustmentFixture } from './shipmentStatementConcurrency/statementAdjustmentFixture';
 
 const prisma = new PrismaClient();
 const rollback = Symbol('statement-adjustment-db-rollback');
@@ -72,7 +73,7 @@ const run = async () => {
     authority: { actorRole: string; workspace: string; workspacePermission: string } } | null = null;
   try {
     committedFixture = await prisma.$transaction(async (tx) => {
-      const [candidate] = await tx.$queryRaw<Array<{
+      const [existingCandidate] = runConcurrency ? await tx.$queryRaw<Array<{
         waybillId: string; revisionId: string; revisionLineId: string; itemId: string; productRowId: string;
         contractId: string; customerId: string; financialRecordId: string; createdBy: string; currency: string;
         lineQuantity: Prisma.Decimal; lineUnit: string; loadingId: string;
@@ -93,8 +94,10 @@ const run = async () => {
           AND NOT EXISTS (SELECT 1 FROM "dispatch_document_artifacts" da WHERE da."waybillId" = w."id")
         ORDER BY w."issuedAt", arl."id"
         LIMIT 1
-      `);
-      assert(candidate, 'sabalanerp-local needs one exited waybill with an unsealed stable contract row');
+      `) : [];
+      // The race runs only in an explicitly named temporary database, so it
+      // can safely author its own exited shipment when no legacy fixture exists.
+      const candidate = existingCandidate || await createStatementAdjustmentFixture(tx);
 
       const repository = new PrismaApprovedPricingRepository(tx);
       const versionId = randomUUID();
@@ -284,8 +287,10 @@ const run = async () => {
     const { actor: guard, authority: guardAuthority } = await createAuthorizedActorFixture(prisma, {
       runId: process.env.ISSUE260_PARENT_RUN_ID || randomUUID(), workspace: 'security',
       feature: 'security_dispatch_confirmation_approve', withSecurityPersonnel: true });
+    const originalLoading = await prisma.logisticsLoading.findUniqueOrThrow({ where: { id: committedFixture.loadingId }, select: { projectId: true } });
     const inbound = await recordGuardInboundMovement(prisma, { purpose: 'SALES_RETURN',
       loadingId: committedFixture.loadingId, customerId: committedFixture.customerId,
+      projectId: originalLoading.projectId,
       occurredAt: new Date(Date.now() - 1_000), actorId: guard.id });
     await completeGuardInboundMovement(prisma, { movementId: inbound.id });
     const concurrentReturn = await verifyGuardPhysicalReturn(prisma, { movementId: inbound.id,

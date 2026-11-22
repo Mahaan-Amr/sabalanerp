@@ -1,4 +1,5 @@
-﻿// Stair calculation service
+import { stairMandatoryDefaults } from '@sabalanerp/contract-product-graph';
+// Stair calculation service
 // Handles all stair system V2 calculations
 
 import type {
@@ -1156,7 +1157,7 @@ export const computeTotalsV2 = (
   }
 
   const baseMaterialPrice = pricingSquareMeters * pricePerSqm;
-  const defaultMandatoryForPart = part === 'riser' || part === 'landing';
+  const defaultMandatoryForPart = stairMandatoryDefaults(part).enabled;
   const isMandatoryEnabled = draft.useMandatory ?? defaultMandatoryForPart;
   const mandatoryPercentageValue = draft.mandatoryPercentage ?? 20;
   const mandatoryAmount = isMandatoryEnabled && mandatoryPercentageValue > 0

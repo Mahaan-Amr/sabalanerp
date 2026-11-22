@@ -1,6 +1,9 @@
-import { createHash } from 'node:crypto';
+import { externalDriverBlockers, externalVehicleBlockers, externalOperationalReadiness } from './externalVehicleOperations';
+import { HrVehicleError, externalAssignmentScope, lockHrDriverFacts } from './hrVehicleOperations';
+import { normalizePlateDigits, requireCompanyPlate } from './companyVehicleEntry';
+import { createHash, randomUUID } from 'node:crypto';
 import { GuardDriverQueueTurnStatus, GuardDriverSource, Prisma, PrismaClient } from '@prisma/client';
-import { projectExternalDriverReadiness, projectExternalVehicleReadiness, projectInternalDriverReadiness } from './dispatchMasterDataPolicy';
+import { normalizeIranianPlate, projectExternalDriverReadiness, projectExternalVehicleReadiness, projectInternalDriverReadiness } from './dispatchMasterDataPolicy';
 import { assertCanonicalDispatchCommandAllowed, recordFirstCanonicalAdmission } from './dispatchCutover';
 import { preparePartnerLoadingQueueChange, preparePartnerGuardQueueRelease } from './partnerSales/fulfillment/loadingQueue';
 import { PartnerLoadingCommandError } from './partnerSales/fulfillment/loadingAuthority';
@@ -18,10 +21,10 @@ const stableValue = (value: unknown): unknown => {
 
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(stableValue(value))).digest('hex');
 const activeAt = (at: Date) => ({ effectiveFrom: { lte: at }, OR: [{ effectiveTo: null }, { effectiveTo: { gt: at } }] });
-type GuardQueueEventType = 'ADMITTED' | 'MADE_AVAILABLE_FOR_LOADING' | 'RESERVED_FOR_LOADING' | 'RESERVATION_RELEASED'
+type GuardQueueEventType = 'PERSONAL_PICKUP_SELECTED' | 'ADMITTED' | 'MADE_AVAILABLE_FOR_LOADING' | 'RESERVED_FOR_LOADING' | 'RESERVATION_RELEASED'
   | 'LOADING_FINALIZED' | 'PHYSICAL_EXIT_RECORDED' | 'MANUAL_OUTAGE_EXIT_REGISTERED'
   | 'RETURNED_TO_GATE_WAITING' | 'RESERVATION_RELEASED_FOR_DEPARTURE' | 'CLOSED_WITHOUT_LOADING'
-  | 'RESERVATION_RELEASED_FOR_VOID' | 'VOIDED';
+  | 'RESERVATION_RELEASED_FOR_VOID' | 'VOIDED' | 'FINALIZED_LOADING_CANCELLED';
 
 export class GuardQueueConflictError extends Error {}
 export class GuardQueueValidationError extends Error {}
@@ -33,15 +36,35 @@ type QueueTurnIdentity = {
   companyVehicleId: string | null;
   externalVehicleId: string | null;
   assignmentId: string | null;
+  admissionSnapshot?: Prisma.JsonValue;
+  loadingId?: string | null;
 };
+
+export function customerPickupPhone(snapshot: Prisma.JsonValue | undefined) {
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) return null;
+  const driver = snapshot.driver;
+  if (!driver || typeof driver !== 'object' || Array.isArray(driver)) return null;
+  return driver.source === 'CUSTOMER_PICKUP' && typeof driver.phone === 'string' && /^09\d{9}$/.test(driver.phone)
+    ? driver.phone : null;
+}
+
+export const queueTurnDriverIdentity = (turn: QueueTurnIdentity & { id: string }) =>
+  ['CUSTOMER_PICKUP', 'PERSONAL_PICKUP'].includes(turn.driverSource) ? turn.id :
+    turn.driverSource === 'INTERNAL' ? turn.internalDriverId : turn.externalDriverId;
 
 export const isGuardQueueTurnCurrentlyReady = async (
   db: Prisma.TransactionClient | PrismaClient,
   turn: QueueTurnIdentity,
   at = new Date(),
 ) => {
+  if (turn.driverSource === 'PERSONAL_PICKUP') {
+    const snapshot = turn.admissionSnapshot as Record<string, unknown> | undefined;
+    return Boolean(turn.loadingId && snapshot?.kind === 'PERSONAL_PICKUP_SELECTION' && snapshot.loadingId === turn.loadingId);
+  }
+  if (turn.driverSource === GuardDriverSource.CUSTOMER_PICKUP) return Boolean(customerPickupPhone(turn.admissionSnapshot));
   if (turn.driverSource === GuardDriverSource.INTERNAL) {
     if (!turn.internalDriverId || !turn.companyVehicleId || !turn.assignmentId) return false;
+    if (!('$transaction' in db)) await lockHrDriverFacts(db, turn.internalDriverId, at, turn.companyVehicleId);
     const driver = await db.internalDriverProfile.findUnique({ where: { id: turn.internalDriverId }, include: {
       personnel: { include: { hrEmploymentRelationships: { where: { status: 'ACTIVE', ...activeAt(at) }, take: 1 } } },
       eligibilityPeriods: { where: activeAt(at), orderBy: { effectiveFrom: 'desc' }, take: 1 },
@@ -59,20 +82,12 @@ export const isGuardQueueTurnCurrentlyReady = async (
     return readiness?.status === 'READY';
   }
   if (!turn.externalDriverId || !turn.externalVehicleId) return false;
-  const [driver, vehicle] = await Promise.all([
-    db.externalDriver.findUnique({ where: { id: turn.externalDriverId }, include: {
-      documents: true,
-      externalLinks: { include: { personnel: { include: { hrEmploymentRelationships: true, internalDriverProfile: { include: { eligibilityPeriods: true } } } } } },
-    } }),
-    db.externalVehicle.findUnique({ where: { id: turn.externalVehicleId }, include: { documents: true, plates: { where: activeAt(at), take: 1 } } }),
-  ]);
-  if (!driver || !vehicle) return false;
-  const continuity = driver.externalLinks.some(({ personnel }) => personnel.isActive && !personnel.archivedAt && (
-    personnel.hrEmploymentRelationships.some((item) => item.status === 'ACTIVE' && item.effectiveFrom <= at && (!item.effectiveTo || item.effectiveTo > at))
-    || Boolean(personnel.internalDriverProfile?.eligibilityPeriods.some((item) => item.status === 'ELIGIBLE' && item.effectiveFrom <= at && (!item.effectiveTo || item.effectiveTo > at)))
-  ));
-  return projectExternalDriverReadiness({ lifecycleStatus: driver.status, documents: driver.documents, continuityLinkedToActiveInternalIdentity: continuity }, at).status === 'READY'
-    && projectExternalVehicleReadiness({ lifecycleStatus: vehicle.status, documents: vehicle.documents, hasCurrentPlate: Boolean(vehicle.plates[0]) }, at).status === 'READY';
+  try {
+    if (!('$transaction' in db)) await lockHrDriverFacts(externalAssignmentScope(db), turn.externalDriverId, at, turn.externalVehicleId);
+    await externalOperationalReadiness(db, turn.externalDriverId, turn.externalVehicleId, at);
+    return true;
+  } catch (error) { if (error instanceof HrVehicleError) return false; throw error; }
+
 };
 
 export const appendQueueEvent = async (tx: Prisma.TransactionClient, input: {
@@ -102,7 +117,9 @@ export const appendQueueEvent = async (tx: Prisma.TransactionClient, input: {
 };
 
 const buildInternalAdmission = async (tx: Prisma.TransactionClient, driverId: string, actorId: string, admittedAt: Date) => {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('HR_VEHICLE_OPERATIONS'))`;
   await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', `GUARD_QUEUE:INTERNAL:${driverId}`);
+  await lockHrDriverFacts(tx, driverId, admittedAt);
   const driver = await tx.internalDriverProfile.findUnique({ where: { id: driverId }, include: {
     personnel: { include: { hrEmploymentRelationships: { where: { status: 'ACTIVE', ...activeAt(admittedAt) }, orderBy: { effectiveFrom: 'desc' }, take: 1 } } },
     eligibilityPeriods: { where: activeAt(admittedAt), orderBy: { effectiveFrom: 'desc' }, take: 1 },
@@ -113,6 +130,7 @@ const buildInternalAdmission = async (tx: Prisma.TransactionClient, driverId: st
   const employment = driver.personnel.hrEmploymentRelationships[0];
   const assignment = driver.vehicleAssignments[0];
   const plate = assignment?.vehicle.plates[0];
+  if (assignment) await lockHrDriverFacts(tx, driverId, admittedAt, assignment.vehicleId);
   const readiness = projectInternalDriverReadiness({
     personnelActive: driver.personnel.isActive && !driver.personnel.archivedAt,
     activeEmployment: Boolean(employment), eligible: eligibility?.status === 'ELIGIBLE', drivingProfileActive: driver.status === 'ACTIVE',
@@ -144,29 +162,9 @@ const buildInternalAdmission = async (tx: Prisma.TransactionClient, driverId: st
 const buildExternalAdmission = async (tx: Prisma.TransactionClient, driverId: string, vehicleId: string, actorId: string, admittedAt: Date) => {
   const lockKeys = [`GUARD_QUEUE:EXTERNAL_DRIVER:${driverId}`, `GUARD_QUEUE:EXTERNAL_VEHICLE:${vehicleId}`].sort();
   for (const key of lockKeys) await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', key);
-  const [driver, vehicle] = await Promise.all([
-    tx.externalDriver.findUnique({ where: { id: driverId }, include: {
-      documents: { orderBy: { recordedAt: 'desc' } },
-      externalLinks: { include: { personnel: { include: { hrEmploymentRelationships: true, internalDriverProfile: { include: { eligibilityPeriods: true } } } } } },
-    } }),
-    tx.externalVehicle.findUnique({ where: { id: vehicleId }, include: {
-      plates: { where: activeAt(admittedAt), orderBy: { effectiveFrom: 'desc' }, take: 1 }, documents: { orderBy: { recordedAt: 'desc' } },
-    } }),
-  ]);
-  if (!driver) throw new GuardQueueValidationError('External driver was not found.');
-  if (!vehicle) throw new GuardQueueValidationError('External vehicle was not found.');
-  const continuityLinkedToActiveInternalIdentity = driver.externalLinks.some((link) => {
-    const personnel = link.personnel;
-    const employment = personnel.hrEmploymentRelationships.some((item) => item.status === 'ACTIVE' && item.effectiveFrom <= admittedAt && (!item.effectiveTo || item.effectiveTo > admittedAt));
-    const eligibility = personnel.internalDriverProfile?.eligibilityPeriods.some((item) => item.status === 'ELIGIBLE' && item.effectiveFrom <= admittedAt && (!item.effectiveTo || item.effectiveTo > admittedAt));
-    return personnel.isActive && !personnel.archivedAt && (employment || eligibility);
-  });
-  const driverReadiness = projectExternalDriverReadiness({ lifecycleStatus: driver.status, documents: driver.documents, continuityLinkedToActiveInternalIdentity }, admittedAt);
-  const vehicleReadiness = projectExternalVehicleReadiness({ lifecycleStatus: vehicle.status, hasCurrentPlate: Boolean(vehicle.plates[0]), documents: vehicle.documents }, admittedAt);
-  const plate = vehicle.plates[0];
-  if (driverReadiness.status !== 'READY' || vehicleReadiness.status !== 'READY' || !plate) {
-    throw new GuardQueueValidationError(`External driver-vehicle combination is not currently ready for admission: ${[...driverReadiness.blockers, ...vehicleReadiness.blockers].join(', ')}`);
-  }
+  await lockHrDriverFacts(externalAssignmentScope(tx), driverId, admittedAt, vehicleId || undefined);
+  const { driver, vehicle, assignment } = await externalOperationalReadiness(tx, driverId, vehicleId || undefined, admittedAt);
+  const plate = vehicle.plates.find(p => p.effectiveFrom <= admittedAt && (!p.effectiveTo || p.effectiveTo > admittedAt))!;
   const driverDocument = driver.documents.find((document) => document.documentType === 'DRIVING_LICENCE' && (!document.expiresAt || document.expiresAt > admittedAt))!;
   const vehicleDocument = vehicle.documents.find((document) => document.documentType === 'VEHICLE_REGISTRATION' && (!document.expiresAt || document.expiresAt > admittedAt))!;
   const documents = [
@@ -178,31 +176,68 @@ const buildExternalAdmission = async (tx: Prisma.TransactionClient, driverId: st
     driver: { source: 'GUARD_EXTERNAL', id: driver.id, firstName: driver.firstName, lastName: driver.lastName, nationalCode: driver.nationalCode, phone: driver.phone },
     vehicle: { source: 'GUARD_EXTERNAL', id: vehicle.id, vehicleType: vehicle.vehicleType },
     plate,
-    readiness: { status: 'READY', checkedAt: admittedAt, driver: driverReadiness, vehicle: vehicleReadiness },
+    readiness: { status: 'READY', checkedAt: admittedAt, assignmentId: assignment.id, biometricRequired: true },
     documents,
   });
   return { driver, vehicle, snapshot };
 };
 
-export const admitGuardDriverQueueTurn = async (prisma: PrismaClient, input: {
-  source: GuardDriverSource;
-  driverId: string;
-  vehicleId?: string;
-  actorId: string;
-}) => prisma.$transaction(async (tx) => {
+const openQueueStatuses: GuardDriverQueueTurnStatus[] = ['WAITING_AT_GATE', 'AVAILABLE_FOR_LOADING', 'RESERVED_FOR_LOADING', 'LOADING_FINALIZED'];
+
+type AdmissionInput = { actorId: string } & (
+  | { source: 'INTERNAL' | 'EXTERNAL'; driverId: string; vehicleId?: string }
+  | { source: 'CUSTOMER_PICKUP'; vehicleType: unknown; plate: unknown; phone: unknown }
+);
+
+const buildAdmission = async (tx: Prisma.TransactionClient, input: AdmissionInput, admittedAt: Date) => {
+  if (input.source === 'INTERNAL') {
+    const { driver, assignment, snapshot } = await buildInternalAdmission(tx, input.driverId, input.actorId, admittedAt);
+    return { snapshot, identity: { internalDriverId: driver.id, companyVehicleId: assignment.vehicleId, assignmentId: assignment.id } };
+  }
+  if (input.source === 'EXTERNAL') {
+    const { driver, vehicle, snapshot } = await buildExternalAdmission(tx, input.driverId, input.vehicleId || '', input.actorId, admittedAt);
+    return { snapshot, identity: { externalDriverId: driver.id, externalVehicleId: vehicle.id } };
+  }
+  if (input.source !== 'CUSTOMER_PICKUP') throw new GuardQueueValidationError('نوع راننده معتبر نیست.');
+  const { vehicleType } = input;
+  if (vehicleType !== 'کامیون' && vehicleType !== 'وانت') throw new GuardQueueValidationError('نوع خودرو را انتخاب کنید.');
+  const phone = typeof input.phone === 'string' ? normalizePlateDigits(input.phone.trim()).replace(/[\s-]/g, '').replace(/^(?:\+98|0098|98)/, '0') : '';
+  if (!/^09\d{9}$/.test(phone)) throw new GuardQueueValidationError('شماره همراه معتبر وارد کنید.');
+  let plate: string;
+  try { plate = requireCompanyPlate(input.plate); }
+  catch (error) { throw new GuardQueueValidationError((error as Error).message); }
+  const id = randomUUID();
+  const snapshot = {
+    schemaVersion: 1, admittedAt, actorId: input.actorId,
+    driver: { source: input.source, id, firstName: 'راننده متفرقه', phone },
+    vehicle: { source: input.source, id, vehicleType },
+    plate: { plate, normalizedPlate: normalizeIranianPlate(plate) },
+    readiness: { status: 'READY', checkedAt: admittedAt },
+  };
+  return { snapshot, identity: { id } };
+};
+
+export const admitGuardDriverQueueTurn = async (prisma: PrismaClient, input: AdmissionInput) => prisma.$transaction(async (tx) => {
   await assertCanonicalDispatchCommandAllowed(tx);
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('HR_VEHICLE_OPERATIONS'))`;
   const admittedAt = new Date();
-  const resolved = input.source === GuardDriverSource.INTERNAL
-    ? await buildInternalAdmission(tx, input.driverId, input.actorId, admittedAt)
-    : await buildExternalAdmission(tx, input.driverId, String(input.vehicleId || ''), input.actorId, admittedAt);
-  const integrityHash = digest(resolved.snapshot);
+  const resolved = await buildAdmission(tx, input, admittedAt);
+  const snapshot = stableValue(resolved.snapshot) as Prisma.InputJsonObject;
+  const plate = snapshot.plate as { plate: string; normalizedPlate?: string };
+  const duplicate = await tx.guardDriverQueueTurn.findFirst({ where: {
+    status: { in: openQueueStatuses },
+    ...(input.source === 'CUSTOMER_PICKUP' ? {} : { driverSource: 'CUSTOMER_PICKUP' }),
+    OR: [
+      { admissionSnapshot: { path: ['plate', 'normalizedPlate'], equals: normalizeIranianPlate(plate.plate) } },
+      { admissionSnapshot: { path: ['plate', 'plate'], equals: plate.plate } },
+    ],
+  }, select: { id: true } });
+  if (duplicate) throw new GuardQueueConflictError('برای این پلاک پذیرش باز وجود دارد.');
+  const integrityHash = digest(snapshot);
   try {
     const turn = await tx.guardDriverQueueTurn.create({ data: {
-      driverSource: input.source,
-      ...(input.source === GuardDriverSource.INTERNAL
-        ? { internalDriverId: (resolved as Awaited<ReturnType<typeof buildInternalAdmission>>).driver.id, companyVehicleId: (resolved as Awaited<ReturnType<typeof buildInternalAdmission>>).assignment.vehicleId, assignmentId: (resolved as Awaited<ReturnType<typeof buildInternalAdmission>>).assignment.id }
-        : { externalDriverId: (resolved as Awaited<ReturnType<typeof buildExternalAdmission>>).driver.id, externalVehicleId: (resolved as Awaited<ReturnType<typeof buildExternalAdmission>>).vehicle.id }),
-      admittedAt, admittedBy: input.actorId, admissionSnapshot: resolved.snapshot as Prisma.InputJsonValue, integrityHash,
+      driverSource: input.source, ...resolved.identity,
+      admittedAt, admittedBy: input.actorId, admissionSnapshot: snapshot, integrityHash,
     } });
     await appendQueueEvent(tx, {
       turnId: turn.id, eventType: 'ADMITTED', fromStatus: null, toStatus: turn.status, actorId: input.actorId,
@@ -255,6 +290,8 @@ export const reserveGuardQueueTurn = async (prisma: PrismaClient, input: { turnI
   if (loading.status !== 'DRAFT') throw new GuardQueueConflictError('Only a draft loading can reserve a queue turn.');
   if (turn.status !== GuardDriverQueueTurnStatus.AVAILABLE_FOR_LOADING) throw new GuardQueueConflictError('Only an available queue turn can be reserved.');
   if (!await isGuardQueueTurnCurrentlyReady(tx, turn)) throw new GuardQueueConflictError('The admitted driver or vehicle is no longer currently ready for loading.');
+  if (turn.driverSource === 'PERSONAL_PICKUP' || await tx.guardDriverQueueTurn.count({ where: { loadingId: loading.id, driverSource: 'PERSONAL_PICKUP', status: 'RESERVED_FOR_LOADING' } }))
+    throw new GuardQueueConflictError('بارگیری شخصی با رانندگان دیگر ترکیب نمی‌شود. ابتدا نوع بارگیری را تغییر دهید.');
   const changed = await tx.guardDriverQueueTurn.updateMany({
     where: { id: turn.id, status: GuardDriverQueueTurnStatus.AVAILABLE_FOR_LOADING, loadingId: null },
     data: { status: GuardDriverQueueTurnStatus.RESERVED_FOR_LOADING, loadingId: loading.id, reservedAt: new Date(), reservedBy: input.actorId },
@@ -292,7 +329,9 @@ export const releaseGuardQueueReservation = async (prisma: PrismaClient, input: 
   });
   const changed = await tx.guardDriverQueueTurn.updateMany({
     where: { id: turn.id, status: GuardDriverQueueTurnStatus.RESERVED_FOR_LOADING, loadingId: input.loadingId },
-    data: { status: GuardDriverQueueTurnStatus.AVAILABLE_FOR_LOADING, loadingId: null, reservedAt: null, reservedBy: null },
+    data: turn.driverSource === 'PERSONAL_PICKUP'
+      ? { status: GuardDriverQueueTurnStatus.CLOSED_WITHOUT_LOADING, closedAt: new Date(), closedBy: input.actorId, closureReason: reason }
+      : { status: GuardDriverQueueTurnStatus.AVAILABLE_FOR_LOADING, loadingId: null, reservedAt: null, reservedBy: null },
   });
   if (changed.count !== 1) throw new GuardQueueConflictError('The reservation changed before it could be released.');
   const updated = await tx.guardDriverQueueTurn.findUniqueOrThrow({ where: { id: turn.id } });
@@ -335,6 +374,7 @@ export const closeGuardQueueTurnWithoutLoading = async (prisma: PrismaClient, in
   let turn = await tx.guardDriverQueueTurn.findUnique({ where: { id: input.turnId } });
   if (!turn) throw new GuardQueueValidationError('Canonical queue turn was not found.');
   if (turn.loadingId !== owner.value.loadingId) throw new GuardQueueConflictError('The queue reservation changed before departure.');
+  if (turn.driverSource === 'PERSONAL_PICKUP') throw new GuardQueueConflictError('بارگیری شخصی از لجستیک مدیریت می‌شود.');
   const reason = input.reason.trim();
   if (!reason) throw new GuardQueueValidationError('A close-without-loading reason is required.');
   const closableStatuses = new Set<GuardDriverQueueTurnStatus>([
@@ -381,6 +421,7 @@ export const voidGuardQueueTurn = async (prisma: PrismaClient, input: { turnId: 
   let turn = await tx.guardDriverQueueTurn.findUnique({ where: { id: input.turnId } });
   if (!turn) throw new GuardQueueValidationError('Canonical queue turn was not found.');
   if (turn.loadingId !== owner.value.loadingId) throw new GuardQueueConflictError('The queue reservation changed before voiding.');
+  if (turn.driverSource === 'PERSONAL_PICKUP') throw new GuardQueueConflictError('بارگیری شخصی از لجستیک مدیریت می‌شود.');
   const reason = input.reason.trim();
   if (!reason) throw new GuardQueueValidationError('A void reason is required.');
   const voidableStatuses = new Set<GuardDriverQueueTurnStatus>([
@@ -437,6 +478,7 @@ export const listGuardQueueAdmissionOptions = async (prisma: PrismaClient, at = 
       vehicleAssignments: { orderBy: { effectiveFrom: 'desc' }, include: { vehicle: { include: { plates: { orderBy: { effectiveFrom: 'desc' } } } } } },
     }, orderBy: { createdAt: 'asc' } }),
     prisma.externalDriver.findMany({ where: { id: { notIn: usedExternalDrivers } }, include: {
+      assignments: { where: activeAt(at) }, biometricEnrollments: { where: { status: "ACTIVE" }, select: { id: true } },
       documents: { orderBy: { recordedAt: 'desc' } },
       externalLinks: { include: { personnel: { include: { hrEmploymentRelationships: true, internalDriverProfile: { include: { eligibilityPeriods: true } } } } } },
     }, orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }] }),
@@ -462,20 +504,14 @@ export const listGuardQueueAdmissionOptions = async (prisma: PrismaClient, at = 
       fleetCode: assignment.vehicle.fleetCode, plate: plate.plate,
     }];
   });
-  const readyExternalDrivers = externalDrivers.filter((driver) => {
-    const continuity = driver.externalLinks.some((link) => {
-      const personnel = link.personnel;
-      return personnel.isActive && !personnel.archivedAt && (
-        personnel.hrEmploymentRelationships.some((item) => item.status === 'ACTIVE' && item.effectiveFrom <= at && (!item.effectiveTo || item.effectiveTo > at))
-        || Boolean(personnel.internalDriverProfile?.eligibilityPeriods.some((item) => item.status === 'ELIGIBLE' && item.effectiveFrom <= at && (!item.effectiveTo || item.effectiveTo > at)))
-      );
-    });
-    return projectExternalDriverReadiness({ lifecycleStatus: driver.status, documents: driver.documents, continuityLinkedToActiveInternalIdentity: continuity }, at).status === 'READY';
-  }).map((driver) => ({ id: driver.id, firstName: driver.firstName, lastName: driver.lastName, nationalCode: driver.nationalCode, phone: driver.phone }));
-  const readyExternalVehicles = externalVehicles.flatMap((vehicle) => {
-    const plate = vehicle.plates.find((item) => item.effectiveFrom <= at && (!item.effectiveTo || item.effectiveTo > at));
-    const readiness = projectExternalVehicleReadiness({ lifecycleStatus: vehicle.status, hasCurrentPlate: Boolean(plate), documents: vehicle.documents }, at);
-    return readiness.status === 'READY' && plate ? [{ id: vehicle.id, vehicleType: vehicle.vehicleType, plate: plate.plate }] : [];
+  const readyExternalVehicles = externalVehicles.flatMap(vehicle => {
+    const plate = vehicle.plates.find(p => p.effectiveFrom <= at && (!p.effectiveTo || p.effectiveTo > at));
+    return !externalVehicleBlockers(vehicle, at).length && plate ? [{ id: vehicle.id, vehicleType: vehicle.vehicleType, plate: plate.plate }] : [];
+  });
+  const readyExternalDrivers = externalDrivers.flatMap(driver => {
+    const assignment = driver.assignments[0];
+    if (externalDriverBlockers(driver, at).length || !driver.biometricEnrollments.length || !assignment || !readyExternalVehicles.some(v => v.id === assignment.vehicleId)) return [];
+    return [{ id: driver.id, firstName: driver.firstName, lastName: driver.lastName, vehicleId: assignment.vehicleId, assignmentId: assignment.id }];
   });
   return { internalAssignments, externalDrivers: readyExternalDrivers, externalVehicles: readyExternalVehicles };
 };

@@ -1,3 +1,4 @@
+import { accessFor as purchasingAccessFor, purchasingSections } from './purchasing/access';
 import { ownsPartnerCustomerContract } from './partnerSales/contractVisibility';
 import { canReadTransferNotice } from './partnerSales/crm/transferAccess';
 import type { PrismaClient } from '@prisma/client';
@@ -34,6 +35,8 @@ const rules: Rule[] = [
   { pattern: /^\/dashboard\/hr\/users/, workspace: 'hr', features: ['USER_ADMINISTRATION'] },
   { pattern: /^\/dashboard\/hr\/migration/, workspace: 'hr', features: ['DATA_MIGRATION_RECONCILIATION'] },
   { pattern: /^\/dashboard\/hr\/(?:tasks|duties)/, workspace: 'hr', features: ['HR_WORK_MANAGEMENT'] },
+  { pattern: /^\/dashboard\/hr\/external-drivers/, workspace: 'hr', features: ['hr_vehicle_operations_view'] },
+  { pattern: /^\/dashboard\/security\/(?:external-registry|external-drivers)/, workspace: 'hr', features: ['hr_vehicle_operations_view'] },
   { pattern: /^\/dashboard\/hr\/vehicle-operations/, workspace: 'hr', features: ['hr_internal_drivers_view', 'hr_vehicle_operations_view', 'hr_driver_biometric_audit_view'] },
   { pattern: /^\/dashboard\/hr\/personnel\/performance(?:\/|$)/, workspace: 'hr', features: [...PERFORMANCE_ACTION_PERMISSION_CODES] },
   { pattern: /^\/dashboard\/hr\/personnel/, workspace: 'hr', features: ['PERSONNEL'] },
@@ -42,6 +45,7 @@ const rules: Rule[] = [
   { pattern: /^\/dashboard\/accounting\/settings\/biometric-connector/, workspace: 'accounting', features: ['accounting_biometric_diagnostics_view'], narrow: true },
   { pattern: /^\/dashboard\/accounting\/settings/, workspace: 'accounting', features: ['accounting_actions_manage'], level: 'edit', narrow: true },
   { pattern: /^\/dashboard\/accounting\/correction-requests/, workspace: 'accounting', features: ['accounting_corrections_manage', 'accounting_corrections_approve', 'accounting_corrections_verify'], narrow: true },
+  { pattern: /^\/dashboard\/accounting\/invoice-candidates\/[^/]+\/?$/, workspace: 'accounting', features: ['accounting_records_approve_void'] },
   { pattern: /^\/dashboard\/accounting\/invoice-candidates/, workspace: 'accounting', features: ['accounting_invoice_candidates_manage'] },
   { pattern: /^\/dashboard\/accounting\/receivables/, workspace: 'accounting', features: ['accounting_receivables_manage'] },
   { pattern: /^\/dashboard\/accounting\/payments/, workspace: 'accounting', features: ['accounting_payments_manage'] },
@@ -73,7 +77,7 @@ const rules: Rule[] = [
   { pattern: /^\/dashboard\/security\/shifts/, workspace: 'security', features: ['security_shifts_view'] },
   { pattern: /^\/dashboard\/security\/attendance/, workspace: 'security', features: ['security_attendance_daily_view'] },
   { pattern: /^\/dashboard\/security\/exceptions/, workspace: 'security', features: ['security_exceptions_view'] },
-  { pattern: /^\/dashboard\/security\/(?:external-registry|vehicles)/, workspace: 'security', features: ['security_external_drivers_view'] },
+  { pattern: /^\/dashboard\/security\/vehicles/, workspace: 'security', features: ['security_external_drivers_view'] },
   { pattern: /^\/dashboard\/security\/(?:personnel|reports|supervisor-reports|settings)/, workspace: 'security', features: ['security_personnel_view'] },
   { pattern: /^\/dashboard\/bi\//, workspace: 'bi', features: ['bi_dashboard_view'] },
 ];
@@ -92,8 +96,14 @@ export const resolveWorkspaceRouteAvailability = async (
       await ownsPartnerCustomerContract(prisma, input.userId, ownedDetailId)) return { allowed: true, reason: null };
   const rule = rules.find((candidate) => candidate.pattern.test(input.path));
   if (!rule) {
-    const workspace = input.path.match(/^\/dashboard\/(sales|crm|hr|accounting|inventory|security|bi|logistics)(?:\/|$)/)?.[1];
+    const workspace = input.path.match(/^\/dashboard\/(sales|crm|hr|accounting|inventory|security|bi|logistics|purchasing)(?:\/|$)/)?.[1];
     if (!workspace) return { allowed: true, reason: null };
+    if (workspace === 'purchasing') {
+      const access=await purchasingAccessFor(prisma,{id:input.userId,role:input.role}).catch(()=>null);
+      const section=input.path.split('?')[0].split('/')[3];
+      const allowed=Boolean(access&&(!section||purchasingSections(access).includes(section)));
+      return {allowed,reason:allowed?null:'دسترسی این بخش خرید برای شما فعال نیست.'};
+    }
     const effective = await getEffectiveUserAccess(prisma, { userId: input.userId, userRole: input.role });
     const allowed = effective.workspaces.some((grant) => grant.workspace === workspace);
     return { allowed, reason: allowed ? null : 'دسترسی فعال به این فضای کاری ثبت نشده است. مدیر همان فضای کاری باید مجوز را بررسی کند.' };

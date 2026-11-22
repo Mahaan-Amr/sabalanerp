@@ -21,7 +21,7 @@ for (const width of [1280, 390]) for (const theme of ['light', 'dark'] as const)
         pagination: { page: 1, limit: 20, total: data.length, pages: 1 } }) });
     });
     await page.goto('/dashboard/sales/contracts');
-    await expect(page.getByText('عمومی: QA-NOTE', { exact: true }).filter({ visible: true })).toBeVisible();
+    await expect(page.getByText('قرارداد QA-NOTE', { exact: true }).filter({ visible: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'امضای قرارداد', exact: true })).toHaveCount(0);
     await setTheme(page, theme);
     const filter = page.getByRole('combobox', { name: 'وضعیت', exact: true });
@@ -29,8 +29,8 @@ for (const width of [1280, 390]) for (const theme of ['light', 'dark'] as const)
     for (const [, , label] of states) await expect(page.getByRole('option', { name: label, exact: true })).toBeVisible();
     await expect(page.getByRole('option').filter({ hasText: 'قدیمی' })).toHaveCount(0);
     await page.getByRole('option', { name: 'استعلام شده', exact: true }).click();
-    await expect(page.getByText('عمومی: QA-QUOTED', { exact: true }).filter({ visible: true })).toBeVisible();
-    await expect(page.getByText('عمومی: QA-NOTE', { exact: true })).toHaveCount(0);
+    await expect(page.getByText('قرارداد QA-QUOTED', { exact: true }).filter({ visible: true })).toBeVisible();
+    await expect(page.getByText('قرارداد QA-NOTE', { exact: true })).toHaveCount(0);
     await expect(page.getByText('استعلام شده', { exact: true }).filter({ visible: true }).last()).toBeVisible();
     await assertNoHorizontalOverflow(page);
     await page.screenshot({ path: `tmp/qa/partner-visual-2026-10-03/list-status-${width}-${theme}.png`, fullPage: true, animations: 'disabled' });

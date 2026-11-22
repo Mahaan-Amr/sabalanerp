@@ -1,3 +1,4 @@
+import { startBackgroundJob } from './backgroundJobLifecycle';
 import type { PrismaClient } from '@prisma/client';
 import hrHiringSmsGateway from './hrHiringSmsGateway';
 import { getRecoveryRuntimeState } from './recoveryRuntime';
@@ -128,7 +129,5 @@ export const startHiringInvitationDeliveryPolling = (prisma: PrismaClient) => {
       notifyOverduePreIdentityChecklist(prisma)
     ]).then(() => undefined).catch((error) => console.error('HR hiring background polling failed:', error));
   };
-  run();
-  const timer = setInterval(run, POLL_INTERVAL_MS);
-  timer.unref();
+  return startBackgroundJob({ name: 'startHiringInvitationDeliveryPolling', intervalMs: POLL_INTERVAL_MS, run });
 };

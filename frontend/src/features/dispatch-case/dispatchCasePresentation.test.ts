@@ -23,6 +23,13 @@ test("replaces dispatch workflow codes with plain Persian labels", () => {
   );
 });
 
+test("distinguishes waybill-only and combined cancellation without exposing command identifiers", () => {
+  assert.equal(dispatchEventLabel("VOID_WAYBILL:waybill-1"), "حواله خروج باطل شد");
+  assert.equal(dispatchEventLabel("VOID_WAYBILL_AND_INVOICE:waybill-1:invoice-1"), "حواله خروج و فاکتور فروش باطل شدند");
+  assert.equal(dispatchEventLabel("VOID_WAYBILL_AND_INVOICE:waybill-1:"), "حواله خروج باطل شد");
+  assert.equal(dispatchEventLabel("CANDIDATE_WITHDRAWN"), "درخواست صدور اسناد خروج پس گرفته شد");
+});
+
 test("unknown backend codes are never exposed on the normal user surface", () => {
   assert.equal(
     dispatchStatusLabel("NEW_BACKEND_STATUS"),
@@ -63,4 +70,19 @@ test("presents evidence as translated fields and keeps identifiers in technical 
     { label: "نسخه ساختار ثبت", value: "۱" },
     { label: "کد صحت داده", value: "abc۱۲۳" },
   ]);
+});
+
+test("biometric history distinguishes a failed attempt, a match and missing historical evidence", () => {
+  const type = "BIOMETRIC_ATTEMPT_RECORDED";
+  assert.match(dispatchEventLabel(type, { result: { errorCategory: "CAPTURE_TIMEOUT" } }), /ناموفق.*مهلت/);
+  assert.match(dispatchEventLabel(type, {
+    match: { state: "MATCH" }, captureQuality: { state: "ACCEPTED" }, liveness: { state: "LIVE" },
+  }), /تطابق داشت/);
+  assert.equal(dispatchEventLabel(type), "نتیجه بررسی اثر انگشت ثبت شد");
+});
+
+
+test("personal pickup history does not claim driver identity or Guard entry verification", () => {
+  assert.equal(dispatchEventLabel("PERSONAL_PICKUP_SELECTED"), "راننده شخصی برای بارگیری انتخاب شد");
+  assert.equal(dispatchEventLabel("CONFIRMATION_CONFIRMED", { method: "PERSONAL_PICKUP_ACCOUNTING" }), "مجوز خروج راننده شخصی صادر شد");
 });

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { loginAsAdmin, assertNoHorizontalOverflow, assertNoSeriousAxeViolations, setTheme } from './support/design-system';
+import { loginAsAdmin, assertNoHorizontalOverflow, assertNoSeriousAxeViolations } from './support/design-system';
 
 const timestamp = '2026-10-08T08:00:00.000Z';
 const duty = {
@@ -21,7 +21,12 @@ for (const width of [1280, 390]) test(`expired correction Accounting decision an
   let historySeen = 0;
   await loginAsAdmin(page);
   await page.setViewportSize({ width, height: 900 });
-  await setTheme(page, width === 390 ? 'dark' : 'light');
+  const theme = width === 390 ? 'dark' : 'light';
+  const themeToggle = page.getByRole('button', { name: /فعال‌کردن حالت (روشن|تیره)/ });
+  await expect(themeToggle).toBeVisible();
+  const toggleTo = theme === 'dark' ? 'فعال‌کردن حالت تیره' : 'فعال‌کردن حالت روشن';
+  if (await themeToggle.getAttribute('aria-label') === toggleTo) await themeToggle.click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
   await page.route('**/duties/workspaces/accounting/summary', route => route.fulfill({ json: { success: true, data: {
     open: completed ? 0 : 1, available: 0, availableUnseen: 0, attention: 0,
     dueSoon: 0, overdue: 0, triage: 0, historyUnseen: 0, canManageTriage: false,
@@ -81,7 +86,7 @@ for (const width of [1280, 390]) test(`expired correction Accounting decision an
   await page.screenshot({ path: testInfo.outputPath(`accounting-review-${width}.png`), fullPage: true });
   await page.getByRole('button', { name: 'ثبت تصمیم', exact: true }).click();
   await expect(page.getByRole('button', { name: 'بستن درخواست', exact: true })).toHaveCount(0);
-  expect(responses).toHaveLength(2);
+  await expect.poll(() => responses.length).toBe(2);
   expect(responses[1]).toMatchObject({ actionCode: 'VERIFY', reason: 'رسیدگی مالی بررسی شد؛ بستن با حفظ سوابق',
     expectedSourceVersion: 4, expectedEnvelopeVersion: 1 });
 });

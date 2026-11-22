@@ -215,36 +215,21 @@ const main = async () => {
       throw new Error(message);
     };
     const blocked = async (pid: number) => (await client.$queryRaw<Array<{ blocked: boolean }>>`SELECT EXISTS(SELECT 1 FROM pg_locks WHERE pid = ${pid} AND NOT granted) AS blocked`)[0].blocked;
-    const ordered = async <A, B>(winner: (tx: Prisma.TransactionClient) => Promise<A>, loser: (tx: Prisma.TransactionClient) => Promise<B>) => {
-      const holding = deferred<void>(); const releaseWinner = deferred<void>(); const loserPid = deferred<number>();
-      const winning = client.$transaction(async (tx) => { const result = await winner(tx); holding.resolve(); await releaseWinner.promise; return result; }, { timeout: 30_000 });
-      let losing: Promise<B> | undefined;
-      try {
-        await Promise.race([holding.promise, winning.then(() => { throw new Error('Winner missed barrier'); })]);
-        losing = second.$transaction(async (tx) => { const [row] = await tx.$queryRaw<Array<{ pid: number }>>`SELECT pg_backend_pid() AS pid`; loserPid.resolve(row.pid); return loser(tx); }, { timeout: 30_000 });
-        const observed = losing.then((value) => ({ value }), (error: unknown) => ({ error }));
-        const pid = await loserPid.promise;
-        await waitFor(() => blocked(pid), 'Expected actual database lock contention');
-        releaseWinner.resolve(); const firstResult = await winning; const outcome = await observed;
-        if ('error' in outcome) throw outcome.error;
-        return { firstResult, secondResult: outcome.value };
-      } finally { releaseWinner.resolve(); await Promise.allSettled([winning, ...(losing ? [losing] : [])]); }
-    };
     const raceExport = await readyExport();
-    const heldRace = await ordered(
-      (tx) => placePerformanceLegalHold(tx, { actorUserId: actor.id, aggregateType: 'EVALUATION', aggregateId: source.evaluations[0].id, reasonCode: 'HOLD_WINS_CLEANUP' }),
-      (tx) => cleanupExpiredPerformanceExports(tx, future),
-    );
-    assert.equal(heldRace.secondResult, 0);
+    const heldRace = await placePerformanceLegalHold(client, { actorUserId: actor.id, aggregateType: 'EVALUATION',
+      aggregateId: source.evaluations[0].id, reasonCode: 'PRESERVE_EXTERNAL_TRANSACTION_REFUSAL' });
+    const attemptsBeforeRefusal = await client.performanceExportCleanupAttempt.count();
+    for (const isolationLevel of [Prisma.TransactionIsolationLevel.ReadCommitted, Prisma.TransactionIsolationLevel.RepeatableRead]) {
+      await assert.rejects(client.$transaction(tx => cleanupExpiredPerformanceExports(tx, future), { isolationLevel }),
+        { code: 'PERFORMANCE_CLEANUP_TRANSACTION_REQUIRED' });
+    }
+    assert.equal(await client.performanceExportCleanupAttempt.count(), attemptsBeforeRefusal,
+      'refusing an outer transaction must precede any cleanup intent or audit mutation');
     await access(raceExport.artifactPath!);
-    await release(heldRace.firstResult.id);
-    const cleanedRace = await ordered(
-      (tx) => cleanupExpiredPerformanceExports(tx, future),
-      (tx) => placePerformanceLegalHold(tx, { actorUserId: actor.id, aggregateType: 'EVALUATION', aggregateId: source.evaluations[0].id, reasonCode: 'CLEANUP_WINS_HOLD' }),
-    );
-    assert.equal(cleanedRace.firstResult, 1);
+    assert.equal(await cleanupExpiredPerformanceExports(client, future), 0, 'independent cleanup still respects the active hold');
+    await release(heldRace.id);
+    assert.equal(await cleanupExpiredPerformanceExports(client, future), 1);
     await assert.rejects(() => access(raceExport.artifactPath!));
-    await release(cleanedRace.secondResult.id);
 
     // Test-only PostgreSQL gates stop real worker publication/claim while the public services run.
     // No sleeps decide the winning order: every contender must be observed waiting in pg_locks.
@@ -291,7 +276,7 @@ const main = async () => {
         await client.$executeRawUnsafe(`DROP TRIGGER IF EXISTS export_test_gate ON performance_export_artifacts`);
       }
     }
-    console.log('Export lineage regression passed: named/aggregate/trend/denominator sources; immutable evidence; descendant holds; failed files; unrelated expiry; dual release; four deterministic cleanup/publication orderings.');
+    console.log('Export lineage regression passed: named/aggregate/trend/denominator sources; immutable evidence; descendant holds; failed files; unrelated expiry; dual release; outer-transaction refusal and deterministic publication orderings.');
     if (process.env.PERFORMANCE_ACCEPTANCE_EXPORT_TIMINGS === '1') {
       console.log(`PERFORMANCE_EXPORT_REQUEST_TIMINGS:${JSON.stringify({
         requestDurationsMs: exportRequestDurations, queueDurationsMs: exportQueueDurations,

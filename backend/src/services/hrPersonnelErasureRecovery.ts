@@ -1,6 +1,9 @@
+import { startBackgroundJob } from './backgroundJobLifecycle';
 import { Prisma, PrismaClient } from '@prisma/client';
 import crypto from 'node:crypto';
 import { restoreStagedHiringFiles } from './hrDeletionFileTransaction';
+import { hasDeclaredHrFileProtocol, readHrLegacyFileCleanupRows } from './hrLegacyFileCleanupRows';
+import { versionedHrFileRuntime } from './hrFileRuntime';
 
 const RECOVERY_INTERVAL_MS = 60_000;
 export const PERSONNEL_ERASURE_LEASE_MS = 5 * 60_000;
@@ -26,6 +29,9 @@ const accessSnapshot = (value: Prisma.JsonValue): AccessRecoverySnapshot | null 
 };
 
 export const recoverInterruptedPersonnelErasures = async (prisma: PrismaClient, now = new Date()) => {
+  // A bound versioned runtime never adopts raw legacy file work, including
+  // receipts created before this process selected its publication ownership.
+  if (versionedHrFileRuntime()) return 0;
   const receipts = await prisma.hrDeletionReceipt.findMany({
     where: {
       targetType: 'PERSONNEL',
@@ -36,17 +42,33 @@ export const recoverInterruptedPersonnelErasures = async (prisma: PrismaClient, 
   let recovered = 0;
   for (const receipt of receipts) {
     const recoveryToken = `RECOVERY:${crypto.randomUUID()}`;
-    const claimed = await prisma.hrDeletionReceipt.updateMany({
-      where: {
-        id: receipt.id, status: receipt.status, operationToken: receipt.operationToken,
-        leaseExpiresAt: { lt: now }
-      },
-      data: { status: 'RECOVERING', operationToken: recoveryToken, leaseExpiresAt: new Date(now.getTime() + PERSONNEL_ERASURE_LEASE_MS) }
-    });
-    if (claimed.count !== 1) continue;
+    const cleanupRows = await prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT set_config('lock_timeout','1000ms',true),set_config('statement_timeout','10000ms',true)`;
+      // Both versioned plan insertion and claim transitions lock this parent.
+      // Inspect cleanup rows in a fresh READ COMMITTED statement AFTER the
+      // lock: a pre-lock snapshot can miss a just-committed versioned plan.
+      const locked = await tx.$queryRaw<Array<{ id: string; recordCounts: Prisma.JsonValue }>>`SELECT id,"recordCounts" FROM public.hr_deletion_receipts
+        WHERE id=${receipt.id} AND status=${receipt.status} AND "operationToken" IS NOT DISTINCT FROM ${receipt.operationToken}
+          AND "leaseExpiresAt"<${now} FOR UPDATE`;
+      if (locked.length !== 1) return null;
+      // A declared file protocol belongs to its original native owner even
+      // before its first child plan exists. Empty cleanup rows are not proof
+      // that this legacy compensator owns the parent. Unknown protocols stay
+      // unresolved too; never adopt them merely because their lease expired.
+      if (hasDeclaredHrFileProtocol(locked[0].recordCounts)) return null;
+      const planned = await readHrLegacyFileCleanupRows(tx, receipt.id);
+      // This compensator owns only ADR-0033's legacy raw-rename format.
+      // Unknown/versioned work retains original ownership and receipts.
+      if (planned.some(row => row.status !== 'PREPARING' || row.legacyFileState !== true)) return null;
+      const claimed = await tx.hrDeletionReceipt.updateMany({
+        where: { id: receipt.id, status: receipt.status, operationToken: receipt.operationToken, leaseExpiresAt: { lt: now } },
+        data: { status: 'RECOVERING', operationToken: recoveryToken, leaseExpiresAt: new Date(now.getTime() + PERSONNEL_ERASURE_LEASE_MS) }
+      });
+      return claimed.count === 1 ? planned : null;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, timeout: 15_000, maxWait: 1000 });
+    if (cleanupRows === null) continue;
     let recoveryOwned = true;
     try {
-      const cleanupRows = await prisma.hrDeletionFileCleanup.findMany({ where: { receiptId: receipt.id } });
       for (const row of cleanupRows) {
         const renewed = await prisma.hrDeletionReceipt.updateMany({
           where: { id: receipt.id, status: 'RECOVERING', operationToken: recoveryToken },
@@ -92,7 +114,5 @@ export const recoverInterruptedPersonnelErasures = async (prisma: PrismaClient, 
 
 export const startPersonnelErasureRecovery = (prisma: PrismaClient) => {
   const run = () => recoverInterruptedPersonnelErasures(prisma).catch((error) => console.error('Personnel erasure recovery failed:', error));
-  run();
-  const timer = setInterval(run, RECOVERY_INTERVAL_MS);
-  timer.unref();
+  return startBackgroundJob({ name: 'startPersonnelErasureRecovery', intervalMs: RECOVERY_INTERVAL_MS, run });
 };

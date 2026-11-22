@@ -55,3 +55,36 @@ export async function decodeTechnicalSavedSnapshot(value: unknown): Promise<Tech
     return { version: 1, sessionId: payload.sessionId, view, draft, graph, context: payload.context, identities, ...(payload.serviceRows ? { serviceRows: payload.serviceRows } : {}) };
   } catch { return undefined; }
 }
+
+/** Presentation readers tolerate corrupt candidates; owning save/read gates
+ * retain their separate, strict history validation. */
+export async function latestTechnicalSavedSnapshot(records: readonly unknown[]) {
+  // An untrusted hint only orders candidate work. Authority and all envelope,
+  // graph, identity and view integrity checks remain in the full decoder.
+  const candidates = records.map(record => ({ record, revision: savedRevisionHint(record) }))
+    .filter((candidate): candidate is { record: unknown; revision: number } => candidate.revision !== undefined)
+    .sort((a, b) => b.revision - a.revision);
+  for (const { record } of candidates) {
+    const candidate = await decodeTechnicalSavedSnapshot(record);
+    if (candidate) return candidate;
+  }
+  return undefined;
+}
+
+export async function technicalSavedSnapshotAtRevision(records: readonly unknown[], revision: number) {
+  // The existing approval matcher chooses the last valid matching candidate.
+  for (let index = records.length - 1; index >= 0; index--) {
+    if (savedRevisionHint(records[index]) !== revision) continue;
+    const candidate = await decodeTechnicalSavedSnapshot(records[index]);
+    if (candidate?.view.recoveryRevision === revision) return candidate;
+  }
+  return undefined;
+}
+
+function savedRevisionHint(value: unknown): number | undefined {
+  try {
+    const revision = (value as { payload?: { view?: { recoveryRevision?: unknown } } } | null)
+      ?.payload?.view?.recoveryRevision;
+    return typeof revision === 'number' && Number.isSafeInteger(revision) && revision > 0 ? revision : undefined;
+  } catch { return undefined; }
+}

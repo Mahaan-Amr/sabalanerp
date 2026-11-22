@@ -1,0 +1,65 @@
+ONLINE_NATIVE_ACCEPTANCE_HELD /app/online-runtime-acceptance/online-native-d79cf6f7cc2d907b6869bd1c04e5d08c
+Traceback (most recent call last):
+  File "/app/online-runtime-acceptance/online-native-d79cf6f7cc2d907b6869bd1c04e5d08c/fixture.py", line 234, in <module>
+    require(ready(capture)['purpose'] == 'capture')
+            ^^^^^^^^^^^^^^
+  File "/app/online-runtime-acceptance/online-native-d79cf6f7cc2d907b6869bd1c04e5d08c/fixture.py", line 153, in ready
+    require(False, 'CAPTURE_NAMESPACE_PROBE_REJECTED' if b'CAPTURE_NAMESPACE_PROBE_REJECTED' in diagnostic else 'WORKER_DID_NOT_START')
+  File "/app/online-runtime-acceptance/online-native-d79cf6f7cc2d907b6869bd1c04e5d08c/fixture.py", line 18, in require
+    raise RuntimeError(message)
+RuntimeError: CAPTURE_NAMESPACE_PROBE_REJECTED
+node:internal/errors:983
+  const err = new Error(message);
+              ^
+
+Error: Command failed: docker exec f23b77c6ccf8509eb46d8b7df8bdac29640393efdccdb2eaa9a9ce6d068bef26 python3 -I -B /app/online-runtime-acceptance/online-native-d79cf6f7cc2d907b6869bd1c04e5d08c/fixture.py /app/online-runtime-acceptance/online-native-d79cf6f7cc2d907b6869bd1c04e5d08c exercise
+ONLINE_NATIVE_ACCEPTANCE_HELD /app/online-runtime-acceptance/online-native-d79cf6f7cc2d907b6869bd1c04e5d08c
+Traceback (most recent call last):
+  File "/app/online-runtime-acceptance/online-native-d79cf6f7cc2d907b6869bd1c04e5d08c/fixture.py", line 234, in <module>
+    require(ready(capture)['purpose'] == 'capture')
+            ^^^^^^^^^^^^^^
+  File "/app/online-runtime-acceptance/online-native-d79cf6f7cc2d907b6869bd1c04e5d08c/fixture.py", line 153, in ready
+    require(False, 'CAPTURE_NAMESPACE_PROBE_REJECTED' if b'CAPTURE_NAMESPACE_PROBE_REJECTED' in diagnostic else 'WORKER_DID_NOT_START')
+  File "/app/online-runtime-acceptance/online-native-d79cf6f7cc2d907b6869bd1c04e5d08c/fixture.py", line 18, in require
+    raise RuntimeError(message)
+RuntimeError: CAPTURE_NAMESPACE_PROBE_REJECTED
+
+    at genericNodeError (node:internal/errors:983:15)
+    at wrappedFn (node:internal/errors:537:14)
+    at checkExecSyncError (node:child_process:882:11)
+    at execFileSync (node:child_process:918:15)
+    at file:///C:/Users/mahan/.codex/worktrees/online-deployment/sabalanerp/scripts/run-online-native-owner-local.mjs:88:16
+    at ModuleJob.run (node:internal/modules/esm/module_job:271:25)
+    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:547:26)
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:116:5) {
+  status: 1,
+  signal: null,
+  output: [
+    null,
+    '',
+    'ONLINE_NATIVE_ACCEPTANCE_HELD /app/online-runtime-acceptance/online-native-d79cf6f7cc2d907b6869bd1c04e5d08c\n' +
+      'Traceback (most recent call last):\n' +
+      '  File "/app/online-runtime-acceptance/online-native-d79cf6f7cc2d907b6869bd1c04e5d08c/fixture.py", line 234, in <module>\n' +
+      "    require(ready(capture)['purpose'] == 'capture')\n" +
+      '            ^^^^^^^^^^^^^^\n' +
+      '  File "/app/online-runtime-acceptance/online-native-d79cf6f7cc2d907b6869bd1c04e5d08c/fixture.py", line 153, in ready\n' +
+      "    require(False, 'CAPTURE_NAMESPACE_PROBE_REJECTED' if b'CAPTURE_NAMESPACE_PROBE_REJECTED' in diagnostic else 'WORKER_DID_NOT_START')\n" +
+      '  File "/app/online-runtime-acceptance/online-native-d79cf6f7cc2d907b6869bd1c04e5d08c/fixture.py", line 18, in require\n' +
+      '    raise RuntimeError(message)\n' +
+      'RuntimeError: CAPTURE_NAMESPACE_PROBE_REJECTED\n'
+  ],
+  pid: 57632,
+  stdout: '',
+  stderr: 'ONLINE_NATIVE_ACCEPTANCE_HELD /app/online-runtime-acceptance/online-native-d79cf6f7cc2d907b6869bd1c04e5d08c\n' +
+    'Traceback (most recent call last):\n' +
+    '  File "/app/online-runtime-acceptance/online-native-d79cf6f7cc2d907b6869bd1c04e5d08c/fixture.py", line 234, in <module>\n' +
+    "    require(ready(capture)['purpose'] == 'capture')\n" +
+    '            ^^^^^^^^^^^^^^\n' +
+    '  File "/app/online-runtime-acceptance/online-native-d79cf6f7cc2d907b6869bd1c04e5d08c/fixture.py", line 153, in ready\n' +
+    "    require(False, 'CAPTURE_NAMESPACE_PROBE_REJECTED' if b'CAPTURE_NAMESPACE_PROBE_REJECTED' in diagnostic else 'WORKER_DID_NOT_START')\n" +
+    '  File "/app/online-runtime-acceptance/online-native-d79cf6f7cc2d907b6869bd1c04e5d08c/fixture.py", line 18, in require\n' +
+    '    raise RuntimeError(message)\n' +
+    'RuntimeError: CAPTURE_NAMESPACE_PROBE_REJECTED\n'
+}
+
+Node.js v22.13.0

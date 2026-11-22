@@ -1,3 +1,4 @@
+import { exactQuantityText } from '../exactQuantity';
 import {
   ApprovedPricingVersionOrigin,
   Prisma,
@@ -660,7 +661,8 @@ export const reconstructLegacyV1Quantity = (input: {
     raw = legacyMoney(product.quantity, `Product ${input.productRowId} legacy quantity`);
     unit = 'count';
   }
-  const sealed = raw.toDecimalPlaces(3, Prisma.Decimal.ROUND_HALF_UP).toFixed(3);
+  const sealed = type === 'slab' ? exactQuantityText(raw)
+    : raw.toDecimalPlaces(3, Prisma.Decimal.ROUND_HALF_UP).toFixed(3);
   return {
     requestedQuantity: type === 'longitudinal'
       ? longitudinalCount!.toDecimalPlaces(3, Prisma.Decimal.ROUND_HALF_UP).toFixed(3)
@@ -675,7 +677,7 @@ export const reconstructLegacyV1Quantity = (input: {
       rawValue: raw.toString(),
       sealedValue: sealed,
       unit,
-      rule: 'LEGACY_GRAPH_V1_ROUND_HALF_UP_SCALE_THREE' as const,
+      rule: type === 'slab' ? 'SLAB_EXACT_ACCOUNTING_AREA_V1' as const : 'LEGACY_GRAPH_V1_ROUND_HALF_UP_SCALE_THREE' as const,
     },
   };
 };
@@ -699,7 +701,7 @@ const mapVersion = (version: PersistedVersion): ApprovedPricingVersionRecord => 
     contractItemId: row.contractItemId,
     productRowId: row.productRowId,
     ordinal: row.ordinal,
-    contractedQuantity: row.contractedQuantity.toFixed(3),
+    contractedQuantity: exactQuantityText(row.contractedQuantity),
     unit: row.unit,
     canonicalAllInTotal: row.canonicalAllInTotal.toFixed(12),
     discountEligible: row.discountEligible,

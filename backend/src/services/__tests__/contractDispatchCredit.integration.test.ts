@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 import { PrismaClient, Prisma, type SalesContract } from '@prisma/client';
-import { activeCreditForContract, creditBalance, synchronizeSellerCredit, createDispatchRequest, decideDispatchRequest, canReviewManagerDispatch } from '../contractDispatchCredit';
+import { activeCreditForContract, creditBalance, synchronizeSellerCredit, createDispatchRequest, decideDispatchRequest, canReviewManagerDispatch, tehranDay } from '../contractDispatchCredit';
 import { ordinaryContractDispatchEligible } from '../ordinaryContractDispatchEligibility';
-import { createContractDispatchDuty } from '../crossWorkspaceDutyAdapters/contractDispatchDutyAdapter';
+import { createContractDispatchDuty, closeContractDispatchDuty } from '../crossWorkspaceDutyAdapters/contractDispatchDutyAdapter';
 import { respondToCrossWorkspaceDuty } from '../crossWorkspaceDutyModule';
 import { processContractCreditReminders } from '../contractCreditReminders';
 import { getCrossWorkspaceDutyDetail } from '../crossWorkspaceDutyInbox';
@@ -34,6 +34,49 @@ const fixture = async (run: (tx: Prisma.TransactionClient, contract: any, seller
     }, { timeout: 60000 }), Rollback);
   } finally { await db.$disconnect(); }
 };
+
+for (const action of ['SUPERSEDED', 'WITHDRAW', 'REVOKE']) test(`dispatch ${action} cancels the open duty without recording a decision response`, () => fixture(async (tx, contract, seller, admin) => {
+  const request = await createDispatchRequest(tx, contract, seller.id, { kind: 'MANAGER' });
+  const duty = await createContractDispatchDuty(tx, request.id);
+  await closeContractDispatchDuty(tx, request.id, admin.id, action, 'آزمون پایان درخواست');
+  const closed = await tx.crossWorkspaceDuty.findUniqueOrThrow({ where: { id: duty.id } });
+  assert.equal(closed.status, 'CANCELLED');
+  assert.equal(closed.respondedAt, null);
+  assert.equal(closed.respondedByUserId, null);
+  assert.deepEqual(closed.structuredResultJson, { actionCode: action, reason: 'آزمون پایان درخواست' });
+  const audit = await tx.crossWorkspaceDutyAuditVersion.findFirstOrThrow({ where: { dutyId: duty.id, eventCode: 'CANCELLED' } });
+  assert.equal(audit.actorUserId, admin.id);
+  assert.equal(audit.reason, 'آزمون پایان درخواست');
+  await closeContractDispatchDuty(tx, request.id, admin.id, action, 'تکرار');
+  assert.equal(await tx.crossWorkspaceDutyAuditVersion.count({ where: { dutyId: duty.id, eventCode: 'CANCELLED' } }), 1);
+}));
+
+test('a new seller-credit promise in the past remains invalid after managerial rejection', () => fixture(async (tx, contract, seller, admin) => {
+  const request = await createDispatchRequest(tx, contract, seller.id, { kind: 'MANAGER' });
+  await decideDispatchRequest(tx, request.id, admin.id, 'DECLINE', 'رد درخواست مدیریتی');
+  await tx.payment.create({ data: { contractId: contract.id, paymentMethod: 'SELLER_CREDIT', totalAmount: 1000,
+    currency: 'ریال', paymentDate: new Date('2000-01-01') } });
+  await assert.rejects(synchronizeSellerCredit(tx, contract, seller.id), /تاریخ وعده پرداخت باید امروز یا آینده باشد/);
+  assert.equal(await tx.contractDispatchAuthority.count({ where: { contractId: contract.id, kind: 'CREDIT' } }), 0);
+  await tx.payment.updateMany({ where: { contractId: contract.id }, data: { paymentDate: new Date('2099-01-01') } });
+  await synchronizeSellerCredit(tx, contract, seller.id);
+  assert.equal((await creditBalance(tx, seller.id)).usedRials, '1000');
+}));
+
+test('a promise can start today and an unchanged saved credit date remains valid after it is due', () => fixture(async (tx, contract, seller) => {
+  await tx.payment.create({ data: { contractId: contract.id, paymentMethod: 'SELLER_CREDIT', totalAmount: 1000,
+    currency: 'ریال', paymentDate: new Date(tehranDay()) } });
+  await synchronizeSellerCredit(tx, contract, seller.id);
+  const grant = await tx.contractDispatchAuthority.findFirstOrThrow({ where: { contractId: contract.id, kind: 'CREDIT', status: 'APPROVED' } });
+  // Model a previously valid promise whose due date has now passed.
+  await tx.contractDispatchAuthority.update({ where: { id: grant.id }, data: { promisedDate: new Date('2000-01-01') } });
+  await tx.payment.updateMany({ where: { contractId: contract.id }, data: { paymentDate: new Date('2000-01-01') } });
+  await synchronizeSellerCredit(tx, { ...contract, commercialRevision: 2 }, seller.id);
+  const unchanged = await tx.contractDispatchAuthority.findUniqueOrThrow({ where: { id: grant.id } });
+  assert.equal(unchanged.promisedDate!.toISOString().slice(0, 10), '2000-01-01');
+  assert.equal(unchanged.revision, 2);
+  assert.equal((await creditBalance(tx, seller.id)).usedRials, '1000');
+}));
 
 test('partial guarantee, financial release, reversal deficit, deactivation and cancellation use live evidence', () => fixture(async (tx, contract, seller) => {
   await tx.payment.create({ data: { contractId: contract.id, paymentMethod: 'SELLER_CREDIT', totalAmount: 300, currency: 'ریال', paymentDate: new Date('2099-01-01') } });

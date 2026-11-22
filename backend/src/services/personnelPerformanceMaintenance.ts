@@ -1,3 +1,4 @@
+import { startBackgroundJob } from './backgroundJobLifecycle';
 import { PerformanceArtifactLifecycle, PerformanceResultStatus, type PrismaClient } from '@prisma/client';
 import {
   activateDuePerformanceArtifacts,
@@ -74,9 +75,5 @@ export const startPersonnelPerformanceMaintenance = (client: PrismaClient) => {
     catch { console.error('Personnel performance maintenance failed closed: PERFORMANCE_MAINTENANCE_FAILED'); }
     finally { running = false; }
   };
-  const initial = setTimeout(run, 5_000);
-  initial.unref();
-  const interval = setInterval(run, 60_000);
-  interval.unref();
-  return interval;
+  return startBackgroundJob({ name: 'startPersonnelPerformanceMaintenance', intervalMs: 60_000, run, initialDelayMs: 5000 });
 };

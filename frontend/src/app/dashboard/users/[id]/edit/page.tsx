@@ -39,6 +39,9 @@ export default function EditUserPage(props: { params: Promise<{ id: string }> })
   const params = use(props.params);
   const router = useRouter();
   const [formData, setFormData] = useState<UserFormState>(initialFormState);
+  const [hasPersonnel, setHasPersonnel] = useState(false);
+  const [identityVersion, setIdentityVersion] = useState('');
+  const [originalNames, setOriginalNames] = useState({ firstName: '', lastName: '' });
   const [departments, setDepartments] = useState<Department[]>([]);
   const [currentUserRole, setCurrentUserRole] = useState<string | null>(null);
   const [targetUserRole, setTargetUserRole] = useState<string | null>(null);
@@ -47,6 +50,7 @@ export default function EditUserPage(props: { params: Promise<{ id: string }> })
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    let active = true;
     const fetchData = async () => {
       try {
         setLoading(true);
@@ -57,9 +61,13 @@ export default function EditUserPage(props: { params: Promise<{ id: string }> })
           authAPI.getMe(),
         ]);
 
+        if (!active) return;
         if (userResponse.data.success) {
           const user = userResponse.data.data;
           setTargetUserRole(user.role);
+          setIdentityVersion(user.identityVersion);
+          setHasPersonnel(Boolean(user.personnel));
+          setOriginalNames({ firstName: user.firstName || '', lastName: user.lastName || '' });
           setFormData({
             firstName: user.firstName || '',
             lastName: user.lastName || '',
@@ -80,13 +88,14 @@ export default function EditUserPage(props: { params: Promise<{ id: string }> })
           setCurrentUserRole(meResponse.data.data.role);
         }
       } catch (error: any) {
-        setError(error.response?.data?.error || 'خطا در بارگذاری اطلاعات کاربر');
+        if (active) setError(error.response?.data?.error || 'خطا در بارگذاری اطلاعات کاربر');
       } finally {
-        setLoading(false);
+        if (active) setLoading(false);
       }
     };
 
-    fetchData();
+    void fetchData();
+    return () => { active = false; };
   }, [params.id]);
 
   const handleInputChange = (event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -122,8 +131,7 @@ export default function EditUserPage(props: { params: Promise<{ id: string }> })
       setSaving(true);
       setError(null);
       const response = await usersAPI.updateUser(params.id, {
-        firstName: formData.firstName,
-        lastName: formData.lastName,
+        ...((formData.firstName !== originalNames.firstName || formData.lastName !== originalNames.lastName) ? { firstName: formData.firstName, lastName: formData.lastName, expectedIdentityVersion: identityVersion } : {}),
         email: formData.email,
         username: formData.username,
         phone: formData.phone,
@@ -139,6 +147,15 @@ export default function EditUserPage(props: { params: Promise<{ id: string }> })
       const details = error.response?.data?.details;
       const detailMessage = Array.isArray(details) && details.length > 0 ? details[0].msg : null;
       setError(detailMessage || error.response?.data?.error || 'خطا در بروزرسانی کاربر');
+      if (error.response?.data?.code === 'PERSONNEL_IDENTITY_CONFLICT') {
+        const latest = await usersAPI.getUser(params.id).catch(() => null);
+        if (latest?.data?.success) {
+          const user = latest.data.data;
+          setIdentityVersion(user.identityVersion);
+          setOriginalNames({ firstName: user.firstName, lastName: user.lastName });
+          setFormData(current => ({ ...current, firstName: user.firstName, lastName: user.lastName }));
+        }
+      }
     } finally {
       setSaving(false);
     }
@@ -163,7 +180,7 @@ export default function EditUserPage(props: { params: Promise<{ id: string }> })
     <ErpPage
       eyebrow="مدیریت سیستم"
       title="ویرایش کاربر"
-      description="اطلاعات حساب، نقش، بخش و شماره تماس ورود را بروزرسانی کنید؛ پرونده و برنامه کاری پرسنل فقط در HR تغییر می‌کند."
+      description="اطلاعات حساب کاربری را ویرایش کنید."
       backHref={`/dashboard/hr/users/${params.id}`}
     >
       {managerEditingAdmin ? (
@@ -177,6 +194,7 @@ export default function EditUserPage(props: { params: Promise<{ id: string }> })
         <form onSubmit={handleSubmit} className="space-y-5">
           {error && <ErpInlineState kind="error" title={error} />}
 
+          {hasPersonnel && <ErpInlineState kind="empty" title="تغییر نام، نام پروندهٔ پرسنلی متصل را هم به‌روزرسانی می‌کند." />}
           <ErpSection title="اطلاعات پایه">
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <label className="block">

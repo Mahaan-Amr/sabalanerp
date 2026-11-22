@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import {useUnarchivedDraftGuard} from '@/lib/useUnarchivedDraftGuard';
 import { ErpButton, ErpField, ErpSheet, ErpTextarea } from "@/components/erp";
 import HrPersianCalendar from "@/features/hr/HrPersianCalendar";
 
@@ -25,6 +26,7 @@ export default function RetentionAction({
 }) {
   const [reason, setReason] = useState("");
   const [date, setDate] = useState(effectiveDate || "");
+  useUnarchivedDraftGuard('hr-retention-action',true);
   const ready = reason.trim().length >= 3 && (effectiveDate === undefined || Boolean(date));
 
   return (

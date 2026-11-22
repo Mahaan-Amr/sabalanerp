@@ -1,0 +1,16 @@
+{
+  "head": "c31c77306b36dc224172bb97fd0e4c3a5157fd2d",
+  "sources": {
+    "backend/src/services/versionedFilePublication.ts": "e7feb721a5bbb4e0b5e24e5f71c5ff4239ed71682835a8d7ecf700e13c444bcb",
+    "backend/src/services/runtimeWorkContext.ts": "9fcbc84ad7393eecc75ffe9bc8df73ebc051a4ba2050f2f31d6f00f7280c795d",
+    "backend/src/services/runtimeTaskAdmission.ts": "c45592ec5a5693c0aacbe794b481bd4198638dcf460e00240c4cae0e6ac7e9fa",
+    "backend/src/services/dispatchDocuments/filesystemStorage.ts": "fdf6fbb74562b030c03208c629ec5fe0d89084e00833a18d92815a00b7f283e7",
+    "scripts/run-versioned-file-publication-local.mjs": "4f30f2dc1418e9d6c0a82c0b5d2f4d79d111b0317a99d8196aea43d0fb3935ec",
+    "tests/online-deployment/versioned-file-publication.fixture.cjs": "f388fa4a3e2b8696ee89519b1b1516028ea5d92d1691783e3b17c59c107a7c4b",
+    "backend/src/services/kernelWriteAdmission.ts": "8952c65ddde926fbc5136be933d1c7401ea269191cbcba64dd20ba6d95bdd875",
+    "backend/src/services/runtimeBoundaryJournal.ts": "d94912a6fb15d759d8270c067e96c81964f1a5464cc54c26df28636ccbe2e9eb",
+    "backend/src/services/durableFilePublication.ts": "5c1ecdf41aeae4259daf6ebef0f1556fc39135e9c07b80da1ff831bf64a1095a"
+  },
+  "patchSha256": "8e602eb952b45cc5524046f8818953d310805d63a24377d3c278ec69f213081b",
+  "scope": "private admitted per-write versions, explicit Dispatch adapter and metadata-only actual-EX file component cut; no production activation"
+}

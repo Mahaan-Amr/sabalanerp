@@ -3,6 +3,7 @@ import type {
   DispatchDocumentWorkspace,
   MonetaryAmount,
 } from "./dispatchDocumentsViewModel";
+import { browserScopedFetch } from '@/lib/browserScopedFetch';
 
 export type DispatchDocumentDecision = {
   action: "ACCEPT" | "REJECT";
@@ -141,9 +142,9 @@ export function mapDispatchDocumentReadModel(
       ),
       quantity: text(line.quantity),
       unit: text(line.unit),
-      gross: money(priced.grossAmount, currency),
-      discount: money(priced.discountAmount, currency),
-      net: money(priced.netAmount, currency),
+      gross: money(priced.grossAmount ?? "UNKNOWN", currency),
+      discount: money(priced.discountAmount ?? "UNKNOWN", currency),
+      net: money(priced.netAmount ?? "UNKNOWN", currency),
     });
     contractGroups.set(contractId, group);
   }
@@ -168,8 +169,13 @@ export function mapDispatchDocumentReadModel(
     : status === "PENDING"
       ? "READY"
       : "BLOCKED";
-  const total = events.length
-    ? addDecimals(events.map((event) => text(event.netAmount, "0")))
+  const revisionLines = list(revision.lines);
+  const completeAmounts = revisionLines.length > 0 && revisionLines.every((line) => {
+    const event = eventByLine.get(text(line.id));
+    return event && /^[+-]?\d+(?:\.\d+)?$/.test(text(event.netAmount));
+  });
+  const total = completeAmounts
+    ? addDecimals(revisionLines.map((line) => text(eventByLine.get(text(line.id))?.netAmount)))
     : "UNKNOWN";
   const contracts = Array.from(contractGroups.values());
 
@@ -289,7 +295,7 @@ export function mapDispatchDocumentReadModel(
   };
 }
 
-const parseJsonResponse = async <T>(response: Response): Promise<T> => {
+const parseJsonResponse = async <T>(response: Pick<Response, 'json' | 'status' | 'ok'>): Promise<T> => {
   const body = (await response
     .json()
     .catch(() => null)) as ApiEnvelope<T> | null;
@@ -309,7 +315,7 @@ const parseJsonResponse = async <T>(response: Response): Promise<T> => {
 };
 
 const send = (url: string, init?: RequestInit) =>
-  fetch(url, {
+  browserScopedFetch(url, {
     credentials: "include",
     ...init,
     headers: { "Content-Type": "application/json", ...init?.headers },
@@ -382,7 +388,7 @@ export function createDispatchDocumentsHttpClient(
     return item.bundle;
   };
   const pdf = async (url: string) => {
-    const response = await fetch(url, { credentials: "include" });
+    const response = await browserScopedFetch(url, { credentials: "include" });
     if (response.status === 401 || response.status === 403)
       throw new DispatchDocumentsAuthorizationError(
         "دسترسی به اسناد ارسال مجاز نیست.",

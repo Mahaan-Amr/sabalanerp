@@ -1,0 +1,17 @@
+{
+  "head": "0626c53ee1b238d8b0b24419cd4a3e0dc79d540c",
+  "sources": {
+    "deploy/scripts/recovery-versioned-files.py": "318fcb20c1ebd6d6344b8d7153b1e6cef7c07b1941abca2e8d5f1b1429f37cf9",
+    "tests/online-deployment/versioned-file-reader.worker.py": "a1e3ee1f5a9573a86e0a2a712bd87ac6823ae52c073598968139a33bd7edc734",
+    "tests/online-deployment/versioned-file-reader.fixture.cjs": "81e3d47fa786c8bf69e1450bb243233eba73e1461fe93f6817ce401eb9c3d57f",
+    "scripts/run-versioned-file-reader-local.mjs": "ab1190abc6aa9f701735754ce097c22afb639e3d1e1ad1b82a9a3cbf787f1b25"
+  },
+  "dependencies": {
+    "backend/src/services/versionedFilePublication.ts": "a1b4a382ef3664d953ba048260aba3b18814fc3840c16fb3ac92f8e071a63480",
+    "backend/src/services/runtimeWorkContext.ts": "9fcbc84ad7393eecc75ffe9bc8df73ebc051a4ba2050f2f31d6f00f7280c795d",
+    "backend/src/services/runtimeTaskAdmission.ts": "c45592ec5a5693c0aacbe794b481bd4198638dcf460e00240c4cae0e6ac7e9fa"
+  },
+  "patchSha256": "ab97642560be3a183c3f277c130c1b81261b07ece2bd98a5053fdece3793c206",
+  "nativeReport": "versioned-file-reader-712b84de28b78c8c5e2983a9f72d8052.json",
+  "scope": "independent private immutable Node file-cut materializer, no lease/capture/write APIs, no healthy application point or production authority"
+}

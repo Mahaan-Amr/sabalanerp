@@ -25,7 +25,7 @@ const responsibilityValues = new Set<string>(HR_REDESIGN_CATALOG.responsibilityT
 
 const asyncHandler = (handler: (req: AuthRequest, res: Response, next: NextFunction) => Promise<unknown>) => (
   req: AuthRequest, res: Response, next: NextFunction,
-) => void handler(req, res, next).catch(next);
+) => handler(req, res, next).catch(next);
 const actorId = (req: AuthRequest) => req.user!.id;
 const text = (value: unknown) => String(value ?? '').trim();
 const httpError = (statusCode: number, message: string) => Object.assign(new Error(message), { statusCode, isOperational: true });
@@ -245,7 +245,7 @@ router.post('/user-access/:userId', administer, asyncHandler(async (req, res) =>
     if (requestedRole !== target.role) await tx.user.update({ where: { id: targetUserId }, data: { role: requestedRole as never } });
 
     const existingWorkspacePermissions = await tx.workspacePermission.findMany({ where: { userId: targetUserId } });
-    for (const workspace of ['crm', 'sales', 'inventory', 'security', 'accounting', 'bi', 'logistics']) {
+    for (const workspace of ['crm', 'sales', 'inventory', 'security', 'accounting', 'bi', 'logistics', 'purchasing']) {
       const level = requestedWorkspaces[workspace];
       const existing = existingWorkspacePermissions.find((permission) => permission.workspace === workspace);
       const nextExpiry = expiryWasProvided ? effectiveTo ?? null : existing?.expiresAt ?? null;

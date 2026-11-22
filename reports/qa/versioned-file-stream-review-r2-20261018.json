@@ -1,0 +1,25 @@
+{
+  "head": "3d4443c2a9f7d6312dcba725930dcdf4016c22eb",
+  "sources": {
+    "backend/src/services/versionedFilePublication.ts": "bd40d645bd3bebdd1f36575fb50fc1fe0bc656705ff454bc68846b425e1ce257",
+    "tests/online-deployment/versioned-file-stream.fixture.cjs": "b2bd5cfed81d0a56fc30339f81f929ea94335fc0bdea8bb71ce920ac10ca4d25",
+    "scripts/run-versioned-file-stream-local.mjs": "2d279bc2f03ee5d982f876ffc5c9f7591bc38fadc52240cd92f76b19b3285faf"
+  },
+  "dependencies": {
+    "backend/src/services/runtimeWorkContext.ts": "9fcbc84ad7393eecc75ffe9bc8df73ebc051a4ba2050f2f31d6f00f7280c795d",
+    "backend/src/services/runtimeTaskAdmission.ts": "c45592ec5a5693c0aacbe794b481bd4198638dcf460e00240c4cae0e6ac7e9fa",
+    "backend/src/services/durableFilePublication.ts": "5c1ecdf41aeae4259daf6ebef0f1556fc39135e9c07b80da1ff831bf64a1095a",
+    "deploy/scripts/recovery-versioned-files.py": "2bc671d85b956666018d67b5987b774111c2e5b1b4078ed0cae96605ef04f99f",
+    "tests/online-deployment/versioned-file-reader.worker.py": "a1e3ee1f5a9573a86e0a2a712bd87ac6823ae52c073598968139a33bd7edc734"
+  },
+  "patchSha256": "488a04f89049e0d98b2158433854a820bb4bdeb6d9a229f9a1a551f003aa5413",
+  "nativeReport": "versioned-file-stream-1bb13a5ac6b4ccc1e34bf8016c0ab8eb.json",
+  "redMissingApi": "versioned-file-stream-a729467a517dfced57009be4579a567a.failed.json",
+  "redCloseFailure": "versioned-file-stream-eb967e79455128259b6e92df1f1e96e9.failed.json",
+  "retainedCloseFailureSource": "versioned-file-stream-source-pre-close.ts.txt",
+  "scope": "admitted per-write stream publication; exact existing version schema, no startup/controller/role/retention changes",
+  "remaining": "final11native cases running (10alreadyPASSr2); ten existing Bufferregressions startedagainst prior identicalnon-stream implementation; companionPDFpending",
+  "reviewRepair": "finished() replaced with actual Readable.closed completion plus scheduled error emission drain; applies successful finish and disposal; no timeout reset; source error checked before any live publication",
+  "reviewRed": "versioned-file-stream-7aeddb98864559fe3fba6d0dccf54b43.failed.json",
+  "reviewRedSource": "versioned-file-stream-source-pre-emit-close.ts.txt"
+}

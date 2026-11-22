@@ -1,3 +1,4 @@
+import { readContractEditSession } from '../../contractEditSessionRead';
 import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import {
@@ -45,8 +46,7 @@ export async function consumePrismaPartnerTechnicalRecovery(tx: Transaction, inp
   caseId: string;
   customerContractId?: string;
 }): Promise<Result<void>> {
-  const current = await tx.salesContractEditSession.findUnique({ where: { draftId: input.recoveryId },
-    select: { id: true, ownerUserId: true, purpose: true, contractId: true, recovery: true } });
+  const current = await readContractEditSession(tx, input.recoveryId);
   const recovery = decodeTechnicalRecovery(current?.recovery);
   if (!current || current.ownerUserId !== input.actorId || current.purpose !== 'PARTNER_TECHNICAL') {
     return { ok: false, error: partnerError('NOT_FOUND') };
@@ -85,9 +85,10 @@ export async function consumePrismaPartnerTechnicalRecovery(tx: Transaction, inp
   if (prior && (prior.payloadHash !== payloadHash || await canonicalHash(prior.outcome) !== prior.payloadHash)) {
     return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
   }
-  if (!prior) await tx.partnerCommandOutcome.create({ data: { id: randomUUID(), actorId: input.actorId,
-    operation: SUBMISSION_EVIDENCE_OPERATION, targetScope: input.recoveryId, key: evidenceKey,
-    payloadHash, outcome: json(evidence) } });
+  if (!prior) await tx.$executeRaw`INSERT INTO partner_command_outcomes
+    (id, "actorId", operation, "targetScope", key, "payloadHash", outcome)
+    VALUES (${randomUUID()}, ${input.actorId}, ${SUBMISSION_EVIDENCE_OPERATION}, ${input.recoveryId},
+      ${evidenceKey}, ${payloadHash}, ${JSON.stringify(evidence)}::jsonb)`;
   const nextRecovery = json({ ...recovery, partnerCaseId: input.caseId });
   if (!input.customerContractId) {
     if (boundCaseId === input.caseId) return { ok: true, value: undefined };
@@ -128,10 +129,7 @@ export async function resolvePrismaPartnerCaseDraft(tx: Transaction, input: {
   revisionAuthority?: 'CASE_EDIT_LEASE' | 'CORRECTION_WORKFLOW';
 }): Promise<Result<ResolvedCaseDraft>> {
   const { command, actorId } = input;
-  const session = await tx.salesContractEditSession.findUnique({
-    where: { draftId: command.intent.recoveryId },
-    select: { id: true, draftId: true, ownerUserId: true, purpose: true, contractId: true, recovery: true },
-  });
+  const session = await readContractEditSession(tx, command.intent.recoveryId);
   const recovery = decodeTechnicalRecovery(session?.recovery);
   const boundCaseId = typeof recovery?.partnerCaseId === 'string' ? recovery.partnerCaseId : undefined;
   const revisionBound = command.type !== 'CASE_DRAFT_REVISE' || (input.revisionAuthority && (

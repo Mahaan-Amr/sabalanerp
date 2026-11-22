@@ -1,0 +1,197 @@
+TAP version 13
+# Subtest: a Server Action body cannot acknowledge completion while its already started nested query is unfinished
+ok 1 - a Server Action body cannot acknowledge completion while its already started nested query is unfinished
+  ---
+  duration_ms: 139.727458
+  type: 'test'
+  ...
+# Subtest: an admitted action finishes nested queries during capture closure while a new action remains outside the gate
+ok 2 - an admitted action finishes nested queries during capture closure while a new action remains outside the gate
+  ---
+  duration_ms: 105.70049
+  type: 'test'
+  ...
+# Subtest: a handled nested failure preserves the action result, and a failed parent still owns its unfinished child
+ok 3 - a handled nested failure preserves the action result, and a failed parent still owns its unfinished child
+  ---
+  duration_ms: 165.454703
+  type: 'test'
+  ...
+# Subtest: drain refuses an invalid or unbounded timeout without silently retiring the context
+ok 4 - drain refuses an invalid or unbounded timeout without silently retiring the context
+  ---
+  duration_ms: 66.40443
+  type: 'test'
+  ...
+# Subtest: a later async descendant cannot reuse its completed parent admission across a capture pause
+ok 5 - a later async descendant cannot reuse its completed parent admission across a capture pause
+  ---
+  duration_ms: 107.68926
+  type: 'test'
+  ...
+# Subtest: owner revocation prevents a nested query without discarding the admitted parent lease
+ok 6 - owner revocation prevents a nested query without discarding the admitted parent lease
+  ---
+  duration_ms: 68.700457
+  type: 'test'
+  ...
+# Subtest: independent processes share admission; the exited flock helper does not release the parent lease
+ok 7 - independent processes share admission; the exited flock helper does not release the parent lease
+  ---
+  duration_ms: 73.859675
+  type: 'test'
+  ...
+# Subtest: a competing exclusive boundary and revoked owner admit no application work
+ok 8 - a competing exclusive boundary and revoked owner admit no application work
+  ---
+  duration_ms: 73.524527
+  type: 'test'
+  ...
+# Subtest: drain never closes a still-owned lease; symlink substitution fails closed
+ok 9 - drain never closes a still-owned lease; symlink substitution fails closed
+  ---
+  duration_ms: 26.121169
+  type: 'test'
+  ...
+# Subtest: replacing an owned inode retains the original lock and forbids retirement or readmission
+ok 10 - replacing an owned inode retains the original lock and forbids retirement or readmission
+  ---
+  duration_ms: 62.719373
+  type: 'test'
+  ...
+# Subtest: native HTTP early response cannot release unfinished handler ownership
+ok 11 - native HTTP early response cannot release unfinished handler ownership
+  ---
+  duration_ms: 59.576356
+  type: 'test'
+  ...
+# Subtest: native HTTP disconnect cannot release unfinished handler ownership
+ok 12 - native HTTP disconnect cannot release unfinished handler ownership
+  ---
+  duration_ms: 41.853935
+  type: 'test'
+  ...
+# Subtest: client disconnect during pending admission never dispatches the domain handler
+ok 13 - client disconnect during pending admission never dispatches the domain handler
+  ---
+  duration_ms: 34.403448
+  type: 'test'
+  ...
+# Subtest: GET response-event audit reservation retains the cross-process boundary until its work finishes
+ok 14 - GET response-event audit reservation retains the cross-process boundary until its work finishes
+  ---
+  duration_ms: 82.730848
+  type: 'test'
+  ...
+# Subtest: durable-completion callback must finish before HTTP retirement and kernel release
+ok 15 - durable-completion callback must finish before HTTP retirement and kernel release
+  ---
+  duration_ms: 46.274145
+  type: 'test'
+  ...
+# Subtest: the existing shared HTTP lifecycle binds native ownership once before serving and retains captured callbacks
+ok 16 - the existing shared HTTP lifecycle binds native ownership once before serving and retains captured callbacks
+  ---
+  duration_ms: 46.271944
+  type: 'test'
+  ...
+# Subtest: ownership cannot be attached after an initially unowned runtime has answered a probe
+ok 17 - ownership cannot be attached after an initially unowned runtime has answered a probe
+  ---
+  duration_ms: 8.014815
+  type: 'test'
+  ...
+# Subtest: a journal cannot declare a different gate from the acquired kernel boundary
+ok 18 - a journal cannot declare a different gate from the acquired kernel boundary
+  ---
+  duration_ms: 91.409918
+  type: 'test'
+  ...
+# Subtest: durable busy epochs remain constant-space and bind the actual native incarnation
+ok 19 - durable busy epochs remain constant-space and bind the actual native incarnation
+  ---
+  duration_ms: 867.533956
+  type: 'test'
+  ...
+# Subtest: overlapping tasks share one durable epoch and retirement waits for the final reference
+ok 20 - overlapping tasks share one durable epoch and retirement waits for the final reference
+  ---
+  duration_ms: 107.576603
+  type: 'test'
+  ...
+# Subtest: new work waits for settling publication and starts a fresh durable epoch
+ok 21 - new work waits for settling publication and starts a fresh durable epoch
+  ---
+  duration_ms: 111.504644
+  type: 'test'
+  ...
+# Subtest: a dead ACTIVE incarnation remains inspectable and cannot be reclaimed or settled by restart
+ok 22 - a dead ACTIVE incarnation remains inspectable and cannot be reclaimed or settled by restart
+  ---
+  duration_ms: 105.242516
+  type: 'test'
+  ...
+# Subtest: unexpected, torn, symlinked and altered namespace records fail closed
+ok 23 - unexpected, torn, symlinked and altered namespace records fail closed
+  ---
+  duration_ms: 40.665723
+  type: 'test'
+  ...
+# Subtest: failed state fsync never admits work or releases the shared boundary
+ok 24 - failed state fsync never admits work or releases the shared boundary
+  ---
+  duration_ms: 133.592633
+  type: 'test'
+  ...
+# Subtest: owner loss after ACTIVE publication retires unstarted work without a false orphan
+ok 25 - owner loss after ACTIVE publication retires unstarted work without a false orphan
+  ---
+  duration_ms: 88.010005
+  type: 'test'
+  ...
+# Subtest: stop during kernel admission cancels unstarted work and still proves retirement
+ok 26 - stop during kernel admission cancels unstarted work and still proves retirement
+  ---
+  duration_ms: 52.725932
+  type: 'test'
+  ...
+# Subtest: native SQL identity binds the entire runtime ID and survives durable task admission
+ok 27 - native SQL identity binds the entire runtime ID and survives durable task admission
+  ---
+  duration_ms: 87.252329
+  type: 'test'
+  ...
+# Subtest: a pending capture stops new joins without blocking existing task completion
+ok 28 - a pending capture stops new joins without blocking existing task completion
+  ---
+  duration_ms: 158.984041
+  type: 'test'
+  ...
+# Subtest: retirement cancels paused admissions without starting another epoch
+ok 29 - retirement cancels paused admissions without starting another epoch
+  ---
+  duration_ms: 71.773558
+  type: 'test'
+  ...
+# Subtest: an OPEN publication before native EX gate release queues unstarted work without failing the request
+ok 30 - an OPEN publication before native EX gate release queues unstarted work without failing the request
+  ---
+  duration_ms: 143.170741
+  type: 'test'
+  ...
+# Subtest: native work claims freeze their exact grant and ACTIVE native claim without changing legacy claims
+ok 31 - native work claims freeze their exact grant and ACTIVE native claim without changing legacy claims
+  ---
+  duration_ms: 92.06179
+  type: 'test'
+  ...
+1..31
+# tests 31
+# suites 0
+# pass 31
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 4212.782196
+{"nativeLinuxGatePassed":true,"backendUnchanged":{"id":"a1ea34a8d7d878b906fba7b4fdbe975df13a6b00d63a863eacce34b9827e86ff","image":"sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505","startedAt":"2026-10-15T09:01:40.016187222Z"},"compiledSha256":{"kernelWriteAdmission.js":"b8dd4d6443eb4f525613fd48d10fa838ccbbd81f43d412674464da31af6c710b","httpRequestLifecycle.js":"046b4b667770518d8dc2ab78ba42da3e0cfc0ff95cdb8d5b4e5e591d7867155f","runtimeBoundaryJournal.js":"c75bd2c91cfeff77f52e6f245fc23c2b88c54397ab3d9bc89f4b316e7b48d5dc","runtimeTaskAdmission.js":"6b1dc81d6fc3f2f9f84ea22e1eae8451a4094f6fba851d56661f5c1a8b60e393","runtimeWorkContext.js":"93747aa97f64e28ad9a79f3cbb33696c04da2bc7a562cb0fb2b887efa2b9ad7d","fixture.cjs":"ea1a4624b293ef54b27c49f4b45e4000a9fba674c74184bf9cb924ca4c022fe9","runtime-fixture.cjs":"5f41334e2828c116c653b24a53c549ddd9fe8c9b83e66c503b8d99839f415265","context-fixture.cjs":"8d3e1470871cc83c41f54e2c8966ca299d57784b131a6f211949cdd744a3f411"}}

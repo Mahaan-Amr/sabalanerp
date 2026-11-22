@@ -1,4 +1,8 @@
+import { selectLoadingTransport, retirePersonalLoadingDraft } from '../services/personalLoadingPickup';
+import { latestLoadingCancellationRequest, readLoadingCancellationDocuments, requestLoadingCancellation } from '../services/crossWorkspaceDutyAdapters/loadingCancellationDutyAdapter';
+import { exactQuantityText, ExactQuantityDecimal } from '../services/exactQuantity';
 import { prisma } from '../lib/prisma';
+import { createSalesInvoiceRouter } from '../services/salesDispatchInvoice/routes';
 import express, { Response } from 'express';
 import { body, validationResult } from 'express-validator';
 import { GuardDriverQueueTurnStatus, Prisma, PrismaClient, SecurityDriverQueueTurnStatus } from '@prisma/client';
@@ -6,15 +10,18 @@ import { protect } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES } from '../middleware/workspace';
 import { requireFeatureAccess, requireNarrowFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
 import { assertNoLegacyDispatchReferences } from '../services/dispatchMasterDataPolicy';
-import { GuardQueueConflictError, GuardQueueValidationError, isGuardQueueTurnCurrentlyReady, releaseGuardQueueReservation, reserveGuardQueueTurn } from '../services/guardDriverQueue';
-import { createSuccessorAllocationRevision, DispatchAllocationConflictError, DispatchAllocationValidationError, finalizeCanonicalLoadingAllocations, saveCanonicalAllocationDraft } from '../services/dispatchAllocation';
+import { GuardQueueConflictError, GuardQueueValidationError, isGuardQueueTurnCurrentlyReady, queueTurnDriverIdentity, releaseGuardQueueReservation, reserveGuardQueueTurn } from '../services/guardDriverQueue';
+import { cancelFinalizedOrdinaryLoading, loadingCancellationAccountingAuthority, LoadingCancellationAccountingAccessError, createSuccessorAllocationRevision, DispatchAllocationConflictError, DispatchAllocationValidationError, finalizeCanonicalLoadingAllocations, saveCanonicalAllocationDraft } from '../services/dispatchAllocation';
 import { PilotSafetyPauseError } from '../services/dispatchCutover';
 import { allocateLoadingNumber } from '../services/logisticsLoadingNumber';
-import { createPartnerCaseLoading, readPartnerCaseLoading, withLogisticsLoadingReadScope } from '../services/dispatchAllocation';
+import { createPartnerCaseLoading, readPartnerCaseLoading, findLoadablePartnerDeliveries, withLogisticsLoadingReadScope } from '../services/dispatchAllocation';
 import { randomUUID } from 'node:crypto';
 import { partnerError, type Result } from '@sabalanerp/partner-sales-contracts';
 import { ordinaryContractDispatchEligible, assertOrdinaryContractsDispatchEligible } from '../services/ordinaryContractDispatchEligibility';
 import { PartnerLoadingCommandError } from '../services/partnerSales/fulfillment/loadingAuthority';
+import { expandPersianSearchTokenVariants, normalizePersianSearchTokens } from '../services/crmCustomerSearch';
+import { resolveLogisticsContractRow } from '../services/logisticsContractRow';
+import { readShipmentQuantityProjection } from '../services/shipmentQuantityProjectionStore';
 
 const router = express.Router();
 const respondPartnerLoading = (res: Response, result: Result<unknown>, successStatus = 200) => {
@@ -34,6 +41,7 @@ const canEdit = requireWorkspaceAccess(WORKSPACES.LOGISTICS, WORKSPACE_PERMISSIO
 const canView = requireWorkspaceAccess(WORKSPACES.LOGISTICS, WORKSPACE_PERMISSIONS.VIEW);
 const canViewDashboard = requireFeatureAccess(FEATURES.LOGISTICS_DASHBOARD_VIEW, FEATURE_PERMISSIONS.VIEW);
 const canViewLoadings = requireFeatureAccess(FEATURES.LOGISTICS_LOADINGS_VIEW, FEATURE_PERMISSIONS.VIEW);
+router.use(createSalesInvoiceRouter({ db: prisma, workspace: 'logistics', view: [canView, canViewLoadings] }));
 const canCreateLoadings = requireFeatureAccess(FEATURES.LOGISTICS_LOADINGS_CREATE, FEATURE_PERMISSIONS.EDIT);
 const canEditLoadings = requireFeatureAccess(FEATURES.LOGISTICS_LOADINGS_EDIT, FEATURE_PERMISSIONS.EDIT);
 const canFinalizeLoadings = requireFeatureAccess(FEATURES.LOGISTICS_LOADINGS_FINALIZE, FEATURE_PERMISSIONS.EDIT);
@@ -42,6 +50,20 @@ const canCreateCorrections = requireFeatureAccess(FEATURES.LOGISTICS_CORRECTIONS
 const canViewDrivers = requireFeatureAccess(FEATURES.LOGISTICS_DRIVERS_VIEW, FEATURE_PERMISSIONS.VIEW);
 const canManageDrivers = requireNarrowFeatureAccess(FEATURES.LOGISTICS_DRIVERS_MANAGE, FEATURE_PERMISSIONS.EDIT);
 
+router.put('/loadings/:id/transport', canEdit, canEditLoadings, canManageDrivers, async (req: any, res: Response) => {
+  try {
+    const result = await selectLoadingTransport(prisma, { loadingId: req.params.id, actorId: req.user.id,
+      mode: req.body.mode, expected: req.body.expected, correlationId: req.get('X-Correlation-Id') });
+    return res.json({ success: true, data: result });
+  } catch (error) {
+    if (error instanceof PartnerLoadingCommandError) return respondPartnerLoading(res, { ok: false, error: error.error });
+    if (error instanceof GuardQueueConflictError || error instanceof GuardQueueValidationError || error instanceof PilotSafetyPauseError)
+      return res.status(error instanceof GuardQueueValidationError ? 400 : 409).json({ success: false, error: error.message });
+    console.error('Loading transport change failed:', error);
+    return res.status(500).json({ success: false, error: 'تغییر نوع بارگیری ناموفق بود.' });
+  }
+});
+
 router.post('/canonical-driver-queue/:id/reserve', canEdit, canManageDrivers, async (req: any, res: Response) => {
   try {
     const loadingId = String(req.body.loadingId || '').trim();
@@ -49,7 +71,7 @@ router.post('/canonical-driver-queue/:id/reserve', canEdit, canManageDrivers, as
     const turn = await reserveGuardQueueTurn(prisma, { turnId: req.params.id, loadingId, actorId: req.user.id,
       expected: req.body.expected, reason: req.body.reason, correlationId: req.get('X-Correlation-Id') });
     return res.json({ success: true, data: {
-      ...turn, driverId: turn.internalDriverId || turn.externalDriverId, vehicleId: turn.companyVehicleId || turn.externalVehicleId,
+      ...turn, driverId: queueTurnDriverIdentity(turn), vehicleId: turn.driverSource === 'CUSTOMER_PICKUP' ? turn.id : turn.companyVehicleId || turn.externalVehicleId,
     } });
   } catch (error) {
     if (error instanceof PartnerLoadingCommandError) return respondPartnerLoading(res, { ok: false, error: error.error });
@@ -68,7 +90,7 @@ router.post('/canonical-driver-queue/:id/release', canEdit, canManageDrivers, as
       correlationId: req.get('X-Correlation-Id'),
     });
     return res.json({ success: true, data: {
-      ...turn, driverId: turn.internalDriverId || turn.externalDriverId, vehicleId: turn.companyVehicleId || turn.externalVehicleId,
+      ...turn, driverId: queueTurnDriverIdentity(turn), vehicleId: turn.driverSource === 'CUSTOMER_PICKUP' ? turn.id : turn.companyVehicleId || turn.externalVehicleId,
     } });
   } catch (error) {
     if (error instanceof PartnerLoadingCommandError) return respondPartnerLoading(res, { ok: false, error: error.error });
@@ -118,7 +140,7 @@ const toNumber = (value: unknown, fallback = 0) => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
-const decimalInput = (value: unknown) => Number(toNumber(value).toFixed(3));
+const decimalInput = (value: unknown) => new ExactQuantityDecimal(exactQuantityText(value));
 
 const normalizeDigits = (value: unknown): string => {
   if (typeof value !== 'string' && typeof value !== 'number') return '';
@@ -168,44 +190,32 @@ const productDisplayName = (product: any, snapshot?: any) => {
   return snapshot?.stoneName || snapshot?.name || product?.namePersian || product?.name || 'محصول';
 };
 
-const getContractProducts = (contract: any) => {
-  const data = contract?.contractData as any;
-  return Array.isArray(data?.products) ? data.products : Array.isArray(data?.items) ? data.items : [];
-};
-
-const itemSnapshot = (contract: any, item: any, itemIndex: number) => {
-  const products = getContractProducts(contract);
-  const byIndex = products[itemIndex];
-  if (byIndex && (!byIndex.productId || byIndex.productId === item.productId)) return byIndex;
-  return products.find((product: any) => product?.productId === item.productId) || null;
-};
-
 const getDeliverableQuantity = (item: any, snapshot: any, unit: string) => {
   if (unit === 'meter') {
     const length = toNumber(snapshot?.length ?? snapshot?.actualLength ?? snapshot?.actualLengthMeters);
     const lengthM = snapshot?.lengthUnit === 'cm' ? length / 100 : length;
     const quantity = toNumber(snapshot?.quantity, 1);
     const total = lengthM * quantity;
-    return total > 0 ? Number(total.toFixed(3)) : toNumber(item.quantity);
+    return total > 0 ? Number(total) : toNumber(item.quantity);
   }
 
   if (unit === 'squareMeter') {
     const squareMeters = toNumber(snapshot?.squareMeters);
-    if (squareMeters > 0) return Number(squareMeters.toFixed(3));
+    if (squareMeters > 0) return Number(squareMeters);
     const preparedQuantity = toNumber(snapshot?.preparedQuantity);
-    if (preparedQuantity > 0) return Number(preparedQuantity.toFixed(3));
+    if (preparedQuantity > 0) return Number(preparedQuantity);
   }
 
   if (unit === 'ton') {
     const preparedQuantity = toNumber(snapshot?.preparedQuantity);
-    if (preparedQuantity > 0) return Number(preparedQuantity.toFixed(3));
+    if (preparedQuantity > 0) return Number(preparedQuantity);
   }
 
   return toNumber(snapshot?.preparedQuantity ?? snapshot?.quantity ?? item.quantity);
 };
 
-const productSnapshotFor = (contract: any, item: any, itemIndex: number) => {
-  const snapshot = itemSnapshot(contract, item, itemIndex);
+const productSnapshotFor = (contract: any, item: any) => {
+  const snapshot = resolveLogisticsContractRow(contract?.contractData, item);
   const unit = inferUnit(item, snapshot);
   const contractedQuantity = getDeliverableQuantity(item, snapshot, unit);
   return {
@@ -231,6 +241,13 @@ const productSnapshotFor = (contract: any, item: any, itemIndex: number) => {
   };
 };
 
+const productGroupKey = (item: any, snapshot: any) => [
+  item.productId, item.productType || '', snapshot.unit,
+  snapshot.width ?? '', snapshot.thickness ?? '',
+  JSON.stringify(snapshot.services || []), JSON.stringify(snapshot.tools || []),
+  JSON.stringify(snapshot.finishing || null)
+].join('|');
+
 const getProjectWithCustomer = async (projectId: string) => {
   return prisma.projectAddress.findUnique({
     where: { id: projectId },
@@ -242,6 +259,7 @@ const getProjectContracts = async (projectId: string, customerId: string) => {
   const contracts = await prisma.salesContract.findMany({
     where: {
       customerId,
+      partnerCaseId: null,
       isInactive: false,
       status: { notIn: ['CANCELLED', 'EXPIRED'] as any },
       contractData: {
@@ -308,27 +326,23 @@ const buildRemainingForProject = async (projectId: string) => {
   }
 
   const contracts = await getProjectContracts(projectId, project.customerId);
-  const itemIds = contracts.flatMap((contract) => contract.items.map((item) => item.id));
-  const consumed = await getConsumptionByItemIds(itemIds);
+  const projections = await Promise.all(contracts.map(contract => readShipmentQuantityProjection(prisma, { contractId: contract.id })));
+  const balances = new Map(projections.flatMap(projection => projection.rows).map(row => [row.contractItemId, row]));
   const groups = new Map<string, any>();
 
   for (const contract of contracts) {
-    contract.items.forEach((item, index) => {
-      const snapshot = productSnapshotFor(contract, item, index);
-      const unit = snapshot.unit;
-      const contractedQuantity = snapshot.quantity;
-      const finalizedLoadedQuantity = consumed.get(item.id) || 0;
-      const remainingQuantity = Number((contractedQuantity - finalizedLoadedQuantity).toFixed(3));
-      const groupKey = [
-        item.productId,
-        item.productType || '',
-        unit,
-        snapshot.width ?? '',
-        snapshot.thickness ?? '',
-        JSON.stringify(snapshot.services || []),
-        JSON.stringify(snapshot.tools || []),
-        JSON.stringify(snapshot.finishing || null)
-      ].join('|');
+    contract.items.forEach((item) => {
+      const balance = balances.get(item.id);
+      if (!balance || balance.health !== 'CURRENT' || !balance.quantities || !balance.canAuthorizeLoading) return;
+      const snapshot = productSnapshotFor(contract, item);
+      const unit = balance.unit;
+      const contractedQuantity = new ExactQuantityDecimal(balance.quantities.contracted).toNumber();
+      const remainingQuantity = new ExactQuantityDecimal(balance.quantities.availableToLoad).toNumber();
+      const finalizedLoadedQuantity = new ExactQuantityDecimal(balance.quantities.finalizedReserved)
+        .plus(balance.quantities.physicallyDispatched).toNumber();
+      snapshot.quantity = contractedQuantity;
+      snapshot.unit = unit;
+      const groupKey = productGroupKey(item, snapshot);
 
       if (!groups.has(groupKey)) {
         groups.set(groupKey, {
@@ -381,9 +395,9 @@ const buildRemainingForProject = async (projectId: string) => {
     groups: Array.from(groups.values())
       .map((group) => ({
         ...group,
-        contractedTotal: Number(group.contractedTotal.toFixed(3)),
-        finalizedLoadedTotal: Number(group.finalizedLoadedTotal.toFixed(3)),
-        remainingTotal: Number(group.remainingTotal.toFixed(3)),
+        contractedTotal: Number(group.contractedTotal),
+        finalizedLoadedTotal: Number(group.finalizedLoadedTotal),
+        remainingTotal: Number(group.remainingTotal),
         sources: group.sources.sort((a: any, b: any) => a.contractNumber.localeCompare(b.contractNumber))
       }))
       .filter((group) => group.remainingTotal > 0)
@@ -394,21 +408,41 @@ const customerDisplayName = (customer: any) => {
   return `${customer.firstName || ''} ${customer.lastName || ''}`.trim() || customer.companyName || 'Customer';
 };
 
-const customerSearchWhere = (search: string, phoneContains: any) => ({
+const searchFields = (term: string) => {
+  const contains = { contains: term, mode: 'insensitive' as const };
+  return [
+    { firstName: contains },
+    { lastName: contains },
+    { companyName: contains },
+    { brandName: contains },
+    { nationalCode: contains },
+    { projectManagerName: contains },
+    { referrerFirstName: contains },
+    { referrerLastName: contains }
+  ];
+};
+
+const projectNameSearch = (terms: string[]): Prisma.ProjectAddressWhereInput => ({
+  isActive: true,
+  OR: (['projectName', 'projectManagerName'] as const).map(field => ({
+    AND: terms.map(term => ({
+      OR: expandPersianSearchTokenVariants(term).map(variant => ({
+        [field]: { contains: variant, mode: 'insensitive' }
+      }))
+    }))
+  }))
+});
+
+const customerSearchWhere = (search: string, terms: string[], phoneContains: any): Prisma.CrmCustomerWhereInput => ({
   isActive: true,
   ...(search ? {
     OR: [
-      { firstName: { contains: search, mode: 'insensitive' as const } },
-      { lastName: { contains: search, mode: 'insensitive' as const } },
-      { companyName: { contains: search, mode: 'insensitive' as const } },
-      { brandName: { contains: search, mode: 'insensitive' as const } },
-      { nationalCode: { contains: search, mode: 'insensitive' as const } },
-      { projectManagerName: { contains: search, mode: 'insensitive' as const } },
-      { referrerFirstName: { contains: search, mode: 'insensitive' as const } },
-      { referrerLastName: { contains: search, mode: 'insensitive' as const } },
-      { projectAddresses: { some: { projectName: { contains: search, mode: 'insensitive' as const } } } },
-      { projectAddresses: { some: { address: { contains: search, mode: 'insensitive' as const } } } },
-      { projectAddresses: { some: { projectManagerName: { contains: search, mode: 'insensitive' as const } } } },
+      ...searchFields(search),
+      ...(terms.length ? [
+        { AND: terms.map(term => ({ OR: expandPersianSearchTokenVariants(term).flatMap(searchFields) })) },
+        { projectAddresses: { some: projectNameSearch(terms) } }
+      ] : []),
+      { projectAddresses: { some: { isActive: true, address: { contains: search, mode: 'insensitive' } } } },
       ...(phoneContains ? [
         { phoneNumbers: { some: { number: phoneContains } } },
         { homeNumber: phoneContains },
@@ -425,9 +459,9 @@ const customerSearchWhere = (search: string, phoneContains: any) => ({
   } : {})
 });
 
-const loadableProjectsForCustomer = async (customerId: string) => {
+const loadableProjectsForCustomer = async (customerId: string, projectId?: string) => {
   const projects = await prisma.projectAddress.findMany({
-    where: { customerId, isActive: true },
+    where: { customerId, isActive: true, ...(projectId ? { id: projectId } : {}) },
     include: { customer: true },
     orderBy: { updatedAt: 'desc' }
   });
@@ -585,8 +619,16 @@ const linePayloadToCreate = async (line: any) => {
   const plus = decimalInput(line.plus || 0);
   const minus = decimalInput(line.minus || 0);
   const calculated = khatRas !== null && pieceCount !== null
-    ? decimalInput((khatRas * pieceCount) + plus - minus)
+    ? decimalInput(khatRas.mul(pieceCount).plus(plus).minus(minus))
     : decimalInput(line.quantity);
+  const productSnapshot = productSnapshotFor(sourceItem.contract, sourceItem);
+  const projection = await readShipmentQuantityProjection(prisma, { contractId: sourceItem.contractId });
+  const balance = projection.rows.find(row => row.contractItemId === sourceItem.id && row.productRowId === sourceItem.productRowId);
+  if (!balance || balance.health !== 'CURRENT' || !balance.quantities || !balance.canAuthorizeLoading || balance.unit !== unit) {
+    throw new DispatchAllocationConflictError('مانده معتبر این ردیف برای بارگیری در دسترس نیست؛ اطلاعات ارسال را بررسی کنید.');
+  }
+  productSnapshot.quantity = new ExactQuantityDecimal(balance.quantities.contracted).toNumber();
+  productSnapshot.unit = balance.unit;
 
   return {
     sourceContractId: sourceItem.contractId,
@@ -599,24 +641,24 @@ const linePayloadToCreate = async (line: any) => {
     pieceCount,
     plus,
     minus,
-    productSnapshot: line.productSnapshot || {
-      productId: sourceItem.productId,
-      name: sourceItem.product.namePersian || sourceItem.product.name,
-      productType: sourceItem.productType
-    },
-    sourceSnapshot: line.sourceSnapshot || {
+    productSnapshot,
+    sourceSnapshot: {
+      ...line.sourceSnapshot,
       contractId: sourceItem.contractId,
       contractNumber: sourceItem.contract.contractNumber,
       contractItemId: sourceItem.id,
-      contractedQuantity: productSnapshotFor(sourceItem.contract, sourceItem, 0).quantity
+      productRowId: sourceItem.productRowId,
+      groupKey: productGroupKey(sourceItem, productSnapshot),
+      contractedQuantity: productSnapshot.quantity,
+      remainingQuantity: new ExactQuantityDecimal(balance.quantities.availableToLoad).toNumber()
     },
     calculationSnapshot: {
       formula: khatRas !== null && pieceCount !== null ? 'khatRas * pieceCount + plus - minus' : 'direct',
-      khatRas,
-      pieceCount,
-      plus,
-      minus,
-      calculatedQuantity: calculated,
+      khatRas: khatRas?.toFixed() ?? null,
+      pieceCount: pieceCount?.toFixed() ?? null,
+      plus: plus.toFixed(),
+      minus: minus.toFixed(),
+      calculatedQuantity: exactQuantityText(calculated),
       unit
     },
     notes: line.notes || null
@@ -644,7 +686,7 @@ const buildLinesAndDriverAllocations = async (body: any) => {
       allocationCreates.push(payload);
       const key = payload.sourceContractItemId;
       const existing = totals.get(key);
-      totals.set(key, existing ? { ...existing, quantity: toNumber(existing.quantity) + toNumber(payload.quantity) } : { ...payload });
+      totals.set(key, existing ? { ...existing, quantity: decimalInput(existing.quantity).plus(payload.quantity) } : { ...payload });
     }
     allocationCreatesByTurn.set(queueTurnId, allocationCreates);
   }
@@ -657,7 +699,7 @@ const buildLinesAndDriverAllocations = async (body: any) => {
     minus: 0,
     calculationSnapshot: {
       formula: 'sum_driver_allocations',
-      calculatedQuantity: toNumber(line.quantity),
+      calculatedQuantity: exactQuantityText(line.quantity),
       unit: line.unit
     }
   }));
@@ -665,8 +707,8 @@ const buildLinesAndDriverAllocations = async (body: any) => {
   return { lineCreates, allocationCreatesByTurn };
 };
 
-const loadLoading = (id: string) => {
-  return prisma.logisticsLoading.findUnique({
+const loadLoading = async (id: string) => {
+  const loading = await prisma.logisticsLoading.findUnique({
     where: { id, sourceKind: 'SALES_CONTRACT' },
     include: {
       customer: true,
@@ -716,9 +758,21 @@ const loadLoading = (id: string) => {
       }
     }
   });
+  if (!loading) return null;
+  return {
+    ...loading,
+    cancellationRequest: await latestLoadingCancellationRequest(prisma, id),
+    canonicalAllocationRevisions: loading.canonicalAllocationRevisions.map(revision => ({
+      ...revision,
+      candidate: revision.candidate ? {
+        ...revision.candidate,
+        waybills: revision.candidate.waybills.map(waybill => ({ ...waybill, number: waybill.number.toString() })),
+      } : null,
+    })),
+  };
 };
 
-const validateLineRemaining = async (lines: Array<{ sourceContractItemId: string; quantity: number; unit: string }>, excludeLoadingId?: string) => {
+const validateLineRemaining = async (lines: Array<{ sourceContractItemId: string; quantity: Prisma.Decimal.Value; unit: string }>, excludeLoadingId?: string) => {
   const itemIds = lines.map((line) => line.sourceContractItemId);
   const sourceItems = await prisma.contractItem.findMany({
     where: { id: { in: itemIds }, retiredAt: null },
@@ -741,10 +795,10 @@ const validateLineRemaining = async (lines: Array<{ sourceContractItemId: string
     const item = sourceById.get(line.sourceContractItemId);
     if (!item) throw new Error('Source contract item not found');
     if (item.contract.isInactive) throw new Error('Inactive contracts cannot be used for loading operations');
-    const snapshot = productSnapshotFor((item as any).contract, item, 0);
+    const snapshot = productSnapshotFor((item as any).contract, item);
     const remaining = snapshot.quantity - (consumed.get(line.sourceContractItemId) || 0);
     const allowed = remaining + (isLinearUnit(line.unit) ? LINEAR_TOLERANCE : 0);
-    if (line.quantity > allowed + 0.0001) {
+    if (decimalInput(line.quantity).gt(allowed + 0.0001)) {
       throw new Error(`Loaded quantity exceeds remaining for source row ${line.sourceContractItemId}`);
     }
   }
@@ -796,21 +850,66 @@ router.get('/customers', canView, canCreateLoadings, async (req: any, res: Respo
     const search = String(req.query.search || '').trim();
     const phoneSearch = normalizePhoneSearch(search);
     const phoneContains = phoneSearch.length >= 3 ? { contains: phoneSearch, mode: 'insensitive' as const } : null;
+    const terms = normalizePersianSearchTokens(search);
     const customers = await prisma.crmCustomer.findMany({
-      where: customerSearchWhere(search, phoneContains),
+      where: customerSearchWhere(search, terms, phoneContains),
       include: {
         phoneNumbers: { where: { isActive: true }, orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }] },
-        projectAddresses: { where: { isActive: true }, orderBy: { updatedAt: 'desc' } },
+        projectAddresses: {
+          where: terms.length ? projectNameSearch(terms) : { id: { in: [] } },
+          select: { id: true, projectName: true, projectManagerName: true, projectManagerNumber: true }
+        },
         primaryContact: true
       },
       orderBy: { updatedAt: 'desc' },
       take: 50
     });
 
+    const partnerCustomerIds = customers.filter(customer => {
+      const name = normalizePersianSearchTokens(customerDisplayName(customer)).join(' ');
+      return !search || (terms.length > 0 && terms.every(term => name.includes(term)));
+    }).map(customer => customer.id);
+    const partnerCounts = new Map<string, { deliveries: number; groups: number }>();
+    if (partnerCustomerIds.length) {
+      const deliveries = await findLoadablePartnerDeliveries(prisma, {
+        actorId: req.user.id, correlationId: randomUUID(), customerIds: partnerCustomerIds,
+      });
+      for (const delivery of deliveries) {
+        const count = partnerCounts.get(delivery.customerId) ?? { deliveries: 0, groups: 0 };
+        count.deliveries++;
+        count.groups += delivery.remainingCount;
+        partnerCounts.set(delivery.customerId, count);
+      }
+    }
+
+    const projectMatches: any[] = [];
     const loadableCustomers: any[] = [];
     for (const customer of customers) {
       const projects = await loadableProjectsForCustomer(customer.id);
-      if (projects.length > 0) {
+      const matchingProjects = new Map(customer.projectAddresses.map(project => [project.id, project]));
+      const matchesName = [customerDisplayName(customer), customer.companyName, customer.brandName]
+        .some(name => {
+          const normalized = normalizePersianSearchTokens(name).join(' ');
+          return terms.every(term => normalized.includes(term));
+        });
+
+      for (const { project, remainingCount } of projects) {
+        const match = matchingProjects.get(project.id);
+        if (!match || matchesName) continue;
+        const managerName = normalizePersianSearchTokens(match.projectManagerName).join(' ');
+        projectMatches.push({
+          id: customer.id,
+          projectId: match.id,
+          customerName: (terms.every(term => managerName.includes(term)) ? match.projectManagerName?.trim() : match.projectName?.trim())
+            || match.projectManagerName?.trim() || customerDisplayName(customer),
+          primaryPhone: match.projectManagerNumber,
+          loadableProjectCount: 1,
+          remainingGroupCount: remainingCount
+        });
+      }
+
+      const partner = partnerCounts.get(customer.id);
+      if (partner || (projects.length > 0 && (matchesName || matchingProjects.size === 0))) {
         loadableCustomers.push({
           id: customer.id,
           customerName: customerDisplayName(customer),
@@ -819,13 +918,13 @@ router.get('/customers', canView, canCreateLoadings, async (req: any, res: Respo
           projectManagerName: customer.projectManagerName,
           projectManagerNumber: customer.projectManagerNumber,
           primaryPhone: customer.phoneNumbers[0]?.number || customer.primaryContact?.mobile || customer.primaryContact?.phone || customer.homeNumber || customer.workNumber || null,
-          loadableProjectCount: projects.length,
-          remainingGroupCount: projects.reduce((sum, item) => sum + item.remainingCount, 0)
+          loadableProjectCount: projects.length + (partner?.deliveries ?? 0),
+          remainingGroupCount: projects.reduce((sum, item) => sum + item.remainingCount, partner?.groups ?? 0)
         });
       }
     }
 
-    res.json({ success: true, data: loadableCustomers });
+    res.json({ success: true, data: [...projectMatches, ...loadableCustomers] });
   } catch (error) {
     console.error('Logistics customers error:', error);
     res.status(500).json({ success: false, error: 'Server error' });
@@ -837,10 +936,14 @@ router.get('/customers/:customerId/projects', canView, canCreateLoadings, async 
     const customer = await prisma.crmCustomer.findUnique({ where: { id: req.params.customerId } });
     if (!customer) return res.status(404).json({ success: false, error: 'Customer not found' });
 
-    const projects = await loadableProjectsForCustomer(customer.id);
+    const projectId = typeof req.query.projectId === 'string' ? req.query.projectId : undefined;
+    const projects = await loadableProjectsForCustomer(customer.id, projectId);
+    const partnerDeliveries = !projectId && customer.isActive ? await findLoadablePartnerDeliveries(prisma, {
+      actorId: req.user.id, correlationId: randomUUID(), customerIds: [customer.id],
+    }) : [];
     res.json({
       success: true,
-      data: projects.map(({ project, remainingCount, remainingTotal }) => ({
+      data: [...projects.map(({ project, remainingCount, remainingTotal }) => ({
         id: project.id,
         projectName: project.projectName,
         projectType: project.projectType,
@@ -852,8 +955,8 @@ router.get('/customers/:customerId/projects', canView, canCreateLoadings, async 
         projectManagerName: project.projectManagerName || project.customer.projectManagerName,
         projectManagerNumber: project.projectManagerNumber || project.customer.projectManagerNumber,
         remainingCount,
-        remainingTotal: Number(remainingTotal.toFixed(3))
-      }))
+        remainingTotal: Number(remainingTotal)
+      })), ...partnerDeliveries]
     });
   } catch (error) {
     console.error('Logistics customer projects error:', error);
@@ -1002,6 +1105,7 @@ router.get('/loadings', canView, canViewLoadings, async (req: any, res: Response
       success: true,
       data: loadings.map((loading) => ({
         id: loading.id,
+        sourceKind: loading.sourceKind,
         loadingNumber: loading.loadingNumber,
         status: loading.status,
         loadingDate: loading.loadingDate,
@@ -1126,6 +1230,7 @@ router.delete('/loadings/:id', canEdit, canEditLoadings, async (req: any, res: R
     if (existing.status !== EDITABLE_STATUS) return res.status(400).json({ success: false, error: 'Only draft loadings can be deleted' });
 
     await prisma.$transaction(async (tx) => {
+      if (await retirePersonalLoadingDraft(tx, existing.id, req.user.id)) return;
       await releaseQueueTurn(tx, existing.id);
       await tx.logisticsLoading.delete({ where: { id: existing.id } });
     });
@@ -1183,24 +1288,75 @@ router.post('/loadings/:id/finalize', canEdit, canFinalizeLoadings, async (req: 
   }
 });
 
+router.get('/loadings/:id/cancellation-documents', canEdit, canCancelLoadings, async (req: any, res: Response) => {
+  try {
+    const loading = await readLoadingCancellationDocuments(prisma, req.params.id);
+    if (!loading) return res.status(404).json({ success: false, error: 'بارگیری پیدا نشد.' });
+    if (!loading.eligible) return res.status(409).json({ success: false, error: 'لغو بارگیری نهایی‌شده فقط پیش از ثبت خروج ممکن است.' });
+    const { documents } = loading;
+    const canVoidDocuments = documents.length === 0 || Boolean(await loadingCancellationAccountingAuthority(prisma, req.user.id));
+    res.setHeader('Cache-Control', 'private, no-store');
+    return res.json({ success: true, data: { documents, canVoidDocuments } });
+  } catch (error) {
+    console.error('Loading cancellation documents error:', error);
+    return res.status(500).json({ success: false, error: 'بررسی اسناد بارگیری انجام نشد.' });
+  }
+});
+
+router.post('/loadings/:id/cancellation-request', canEdit, canCancelLoadings, [
+  body('reason').isString().trim().isLength({ min: 3, max: 2000 }),
+], async (req: any, res: Response) => {
+  if (!validationResult(req).isEmpty()) {
+    return res.status(400).json({ success: false, error: 'دلیل لغو باید بین ۳ تا ۲۰۰۰ نویسه باشد.' });
+  }
+  try {
+    const data = await requestLoadingCancellation(prisma, { loadingId: req.params.id, actorId: req.user.id, reason: req.body.reason });
+    return res.json({ success: true, data });
+  } catch (error) {
+    if (error instanceof DispatchAllocationConflictError) return res.status(409).json({ success: false, error: error.message });
+    console.error('Request loading cancellation error:', error);
+    return res.status(500).json({ success: false, error: 'ثبت درخواست لغو بارگیری انجام نشد.' });
+  }
+});
+
 router.post('/loadings/:id/cancel', canEdit, canCancelLoadings, [
-  body('reason').notEmpty().withMessage('Cancellation reason is required')
+  body('reason').isString().trim().isLength({ min: 1, max: 2000 }).withMessage('دلیل لغو باید بین ۱ تا ۲۰۰۰ نویسه باشد.'),
+  body('expectedDocumentIds').optional().isArray(),
+  body('expectedDocumentIds.*').isString().notEmpty()
 ], async (req: any, res: Response) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'Validation failed', details: errors.array() });
 
-    const loading = await prisma.logisticsLoading.findUnique({ where: { id: req.params.id, sourceKind: 'SALES_CONTRACT' } });
+    const loading = await prisma.logisticsLoading.findUnique({ where: { id: req.params.id, sourceKind: 'SALES_CONTRACT' },
+      include: { _count: { select: { canonicalAllocationRevisions: true } } },
+    });
     if (!loading) return res.status(404).json({ success: false, error: 'Loading not found' });
+    const reason = String(req.body.reason || '').trim();
+    if (!reason) return res.status(400).json({ success: false, error: 'دلیل لغو لازم است.' });
+    if (loading._count.canonicalAllocationRevisions > 0) {
+      const id = await cancelFinalizedOrdinaryLoading(prisma, { loadingId: loading.id, reason, actorId: req.user.id, expectedDocumentIds: req.body.expectedDocumentIds });
+      return res.json({ success: true, data: await loadLoading(id) });
+    }
     if (loading.status === CANCELLED_STATUS) return res.status(400).json({ success: false, error: 'Loading is already cancelled' });
 
-    const updated = await prisma.$transaction(async (tx) => {
+    await prisma.$transaction(async (tx) => {
+      const changed = await tx.logisticsLoading.updateMany({
+        where: { id: loading.id, status: loading.status },
+        data: { status: CANCELLED_STATUS, cancelledAt: new Date(), cancelledBy: req.user.id, cancellationReason: reason },
+      });
+      if (changed.count !== 1) throw new DispatchAllocationConflictError('وضعیت بارگیری تغییر کرده است. صفحه را به‌روز کنید.');
       await releaseQueueTurn(tx, loading.id);
-      return tx.logisticsLoading.update({ where: { id: loading.id }, data: { status: CANCELLED_STATUS as any, cancelledAt: new Date(), cancelledBy: req.user.id, cancellationReason: req.body.reason } });
     });
 
-    res.json({ success: true, data: await loadLoading(updated.id) });
+    res.json({ success: true, data: await loadLoading(loading.id) });
   } catch (error: any) {
+    if (error instanceof LoadingCancellationAccountingAccessError) {
+      return res.status(403).json({ success: false, error: error.message });
+    }
+    if (error instanceof DispatchAllocationConflictError || error instanceof PilotSafetyPauseError) {
+      return res.status(409).json({ success: false, error: error.message });
+    }
     console.error('Cancel loading error:', error);
     res.status(error.statusCode || 500).json({ success: false, error: error.message || 'Server error' });
   }
@@ -1224,11 +1380,11 @@ router.post('/loadings/:id/corrections', canEdit, canCreateCorrections, [
     const deltaQuantity = decimalInput(req.body.deltaQuantity);
     const unit = String(req.body.unit || inferUnit(sourceItem, null));
 
-    if (deltaQuantity > 0) {
+    if (deltaQuantity.gt(0)) {
       await validateLineRemaining([{ sourceContractItemId: sourceItem.id, quantity: deltaQuantity, unit }]);
     } else {
       const consumed = await getConsumptionByItemIds([sourceItem.id]);
-      if (Math.abs(deltaQuantity) > (consumed.get(sourceItem.id) || 0) + 0.0001) {
+      if (deltaQuantity.abs().toNumber() > (consumed.get(sourceItem.id) || 0) + 0.0001) {
         return res.status(400).json({ success: false, error: 'Correction cannot reduce loaded amount below zero' });
       }
     }

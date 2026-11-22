@@ -7,6 +7,29 @@ import { readSharedOperationAuthority } from './sharedOperationAuthority';
 
 const rank: Record<EffectiveWorkspacePermission, number> = { view: 1, edit: 2, admin: 3 };
 
+/** Reuse only raw permission rows within one read-only authority resolution.
+ * Each consumer still evaluates expiry against its own current time. The cache
+ * is discarded before the next authorization decision or business write. */
+function effectiveAccessReadClient(tx: Prisma.TransactionClient): Prisma.TransactionClient {
+  const models = new Set(['workspacePermission', 'roleWorkspacePermission', 'featurePermission',
+    'roleFeaturePermission', 'hrWorkspaceAccessGrant', 'hrFeatureAccessGrant']);
+  const reads = new Map<string, Promise<unknown>>();
+  return new Proxy(tx, { get(target, model, receiver) {
+    const delegate = Reflect.get(target, model, receiver);
+    if (typeof model !== 'string' || !models.has(model)) return delegate;
+    return new Proxy(delegate, { get(table, method, tableReceiver) {
+      const value = Reflect.get(table, method, tableReceiver);
+      if (method !== 'findMany') return value;
+      return (...args: unknown[]) => {
+        const key = JSON.stringify([model, args]);
+        let read = reads.get(key);
+        if (!read) { read = Promise.resolve(Reflect.apply(value, table, args)); reads.set(key, read); }
+        return read;
+      };
+    } });
+  } });
+}
+
 export type PartnerWorkspaceAuthority = {
   isSystemAdmin: boolean;
   disabledFeatures?: string[];
@@ -28,6 +51,7 @@ export async function resolvePartnerWorkspaceAuthority(
   tx: Prisma.TransactionClient,
   actorId: string,
   purpose?: 'ACCOUNTING' | 'RESPONDER',
+  options: { fencedPermissionReads?: boolean } = {},
 ): Promise<PartnerWorkspaceAuthority> {
   const actor = await tx.user.findUnique({
     where: { id: actorId },
@@ -36,7 +60,10 @@ export async function resolvePartnerWorkspaceAuthority(
   if (!actor?.isActive || actor.partnerProfile) {
     return { isSystemAdmin: false, canViewAssigned: false, canRespondAssigned: false, canManageInquiries: false, grants: [] };
   }
-  const effective = await getEffectiveUserAccess(tx, { userId: actorId, userRole: actor.role });
+  // Only the Accounting adapter, after acquiring the central authority fence,
+  // may share raw rows. Unfenced advisory readers must re-read each time.
+  const accessClient = purpose === 'ACCOUNTING' && options.fencedPermissionReads ? effectiveAccessReadClient(tx) : tx;
+  const effective = await getEffectiveUserAccess(accessClient, { userId: actorId, userRole: actor.role });
   const level = (feature: string) => effective.features.find(item => item.feature === feature)?.permission;
   const atLeast = (feature: string, required: EffectiveWorkspacePermission) => {
     const actual = level(feature);
@@ -70,14 +97,14 @@ export async function resolvePartnerWorkspaceAuthority(
       disabledFeatures: effective.disabledFeatures };
   }
 
-  if ((await readPartnerCommercialAccountingCapabilities(tx, actorId)).view) {
+  if ((await readPartnerCommercialAccountingCapabilities(tx, actorId, { viewOnly: true, accessClient })).view) {
     add({ action: 'ACCOUNTING_READ', rootKind: 'CASE', purpose: 'ACCOUNTING', scope: 'COMPANY' });
   }
 
   // Broad Case access is only the first gate. Every shared command retains its
   // exact feature check, so payments authority cannot enqueue an invoice, and
   // Guard authority cannot create a loading or materialize stock lineage.
-  const shared = await readSharedOperationAuthority(tx, actorId);
+  const shared = await readSharedOperationAuthority(tx, actorId, accessClient);
   const accountingWrites = [FEATURES.ACCOUNTING_INVOICE_CANDIDATES_MANAGE,
     FEATURES.ACCOUNTING_RECEIVABLES_MANAGE, FEATURES.ACCOUNTING_PAYMENTS_MANAGE,
     FEATURES.ACCOUNTING_TAX_MANAGE, FEATURES.ACCOUNTING_RECORDS_APPROVE_VOID,
@@ -135,6 +162,9 @@ export async function resolvePartnerWorkspaceAuthority(
   }
 
   addResponderGrants();
+  if (effective.workspaces.some(({ workspace, permission }) => workspace === 'sales' && permission === 'admin')) {
+    add({ action: 'CASE_COMMERCIAL_RENEW', rootKind: 'CASE', purpose: 'MANAGEMENT', scope: 'COMPANY' });
+  }
   if (canManageInquiries) {
     add({ action: 'PROFILE_READ', rootKind: 'PROFILE', purpose: 'ONBOARDING', scope: 'COMPANY' });
     add({ action: 'COMMERCIAL_TERMS_MANAGE', rootKind: 'PROFILE', purpose: 'MANAGEMENT', scope: 'COMPANY' });

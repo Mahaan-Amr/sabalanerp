@@ -1,0 +1,47 @@
+"""Fixed private image export component. No tags, runtime startup or admission."""
+import gzip,hashlib,json,os,pathlib,stat,subprocess,sys
+P=pathlib.Path
+root=P(sys.argv[1]);spec=json.loads((root/'selection.json').read_text())
+def require(value,code):
+ if not value:raise RuntimeError(code)
+def identity(p):
+ s=p.lstat();require(p.resolve(strict=True)==p and stat.S_ISREG(s.st_mode) and s.st_nlink==1 and s.st_uid==0,'UNSAFE_EXPORT_FILE');return (s.st_dev,s.st_ino,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
+def sync(p):
+ fd=os.open(p,os.O_RDONLY|os.O_NOFOLLOW)
+ try:os.fsync(fd)
+ finally:os.close(fd)
+def save(p,v):
+ with p.open('xb') as f:os.fchmod(f.fileno(),0o400);f.write(json.dumps(v,indent=2).encode());f.flush();os.fsync(f.fileno())
+ sync(p.parent)
+require(root.is_absolute() and root.resolve(strict=True)==root and root.stat().st_uid==0 and not root.stat().st_mode&0o077,'UNSAFE_EXPORT_ROOT')
+require(set(spec)=={'services'} and set(spec['services'])=={'backend','frontend','inquiry'},'INVALID_EXPORT_SELECTION')
+results={}
+for service,selected in spec['services'].items():
+ image=selected['imageId'];require(len(image)==71 and image.startswith('sha256:') and all(x in '0123456789abcdef' for x in image[7:]),'INVALID_IMAGE_ID')
+ actual=json.loads(subprocess.check_output(['docker','image','inspect',image],text=True))[0]
+ require(actual['Id']==image and actual['RootFS']['Layers']==selected['rootfsDiffIds'],'IMAGE_CHANGED')
+ raw=root/(service+'.docker.tar');require(not raw.exists(),'EXPORT_OUTPUT_EXISTS')
+ subprocess.run(['docker','image','save','--output',str(raw),image],check=True)
+ os.chmod(raw,0o400);sync(raw);sync(root)
+ script="import {inspectPrivateDockerArchive} from './inspect.mjs';console.log(JSON.stringify(inspectPrivateDockerArchive(process.argv[1],process.argv[2])));"
+ verified=json.loads(subprocess.check_output(['node','--input-type=module','-e',script,str(raw),image],cwd=root,text=True))
+ require(verified['index']==image and verified['rootfsDiffIds']==selected['rootfsDiffIds'],'ARCHIVE_IMAGE_MISMATCH')
+ before=identity(raw);packed=root/(service+'.docker.tar.gz');require(not packed.exists(),'COMPRESSED_OUTPUT_EXISTS')
+ with raw.open('rb') as source,packed.open('xb') as output:
+  os.fchmod(output.fileno(),0o400)
+  with gzip.GzipFile(filename='',fileobj=output,mode='wb',mtime=0,compresslevel=1) as compressor:
+   while chunk:=source.read(1048576):compressor.write(chunk)
+  output.flush();os.fsync(output.fileno())
+ sync(root);require(identity(raw)==before,'RAW_ARCHIVE_CHANGED')
+ expected=identity(packed);digest=hashlib.sha256()
+ with packed.open('rb') as source:
+  while chunk:=source.read(1048576):digest.update(chunk)
+ roundtrip=hashlib.sha256();count=0
+ with gzip.open(packed,'rb') as source:
+  while chunk:=source.read(1048576):
+   count+=len(chunk);require(count<=verified['archiveBytes'],'COMPRESSED_EXPANSION_BOUND');roundtrip.update(chunk)
+ require(count==verified['archiveBytes'] and roundtrip.hexdigest()==verified['archiveSha256'] and identity(packed)==expected,'COMPRESSED_ROUNDTRIP_FAILED')
+ result={'service':service,'sourceImageId':image,'archive':str(packed),'compressedBytes':packed.stat().st_size,'compressedSha256':digest.hexdigest(),'verifiedRawArchive':verified,'fullLocalRoundtripVerified':True}
+ save(root/(service+'-export-proof.json'),result);results[service]=result
+save(root/'image-set-component-proof.json',{'format':'sabalan-production-image-component/v1','images':results,'healthyApplicationPoint':False,'publicOnlineAdmission':False})
+print(json.dumps({'images':results,'healthyApplicationPoint':False,'publicOnlineAdmission':False}))

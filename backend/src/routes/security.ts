@@ -1,19 +1,21 @@
+import { loadPersonnelAttendanceAccounting } from '../services/personnelAttendanceAccounting';
 import { prisma } from '../lib/prisma';
 import express, { Response } from 'express';
 import fs from 'fs';
 import path from 'path';
-import multer from 'multer';
+import { createSharedDurableUpload } from '../services/sharedUploadFileRuntime';
 import * as XLSX from 'xlsx';
 import { body, validationResult } from 'express-validator';
-import { AttendanceIntervalStatus, AttendanceStatus, AttendanceWorkScheduleStatus, ExceptionStatus, ExceptionType, LogisticsDriverRequestStatus, PrismaClient, SecurityDriverQueueTurnStatus, SecurityPatrolStatus, SecurityShiftCoverageStatus, SecurityShiftLogStatus, SecurityShiftPlanStatus, SecurityShiftSessionStatus, SecurityVehiclePairPhotoCategory, SecurityVehiclePlateKind } from '@prisma/client';
+import { AttendanceIntervalStatus, AttendanceStatus, AttendanceWorkScheduleStatus, ExceptionStatus, ExceptionType, LogisticsDriverRequestStatus, Prisma, PrismaClient, SecurityDriverQueueTurnStatus, SecurityPatrolStatus, SecurityShiftCoverageStatus, SecurityShiftLogStatus, SecurityShiftPlanStatus, SecurityShiftSessionStatus, SecurityVehiclePairPhotoCategory, SecurityVehiclePlateKind } from '@prisma/client';
 import { protect, authorize, AuthRequest } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACES, WORKSPACE_PERMISSIONS } from '../middleware/workspace';
 import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
 import { generatePdfFromHtml } from '../utils/pdf';
+import { downloadAndRemoveDocumentPdf } from '../services/documentPdfDownload';
 import { buildPersonnelAttendanceReport, parsePersonnelAttendanceReportOptions, PersonnelAttendanceReportInputError, PersonnelAttendanceReportOptions } from '../services/personnelAttendanceReport';
 import { renderPersonnelAttendanceReportPdf } from '../services/personnelAttendanceReportPdf';
 import { renderSecurityAttendanceReportHtml, securityAttendanceStatusLabel, SecurityAttendanceReportRow } from '../utils/securityAttendanceReport';
-import { addSecurityDays, parseSecurityBusinessDate, securityNowTime, securityPersianDate, securityPersianDateWithWeekday } from '../utils/securityBusinessDate';
+import { addSecurityDays, isFutureSecurityAttendanceTime, parseSecurityBusinessDate, securityNowTime, securityPersianDate, securityPersianDateWithWeekday } from '../utils/securityBusinessDate';
 import { calculateDelayMinutes, calculateScheduledOvertime, loadApplicableWorkSchedules, resolveWorkScheduleDay, scheduledStartHasPassed } from '../utils/personnelWorkSchedule';
 import { buildDashboardRecentReports, buildSecurityDashboardAwareness } from '../services/securityDashboardAwareness';
 import { buildCombinedSecurityShiftTimeline, validateShiftSessionCorrectionPolicy } from '../services/securityShiftSessionPolicy';
@@ -27,6 +29,9 @@ import { completeGuardInboundMovement, GuardInboundMovementConflictError, guardI
   GuardInboundMovementNotFoundError, GuardInboundMovementValidationError, presentGuardInboundMovement,
   recordGuardInboundMovement } from '../services/guardInboundMovement';
 import canonicalGuardQueueRoutes from './canonical-guard-queue';
+import { attendanceDeviceManage, attendanceDeviceReview } from '../middleware/attendanceDeviceAccess';
+import { applyAttendanceCorrection } from '../services/attendanceCorrection';
+import { lockAttendance, AttendanceDeviceError, refreshDeviceAttendance, requireReviewHandover } from '../services/attendanceDevice';
 
 const router = express.Router();
 
@@ -65,17 +70,17 @@ const businessInstant = (businessDate: Date, time: string, nextDay = false) => {
 const securityTimeFromInstant = (value: Date) => securityNowTime(value);
 
 const intervalSummary = (intervals: any[]) => {
-  const active = intervals.filter((interval) => interval.status !== AttendanceIntervalStatus.VOIDED).sort((a, b) => new Date(a.enteredAt).getTime() - new Date(b.enteredAt).getTime());
-  const completed = active.filter((interval) => interval.exitedAt);
+  const active = intervals.filter((interval) => interval.status !== AttendanceIntervalStatus.VOIDED).sort((a, b) => new Date(a.enteredAt || a.observedInsideAt).getTime() - new Date(b.enteredAt || b.observedInsideAt).getTime());
+  const completed = active.filter((interval) => interval.enteredAt && interval.exitedAt && !interval.exitUnknown);
   const firstEntry = active[0]?.enteredAt ? securityTimeFromInstant(new Date(active[0].enteredAt)) : null;
   const finalExitInterval = [...active].reverse().find((interval) => interval.exitedAt);
   const finalExit = finalExitInterval?.exitedAt ? securityTimeFromInstant(new Date(finalExitInterval.exitedAt)) : null;
   const presenceMinutes = completed.reduce((sum, interval) => sum + Math.max(0, Math.floor((new Date(interval.exitedAt).getTime() - new Date(interval.enteredAt).getTime()) / 60_000)), 0);
   const outsideMinutes = active.slice(1).reduce((sum, interval, index) => {
     const previousExit = active[index]?.exitedAt;
-    return previousExit ? sum + Math.max(0, Math.floor((new Date(interval.enteredAt).getTime() - new Date(previousExit).getTime()) / 60_000)) : sum;
+    return previousExit && interval.enteredAt ? sum + Math.max(0, Math.floor((new Date(interval.enteredAt).getTime() - new Date(previousExit).getTime()) / 60_000)) : sum;
   }, 0);
-  return { intervals: active, firstEntry, finalExit, presenceMinutes, outsideMinutes, isOpen: active.some((interval) => !interval.exitedAt) };
+  return { intervals: active, firstEntry, finalExit, presenceMinutes, outsideMinutes, isOpen: active.some((interval) => !interval.exitedAt && !interval.exitUnknown), durationUnknown: active.some((interval) => !interval.enteredAt || !interval.exitedAt || interval.exitUnknown) };
 };
 
 const appendManualAttendanceNote = (existingNote: string | null | undefined, actionLabel: string, reason?: unknown) => {
@@ -91,6 +96,10 @@ const intervalAuditSnapshot = (interval: any) => JSON.parse(JSON.stringify({
   status: interval.status,
   entryReason: interval.entryReason,
   exitReason: interval.exitReason,
+  exitUnknown: interval.exitUnknown,
+  observedInsideAt: interval.observedInsideAt,
+  revision: interval.revision,
+  confirmedRevision: interval.confirmedRevision,
   voidReason: interval.voidReason,
   voidedAt: interval.voidedAt,
   voidedBy: interval.voidedBy
@@ -250,7 +259,7 @@ const unionMinutes = (windows: Array<{ startsAt: Date; endsAt: Date }>) => {
 const movementSegments = (intervals: any[], hourlyLeaves: any[]) => {
   const segments: Array<{ kind: 'PRESENCE' | 'OUTSIDE' | 'HOURLY_LEAVE'; startsAt: Date; endsAt: Date | null }> = [];
   intervals.forEach((interval, index) => {
-    segments.push({ kind: 'PRESENCE', startsAt: new Date(interval.enteredAt), endsAt: interval.exitedAt ? new Date(interval.exitedAt) : null });
+    if (interval.enteredAt) segments.push({ kind: 'PRESENCE', startsAt: new Date(interval.enteredAt), endsAt: interval.exitedAt ? new Date(interval.exitedAt) : null });
     const gapStart = interval.exitedAt ? new Date(interval.exitedAt) : null;
     const nextEntry = intervals[index + 1]?.enteredAt ? new Date(intervals[index + 1].enteredAt) : null;
     if (!gapStart || !nextEntry || nextEntry <= gapStart) return;
@@ -322,7 +331,7 @@ const buildDailyAttendance = async (filters: { date?: unknown; departmentId?: un
     where: {
       personnelId: { in: allPersonnel.map((personnel) => personnel.id) },
       date: { lt: targetDate },
-      intervals: { some: { status: AttendanceIntervalStatus.ACTIVE, exitedAt: null } }
+      intervals: { some: { status: AttendanceIntervalStatus.ACTIVE, exitedAt: null, exitUnknown: false } }
     },
     include: attendanceInclude,
     orderBy: { date: 'desc' }
@@ -332,6 +341,11 @@ const buildDailyAttendance = async (filters: { date?: unknown; departmentId?: un
     if (record.personnelId && !openPreviousByPersonnel.has(record.personnelId)) openPreviousByPersonnel.set(record.personnelId, record);
   });
 
+  const ambiguousDevicePunches = await prisma.attendancePunch.findMany({
+    where: { personnelId: { in: personnelIds }, status: 'REVIEW', occurredAt: { gte: businessInstant(targetDate, '00:00'), lt: businessInstant(nextDay, '00:00') } },
+    select: { personnelId: true }
+  });
+  const ambiguousDevicePeople = new Set(ambiguousDevicePunches.map(p => p.personnelId));
   const attendanceSummary = allPersonnel.map((personnel) => {
     const record = recordsByPersonnel.get(personnel.id);
     const movement = intervalSummary(record?.intervals || []);
@@ -364,11 +378,11 @@ const buildDailyAttendance = async (filters: { date?: unknown; departmentId?: un
       : record?.delayMinutes ?? null;
     const derivedStatus = leaveStatus || (!movement.intervals.length && personMissions.length ? AttendanceStatus.MISSION
       : movement.intervals.length ? (adjustedDelay && adjustedDelay > 0 ? AttendanceStatus.LATE : AttendanceStatus.PRESENT)
-        : missingStatus);
+        : ambiguousDevicePeople.has(personnel.id) ? AttendanceStatus.PENDING : missingStatus);
     const dayStart = businessInstant(targetDate, '00:00');
     const dayEnd = businessInstant(nextDay, '00:00');
     const accountedWindows = [
-      ...movement.intervals.filter((interval: any) => interval.exitedAt).map((interval: any) => ({ startsAt: new Date(interval.enteredAt), endsAt: new Date(interval.exitedAt) })),
+      ...movement.intervals.filter((interval: any) => interval.enteredAt && interval.exitedAt && !interval.exitUnknown).map((interval: any) => ({ startsAt: new Date(interval.enteredAt), endsAt: new Date(interval.exitedAt) })),
       ...personMissions.map((mission) => authorityBounds(mission))
     ].map((window) => ({ startsAt: new Date(Math.max(dayStart.getTime(), window.startsAt.getTime())), endsAt: new Date(Math.min(dayEnd.getTime(), window.endsAt.getTime())) }));
     return {
@@ -381,16 +395,18 @@ const buildDailyAttendance = async (filters: { date?: unknown; departmentId?: un
       exitTime: movement.finalExit || record?.exitTime || null,
       status: derivedStatus,
       exceptionType: fullDayLeave?.exceptionType || hourlyLeaves[0]?.exceptionType || record?.exceptionType || null,
-      notes: record?.notes || null,
+      notes: [record?.notes, movement.intervals.some((i: any) => !i.enteredAt || i.exitUnknown) ? 'زمان حضور نیازمند بررسی' : null, movement.intervals.some((i: any) => i.exitUnknown) ? 'خروج فراموش‌شده؛ ساعت نامعلوم' : null, ambiguousDevicePeople.has(personnel.id) ? 'تردد دستگاه نیازمند بررسی است؛ وضعیت قطعی نیست' : null].filter(Boolean).join('\n') || null,
       digitalSignature: record?.digitalSignature || null,
       createdAt: record?.createdAt || null,
       shift: null,
       intervals: movement.intervals,
       movementTimeline: movementSegments(movement.intervals, hourlyLeaves),
       physicalPresenceMinutes: movement.presenceMinutes,
-      outsideMinutes: movement.outsideMinutes,
+      durationUnknown: movement.durationUnknown,
+      verificationPending: movement.intervals.some((i: any) => !i.enteredAt || i.exitUnknown),
+      outsideMinutes: movement.intervals.some((i: any) => i.exitUnknown) ? null : movement.outsideMinutes,
       presencePending: movement.isOpen,
-      accountedWorkMinutes: movement.isOpen ? null : unionMinutes(accountedWindows),
+      accountedWorkMinutes: movement.durationUnknown ? null : unionMinutes(accountedWindows),
       approvedExceptions: personExceptions,
       approvedLeaves: personLeaves,
       approvedMissions: personMissions,
@@ -403,6 +419,7 @@ const buildDailyAttendance = async (filters: { date?: unknown; departmentId?: un
       openPreviousAttendance: openPreviousAttendance ? {
         id: openPreviousAttendance.id,
         date: openPreviousAttendance.date,
+        intervalId: openPreviousAttendance.intervals.find((i: any) => !i.exitedAt && !i.exitUnknown && i.status === 'ACTIVE')?.id,
         entryTime: intervalSummary(openPreviousAttendance.intervals || []).firstEntry || openPreviousAttendance.entryTime,
         shift: null,
         notes: openPreviousAttendance.notes
@@ -438,19 +455,24 @@ const pairIsComplete = (pair: any) => Boolean(
   pair.homeAddress?.trim() && pair.relativePhone?.trim() &&
   ['DRIVER_LICENSE', 'VEHICLE_CARD', 'DRIVER_PHOTO'].every((category) => pair.photos?.some((photo: any) => photo.category === category))
 );
-const removeStoredFiles = (files: Express.Multer.File[] = []) => files.forEach((file) => {
-  try { fs.unlinkSync(file.path); } catch { /* best effort cleanup */ }
-});
-const vehiclePhotoUpload = multer({
-  storage: multer.diskStorage({
+// Only this request's original unreferenced publication can be discarded.
+// Submission to SQL makes uncertain acknowledgement retain the original bytes.
+const removeStoredFiles = async (request: AuthRequest, files: Express.Multer.File[] = []) => {
+  for (const file of files) {
+    const upload = path.dirname(file.path) === vehiclePhotoDir ? vehiclePhotoUpload : shiftLogPhotoUpload;
+    await upload.discardUnreferenced(request, file);
+  }
+};
+const vehiclePhotoUpload = createSharedDurableUpload(vehiclePhotoDir, {
+  storage: {
     destination: (_req, _file, cb) => { fs.mkdirSync(vehiclePhotoDir, { recursive: true }); cb(null, vehiclePhotoDir); },
     filename: (_req, file, cb) => cb(null, `${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(file.originalname).toLowerCase()}`)
-  }),
+  },
   fileFilter: (_req, file, cb) => cb(null, ['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype) && ['.jpg', '.jpeg', '.png', '.webp'].includes(path.extname(file.originalname).toLowerCase())),
   limits: { fileSize: 10 * 1024 * 1024 }
 });
-const shiftLogPhotoUpload = multer({
-  storage: multer.diskStorage({ destination: (_req, _file, cb) => { fs.mkdirSync(shiftLogPhotoDir, { recursive: true }); cb(null, shiftLogPhotoDir); }, filename: (_req, file, cb) => cb(null, `${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(file.originalname).toLowerCase()}`) }),
+const shiftLogPhotoUpload = createSharedDurableUpload(shiftLogPhotoDir, {
+  storage: { destination: (_req, _file, cb) => { fs.mkdirSync(shiftLogPhotoDir, { recursive: true }); cb(null, shiftLogPhotoDir); }, filename: (_req, file, cb) => cb(null, `${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(file.originalname).toLowerCase()}`) },
   fileFilter: (_req, file, cb) => cb(null, ['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype)), limits: { fileSize: 10 * 1024 * 1024, files: 8 }
 });
 const uploadedFiles = (req: any) => (Array.isArray(req.files) ? req.files : Object.values(req.files || {}).flat()) as Express.Multer.File[];
@@ -540,14 +562,15 @@ router.post('/vehicle-pairs', protect, securityAdmin, vehiclePhotoUpload.any(), 
     const photos = photoCreateData(req);
     const files = uploadedFiles(req);
     if (inputError || files.some((file) => !categoryByField[file.fieldname]) || !Object.values(SecurityVehiclePairPhotoCategory).every((category) => photos.some((photo) => photo.category === category))) {
-      removeStoredFiles(uploadedFiles(req));
+      await removeStoredFiles(req, uploadedFiles(req));
       return res.status(400).json({ success: false, error: inputError || 'حداقل یک تصویر در هر دسته الزامی است.' });
     }
     const duplicate = await prisma.securityVehiclePair.findFirst({ where: { nationalCode: data.nationalCode, vehiclePlate: data.vehiclePlate } });
     if (duplicate) {
-      removeStoredFiles(uploadedFiles(req));
+      await removeStoredFiles(req, uploadedFiles(req));
       return res.status(409).json({ success: false, error: duplicate.isActive ? 'این راننده و خودرو قبلاً ثبت شده است.' : 'این زوج غیرفعال است؛ آن را ویرایش یا فعال کنید.' });
     }
+    for (const file of files) vehiclePhotoUpload.retain(req, file);
     const pair = await prisma.securityVehiclePair.create({
       data: {
         ...data, createdBy: req.user!.id, informationGraceEndsAt: null,
@@ -557,7 +580,7 @@ router.post('/vehicle-pairs', protect, securityAdmin, vehiclePhotoUpload.any(), 
     });
     res.status(201).json({ success: true, data: pair });
   } catch (error) {
-    removeStoredFiles(uploadedFiles(req));
+    await removeStoredFiles(req, uploadedFiles(req));
     console.error('Create security vehicle pair error:', error);
     res.status(500).json({ success: false, error: 'Server error' });
   }
@@ -606,14 +629,15 @@ router.post('/vehicle-pairs/:id/photos', protect, securityAdmin, vehiclePhotoUpl
   const files = uploadedFiles(req);
   try {
     if (!files.length) return res.status(400).json({ success: false, error: 'حداقل یک تصویر انتخاب کنید.' });
-    if (files.some((file) => !categoryByField[file.fieldname])) { removeStoredFiles(files); return res.status(400).json({ success: false, error: 'دسته تصویر نامعتبر است.' }); }
+    if (files.some((file) => !categoryByField[file.fieldname])) { await removeStoredFiles(req, files); return res.status(400).json({ success: false, error: 'دسته تصویر نامعتبر است.' }); }
     const pair = await prisma.securityVehiclePair.findUnique({ where: { id: req.params.id } });
-    if (!pair) { removeStoredFiles(files); return res.status(404).json({ success: false, error: 'رکورد پیدا نشد.' }); }
+    if (!pair) { await removeStoredFiles(req, files); return res.status(404).json({ success: false, error: 'رکورد پیدا نشد.' }); }
+    for (const file of files) vehiclePhotoUpload.retain(req, file);
     await prisma.securityVehiclePairPhoto.createMany({ data: photoCreateData(req).map((photo) => ({ ...photo, vehiclePairId: pair.id })) });
     const updated = await prisma.securityVehiclePair.findUnique({ where: { id: pair.id }, include: { photos: true } });
     res.status(201).json({ success: true, data: updated });
   } catch (error) {
-    removeStoredFiles(files);
+    await removeStoredFiles(req, files);
     res.status(500).json({ success: false, error: 'بارگذاری تصویر ناموفق بود.' });
   }
 });
@@ -1488,7 +1512,7 @@ router.put('/instant-report-types/:id', protect, securityAdmin, [
   }
 });
 
-router.get('/attendance-roster', protect, securityAdmin, async (req: AuthRequest, res: Response) => {
+router.get('/attendance-roster', protect, attendanceDeviceManage, async (req: AuthRequest, res: Response) => {
   try {
     const targetDate = parseDayQuery(req.query.date);
     const personnel = await prisma.personnel.findMany({
@@ -1530,7 +1554,7 @@ router.get('/attendance-roster', protect, securityAdmin, async (req: AuthRequest
   }
 });
 
-router.post('/attendance-roster', protect, securityAdmin, [
+router.post('/attendance-roster', protect, attendanceDeviceManage, [
   body('personnelId').isString().trim().notEmpty(),
   body('effectiveDate').isISO8601()
 ], async (req: AuthRequest, res: Response) => {
@@ -1558,7 +1582,7 @@ router.post('/attendance-roster', protect, securityAdmin, [
   }
 });
 
-router.put('/attendance-roster/:personnelId/remove', protect, securityAdmin, [
+router.put('/attendance-roster/:personnelId/remove', protect, attendanceDeviceManage, [
   body('effectiveDate').isISO8601()
 ], async (req: AuthRequest, res: Response) => {
   try {
@@ -1627,21 +1651,22 @@ router.get('/shift-log/attachments/:id', protect, securityView, async (req: Auth
 router.post('/shift-log/entries', protect, securityEdit, shiftLogPhotoUpload.array('images', 8), [body('categoryId').isString().trim().notEmpty(), body('reportTypeId').optional({ values: 'falsy' }).isString(), body('description').optional({ values: 'falsy' }).isString()], async (req: AuthRequest, res: Response) => {
   try {
     const errors = validationResult(req);
-    if (!errors.isEmpty()) { removeStoredFiles(uploadedFiles(req)); return res.status(400).json({ success: false, error: 'دسته‌بندی گزارش الزامی است.', details: errors.array() }); }
+    if (!errors.isEmpty()) { await removeStoredFiles(req, uploadedFiles(req)); return res.status(400).json({ success: false, error: 'دسته‌بندی گزارش الزامی است.', details: errors.array() }); }
     const { session } = await getActiveShiftSessionForUser(req.user!.id);
-    if (!session) { removeStoredFiles(uploadedFiles(req)); return res.status(409).json({ success: false, error: 'شیفت فعال برای ثبت گزارش پیدا نشد.' }); }
+    if (!session) { await removeStoredFiles(req, uploadedFiles(req)); return res.status(409).json({ success: false, error: 'شیفت فعال برای ثبت گزارش پیدا نشد.' }); }
     const category = await prisma.securityInstantReportCategory.findFirst({ where: { id: req.body.categoryId, isActive: true } });
-    if (!category) { removeStoredFiles(uploadedFiles(req)); return res.status(404).json({ success: false, error: 'دسته‌بندی گزارش فعال پیدا نشد.' }); }
+    if (!category) { await removeStoredFiles(req, uploadedFiles(req)); return res.status(404).json({ success: false, error: 'دسته‌بندی گزارش فعال پیدا نشد.' }); }
     const type = req.body.reportTypeId ? await prisma.securityInstantReportType.findFirst({ where: { id: req.body.reportTypeId, categoryId: category.id, isActive: true } }) : null;
-    if (category.useReportTypes && !type) { removeStoredFiles(uploadedFiles(req)); return res.status(400).json({ success: false, error: 'برای این دسته‌بندی انتخاب نوع گزارش الزامی است.' }); }
-    if (!category.useReportTypes && req.body.reportTypeId) { removeStoredFiles(uploadedFiles(req)); return res.status(400).json({ success: false, error: 'این دسته‌بندی از نوع گزارش استفاده نمی‌کند.' }); }
+    if (category.useReportTypes && !type) { await removeStoredFiles(req, uploadedFiles(req)); return res.status(400).json({ success: false, error: 'برای این دسته‌بندی انتخاب نوع گزارش الزامی است.' }); }
+    if (!category.useReportTypes && req.body.reportTypeId) { await removeStoredFiles(req, uploadedFiles(req)); return res.status(400).json({ success: false, error: 'این دسته‌بندی از نوع گزارش استفاده نمی‌کند.' }); }
     const participantIds = [...new Set(JSON.parse(String(req.body.participantIds || '[]')))].filter((id: any) => typeof id === 'string');
     const validParticipants = participantIds.length ? await prisma.personnel.count({ where: { id: { in: participantIds }, isActive: true } }) : 0;
-    if (validParticipants !== participantIds.length) { removeStoredFiles(uploadedFiles(req)); return res.status(400).json({ success: false, error: 'یکی از پرسنل انتخاب‌شده معتبر نیست.' }); }
+    if (validParticipants !== participantIds.length) { await removeStoredFiles(req, uploadedFiles(req)); return res.status(400).json({ success: false, error: 'یکی از پرسنل انتخاب‌شده معتبر نیست.' }); }
     const useRelatedPersonnel = category.useReportTypes ? Boolean(type?.useRelatedPersonnel) : category.useRelatedPersonnel;
-    if (!useRelatedPersonnel && participantIds.length) { removeStoredFiles(uploadedFiles(req)); return res.status(400).json({ success: false, error: 'برای این طبقه‌بندی افراد مرتبط نمایش داده نمی‌شود.' }); }
+    if (!useRelatedPersonnel && participantIds.length) { await removeStoredFiles(req, uploadedFiles(req)); return res.status(400).json({ success: false, error: 'برای این طبقه‌بندی افراد مرتبط نمایش داده نمی‌شود.' }); }
     const description = String(req.body.description || '').trim();
-    if (!description && !participantIds.length && !uploadedFiles(req).length) { removeStoredFiles(uploadedFiles(req)); return res.status(400).json({ success: false, error: 'حداقل توضیح، تصویر یا فرد مرتبط برای ثبت گزارش لازم است.' }); }
+    if (!description && !participantIds.length && !uploadedFiles(req).length) { await removeStoredFiles(req, uploadedFiles(req)); return res.status(400).json({ success: false, error: 'حداقل توضیح، تصویر یا فرد مرتبط برای ثبت گزارش لازم است.' }); }
+    for (const file of uploadedFiles(req)) shiftLogPhotoUpload.retain(req, file);
     const entry = await prisma.$transaction(async (tx) => {
       const last = await tx.securityShiftLogEntry.findFirst({ where: { sessionId: session.id }, orderBy: { rowNumber: 'desc' } });
       return tx.securityShiftLogEntry.create({
@@ -1661,7 +1686,7 @@ router.post('/shift-log/entries', protect, securityEdit, shiftLogPhotoUpload.arr
       });
     }, { isolationLevel: 'Serializable' });
     res.status(201).json({ success: true, data: entry });
-  } catch (error: any) { removeStoredFiles(uploadedFiles(req));
+  } catch (error: any) { await removeStoredFiles(req, uploadedFiles(req));
     console.error('Create shift log entry error:', error);
     res.status(500).json({ success: false, error: error.message || 'ثبت گزارش لحظه‌ای ناموفق بود.' });
   }
@@ -1762,6 +1787,7 @@ router.post('/shift-plan-slots/:id/end', protect, securityEdit, [
     const errors = validationResult(req); if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'توضیح پایان شیفت معتبر نیست.', details: errors.array() });
     const personnel = await getSelfPersonnel(req.user!.id); if (!personnel) return res.status(403).json({ success: false, error: 'دسترسی نفرات گارد لازم است.' });
     const result = await prisma.$transaction(async (tx) => {
+      await requireReviewHandover(tx, req.user!.id);
       const slot = await tx.securityShiftPlanSlot.findUnique({ where: { id: req.params.id }, include: { session: true, temporaryCoverage: true } });
       if (!slot?.session || slot.session.status !== SecurityShiftSessionStatus.ACTIVE || slot.session.personnelId !== personnel.id) throw new Error('شیفت فعال متعلق به شما پیدا نشد.');
       const activePatrol = await tx.securityPatrolSession.findFirst({ where: { sessionId: slot.session.id, status: SecurityPatrolStatus.ACTIVE } });
@@ -2129,10 +2155,11 @@ router.post('/shifts/end', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, 
 // @desc    Employee check-in
 // @route   POST /api/security/attendance/checkin
 // @access  Private/Security Workspace
-router.post('/attendance/checkin', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.SECURITY_ATTENDANCE_CHECKIN, FEATURE_PERMISSIONS.EDIT), [
+router.post('/attendance/checkin', protect, attendanceDeviceReview, [
   body('employeeId').optional().isString().withMessage('Employee ID must be a string'),
   body('personnelId').optional().isString().withMessage('Personnel ID must be a string'),
-  body('entryTime').optional().isString().withMessage('Entry time must be a string'),
+  body('entryTime').optional().matches(/^([01]\d|2[0-3]):[0-5]\d$/).withMessage('زمان ورود معتبر نیست.'),
+  body('entryUnknown').optional().isBoolean().withMessage('وضعیت نامعلومی ورود معتبر نیست.'),
   body('date').optional().isISO8601().withMessage('Date must be ISO8601'),
   body('reason').optional().isString().withMessage('Reason must be a string'),
 ], async (req: AuthRequest, res: Response) => {
@@ -2152,14 +2179,10 @@ router.post('/attendance/checkin', protect, requireWorkspaceAccess(WORKSPACES.SE
       include: { shift: true }
     });
 
-    if (!securityPersonnel) {
-      return res.status(403).json({
-        success: false,
-        error: 'User is not authorized as security personnel'
-      });
-    }
 
-    const { entryTime, reason } = req.body;
+
+    const { entryTime, reason, entryUnknown } = req.body;
+    if (entryUnknown && !String(reason || '').trim()) return res.status(400).json({ success: false, error: 'دلیل ورود با ساعت نامعلوم الزامی است.' });
     const personnelId = String(req.body.personnelId || req.body.employeeId || '').trim();
     if (!personnelId) return res.status(400).json({ success: false, error: 'پرسنل الزامی است.' });
     const personnel = await prisma.personnel.findUnique({
@@ -2170,7 +2193,10 @@ router.post('/attendance/checkin', protect, requireWorkspaceAccess(WORKSPACES.SE
     const currentTime = entryTime || currentAttendanceTime();
     const targetDate = parseDayQuery(req.body.date);
     const nextDay = addDays(targetDate, 1);
-    const enteredAt = businessInstant(targetDate, currentTime);
+    if (entryUnknown && targetDate.getTime() !== parseDayQuery().getTime()) return res.status(400).json({ success: false, error: 'مشاهده حضور با ساعت ورود نامعلوم فقط برای امروز مجاز است؛ سابقه قبلی را اصلاح کنید.' });
+    const observedInsideAt = entryUnknown ? new Date() : null;
+    const enteredAt = entryUnknown ? null : businessInstant(targetDate, currentTime);
+    if (enteredAt && isFutureSecurityAttendanceTime(enteredAt)) return res.status(400).json({ success: false, error: 'زمان ورود نمی‌تواند در آینده باشد.' });
     const [rosterPerson] = await loadAttendancePopulation(targetDate, { personnelId: personnel.id });
     if (!rosterPerson) return res.status(400).json({ success: false, error: 'این فرد در فهرست حضور و غیاب گارد برای این تاریخ نیست.' });
     const scheduleMap = await loadApplicableWorkSchedules(prisma, [personnel.id], targetDate);
@@ -2193,7 +2219,7 @@ router.post('/attendance/checkin', protect, requireWorkspaceAccess(WORKSPACES.SE
     const openRecord = await prisma.attendanceRecord.findFirst({
       where: {
         personnelId: personnel.id,
-        intervals: { some: { status: AttendanceIntervalStatus.ACTIVE, exitedAt: null } }
+        intervals: { some: { status: AttendanceIntervalStatus.ACTIVE, exitedAt: null, exitUnknown: false } }
       },
       orderBy: { date: 'desc' },
       include: attendanceInclude
@@ -2222,7 +2248,7 @@ router.post('/attendance/checkin', protect, requireWorkspaceAccess(WORKSPACES.SE
     });
 
     const previousInterval = existingRecord?.intervals.filter((interval) => interval.status !== AttendanceIntervalStatus.VOIDED).at(-1);
-    if (previousInterval?.exitedAt && enteredAt < new Date(previousInterval.exitedAt)) {
+    if (previousInterval?.exitedAt && (enteredAt || observedInsideAt!) < new Date(previousInterval.exitedAt)) {
       return res.status(400).json({ success: false, error: 'زمان ورود جدید نمی‌تواند قبل از خروج قبلی باشد.' });
     }
 
@@ -2231,7 +2257,7 @@ router.post('/attendance/checkin', protect, requireWorkspaceAccess(WORKSPACES.SE
         data: {
           employeeId: personnel.user?.id || null,
           personnelId: personnel.id,
-          securityPersonnelId: securityPersonnel.id,
+          securityPersonnelId: securityPersonnel?.id || null,
           shiftId: null,
           date: targetDate,
           status: attendanceStatus,
@@ -2240,12 +2266,12 @@ router.post('/attendance/checkin', protect, requireWorkspaceAccess(WORKSPACES.SE
         }
       });
       await tx.attendanceInterval.create({
-        data: { attendanceRecordId: record.id, enteredAt, entryRecordedBy: req.user!.id, entryReason: String(reason || '').trim() || null }
+        data: { attendanceRecordId: record.id, enteredAt, observedInsideAt, entryRecordedBy: req.user!.id, entryReason: String(reason || '').trim() || null }
       });
       await tx.attendanceRecord.update({
         where: { id: record.id },
         data: {
-          entryTime: existingRecord?.entryTime || currentTime,
+          entryTime: existingRecord?.entryTime || (entryUnknown ? null : currentTime),
           exitTime: null,
           status: existingRecord?.delayMinutes && existingRecord.delayMinutes > 0 ? AttendanceStatus.LATE : existingRecord ? AttendanceStatus.PRESENT : attendanceStatus,
           notes: appendManualAttendanceNote(record.notes, 'ثبت دستی ورود', reason),
@@ -2254,6 +2280,7 @@ router.post('/attendance/checkin', protect, requireWorkspaceAccess(WORKSPACES.SE
           ...personnelSnapshot(personnel)
         }
       });
+      await refreshDeviceAttendance(tx, record.id);
       return record.id;
     });
     const attendanceRecord = await prisma.attendanceRecord.findUnique({ where: { id: recordId }, include: attendanceInclude });
@@ -2277,10 +2304,10 @@ router.post('/attendance/checkin', protect, requireWorkspaceAccess(WORKSPACES.SE
 // @desc    Employee check-out
 // @route   POST /api/security/attendance/checkout
 // @access  Private/Security Personnel
-router.post('/attendance/checkout', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.SECURITY_ATTENDANCE_CHECKOUT, FEATURE_PERMISSIONS.EDIT), [
+router.post('/attendance/checkout', protect, attendanceDeviceReview, [
   body('employeeId').optional().isString().withMessage('Employee ID must be a string'),
   body('personnelId').optional().isString().withMessage('Personnel ID must be a string'),
-  body('exitTime').optional().isString().withMessage('Exit time must be a string'),
+  body('exitTime').optional().matches(/^([01]\d|2[0-3]):[0-5]\d$/).withMessage('زمان خروج معتبر نیست.'),
   body('date').optional().isISO8601().withMessage('Date must be ISO8601'),
   body('attendanceId').optional().isString().withMessage('Attendance ID must be a string'),
   body('reason').optional().isString().withMessage('Reason must be a string'),
@@ -2301,12 +2328,7 @@ router.post('/attendance/checkout', protect, requireWorkspaceAccess(WORKSPACES.S
       include: { shift: true }
     });
 
-    if (!securityPersonnel) {
-      return res.status(403).json({
-        success: false,
-        error: 'User is not authorized as security personnel'
-      });
-    }
+
 
     const { exitTime, reason } = req.body;
     const personnelId = String(req.body.personnelId || req.body.employeeId || '').trim();
@@ -2335,22 +2357,24 @@ router.post('/attendance/checkout', protect, requireWorkspaceAccess(WORKSPACES.S
       });
     }
 
-    const openInterval = [...attendanceRecord.intervals].reverse().find((interval) => interval.status !== AttendanceIntervalStatus.VOIDED && !interval.exitedAt);
+    const openInterval = [...attendanceRecord.intervals].reverse().find((interval) => interval.status !== AttendanceIntervalStatus.VOIDED && !interval.exitedAt && !interval.exitUnknown);
     if (!openInterval) return res.json({ success: true, message: 'برای این حضور خروج باز وجود ندارد.', data: attendanceRecord });
     const isHistoricalClose = attendanceRecord.date < parseDayQuery();
     if (isHistoricalClose && !String(reason || '').trim()) return res.status(400).json({ success: false, error: 'برای ثبت خروج روز قبل، دلیل الزامی است.' });
-    let exitedAt = businessInstant(attendanceRecord.date, currentTime);
-    if (exitedAt <= new Date(openInterval.enteredAt)) exitedAt = businessInstant(attendanceRecord.date, currentTime, true);
-    if (exitedAt <= new Date(openInterval.enteredAt)) return res.status(400).json({ success: false, error: 'زمان خروج باید بعد از زمان ورود باشد.' });
+    let exitedAt = businessInstant(targetDate, currentTime);
+    if (!openInterval.enteredAt && exitedAt <= openInterval.observedInsideAt!) return res.status(400).json({ success: false, error: 'زمان خروج باید بعد از مشاهده حضور باشد.' });
+    if (exitedAt <= (openInterval.enteredAt || openInterval.observedInsideAt!)) exitedAt = businessInstant(attendanceRecord.date, currentTime, true);
+    if (exitedAt <= (openInterval.enteredAt || openInterval.observedInsideAt!)) return res.status(400).json({ success: false, error: 'زمان خروج باید بعد از زمان ورود باشد.' });
+    if (isFutureSecurityAttendanceTime(exitedAt)) return res.status(400).json({ success: false, error: 'زمان خروج نمی‌تواند در آینده باشد.' });
 
     const completedPresenceMinutes = attendanceRecord.intervals.reduce((sum, interval) => {
       if (interval.status === AttendanceIntervalStatus.VOIDED) return sum;
       const intervalExit = interval.id === openInterval.id ? exitedAt : interval.exitedAt ? new Date(interval.exitedAt) : null;
-      return intervalExit ? sum + Math.max(0, Math.floor((intervalExit.getTime() - new Date(interval.enteredAt).getTime()) / 60_000)) : sum;
+      return interval.enteredAt && intervalExit ? sum + Math.max(0, Math.floor((intervalExit.getTime() - new Date(interval.enteredAt).getTime()) / 60_000)) : sum;
     }, 0);
-    await prisma.$transaction([
-      prisma.attendanceInterval.update({ where: { id: openInterval.id }, data: { exitedAt, exitRecordedBy: req.user!.id, exitReason: String(reason || '').trim() || null } }),
-      prisma.attendanceRecord.update({
+    await prisma.$transaction(async (tx) => {
+      await tx.attendanceInterval.update({ where: { id: openInterval.id }, data: { exitedAt, exitSource: "MANUAL", revision: { increment: 1 }, confirmedRevision: openInterval.entrySource === "DEVICE" ? 0 : openInterval.revision + 1, exitRecordedBy: req.user!.id, exitReason: String(reason || '').trim() || null } });
+      await tx.attendanceRecord.update({
         where: { id: attendanceRecord.id },
         data: {
           exitTime: currentTime,
@@ -2362,8 +2386,9 @@ router.post('/attendance/checkout', protect, requireWorkspaceAccess(WORKSPACES.S
           overtimePending: false,
           notes: appendManualAttendanceNote(attendanceRecord.notes, 'ثبت دستی خروج', reason)
         }
-      })
-    ]);
+      });
+      await refreshDeviceAttendance(tx, attendanceRecord.id);
+    });
     const updatedRecord = await prisma.attendanceRecord.findUnique({ where: { id: attendanceRecord.id }, include: attendanceInclude });
 
     res.json({
@@ -2382,40 +2407,10 @@ router.post('/attendance/checkout', protect, requireWorkspaceAccess(WORKSPACES.S
   }
 });
 
-const refreshAttendanceRecordFromIntervals = async (tx: any, recordId: string) => {
-  const record = await tx.attendanceRecord.findUnique({
-    where: { id: recordId },
-    include: { intervals: { where: { status: AttendanceIntervalStatus.ACTIVE }, orderBy: { enteredAt: 'asc' } } }
-  });
-  if (!record) return;
-  const summary = intervalSummary(record.intervals);
-  const firstEntry = summary.firstEntry;
-  const finalExit = summary.isOpen ? null : summary.finalExit;
-  const delayMinutes = firstEntry && record.workScheduleStatus === AttendanceWorkScheduleStatus.WORKDAY && record.scheduledStartTime
-    ? calculateDelayMinutes(firstEntry, record.scheduledStartTime)
-    : record.workScheduleStatus === AttendanceWorkScheduleStatus.NON_WORKING_DAY ? 0 : null;
-  const overtimeMinutes = summary.isOpen
-    ? null
-    : record.workScheduleStatus === AttendanceWorkScheduleStatus.NON_WORKING_DAY
-      ? summary.presenceMinutes
-      : finalExit && record.workScheduleStatus === AttendanceWorkScheduleStatus.WORKDAY && record.scheduledStartTime && record.scheduledEndTime
-        ? calculateScheduledOvertime(finalExit, record.scheduledStartTime, record.scheduledEndTime)
-        : null;
-  await tx.attendanceRecord.update({
-    where: { id: recordId },
-    data: {
-      entryTime: firstEntry,
-      exitTime: finalExit,
-      delayMinutes,
-      overtimeMinutes,
-      overtimePending: summary.isOpen,
-      status: firstEntry ? (delayMinutes && delayMinutes > 0 ? AttendanceStatus.LATE : AttendanceStatus.PRESENT) : AttendanceStatus.ABSENT
-    }
-  });
-};
+const refreshAttendanceRecordFromIntervals = refreshDeviceAttendance;
 
 // Correct a saved movement without replacing its audit history.
-router.put('/attendance/intervals/:id', protect, securityView, [
+router.put('/attendance/intervals/:id', protect, attendanceDeviceReview, [
   body('enteredAt').isISO8601().withMessage('زمان ورود معتبر الزامی است.'),
   body('exitedAt').optional({ nullable: true }).isISO8601().withMessage('زمان خروج معتبر نیست.'),
   body('reason').trim().notEmpty().withMessage('دلیل اصلاح الزامی است.')
@@ -2430,6 +2425,9 @@ router.put('/attendance/intervals/:id', protect, securityView, [
     if (!interval || interval.status === AttendanceIntervalStatus.VOIDED) return res.status(404).json({ success: false, error: 'بازه حضور فعال پیدا نشد.' });
     const enteredAt = new Date(req.body.enteredAt);
     const exitedAt = req.body.exitedAt ? new Date(req.body.exitedAt) : null;
+    const now = new Date();
+    if (isFutureSecurityAttendanceTime(enteredAt, now)) return res.status(400).json({ success: false, error: 'زمان ورود نمی‌تواند در آینده باشد.' });
+    if (exitedAt && isFutureSecurityAttendanceTime(exitedAt, now)) return res.status(400).json({ success: false, error: 'زمان خروج نمی‌تواند در آینده باشد.' });
     if (exitedAt && exitedAt <= enteredAt) return res.status(400).json({ success: false, error: 'زمان خروج باید بعد از زمان ورود باشد.' });
     const overlapEnd = exitedAt || new Date('2100-01-01T00:00:00.000Z');
     const conflict = await prisma.attendanceInterval.findFirst({
@@ -2438,7 +2436,7 @@ router.put('/attendance/intervals/:id', protect, securityView, [
         status: AttendanceIntervalStatus.ACTIVE,
         attendanceRecord: { personnelId: interval.attendanceRecord.personnelId },
         enteredAt: { lt: overlapEnd },
-        OR: [{ exitedAt: null }, { exitedAt: { gt: enteredAt } }]
+        OR: [{ exitedAt: null, exitUnknown: false }, { exitedAt: { gt: enteredAt } }]
       }
     });
     if (conflict) return res.status(409).json({ success: false, error: 'بازه اصلاح‌شده با یک تردد فعال دیگر هم‌پوشانی دارد.' });
@@ -2446,7 +2444,7 @@ router.put('/attendance/intervals/:id', protect, securityView, [
     await prisma.$transaction(async (tx) => {
       const updated = await tx.attendanceInterval.update({
         where: { id: interval.id },
-        data: { enteredAt, exitedAt, entryReason: reason, exitReason: exitedAt ? reason : null, entryRecordedBy: req.user!.id, exitRecordedBy: exitedAt ? req.user!.id : null }
+        data: { enteredAt, observedInsideAt: null, exitedAt, exitUnknown: false, revision: { increment: 1 }, confirmedRevision: 0, confirmedAt: null, confirmedBy: null, entryReason: reason, exitReason: exitedAt ? reason : null, entryRecordedBy: req.user!.id, exitRecordedBy: exitedAt ? req.user!.id : null }
       });
       await tx.attendanceIntervalAudit.create({
         data: { intervalId: interval.id, action: 'CORRECTED', reason, beforeData: intervalAuditSnapshot(interval), afterData: intervalAuditSnapshot(updated), actorId: req.user!.id }
@@ -2462,30 +2460,20 @@ router.put('/attendance/intervals/:id', protect, securityView, [
 });
 
 // Void a saved movement; physical history remains available in the audit trail.
-router.post('/attendance/intervals/:id/void', protect, securityView, [
+router.post('/attendance/intervals/:id/void', protect, attendanceDeviceReview, [
   body('reason').trim().notEmpty().withMessage('دلیل ابطال الزامی است.')
 ], async (req: AuthRequest, res: Response) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'Validation failed', details: errors.array() });
-    const interval = await prisma.attendanceInterval.findUnique({ where: { id: req.params.id } });
-    if (!interval || interval.status === AttendanceIntervalStatus.VOIDED) return res.status(404).json({ success: false, error: 'بازه حضور فعال پیدا نشد.' });
-    const reason = String(req.body.reason).trim();
-    await prisma.$transaction(async (tx) => {
-      const updated = await tx.attendanceInterval.update({
-        where: { id: interval.id },
-        data: { status: AttendanceIntervalStatus.VOIDED, voidReason: reason, voidedAt: new Date(), voidedBy: req.user!.id }
-      });
-      await tx.attendanceIntervalAudit.create({
-        data: { intervalId: interval.id, action: 'VOIDED', reason, beforeData: intervalAuditSnapshot(interval), afterData: intervalAuditSnapshot(updated), actorId: req.user!.id }
-      });
-      await refreshAttendanceRecordFromIntervals(tx, interval.attendanceRecordId);
-    });
-    const record = await prisma.attendanceRecord.findUnique({ where: { id: interval.attendanceRecordId }, include: attendanceInclude });
-    return res.json({ success: true, message: 'بازه تردد با حفظ سابقه باطل شد.', data: record });
+    const data = await prisma.$transaction(async tx => {
+      await lockAttendance(tx);
+      return applyAttendanceCorrection(tx, req.params.id, { ...req.body, action: 'VOID' }, req.user!.id);
+    }, { isolationLevel: 'Serializable' });
+    return res.json({ success: true, data });
   } catch (error) {
-    console.error('Void attendance interval error:', error);
-    return res.status(500).json({ success: false, error: 'Server error' });
+    const status = error instanceof AttendanceDeviceError ? error.status : error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034' ? 409 : 400;
+    return res.status(status).json({ success: false, error: error instanceof AttendanceDeviceError ? error.message : 'اطلاعات تغییر کرده یا اصلاح انجام نشد؛ دوباره بررسی کنید.' });
   }
 });
 
@@ -3587,7 +3575,8 @@ router.post('/reports/personnel-history/:personnelId.pdf', protect, securityAdmi
     const html = `${securityPdfStyles()}${renderSecurityPersonnelReportHistoryPdfHtml({ personnel: result.personnel, exporterName, generatedAt, filters: result.query as any, reports, includeImages })}`;
     const pdfPath = await generatePdfFromHtml({ fileName: `security-personnel-report-history-${Date.now()}`, outputDir: path.join(process.cwd(), 'storage', 'reports'), landscape: true, htmlContent: html, margin: { top: '5mm', right: '5mm', bottom: '14mm', left: '5mm' }, displayHeaderFooter: true, headerTemplate: '<span></span>', footerTemplate: '<div style="width:100%;font-size:8px;color:#64748b;text-align:center;direction:rtl">سوابق گزارش‌های گارد پرسنل · صفحه <span class="pageNumber"></span> از <span class="totalPages"></span></div>' });
     await prisma.securityPersonnelReportExportAudit.create({ data: { actorId: req.user!.id, actorNameSnapshot: exporterName, personnelId: result.personnel.id, personnelNameSnapshot: securityName(result.personnel), filters: result.query as any, includeImages, reportCount: result.entries.length, generatedAt } });
-    return res.download(pdfPath, `security-personnel-reports-${result.personnel.employeeNumber || result.personnel.id}.pdf`, () => fs.unlink(pdfPath, () => undefined));
+    await downloadAndRemoveDocumentPdf(req, res, pdfPath, `security-personnel-reports-${result.personnel.employeeNumber || result.personnel.id}.pdf`);
+    return;
   } catch (error: any) { console.error('Export personnel report history error:', error); return res.status(500).json({ success: false, error: error.message || 'ساخت PDF سوابق گزارش پرسنل ناموفق بود.' }); }
 });
 
@@ -3645,24 +3634,13 @@ router.post('/reports/completed-shifts.pdf', protect, securityAdmin, async (req:
       ),
     });
     const pdfPath = await generatePdfFromHtml({ fileName: `security-shifts-${Date.now()}`, outputDir: path.join(process.cwd(), 'storage', 'reports'), landscape: true, htmlContent: html, margin: { top: '5mm', right: '5mm', bottom: '14mm', left: '5mm' }, displayHeaderFooter: true, headerTemplate: '<span></span>', footerTemplate: '<div style="width:100%;font-size:8px;color:#64748b;text-align:center;direction:rtl">گزارش شیفت‌ها · صفحه <span class="pageNumber"></span> از <span class="totalPages"></span></div>' });
-    return res.download(pdfPath, 'security-shifts.pdf', () => fs.unlink(pdfPath, () => undefined));
+    await downloadAndRemoveDocumentPdf(req, res, pdfPath, 'security-shifts.pdf');
+    return;
   } catch (error: any) { console.error('Export selected security shifts error:', error); return res.status(500).json({ success: false, error: 'ساخت گزارش شیفت‌ها ناموفق بود.' }); }
 });
 
-const loadPersonnelAttendanceReport = async (options: PersonnelAttendanceReportOptions) => {
-  const records = await prisma.attendanceRecord.findMany({
-    where: { date: { gte: options.startDate, lt: addDays(options.endDate, 1) } },
-    select: {
-      id: true, date: true, personnelId: true, employeeId: true, securityPersonnelId: true,
-      personnelFirstName: true, personnelLastName: true,
-      personnel: { select: { firstName: true, lastName: true } },
-      employee: { select: { firstName: true, lastName: true, personnelId: true } },
-      intervals: { select: { enteredAt: true, exitedAt: true, status: true }, orderBy: { enteredAt: 'asc' } },
-    },
-    orderBy: [{ date: 'asc' }, { id: 'asc' }],
-  });
-  return buildPersonnelAttendanceReport(records, options);
-};
+const loadPersonnelAttendanceReport = async (options: PersonnelAttendanceReportOptions) =>
+  prisma.$transaction(db => loadPersonnelAttendanceAccounting(db, options), { isolationLevel: 'RepeatableRead', timeout: 30000 });
 
 router.post('/reports/personnel-attendance-preview', protect, authorize('ADMIN', 'MANAGER'), securityAdmin, async (req: AuthRequest, res: Response) => {
   try {
@@ -3720,7 +3698,8 @@ router.post('/reports/attendance.pdf', protect, securityAdmin, async (req: AuthR
     const rows = result.rows.map((row) => `<tr><td>${securityEscapeHtml(row.personnelName)}</td><td>${securityEscapeHtml(row.shiftTitle)}</td><td>${formatSecurityDateTime(row.shiftStartsAt)} تا ${formatSecurityDateTime(row.shiftEndsAt)}</td><td>${stateLabel[row.state]}</td><td>${formatSecurityDateTime(row.arrivedAt)}</td><td>${row.delayMinutes ? `${row.delayMinutes.toLocaleString('fa-IR')} دقیقه` : '—'}</td></tr>`).join('');
     const html = `${securityPdfStyles()}<div class="sheet"><header class="header"><div><h1>گزارش حضور و غیاب گارد</h1><div class="meta">${slots.length.toLocaleString('fa-IR')} شیفت · ${result.selectedPersonnelIds.length.toLocaleString('fa-IR')} نفر · زمان تولید: ${formatSecurityDateTime(new Date())}</div></div></header><table><thead><tr><th>نیرو</th><th>شیفت</th><th>بازه</th><th>وضعیت</th><th>حضور</th><th>تأخیر</th></tr></thead><tbody>${rows || '<tr><td colspan="6">داده‌ای در دامنه انتخاب‌شده وجود ندارد.</td></tr>'}</tbody></table></div>`;
     const pdfPath = await generatePdfFromHtml({ fileName: `security-attendance-${Date.now()}`, outputDir: path.join(process.cwd(), 'storage', 'reports'), landscape: true, htmlContent: html, margin: { top: '5mm', right: '5mm', bottom: '14mm', left: '5mm' }, displayHeaderFooter: true, headerTemplate: '<span></span>', footerTemplate: '<div style="width:100%;font-size:8px;color:#64748b;text-align:center;direction:rtl">گزارش حضور و غیاب گارد · صفحه <span class="pageNumber"></span> از <span class="totalPages"></span></div>' });
-    return res.download(pdfPath, 'security-attendance.pdf', () => fs.unlink(pdfPath, () => undefined));
+    await downloadAndRemoveDocumentPdf(req, res, pdfPath, 'security-attendance.pdf');
+    return;
   } catch (error: any) { console.error('Export selected security attendance error:', error); return res.status(500).json({ success: false, error: 'ساخت گزارش حضور و غیاب گارد ناموفق بود.' }); }
 });
 
@@ -3737,7 +3716,7 @@ router.get('/reports/latest-completed-shift', protect, securityAdmin, async (_re
   }
 });
 
-router.get('/reports/latest-completed-shift.pdf', protect, securityAdmin, async (_req: AuthRequest, res: Response) => {
+router.get('/reports/latest-completed-shift.pdf', protect, securityAdmin, async (req: AuthRequest, res: Response) => {
   try {
     const slot = await latestCompletedSecurityShift(true) as any;
     if (!slot) return res.status(404).json({ success: false, error: 'هنوز شیفت پایان‌یافته‌ای برای دریافت گزارش وجود ندارد' });
@@ -3752,7 +3731,8 @@ router.get('/reports/latest-completed-shift.pdf', protect, securityAdmin, async 
       </div>
     `;
     const pdfPath = await generatePdfFromHtml({ fileName: `security-latest-completed-shift-${Date.now()}`, outputDir: path.join(process.cwd(), 'storage', 'reports'), landscape: true, htmlContent: html, margin: { top: '5mm', right: '5mm', bottom: '5mm', left: '5mm' } });
-    return res.download(pdfPath, 'security-latest-completed-shift.pdf', () => fs.unlink(pdfPath, () => undefined));
+    await downloadAndRemoveDocumentPdf(req, res, pdfPath, 'security-latest-completed-shift.pdf');
+    return;
   } catch (error) {
     console.error('Export latest completed security shift PDF error:', error);
     return res.status(500).json({ success: false, error: 'ساخت PDF شیفت قبل ناموفق بود.' });
@@ -3817,7 +3797,8 @@ router.get('/reports/security-personnel-performance.pdf', protect, securityAdmin
       </div>
     `;
     const pdfPath = await generatePdfFromHtml({ fileName: `security-personnel-performance-${Date.now()}`, outputDir: path.join(process.cwd(), 'storage', 'reports'), landscape: true, htmlContent: html, margin: { top: '5mm', right: '5mm', bottom: '5mm', left: '5mm' } });
-    res.download(pdfPath, 'security-personnel-performance.pdf', () => fs.unlink(pdfPath, () => undefined));
+    await downloadAndRemoveDocumentPdf(req, res, pdfPath, 'security-personnel-performance.pdf');
+    return;
   } catch (error) {
     console.error('Export security personnel performance PDF error:', error);
     res.status(500).json({ success: false, error: 'ساخت PDF عملکرد نیروهای گارد ناموفق بود.' });
@@ -3916,7 +3897,8 @@ router.get('/reports/export', protect, securityEdit, async (req: AuthRequest, re
       showDateColumn: days > 1
     });
     const pdfPath = await generatePdfFromHtml({ fileName: `security-report-${Date.now()}`, outputDir: path.join(process.cwd(), 'storage', 'reports'), landscape: true, htmlContent, margin: { top: '5mm', right: '5mm', bottom: '5mm', left: '5mm' } });
-    res.download(pdfPath, 'security-report.pdf', () => fs.unlink(pdfPath, () => undefined));
+    await downloadAndRemoveDocumentPdf(req, res, pdfPath, 'security-report.pdf');
+    return;
   } catch (error) {
     console.error('Export security report error:', error);
     res.status(500).json({ success: false, error: 'ساخت خروجی گزارش ناموفق بود.' });

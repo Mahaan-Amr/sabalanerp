@@ -2,6 +2,7 @@
 import { ErpPersianDateField } from '@/components/erp';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   ErpBadge,
   ErpButton,
@@ -19,6 +20,7 @@ import {
 } from '@/components/erp';
 import { accountingAPI } from '@/lib/api';
 import { downloadBlobResponse } from '@/lib/downloadFile';
+import { AccountingFixedAssetsPanel } from '@/features/accounting/AccountingFixedAssetsPanel';
 
 type Tab = 'assets' | 'payroll' | 'schedules' | 'reports' | 'tax' | 'close' | 'archive';
 type Notice = { kind: 'success' | 'error'; title: string };
@@ -44,7 +46,6 @@ const closeStepFa: Record<string, string> = {
 const evidenceTypeFa: Record<string, string> = {
   REPORT: 'گزارش رسمی', RECEIPT: 'رسید قانونی', ATTACHMENT: 'پیوست', VALIDATION: 'نتیجه اعتبارسنجی',
 };
-const malwareStatusFa: Record<string, string> = { CLEAN: 'پاک', PENDING: 'در انتظار بررسی', REJECTED: 'ردشده' };
 const toneOf = (status: string) => status === 'READY' || status === 'ACTIVE' || status === 'POSTED' || status === 'ACCEPTED' || status === 'SETTLED'
   ? 'success' : status === 'BLOCKED' || status === 'FAILED' ? 'danger' : 'warning';
 const digits = (value: unknown) => {
@@ -53,11 +54,20 @@ const digits = (value: unknown) => {
 const dateFa = (value?: string | null) => value ? new Date(value).toLocaleDateString('fa-IR') : '—';
 
 export default function AccountingPeriodEndPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [context, setContext] = useState<any>();
   const [overview, setOverview] = useState<any>();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [tab, setTab] = useState<Tab>('assets');
+  const requestedTab = searchParams.get('tab');
+  const tab: Tab = requestedTab && ['assets', 'payroll', 'schedules', 'reports', 'tax', 'close', 'archive'].includes(requestedTab)
+    ? requestedTab as Tab : 'assets';
+  const setTab = (next: Tab) => {
+    const query = new URLSearchParams(searchParams.toString());
+    query.set('tab', next);
+    router.replace(`/dashboard/accounting/period-end?${query.toString()}`, { scroll: false });
+  };
   const [notice, setNotice] = useState<Notice>();
   const [commandFeedback, setCommandFeedback] = useState<(Notice & { scope: string })>();
   const [closeReason, setCloseReason] = useState('');
@@ -82,7 +92,7 @@ export default function AccountingPeriodEndPage() {
       }
     } catch (error: any) {
       setNotice({ kind: 'error', title: error.response?.data?.error || 'خواندن اطلاعات پایان دوره ناموفق بود.' });
-    } finally { setLoading(false); }
+    } finally { if (!background) setLoading(false); }
   }, []);
 
   useEffect(() => { void load(); }, [load]);
@@ -142,9 +152,10 @@ export default function AccountingPeriodEndPage() {
         />
       </ErpSection>
 
-      {tab === 'assets' && <ErpSection title="دفتر دارایی‌های ثابت" description="استهلاک فقط پس از شاهد آماده‌به‌کار آغاز می‌شود و مبنای دفتری از مبنای مالیاتی جدا می‌ماند.">
-        {!overview?.assets?.length ? <ErpEmptyState title="هنوز دارایی ثابتی ثبت نشده است." description="سیاست طبقه و هویت پایدار دارایی از مسیر مدیر حسابداری ثبت می‌شود." /> : <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{overview.assets.map((asset: any) => <ErpCard key={asset.id} className="p-4"><div className="flex flex-wrap items-start justify-between gap-3 [&>*]:min-w-0 [&>*]:max-w-full [&>*]:break-words"><div><strong>{asset.registerNumber} · {asset.titlePersian}</strong><span className="mt-1 block text-sm text-[var(--sds-text-secondary)]">{asset.location || 'مکان ثبت نشده'} · {digits(asset.components?.length)} جزء</span></div><ErpBadge tone={toneOf(asset.status) as any}>{statusFa[asset.status] || asset.status}</ErpBadge></div><div className="mt-3 grid gap-1 text-sm"><span>بهای دفتری: {digits(asset.bookCostRials)} ریال</span><span>مبنای مالیاتی: {digits(asset.taxCostRials)} ریال</span><span>آماده‌به‌کار: {dateFa(asset.readyForUseAt)}</span></div></ErpCard>)}</div>}
-      </ErpSection>}
+      {tab === 'assets' && <AccountingFixedAssetsPanel book={book} years={years}
+        policies={overview?.assetPolicies || []} assets={overview?.assets || []}
+        accessProfile={context?.accessProfile || 'VIEWER'}
+        onRefresh={() => load(true)} />}
 
       {tab === 'payroll' && <ErpSection title="تحویل و تسویه حقوق" description="جزئیات فردی در منابع انسانی می‌ماند؛ دفترکل فقط خلاصه متوازن و تعهدات کنترل‌شده را می‌بیند.">
         {!overview?.payroll?.length ? <ErpEmptyState title="تحویل تأییدشده‌ای از منابع انسانی دریافت نشده است." /> : <div className="space-y-3">{overview.payroll.map((handoff: any) => <ErpCard key={handoff.id} className="p-4"><div className="flex flex-wrap items-center justify-between gap-3"><strong>دوره حقوق {handoff.payrollRunId} · نسخه {Number(handoff.payrollRunVersion).toLocaleString('fa-IR')}</strong><ErpBadge tone={toneOf(handoff.status) as any}>{statusFa[handoff.status] || handoff.status}</ErpBadge></div><div className="mt-3 grid gap-2 md:grid-cols-3"><span>بدهکار: {digits(handoff.debitTotalRials)} ریال</span><span>بستانکار: {digits(handoff.creditTotalRials)} ریال</span><span>تعهد باز: {digits(handoff.obligations?.filter((item: any) => item.status !== 'SETTLED').length)} مورد</span></div></ErpCard>)}</div>}
@@ -179,7 +190,7 @@ export default function AccountingPeriodEndPage() {
         {!overview?.closeRuns?.length ? <ErpEmptyState title="اجرای بستن دوره‌ای آغاز نشده است." /> : <div className="space-y-3">{overview.closeRuns.map((run: any) => <ErpCard key={run.id} className="p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><strong>{run.runIdentity}</strong><span className="mt-1 block text-sm text-[var(--sds-text-secondary)]">{run.closeType === 'YEAR' ? 'بستن سال' : run.closeType === 'REOPEN' ? 'بازگشایی کنترل‌شده' : 'بستن دوره'}</span></div><ErpBadge tone={toneOf(run.status) as any}>{statusFa[run.status] || 'نیازمند بررسی'}</ErpBadge></div><div className="mt-3 flex flex-wrap gap-2">{run.steps?.map((step: any) => <ErpBadge key={step.id} tone={toneOf(step.status) as any}>{closeStepFa[step.stepCode] || 'کنترل دوره'}: {statusFa[step.status] || 'نیازمند بررسی'}</ErpBadge>)}</div>{run.status === 'READY' && <div className="mt-4 flex justify-end"><ErpButton label="بستن قطعی" tone="danger" disabled={saving || closeReason.trim().length < 8} onClick={() => setPendingClose({ id: run.id, kind: 'CLOSE' })} /></div>}{run.status === 'HARD_CLOSED' && <div className="mt-4 flex justify-end"><ErpButton label="بازگشایی کنترل‌شده" tone="warning" variant="outline" disabled={saving || closeReason.trim().length < 8} onClick={() => setPendingClose({ id: run.id, kind: 'REOPEN' })} /></div>}</ErpCard>)}</div>}
       </ErpSection>}
 
-      {tab === 'archive' && <ErpSection title="بایگانی قانونی و نگهداری" description="مدرک منجمد، اثر انگشت، نتیجه بررسی بدافزار، سیاست نگهداری و توقف قانونی حذف بدون حذف خودکار حفظ می‌شود.">{!overview?.archiveEvidence?.length ? <ErpEmptyState title="مدرک بایگانی‌شده‌ای وجود ندارد." /> : <div className="grid gap-3 md:grid-cols-2">{overview.archiveEvidence.map((item: any) => <ErpCard key={item.id} className="p-4"><div className="flex flex-wrap items-center justify-between gap-3 [&>*]:min-w-0 [&>*]:max-w-full [&>*]:break-words"><strong>{item.evidenceIdentity}</strong><ErpBadge tone={item.legalHold ? 'danger' : 'info'}>{item.legalHold ? 'توقف قانونی حذف' : 'تحت سیاست نگهداری'}</ErpBadge></div><div className="mt-3 grid gap-1 text-sm"><span>نوع: {evidenceTypeFa[item.evidenceType] || 'مدرک قانونی'}</span><span>بررسی بدافزار: {malwareStatusFa[item.malwareScanStatus] || 'نیازمند بررسی'}</span><span>نگهداری تا: {dateFa(item.retainUntil)}</span><span className="break-all">اثر انگشت: {item.contentHash}</span></div></ErpCard>)}</div>}</ErpSection>}
+      {tab === 'archive' && <ErpSection title="بایگانی قانونی و نگهداری" description="مدرک منجمد، اثر انگشت، سیاست نگهداری و توقف قانونی حذف بدون حذف خودکار حفظ می‌شود.">{!overview?.archiveEvidence?.length ? <ErpEmptyState title="مدرک بایگانی‌شده‌ای وجود ندارد." /> : <div className="grid gap-3 md:grid-cols-2">{overview.archiveEvidence.map((item: any) => <ErpCard key={item.id} className="p-4"><div className="flex flex-wrap items-center justify-between gap-3 [&>*]:min-w-0 [&>*]:max-w-full [&>*]:break-words"><strong>{item.evidenceIdentity}</strong><ErpBadge tone={item.legalHold ? 'danger' : 'info'}>{item.legalHold ? 'توقف قانونی حذف' : 'تحت سیاست نگهداری'}</ErpBadge></div><div className="mt-3 grid gap-1 text-sm"><span>نوع: {evidenceTypeFa[item.evidenceType] || 'مدرک قانونی'}</span><span>نگهداری تا: {dateFa(item.retainUntil)}</span><span className="break-all">اثر انگشت: {item.contentHash}</span></div></ErpCard>)}</div>}</ErpSection>}
       <ErpSheet open={Boolean(pendingClose)} onClose={() => setPendingClose(undefined)} presentation="modal" pending={saving} title={pendingClose?.kind === 'REOPEN' ? 'تأیید بازگشایی کنترل‌شده' : 'تأیید بستن قطعی'} footer={<div className="flex justify-end gap-2"><ErpButton label="انصراف" variant="outline" disabled={saving} onClick={() => setPendingClose(undefined)} /><ErpButton label={pendingClose?.kind === 'REOPEN' ? 'تأیید و بازگشایی' : 'تأیید و بستن قطعی'} tone="danger" disabled={saving} onClick={() => { if (!pendingClose) return; const command = pendingClose; setPendingClose(undefined); void act(() => command.kind === 'REOPEN' ? accountingAPI.reopenCloseRun(command.id, { confirmed: true, reason: closeReason.trim() }) : accountingAPI.finalizeCloseRun(command.id, { confirmed: true, reason: closeReason.trim() }), command.kind === 'REOPEN' ? 'دوره با حفظ کامل شواهد بستن قبلی بازگشایی شد.' : 'دوره با شواهد کامل به‌صورت قطعی بسته شد.', "period-end-2"); }} /></div>}>
         <p className="text-sm text-[var(--sds-text-secondary)]">این اقدام وضعیت دوره را تغییر می‌دهد، در سابقه حسابرسی ثبت می‌شود و فقط با اجرای جانشین قابل بازگشت است. دلیل ثبت‌شده: {closeReason}</p>
       {commandFeedback?.scope === "period-end-2" && <ErpInlineState kind={commandFeedback.kind} title={commandFeedback.title} />}

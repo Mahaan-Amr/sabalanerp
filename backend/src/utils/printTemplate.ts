@@ -1,4 +1,5 @@
 import fs from 'fs';
+import { Prisma } from '@prisma/client';
 import { contractStatusLabel } from './contractStatusLabel';
 import path from 'path';
 import type { PartnerProductPrintDetails } from './partnerProductPrint';
@@ -16,7 +17,7 @@ interface RenderableContract {
   partnerCommercialStatus?: string;
   partnerKind?: string | null;
   partnerCaseId?: string | null;
-  totalAmount?: number | null;
+  totalAmount?: number | string | Prisma.Decimal | null;
   currency?: string | null;
   notes?: string | null;
   createdAt?: Date | string;
@@ -40,6 +41,7 @@ interface NormalizedCut {
   type: string;
   code?: string;
   meters: number;
+  squareMeters?: number;
   rate: number;
   cost: number;
 }
@@ -181,7 +183,7 @@ interface FlatProductRow {
   renderAsNoteRow?: boolean;
 }
 
-export type ContractPrintVariant = 'original' | 'summary' | 'accounting' | 'workshop' | 'custom';
+export type ContractPrintVariant = 'original' | 'summary' | 'accounting' | 'production' | 'workshop' | 'custom';
 
 export type ContractPrintColumnKey =
   | 'index'
@@ -218,7 +220,8 @@ interface NormalizedDelivery {
   manager: string;
   receiver: string;
   notes: string;
-  products: Array<{ name: string; quantity: number; amountLabel: string }>;
+  products: Array<{ name: string; quantity: number; amountLabel: string;
+    code?: string; unit?: string; quantityText?: string }>;
 }
 
 interface NormalizedPayment {
@@ -409,6 +412,7 @@ type PrintMoneyOptions = {
   unavailableMoneyLabel?: string;
   includeRialEquivalent?: boolean;
   displayInRials?: boolean;
+  moneyFractionDigits?: number;
 };
 
 const convertToRials = (value: unknown, currency = 'تومان'): number =>
@@ -444,7 +448,7 @@ const formatPrintMoneyCell = (
   if (options.displayInRials) return formatRialAmount(value, currency);
   return options.includeRialEquivalent
     ? formatAccountingAmount(value, currency)
-    : formatMoneyNumber(value);
+    : toFaNumber(value, options.moneyFractionDigits);
 };
 
 const formatPrintRate = (
@@ -701,7 +705,20 @@ const lengthValueToMeters = (value: unknown, unit: unknown): number => {
   return unit === 'cm' ? numeric / 100 : numeric;
 };
 
-const restoreLongitudinalCustomerRequest = (product: any): any => {
+const legacyCutMeters = (product: any, cut: any): number => {
+  if (cut?.meters != null) return toNumber(cut.meters);
+  if (product?.productType === 'longitudinal') {
+    // Legacy length is consumed mother-stone length in cm, not billable cut
+    // meters. Only this saved operation's own rate/amount can recover billing.
+    const rate = toNumber(cut?.rate ?? cut?.cuttingCostPerMeter);
+    const cost = toNumber(cut?.cost ?? cut?.cuttingCost);
+    if (rate > 0 && cost > 0) return cost / rate;
+    return toNumber(cut?.length) / 100;
+  }
+  return toNumber(cut?.length);
+};
+
+export const restoreLongitudinalCustomerRequest = (product: any): any => {
   const plan = product?.smartCutPlan;
   if (
     product?.productType !== 'longitudinal' ||
@@ -1121,17 +1138,50 @@ const normalizeProducts = (
           }))
         : [];
 
-      const cutsFromDetails: NormalizedCut[] = cutsFromBreakdown.length > 0
+      const canonicalUncut = product?.productType === 'longitudinal' &&
+        product?.isCut === false && toNumber(product?.cuttingCost) === 0 &&
+        product?.meta?.pricing?.authority === 'canonical-current-save' &&
+        toNumber(product?.meta?.pricing?.cuttingCost) === 0;
+      const cutsFromDetails: NormalizedCut[] = cutsFromBreakdown.length > 0 || canonicalUncut
         ? []
         : (!product?.smartCutDerivedQuantity && Array.isArray(product?.cutDetails)
           ? product.cutDetails.map((cut: any) => ({
               type: cutTypeLabel(cut),
               code: firstText(cut?.code, cut?.sourceCode),
-              meters: toNumber(cut?.meters || cut?.length),
+              meters: legacyCutMeters(product, cut),
               rate: toNumber(cut?.rate || cut?.cuttingCostPerMeter),
               cost: toNumber(cut?.cost || cut?.cuttingCost)
             }))
           : []);
+
+      // Physical packing cuts remain in the snapshot for production. They are
+      // not the billing lines when the seller selected square-meter cutting.
+      const squareMeterSlab = product?.productType === 'slab' && (
+        product?.slabCuttingMode === 'perSquareMeter' ||
+        (product?.slabCuttingMode == null && product?.slabPolicyInput?.cuttingPricingMethod === 'squareMeter')
+      );
+      let cuts = [...cutsFromBreakdown, ...cutsFromDetails];
+      if (squareMeterSlab) {
+        const verticalCuts = (Array.isArray(product?.cutDetails) ? product.cutDetails : [])
+          .filter((cut: any) => cut?.type === 'vertical')
+          .map((cut: any): NormalizedCut => ({
+            type: cutTypeLabel(cut),
+            code: firstText(cut?.code, cut?.sourceCode),
+            meters: toNumber(cut?.meters ?? cut?.length),
+            rate: toNumber(cut?.rate ?? cut?.cuttingCostPerMeter),
+            cost: toNumber(cut?.cost ?? cut?.cuttingCost)
+          }));
+        const verticalCost = toNumber(product?.slabVerticalCutCost ??
+          verticalCuts.reduce((sum: number, cut: NormalizedCut) => sum + cut.cost, 0));
+        cuts = [{
+          type: 'برش اسلب بر اساس مساحت',
+          meters: 0,
+          squareMeters: toNumber(product?.squareMeters),
+          rate: toNumber(product?.slabCuttingPricePerSquareMeter ?? product?.slabPolicyInput?.squareMeterCutRateToman),
+          // Preserve the saved charge; printing must not reprice the contract.
+          cost: toNumber(product?.cuttingCost) - verticalCost
+        }, ...verticalCuts];
+      }
 
       const services: NormalizedService[] = [];
       (product?.appliedSubServices || []).forEach((service: any) => {
@@ -1301,7 +1351,7 @@ const normalizeProducts = (
         mandatoryPercentage: toNumber(product?.mandatoryPercentage),
         totalPrice: toNumber(product?.totalPrice || relationItem?.totalPrice),
         description,
-        cuts: [...cutsFromBreakdown, ...cutsFromDetails],
+        cuts,
         services,
         tools: dedupedTools,
         layerSummary: product?.layerTypeName
@@ -1414,6 +1464,9 @@ const normalizeDeliveries = (
               products.find((candidate) => candidate.id.startsWith(`${deliveryProduct?.productId || ''}-`));
             return {
               name: product?.name || EMPTY,
+              code: product?.code,
+              unit: inferDeliveryUnit(product, deliveryProduct),
+              quantityText: String(deliveryProduct?.amount ?? deliveryProduct?.quantity ?? 0),
               quantity: toNumber(deliveryProduct?.quantity),
               amountLabel: formatDeliveryAmount(deliveryProduct, product, deliveryProduct?.quantity)
             };
@@ -1588,7 +1641,7 @@ const normalizeFinancials = (
 };
 
 const isMeaningfulCut = (cut: NormalizedCut): boolean =>
-  cut.meters > 0 || cut.rate > 0 || cut.cost > 0;
+  cut.meters > 0 || toNumber(cut.squareMeters) > 0 || cut.rate > 0 || cut.cost > 0;
 
 const isMeaningfulService = (service: NormalizedService): boolean =>
   hasTextValue(service.name) || service.amount > 0 || service.rate > 0 || service.cost > 0;
@@ -1847,6 +1900,7 @@ const buildFlatProductRows = (
     includeRialEquivalent?: boolean;
     displayInRials?: boolean;
     accountingDetail?: boolean;
+    moneyFractionDigits?: number;
     productRowsMode?: 'detailed' | 'summarized';
     showExplanatoryRows?: boolean;
     showTotals?: boolean;
@@ -1887,8 +1941,8 @@ const buildFlatProductRows = (
           code: cut.code,
           category: 'برش',
           description: cut.type,
-          amount: cut.meters,
-          unitLabel: 'متر طول',
+          amount: cut.squareMeters ?? cut.meters,
+          unitLabel: cut.squareMeters === undefined ? 'متر طول' : 'متر مربع',
           rate: cut.rate,
           total: cut.cost,
           groupByRate: true
@@ -2015,10 +2069,11 @@ const buildFlatProductRows = (
 
       const aggregatedCuts = new Map<string, NormalizedCut>();
       product.cuts.filter(isMeaningfulCut).forEach(cut => {
-        const key = `${cut.code || ''}|${cut.type}|${cut.rate}`;
+        const key = `${cut.code || ''}|${cut.type}|${cut.rate}|${cut.squareMeters === undefined ? 'meter' : 'squareMeter'}`;
         const existing = aggregatedCuts.get(key);
         if (existing) {
           existing.meters += cut.meters;
+          if (cut.squareMeters !== undefined) existing.squareMeters = toNumber(existing.squareMeters) + cut.squareMeters;
           existing.cost += cut.cost;
         } else {
           aggregatedCuts.set(key, { ...cut });
@@ -2032,8 +2087,8 @@ const buildFlatProductRows = (
         category: 'برش',
         length: '',
         width: '',
-        linearMeasurement: toFaNumber(cut.meters, 4),
-        squareMeasurement: '',
+        linearMeasurement: cut.squareMeters === undefined ? toFaNumber(cut.meters, 4) : '',
+        squareMeasurement: cut.squareMeters === undefined ? '' : toFaNumber(cut.squareMeters, 4),
         count: '',
         rate: formatPrintMoneyCell(cut.rate, currency, options),
         total: formatPrintMoneyCell(cut.cost, currency, options)
@@ -2205,8 +2260,8 @@ const buildFlatProductRows = (
         category: 'برش',
         length: '',
         width: '',
-        linearMeasurement: toFaNumber(cut.meters, 4),
-        squareMeasurement: '',
+        linearMeasurement: cut.squareMeters === undefined ? toFaNumber(cut.meters, 4) : '',
+        squareMeasurement: cut.squareMeters === undefined ? '' : toFaNumber(cut.squareMeters, 4),
         count: '',
         rate: formatPrintMoneyCell(cut.rate, currency, options),
         total: formatPrintMoneyCell(cut.cost, currency, options)
@@ -2333,6 +2388,35 @@ const buildFlatProductRows = (
   return rows;
 };
 
+/** Dispatch uses the same saved measurement and service rows as contract print. */
+export type DispatchProductPrintRow = Pick<FlatProductRow, 'code' | 'description' | 'category' |
+  'length' | 'width' | 'count' | 'linearMeasurement' | 'squareMeasurement' | 'rate' | 'total'>;
+
+export function createDispatchProductRows(contractData: unknown, options: {
+  currency?: string;
+  partnerDetails?: PartnerProductPrintDetails;
+  siblingDispatchRows?: ReadonlySet<string>;
+} = {}) {
+  const currency = options.currency || 'ریال';
+  const products = normalizeProducts({ contractData });
+  const byRowId = new Map(products.map(product => [product.rowId, product]));
+  return (rowId: string): DispatchProductPrintRow[] => {
+    const product = byRowId.get(rowId);
+    if (!product) return [];
+    const children = products.filter(item => item.layer?.parentRowId === rowId &&
+      !options.siblingDispatchRows?.has(item.rowId || item.id));
+    const rows = options.partnerDetails
+      ? buildPartnerProductRows(product, options.partnerDetails, 1, currency, { moneyFractionDigits: 12 })
+      : buildFlatProductRows([product, ...children], [], currency, 0, undefined,
+          { showTotals: false, accountingDetail: true, moneyFractionDigits: 12 });
+    return rows.map(({ code, description, category, length, width, count, linearMeasurement, squareMeasurement, rate, total }) => {
+      const rateUnit = squareMeasurement ? 'متر مربع' : linearMeasurement ? 'متر طول' : '';
+      const displayRate = category === 'برش' && rate && rateUnit && !rate.includes(' / ') ? `${rate} / ${rateUnit}` : rate;
+      return { code, description, category, length, width, count, linearMeasurement, squareMeasurement, rate: displayRate, total };
+    });
+  };
+}
+
 const renderProductMainRows = (
   products: NormalizedProduct[],
   standaloneServices: NormalizedStandaloneService[],
@@ -2445,13 +2529,43 @@ const renderProductMainRows = (
   ).join('');
 };
 
-const renderDeliveryRows = (deliveries: NormalizedDelivery[], options: { hideReceiver?: boolean } = {}): string => {
+type CompactDeliveryItem = { name: string; code?: string; unit: string; quantity: string; execution?: boolean };
+
+/** Print-only aggregation within one delivery. Unknown product codes remain separate. */
+const compactDeliveryItems = (items: CompactDeliveryItem[]): CompactDeliveryItem[] => {
+  const groups = new Map<string, CompactDeliveryItem>();
+  items.forEach((item, index) => {
+    const key = item.code && item.code !== EMPTY
+      ? JSON.stringify([item.name, item.code, item.unit, Boolean(item.execution)])
+      : `unidentified:${index}`;
+    const previous = groups.get(key);
+    if (previous) previous.quantity = new Prisma.Decimal(previous.quantity).add(item.quantity).toFixed();
+    else groups.set(key, { ...item });
+  });
+  return [...groups.values()];
+};
+
+const renderDeliveryRows = (deliveries: NormalizedDelivery[], options: { hideReceiver?: boolean; compact?: boolean } = {}): string => {
   const columnCount = options.hideReceiver ? 5 : 6;
   if (!deliveries.length) {
     return `<tr><td colspan="${columnCount}" class="empty-cell">${escapeHtml(EMPTY)}</td></tr>`;
   }
 
   return deliveries.map((delivery) => {
+    if (options.compact && delivery.products.length && delivery.products.every(product => product.quantityText !== undefined && product.unit)) {
+      const groups = compactDeliveryItems(delivery.products.map(product => ({
+        name: product.name, code: product.code, unit: product.unit || 'count',
+        quantity: product.quantityText ?? String(product.quantity),
+      })));
+      return groups.map(product => `<tr class="delivery-row">
+        <td>${toFaNumber(delivery.index)}</td>
+        <td>${escapeHtml(product.name)}${product.code && product.code !== EMPTY ? `<div>کد محصول: ${escapeHtml(product.code)}</div>` : ''}</td>
+        <td>${toFaNumber(Number(product.quantity), product.unit === 'count' ? 0 : 4)} ${escapeHtml(deliveryUnitLabel(product.unit))}</td>
+        <td>${escapeHtml(delivery.date)}</td>
+        ${options.hideReceiver ? '' : `<td>${escapeHtml(delivery.receiver)}</td>`}
+        <td>${escapeHtml(delivery.notes)}</td>
+      </tr>`).join('');
+    }
     const productsLabel = delivery.products.length > 0
       ? delivery.products.map((product) => product.name).join('، ')
       : EMPTY;
@@ -2562,6 +2676,7 @@ const getContractHeaderMeta = (contract: RenderableContract) => {
 const variantTitle = (variant: ContractPrintVariant): string => {
   if (variant === 'custom') return 'چاپ سفارشی حسابداری';
   if (variant === 'accounting') return 'چاپ حسابداری';
+  if (variant === 'production') return 'قرارداد فروش سنگ';
   if (variant === 'workshop') return 'چاپ نمره کارگاه';
   if (variant === 'summary') return 'خلاصه قرارداد';
   return 'چاپ نسخه اصلی';
@@ -2578,7 +2693,7 @@ const renderCompactMetadataSection = (
   if (options.variant === 'original' || options.variant === 'summary') return '';
   const { contractNumber, contractDate, statusLabel } = getContractHeaderMeta(contract);
   const salesAccountName = getUserName(contract.createdByUser);
-  const accountingFields = options.variant === 'accounting'
+  const accountingFields = options.variant === 'accounting' || options.variant === 'production'
     ? `
         <div><strong>حساب فروش:</strong> ${escapeHtml(salesAccountName)}</div>
       `
@@ -2605,7 +2720,8 @@ const renderCompactMetadataSection = (
   `;
 };
 
-export function renderContractPdfHeaderTemplate(contract: RenderableContract, customerOutput?: CustomerContractOutput): string {
+export function renderContractPdfHeaderTemplate(contract: RenderableContract, customerOutput?: CustomerContractOutput,
+  labels: { number?: string; date?: string; statusValue?: string } = {}): string {
   if (customerOutput) contract = { contractNumber: customerOutput.contractNumber, status: customerOutput.status, createdAt: customerOutput.contractDate };
   const { contractNumber, contractDate, statusLabel } = getContractHeaderMeta(contract);
   const logoMarkup = customerOutput ? `<div style="direction:rtl"><strong>${escapeHtml(customerOutput.seller.displayName)}</strong><div style="font-size:8px">تأمین و تحویل توسط سبلان</div></div>` : logoUrl
@@ -2618,9 +2734,9 @@ export function renderContractPdfHeaderTemplate(contract: RenderableContract, cu
       <div style="height:24mm;border:1px solid #d1d5db;border-radius:8px;padding:4px 10px 4px 5px;display:flex;align-items:center;justify-content:space-between;gap:12px;direction:ltr;background:#fff;box-sizing:border-box;overflow:hidden;">
         <div style="flex:1;display:flex;align-items:center;justify-content:flex-start;height:100%;direction:ltr;">${logoMarkup}</div>
         <div style="min-width:210px;text-align:right;direction:rtl;line-height:1.55;">
-          <div><strong>شماره قرارداد:</strong> ${escapeHtml(contractNumber)}</div>
-          <div><strong>تاریخ تنظیم:</strong> ${escapeHtml(contractDate)}</div>
-          <div><strong>وضعیت هنگام چاپ:</strong> ${escapeHtml(statusLabel)}</div>
+          <div><strong>${escapeHtml(labels.number || 'شماره قرارداد')}:</strong> ${escapeHtml(contractNumber)}</div>
+          <div><strong>${escapeHtml(labels.date || 'تاریخ تنظیم')}:</strong> ${escapeHtml(contractDate)}</div>
+          <div><strong>وضعیت هنگام چاپ:</strong> ${escapeHtml(labels.statusValue ?? statusLabel)}</div>
           <div><strong>صفحه:</strong> <span class="pageNumber"></span></div>
         </div>
       </div>
@@ -2699,10 +2815,15 @@ function renderCustomerDeliveryRows(output: CustomerContractOutput): string {
   return output.deliveries.flatMap((delivery, index) => {
     const physical = delivery.items.map(item => ({ rowId: item.productRowId, quantity: item.quantity, execution: false }));
     const services = (delivery.serviceItems ?? []).map(item => ({ rowId: item.serviceRowId, quantity: item.quantity, execution: true }));
-    return [...physical, ...services].map(item => `<tr>
+    const grouped = compactDeliveryItems([...physical, ...services].map(item => {
+      const product = products.get(item.rowId);
+      return { name: product?.description || '', code: product?.productCode, unit: product?.unit || 'count',
+        quantity: item.quantity, execution: item.execution };
+    }));
+    return grouped.map(item => `<tr class="delivery-row">
       <td>${escapeHtml(String(index + 1))}</td>
-      <td>${item.execution ? 'اجرای خدمت: ' : ''}${escapeHtml(products.get(item.rowId)?.description || '')}</td>
-      <td>${escapeHtml(item.quantity)} ${escapeHtml(deliveryUnitLabel(products.get(item.rowId)?.unit))}</td>
+      <td>${item.execution ? 'اجرای خدمت: ' : ''}${escapeHtml(item.name)}${item.code ? `<div>کد محصول: ${escapeHtml(item.code)}</div>` : ''}</td>
+      <td>${escapeHtml(item.quantity)} ${escapeHtml(deliveryUnitLabel(item.unit))}</td>
       <td>${escapeHtml(formatDate(delivery.date))}</td><td>${escapeHtml(output.customer.displayName)}</td><td>${escapeHtml(delivery.destination)}</td>
     </tr>`);
   }).join('');
@@ -2724,8 +2845,8 @@ export function renderCustomerContractPrint(output: CustomerContractOutput, prin
     contractNumber: output.contractNumber, status: output.status, createdAt: output.contractDate,
   };
   return {
-    htmlContent: renderContractHtml(contract, { customerOutput: output, customerPrintDetails: printDetails, reservePdfHeaderSpace: true }),
-    headerTemplate: renderContractPdfHeaderTemplate(contract, output),
+    htmlContent: renderContractHtml(contract, { customerOutput: output, customerPrintDetails: printDetails, firstPageHeader: true }),
+    headerTemplate: '<span></span>',
   };
 }
 
@@ -2737,6 +2858,8 @@ type RenderContractHtmlOptions = {
   customerOutput?: CustomerContractOutput;
   customerPrintDetails?: PartnerProductPrintDetails[];
   reservePdfHeaderSpace?: boolean;
+  /** Partner PDFs keep the header in document flow so later pages reclaim its space. */
+  firstPageHeader?: boolean;
   variant?: ContractPrintVariant;
   customPrint?: ContractCustomPrintOptions;
   finishingCodeById?: Record<string, string>;
@@ -2753,7 +2876,10 @@ export function renderContractHtml(contract: RenderableContract, options: Render
   // A mixed caller cannot carry legacy entity facts into the customer path.
   if (output) contract = { contractNumber: output.contractNumber, status: output.status, createdAt: output.contractDate };
   const variant = options.variant || 'original';
-  const isAccountingVariant = variant === 'accounting';
+  if ((variant === 'production' || variant === 'workshop') && options.firstPageHeader === undefined) {
+    options = { ...options, firstPageHeader: true };
+  }
+  const isAccountingVariant = variant === 'accounting' || variant === 'production';
   const displayInRials = isAccountingVariant || options.displayInRials === true;
   const isWorkshopVariant = variant === 'workshop';
   const isCustomVariant = variant === 'custom';
@@ -2772,7 +2898,7 @@ export function renderContractHtml(contract: RenderableContract, options: Render
   const showProductsSection = customPrint.showProductsSection !== false;
   const showPriceColumns = !isWorkshopVariant && customPrint.showPrices !== false;
   const showDeliverySection = customPrint.showDeliverySection !== false;
-  const showPaymentSection = !isWorkshopVariant && customPrint.showPaymentSection !== false;
+  const showPaymentSection = variant !== 'production' && !isWorkshopVariant && customPrint.showPaymentSection !== false;
   const showDigitalConfirmation = variant === 'original' || isSummaryVariant;
   const showLegalNotes = variant === 'original' || isSummaryVariant;
   const showSignatures = variant === 'original' || isSummaryVariant;
@@ -2837,7 +2963,8 @@ export function renderContractHtml(contract: RenderableContract, options: Render
   const visibleProductColumnDefinitions = productColumnDefinitions.filter((column) => productColumns[column.key]);
 
   return `
-  <div class="sheet ${isWorkshopVariant ? 'workshop-print' : ''} ${output ? 'customer-output' : ''}">
+  <div class="sheet ${isWorkshopVariant ? 'workshop-print' : ''} ${output ? 'customer-output' : ''}${options.firstPageHeader ? ' partner-first-page-header' : ''}">
+    ${options.firstPageHeader ? `<div class="first-page-header">${renderContractPdfHeaderTemplate(contract, output).replace('<span class="pageNumber"></span>', '<span>۱</span>')}</div>` : ''}
     ${renderCompactMetadataSection(contract, { variant, customerName, customerAddress })}
 
     ${showFormalSection ? `<section class="section">
@@ -2912,13 +3039,13 @@ export function renderContractHtml(contract: RenderableContract, options: Render
           </tr>
         </thead>
         <tbody>
-          ${output ? renderCustomerDeliveryRows(output) : renderDeliveryRows(normalizedDeliveries, { hideReceiver: isWorkshopVariant })}
+          ${output ? renderCustomerDeliveryRows(output) : renderDeliveryRows(normalizedDeliveries, { hideReceiver: isWorkshopVariant, compact: options.firstPageHeader })}
         </tbody>
       </table>
       ${output ? '' : `<p class="section-note">${escapeHtml(DELIVERY_NOTE)}</p>`}
     </section>` : ''}
 
-    ${showPaymentSection ? `<section class="section">
+    ${showPaymentSection ? `<section class="section${options.firstPageHeader ? ' print-payment' : ''}">
       <h2>برنامه پرداخت</h2>
       <table>
         <thead>
@@ -2991,7 +3118,7 @@ export function renderContractHtml(contract: RenderableContract, options: Render
 
     @page {
       size: A4 portrait;
-      margin: ${options.reservePdfHeaderSpace ? '50mm 5mm 5mm 5mm' : '0'};
+      margin: ${options.firstPageHeader ? '5mm' : options.reservePdfHeaderSpace ? '50mm 5mm 5mm 5mm' : variant === 'production' || isWorkshopVariant ? '8mm 6mm 10mm' : '0'};
     }
 
     * {
@@ -3367,6 +3494,37 @@ export function renderContractHtml(contract: RenderableContract, options: Render
       font-size: 9px;
       color: #6b7280;
     }
+
+    .partner-first-page-header .first-page-header {
+      height: 29mm;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+    .partner-first-page-header .first-page-header > div {
+      transform: translateY(-3mm);
+      padding-left: 0 !important;
+      padding-right: 0 !important;
+    }
+    .partner-first-page-header .main-products-table > .product-group {
+      break-inside: auto;
+      page-break-inside: auto;
+    }
+    .partner-first-page-header .main-products-table tr {
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+    .partner-first-page-header .section h2 { break-after: avoid; page-break-after: avoid; }
+    .partner-first-page-header .delivery-table tr { break-inside: avoid; page-break-inside: avoid; }
+    .partner-first-page-header .print-payment {
+      padding-top: 4px;
+      padding-bottom: 4px;
+    }
+    .partner-first-page-header .print-payment .section-note {
+      margin-top: 2px;
+      line-height: 1.3;
+    }
+    .partner-first-page-header .section:has(+ .footer) { margin-bottom: 0; }
+    .partner-first-page-header .footer { margin-top: 2px; padding-top: 2px; }
 
   </style>
   `;

@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
@@ -17,6 +18,7 @@ import {
   type DispatchEvidenceAudit,
   type DispatchRecoveryAuthority,
   createDispatchDocumentFilesystem,
+  createDispatchDocumentRecoveryOperations,
   validateDispatchLifecycleConservation,
   parsePersistedOrphanEvidence,
   verifyProductionDispatchAuditChains,
@@ -58,7 +60,50 @@ const authority: DispatchRecoveryAuthority = {
   beforeHash: 'a'.repeat(64), afterHash: 'b'.repeat(64),
 };
 const orphanBytes = Buffer.from('orphan');
+
+test('configured orphan owner refusal cannot fall back to legacy writes and command retries retain their scope', async () => {
+  const scopes: string[] = []; let locks = 0; let legacyWrites = 0;
+  const rejected = new Error('OWNER_NOT_ADMITTED');
+  const transaction = { $executeRawUnsafe: async () => { locks += 1; }, $queryRaw: async () => [] };
+  const database = { $transaction: (body: (tx: unknown) => unknown) => body(transaction) };
+  const filesystem = { quarantine: async () => { legacyWrites += 1; }, stageCleanup: async () => { legacyWrites += 1; } };
+  const operations = createDispatchDocumentRecoveryOperations(database as never, filesystem as never, {} as never, {
+    orphanStorage: async ({ operationId }) => { scopes.push(operationId); throw rejected; },
+  });
+  const command = { storageKey: 'issued/orphan.pdf', actorId: 'admin', reason: 'confirmed orphan', correlationId: 'request-a',
+    idempotencyKey: 'stable-command', authority, now: new Date('2026-10-19T00:00:00Z') };
+  await assert.rejects(operations.quarantine(command), rejected);
+  await assert.rejects(operations.quarantine({ ...command, correlationId: 'request-b', now: new Date('2026-10-20T00:00:00Z') }), rejected);
+  await assert.rejects(operations.cleanup(command), rejected);
+  assert.equal(locks, 3); assert.equal(legacyWrites, 0);
+  assert.match(scopes[0]!, /^[a-f0-9]{64}$/); assert.equal(scopes[0], scopes[1]); assert.notEqual(scopes[0], scopes[2]);
+});
 const orphanEvidence = { reportHash: 'c'.repeat(64), observedAt: '2026-08-09T00:00:00.000Z', observedByteLength: orphanBytes.length, observedSha256: createHash('sha256').update(orphanBytes).digest('hex') };
+
+test('quarantine generation authorization survives audit persistence and is forwarded unchanged to cleanup', async () => {
+  const events: DispatchArtifactAuditEvent[] = [];
+  const fileReceipt = { format: 'sabalan-dispatch-quarantine/v1' as const, operationId: '1'.repeat(64),
+    versionSha256: '2'.repeat(64), moveReceiptSha256: '3'.repeat(64) };
+  const common = { actorId: 'admin', reason: 'confirmed orphan', correlationId: 'request', idempotencyKey: 'quarantine',
+    storageKey: 'issued/orphan.pdf', authority };
+  const audit = { append: async (event: DispatchArtifactAuditEvent) => { events.push(event); } };
+  await quarantineDispatchDocumentOrphan({ ...common, now: new Date('2026-10-01T00:00:00Z'), audit,
+    repository: { isReferenced: async () => false, readPersistedOrphanEvidence: async () => orphanEvidence },
+    storage: { read: async () => orphanBytes, quarantine: async () => fileReceipt, restoreQuarantined: async () => {} } });
+  const completed = events.find(event => event.action === 'QUARANTINE_COMPLETED')!;
+  assert.deepEqual(completed.detail.fileReceipt, fileReceipt);
+  let staged = false;
+  await cleanupQuarantinedDispatchDocumentOrphan({ ...common, idempotencyKey: 'cleanup', now: new Date('2026-10-19T00:00:00Z'), audit,
+    repository: { isReferenced: async () => false, readQuarantineEvidence: async () => ({
+      quarantinedAt: completed.detail.quarantinedAt as string,
+      reconciliationReportHash: completed.detail.reconciliationReportHash as string,
+      fileReceipt: completed.detail.fileReceipt as typeof fileReceipt,
+    }) }, storage: { stageCleanup: async (key, authorized) => {
+      assert.equal(key, common.storageKey); assert.deepEqual(authorized, fileReceipt); staged = true;
+    }, restoreStagedCleanup: async () => {}, finalizeCleanup: async () => {} } });
+  assert.equal(staged, true);
+  assert.deepEqual(events.find(event => event.action === 'CLEANUP_COMPLETED')!.detail.fileReceipt, fileReceipt);
+});
 
 const node = (kind: DispatchEvidenceNode['kind'], id: string, parents: string[] = []): DispatchEvidenceNode => {
   const evidence = { kind, id, parents };
@@ -171,7 +216,7 @@ test('production conservation keeps contract, item, product row, and unit in the
 
 test('production replay uses writer-owned Guard and correction hash formats', () => {
   assert.deepEqual(guardPhysicalExitReasonEvidence(), { reasonCode: 'GUARD_PHYSICAL_EXIT_CONFIRMED', reasonDetail: null });
-  const correction = { correctionId: 'correction-1', waybillId: 'waybill-1', reason: 'verified return', effectiveAt: new Date('2026-08-09T08:00:00.000Z'), lines: [{ id: 'line-1', quantity: { toFixed: () => '1.000' } }], postedAt: new Date('2026-08-09T09:00:00.000Z') };
+  const correction = { correctionId: 'correction-1', waybillId: 'waybill-1', reason: 'verified return', effectiveAt: new Date('2026-08-09T08:00:00.000Z'), lines: [{ id: 'line-1', quantity: new Prisma.Decimal('1.000') }], postedAt: new Date('2026-08-09T09:00:00.000Z') };
   assert.match(dispatchCorrectionIntegrityHash(correction), /^[a-f0-9]{64}$/);
   const correctionPayload = { workspace: 'accounting', effectiveAuthority: { actorRole: 'ADMIN' }, waybillId: 'waybill-1', reason: 'verified return', integrityHash: dispatchCorrectionIntegrityHash(correction) };
   const correctionAudit = dispatchLifecycleAuditEventHash({ aggregateType: 'DISPATCH_CORRECTION', aggregateId: 'correction-1', eventType: 'CORRECTION_POSTED', payload: correctionPayload, actorId: 'actor-1', authority: correctionPayload.effectiveAuthority as never, at: new Date('2026-08-09T09:00:00.000Z'), previousHash: null });
@@ -380,7 +425,7 @@ test('durable restoration lookup reconstructs the exact persisted completion eve
 
 test('statement adjustment replay cross-binds immutable sources and rejects a self-consistent row tamper', () => {
   const at = new Date('2026-08-20T13:00:00.000Z'); const originalStatement = { id: 'statement-1', sourceIntegrityHash: 'a'.repeat(64), sha256: 'b'.repeat(64) };
-  const line = { id: 'correction-line-1', contractId: 'contract-1', contractItemId: 'item-1', productRowId: 'row-1', unit: 'M3', quantity: { toFixed: () => '-1.000' } };
+  const line = { id: 'correction-line-1', contractId: 'contract-1', contractItemId: 'item-1', productRowId: 'row-1', unit: 'M3', quantity: new Prisma.Decimal('-1.000') };
   const correction = { id: 'correction-1', reason: 'returned quantity', integrityHash: 'c'.repeat(64), postedAt: at, postedBy: 'accountant-1', lines: [line] };
   const snapshot = { schemaVersion: 1, adjustmentId: 'adjustment-1', waybillId: 'waybill-1', correctionId: correction.id, sequence: 1,
     reason: correction.reason, correctionIntegrityHash: correction.integrityHash, originalStatementDocumentId: originalStatement.id,
@@ -408,7 +453,7 @@ test('statement adjustment replay cross-binds immutable sources and rejects a se
       pricingVersion: { currency: 'TOMAN', rows: [{ id: 'pricing-row-1', contractItemId: 'frozen-item-1', linkedContractItemId: line.contractItemId,
         productRowId: line.productRowId, unit: line.unit, integrityHash: 'f'.repeat(64) }] } }], command, audit };
   assert.equal(validatesStatementAdjustmentEvidence(input), true);
-  const amount = (value: string) => ({ toFixed: () => value });
+  const amount = (value: string) => new Prisma.Decimal(value);
   const baseEvents = [{ pricingRowId: 'pricing-row-1', ledgerSequence: 1, quantity: amount('2.000'),
     grossAmount: amount('20.000000000000'), discountAmount: amount('2.000000000000'), netAmount: amount('18.000000000000'), evidence: {
       ledgerSequence: 1, beforeQuantity: '0.000', afterQuantity: '2.000', beforeGross: '0.000000000000',
@@ -439,7 +484,7 @@ test('statement adjustment replay cross-binds immutable sources and rejects a se
 });
 
 test('mandatory Prisma truth verifier accepts only immutable writer-owned pricing/event/provenance sources', async () => {
-  const decimal = (value: string) => ({ toFixed: () => value });
+  const decimal = (value: string) => new Prisma.Decimal(value);
   const versionBase = { id: 'pricing-1', contractId: 'contract-1', versionNumber: 1, sourceFinancialRecordId: 'financial-1',
     approvedAt: new Date('2026-08-09T07:00:00.000Z'), approvedBy: 'finance-1', schemaVersion: 1, currency: 'TOMAN',
     grossAmount: '100.000000000000', discountAmount: '10.000000000000', netAmount: '90.000000000000', sourceEvidence: { source: 'approved' } };
@@ -467,7 +512,11 @@ test('mandatory Prisma truth verifier accepts only immutable writer-owned pricin
       documentArtifacts: [{ kind: 'WAYBILL', statementAdjustmentId: null, sourceIntegrityHash: sourceHash }, { kind: 'STATEMENT', statementAdjustmentId: null, sourceIntegrityHash: sourceHash }] }] } };
   const tx = { logisticsAllocationRevision: { findUnique: async () => revision },
     logisticsAllocationRevisionPricing: { findMany: async () => [{ contractId: 'contract-1', pricingVersionId: version.id, expectedPricingHash: version.integrityHash, readinessEvidenceHash: 'd'.repeat(64), pricingVersion: version }] },
-    dispatchPricedAllocationEvent: { findMany: async () => [event] } };
+    dispatchPricedAllocationEvent: { findMany: async () => [event] },
+    // The production reader verifies the global sequence against both kinds
+    // of correction evidence, including when no correction has occurred.
+    dispatchStatementAdjustment: { findMany: async () => [] },
+    salesInvoiceCorrection: { findMany: async () => [] } };
   const verifier = createPrismaDispatchReplayTruthVerifier({ $transaction: async (work: (database: typeof tx) => unknown) => work(tx) } as never);
   const input = { allocationRevisionId: revision.id, allocationIntegrityHash: revision.integrityHash, expectedSourceIntegrityHash: sourceHash, pricingVersionIds: [version.id], pricedEventIntegrityHashes: [event.integrityHash] };
   assert.equal(await verifier.verifyPrimarySource(input), true);
@@ -820,6 +869,7 @@ test('system recovery rejects an incomplete backup until every referenced origin
   const original = Buffer.from('original-pdf');
   const database = {
     $queryRawUnsafe: async () => [],
+    performanceExportReceipt: { findMany: async () => [] },
     dispatchDocumentArtifact: { findMany: async () => [{ id: 'artifact-1', storageKey: 'issued/original.pdf', byteLength: BigInt(original.length), sha256: createHash('sha256').update(original).digest('hex') }] },
   };
   try {
@@ -845,7 +895,7 @@ test('sanitized dispatch backup validates only against placeholder metadata in t
   const payloadRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'dispatch-sanitized-coverage-'));
   const storageKey = 'issued/statement.pdf'; const placeholder = Buffer.from('%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Count 0/Kids[]>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n');
   const placeholderMetadata = sanitizedDispatchArtifactMetadata(storageKey);
-  const database = { $queryRawUnsafe: async () => [], dispatchDocumentArtifact: { findMany: async () => [{ id: 'artifact-1', storageKey,
+  const database = { $queryRawUnsafe: async () => [], performanceExportReceipt: { findMany: async () => [] }, dispatchDocumentArtifact: { findMany: async () => [{ id: 'artifact-1', storageKey,
     byteLength: BigInt(placeholderMetadata.byteLength), sha256: placeholderMetadata.sha256 }] } };
   try {
     const target = recoveryEngineInternals.dispatchArtifactBackupPath(payloadRoot, storageKey); await fs.promises.mkdir(path.dirname(target), { recursive: true }); await fs.promises.writeFile(target, placeholder);

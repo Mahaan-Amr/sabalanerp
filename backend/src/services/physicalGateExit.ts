@@ -1,7 +1,13 @@
+import { projectAccountingDispatchCandidateSummary } from './accountingDispatchCandidatePresentation';
+import { exactQuantityText } from './exactQuantity';
+import { assertLoadingSalesInvoice } from './salesDispatchInvoice/service';
+import { SalesInvoiceError } from './salesDispatchInvoice/source';
 import { assertPartnerCommercialDispatchEligible } from './partnerSales/fulfillment/commercialSettlement';
 import { createHash, randomUUID } from 'node:crypto';
 import { assertOrdinaryContractsDispatchEligible, ordinaryDispatchSourcesEligible } from './ordinaryContractDispatchEligibility';
 import { AccountingDispatchWaybillStatus, DispatchBuyerSmsStatus, GuardDriverQueueTurnStatus, Prisma, PrismaClient } from '@prisma/client';
+import { isGuardQueueTurnCurrentlyReady, queueTurnDriverIdentity } from './guardDriverQueue';
+import { lockHrVehicleOperations } from './hrVehicleOperations';
 import { refreshProjectionContracts } from './dispatchAllocation';
 import { appendQueueEvent } from './guardDriverQueue';
 import { shipmentQuantityEvidenceIntegrityHash } from './shipmentQuantityProjectionStore';
@@ -14,13 +20,13 @@ export const GUARD_PHYSICAL_EXIT_REASON_CODE = 'GUARD_PHYSICAL_EXIT_CONFIRMED' a
 export const guardPhysicalExitReasonEvidence = (detail?: string) => ({ reasonCode: GUARD_PHYSICAL_EXIT_REASON_CODE,
   reasonDetail: String(detail || '').trim() || null });
 
-const stableValue = (value: unknown): unknown => {
-  if (Array.isArray(value)) return value.map(stableValue);
+const stableValue = (value: unknown, field = ''): unknown => {
+  if (Array.isArray(value)) return value.map(entry => stableValue(entry));
   if (typeof value === 'bigint') return value.toString();
-  if (value instanceof Prisma.Decimal) return value.toFixed(3);
+  if (value instanceof Prisma.Decimal) return field.toLowerCase().includes('quantity') ? exactQuantityText(value) : value.toFixed(3);
   if (value instanceof Date) return value.toISOString();
   if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value as Record<string, unknown>)
-    .sort(([left], [right]) => left.localeCompare(right)).map(([key, entry]) => [key, stableValue(entry)]));
+    .sort(([left], [right]) => left.localeCompare(right)).map(([key, entry]) => [key, stableValue(entry, key)]));
   return value;
 };
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(stableValue(value))).digest('hex');
@@ -77,6 +83,9 @@ export class PhysicalGateExitService {
     return authorizations.filter((_authorization, index) => eligible[index]).map((authorization) => ({ id: authorization.id, waybillId: authorization.waybillId,
       dispatchNumber: authorization.waybill.number.toString(), validUntil: authorization.validUntil,
       method: authorization.method, queueTurnId: authorization.waybill.candidate.allocationRevision.queueTurnId,
+      ...(authorization.driverSource === 'PERSONAL_PICKUP' ? {
+        summary: projectAccountingDispatchCandidateSummary(authorization.waybill.candidate.allocationRevision.snapshot),
+      } : {}),
       admissionSnapshot: authorization.waybill.candidate.allocationRevision.queueTurn.admissionSnapshot }));
   }
 
@@ -114,9 +123,16 @@ export class PhysicalGateExitService {
       }
       const waybill = authorization.waybill;
       const revision = waybill.candidate.allocationRevision;
+      let salesInvoiceId: string;
+      try { salesInvoiceId = await assertLoadingSalesInvoice(tx, revision.loadingId); }
+      catch (error) { if (error instanceof SalesInvoiceError) throw new PhysicalGateExitConflictError(error.message); throw error; }
       await assertOrdinaryContractsDispatchEligible(tx, revision.lines.map(line => line.sourceContractId), PhysicalGateExitConflictError);
       await assertPartnerCommercialDispatchEligible(tx, [revision.partnerCaseId, ...revision.lines.map(line => line.partnerCaseId)], PhysicalGateExitConflictError);
       const turn = revision.queueTurn;
+      {
+        await lockHrVehicleOperations(tx);
+        if (!await isGuardQueueTurnCurrentlyReady(tx, turn, at)) throw new PhysicalGateExitConflictError('خروج مجاز نیست؛ شرایط رانندگی یا خودروی پرونده معتبر نیست. صلاحیت، گواهینامه و تخصیص جاری را بررسی کنید.');
+      }
       if (waybill.status !== AccountingDispatchWaybillStatus.ISSUED || waybill.integrityHash !== authorization.waybillIntegrityHash) {
         throw new PhysicalGateExitConflictError('The authorized waybill snapshot is no longer valid.');
       }
@@ -126,7 +142,7 @@ export class PhysicalGateExitService {
       if (turn.status !== GuardDriverQueueTurnStatus.LOADING_FINALIZED || turn.loadingId !== revision.loadingId) {
         throw new PhysicalGateExitConflictError('The Guard queue turn is not awaiting physical exit.');
       }
-      const expectedDriverId = turn.driverSource === 'INTERNAL' ? turn.internalDriverId : turn.externalDriverId;
+      const expectedDriverId = queueTurnDriverIdentity(turn);
       if (!expectedDriverId || expectedDriverId !== authorization.driverId || turn.driverSource !== authorization.driverSource) {
         throw new PhysicalGateExitConflictError('The authorization does not match the admitted driver snapshot.');
       }
@@ -136,7 +152,7 @@ export class PhysicalGateExitService {
       const plate = String(asRecord(admissionSnapshot.plate).plate || asRecord(admissionSnapshot.vehicle).plate || '').trim();
       const phoneNumber = String(notification.confirmationPhone || '').trim() || null;
       const exitId = randomUUID();
-      const snapshot = { schemaVersion: 1, authorizationId: authorization.id, authorizationIntegrityHash: authorization.integrityHash,
+      const snapshot = { schemaVersion: 1, salesInvoiceId, authorizationId: authorization.id, authorizationIntegrityHash: authorization.integrityHash,
         waybillId: waybill.id, dispatchNumber: waybill.number.toString(), waybillIntegrityHash: waybill.integrityHash,
         allocationRevisionId: revision.id, allocationIntegrityHash: revision.integrityHash, queueTurnId: turn.id,
         admissionIntegrityHash: turn.integrityHash, driverSource: turn.driverSource, driverId: expectedDriverId,
@@ -146,7 +162,7 @@ export class PhysicalGateExitService {
         recordedBy: actorId, snapshot: json(snapshot), integrityHash: digest(snapshot) } });
       for (const line of revision.lines) {
         const evidence = { id: `${exitId}:${line.id}`, ...shipmentSourceForAllocationLine(line),
-          productRowId: line.productRowId, unit: line.unit, kind: 'PHYSICAL_EXIT' as const, quantity: line.quantity.toFixed(3),
+          productRowId: line.productRowId, unit: line.unit, kind: 'PHYSICAL_EXIT' as const, quantity: exactQuantityText(line.quantity),
           effectiveAt: at.toISOString(), recordedAt: at.toISOString(), sourceType: 'GUARD_PHYSICAL_EXIT', sourceId: `${exitId}:${line.id}`,
           sourceVersion: 1, integrityHash: '', metadata: { loadingId: revision.loadingId, waybillId: waybill.id, physicalExitId: exitId,
             authorizationId: authorization.id, allocationLineId: line.id, allocationRevisionId: revision.id } };
@@ -165,8 +181,8 @@ export class PhysicalGateExitService {
         toStatus: GuardDriverQueueTurnStatus.EXIT_RECORDED, actorId, payload: { physicalExitId: exitId, authorizationId: authorization.id, waybillId: waybill.id } });
       const smsIntent = await tx.dispatchBuyerSmsIntent.create({ data: { physicalExitId: exitId, idempotencyKey: `BUYER_EXIT:${exitId}`,
         sessionId: authorization.sessionId,
-        phoneNumber, dispatchNumber: waybill.number.toString(), vehiclePlate: plate,
-        payload: json({ dispatchNumber: waybill.number.toString(), vehiclePlate: plate }), status: phoneNumber ? 'PENDING' : 'NEEDS_ATTENTION', availableAt: at } });
+        phoneNumber, dispatchNumber: waybill.number.toString(), vehiclePlate: turn.driverSource === 'PERSONAL_PICKUP' ? 'سواری شخصی' : plate,
+        payload: json({ dispatchNumber: waybill.number.toString(), vehiclePlate: turn.driverSource === 'PERSONAL_PICKUP' ? 'سواری شخصی' : plate }), status: phoneNumber ? 'PENDING' : 'NEEDS_ATTENTION', availableAt: at } });
       if (!phoneNumber) await tx.dispatchConfirmationAlert.create({ data: { sessionId: authorization.sessionId,
         alertType: 'BUYER_EXIT_SMS_NEEDS_ATTENTION', payload: json({ physicalExitId: exitId, smsIntentId: smsIntent.id,
           dispatchNumber: waybill.number.toString(), status: 'NEEDS_ATTENTION', detail: 'No confirmed buyer notification phone was snapshotted.' }) } });

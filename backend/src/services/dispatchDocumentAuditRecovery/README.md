@@ -49,3 +49,11 @@ The Accounting endpoint `GET /api/accounting/audit/dispatch-documents/recovery` 
 Production recovery mutations use `npm --prefix backend run dispatch-document:recovery -- ...`. The script requires an
 active ADMIN, explicit subject/session/device/correlation/idempotency/before/after hashes, and persists every outcome.
 The encrypted package passphrase is accepted only via `DISPATCH_RECOVERY_PASSPHRASE`, never a command-line argument.
+
+Every CLI command, including replay and reconciliation, writes audit evidence and requires the existing protected
+deployment authority: inherited native control FD9, retired online inventories, and the exact live
+`DEPLOYMENT_ID` / `DEPLOYMENT_RELEASE_ID` / `DEPLOYMENT_LEASE_TOKEN` at `MUTATION_STARTED` with a verified local,
+remote and restored checkpoint. The CLI checks native ownership before constructing Prisma and rechecks the
+checkpoint/lease before constructing recovery services and dispatching a command. It cannot run beside an enrolled
+online fleet. The private online Dispatch startup registry covers the initial Accounting document service and its
+adjustment preparer only; it does not enroll this separate recovery filesystem, quarantine or cleanup roots.

@@ -1,0 +1,28 @@
+import assert from 'node:assert/strict';
+import {renderPurchaseOrder,renderPurchaseReceipt} from '../purchasing/print';
+import {renderContractHtml,renderContractPdfHeaderTemplate} from '../../utils/printTemplate';
+import type {Doc} from '../purchasing/domain';
+
+const document:Doc={ownerId:'qa',creatorId:'qa',contractId:null,customerId:null,parentId:null,updatedAt:new Date('2026-11-01T08:00:00Z'),id:'qa-print',kind:'ORDER',number:1001,version:2,status:'OPEN',createdAt:new Date('2026-11-01T08:00:00Z'),data:{stone:'سنگ <script>alert(1)</script>',quantity:'75.125',unit:'مترمربع',price:'3500000',supplierName:'کارخانه نمونه',route:'direct',destinations:[{name:'نماینده',phone:'09120000000',address:'نشانی <img src=x>'}],paymentTerms:'نقدی',quoteTerms:[{quantity:'75.125',readyLeadDays:'3',arrivalLeadDays:'5',leadBasis:'ORDER_CONFIRMATION',dayKind:'working'}]}};
+const html=renderPurchaseOrder(document);
+const shared=renderContractHtml({id:document.id,contractNumber:'1001',items:[]},{variant:'accounting'});
+assert(html.includes(shared.slice(shared.indexOf('<style>'))),'Reuse canonical Accounting variant styles and fonts');
+assert(html.includes('size:A4 portrait'));
+assert(html.includes('سفارش قطعی خرید'));
+assert(html.includes('روز کاری'));
+assert(html.includes('۲۶۲٬۹۳۷٬۵۰۰'));
+assert(html.includes('&lt;script&gt;')&&!html.includes('<script>'));
+assert(html.includes('&lt;img src=x&gt;'));
+const defaultHeader=renderContractPdfHeaderTemplate({contractNumber:'1001',createdAt:document.createdAt,status:'APPROVED'});
+assert(!defaultHeader.includes('سفارش قطعی خرید'),'Optional Purchasing label must not alter other document headers');
+document.data.price=null;
+assert(renderPurchaseOrder(document).includes('در انتظار توافق'));
+assert(!renderPurchaseOrder(document).includes('۲۶۲٬۹۳۷٬۵۰۰'));
+const receipt:Doc={...document,id:'qa-receipt',kind:'RECEIPT',number:1002,parentId:document.id,data:{stone:'سنگ <script>bad</script>',unit:'مترمربع',quantity:'40',accepted:'15',rejected:'10',returned:'4',location:'انبار',recipient:{name:'نماینده <ناشناخته>'}}};
+const receiptHtml=renderPurchaseReceipt(receipt,document);
+assert(receiptHtml.includes('رسید دریافت بار خرید'));
+assert(receiptHtml.includes('۱۵')&&receiptHtml.includes('۱۰')&&receiptHtml.includes('۴'));
+assert(receiptHtml.includes('&lt;script&gt;')&&!receiptHtml.includes('<script>'));
+assert(receiptHtml.includes('این سند به‌تنهایی فاکتور یا تأیید پرداخت نیست'));
+assert(!receiptHtml.includes('۳٬۵۰۰٬۰۰۰'));
+console.log('Purchasing PDF: 10 canonical-template, amount, promise and escaping checks passed.');

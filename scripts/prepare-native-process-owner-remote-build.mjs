@@ -1,0 +1,14 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import {createHash,randomBytes} from 'node:crypto';
+const root=path.resolve(import.meta.dirname,'..'),source=path.join(root,'deploy/scripts/native-process-owner.c'),template=path.join(root,'deploy/scripts/build-native-process-owner-remote.py');
+const sha=raw=>createHash('sha256').update(raw).digest('hex');
+const raw=fs.readFileSync(source),operation=randomBytes(16).toString('hex');
+const spec={operation,sourceSha256:sha(raw),sourceBase64:raw.toString('base64')};
+const original=fs.readFileSync(template,'utf8');assert.equal(original.split('SPEC = None').length,2);
+const generated=original.replace('SPEC = None','SPEC = '+JSON.stringify(spec));
+const name='native-process-owner-remote-build-'+operation;
+const file=path.join('D:/sabalanerp-online-qa',name+'-remote.py');fs.writeFileSync(file,generated,{flag:'wx',mode:0o600});
+assert.equal(sha(fs.readFileSync(source)),spec.sourceSha256);
+process.stdout.write(JSON.stringify({file,sha256:sha(Buffer.from(generated)),sourceSha256:spec.sourceSha256,output:path.join(root,'reports/qa',name+'.json'),wrapper:'D:/sabalanerp-online-qa/run-reviewed-backup-operation-with-password-20261019.py',actualBuildExecuted:false})+'\n');

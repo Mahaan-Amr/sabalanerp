@@ -18,7 +18,7 @@ const rollback = new Error('ROLLBACK_HR_HIRING_FINANCE_DUTY_TEST');
 
 const evidence = (name: string) => ({
   storageName: `${name}.pdf`, originalName: `${name}.pdf`, mimeType: 'application/pdf',
-  size: 12, sha256: name.padEnd(64, '0').slice(0, 64), malwareScanStatus: 'CLEAN',
+  size: 12, sha256: name.padEnd(64, '0').slice(0, 64),
 });
 
 test('Accounting duties record and verify collateral atomically without granting HR workspace access', async () => {
@@ -63,12 +63,18 @@ test('Accounting duties record and verify collateral atomically without granting
       const candidate = await tx.hrCandidate.create({ data: { firstName: 'Duty', lastName: 'Candidate', mobile: `09${suffix.replace(/\D/g, '').slice(-9).padStart(9, '0')}` } });
       const application = await tx.hrJobApplication.create({ data: {
         candidateId: candidate.id, positionId: position.id, createdBy: initiator.id,
+        acceptedOfferAt: new Date('2026-08-22T08:00:00Z'),
         collateralClearance: 'IN_PROGRESS', pendingClosureOutcome: 'REJECTED',
         pendingClosureReason: 'Closure after verified original return', pendingClosureRequestedBy: initiator.id,
         pendingClosureRequestedAt: new Date('2026-08-23T08:00:00Z'),
       } });
+      const requirement = await tx.hrCollateralRequirement.create({ data: {
+        applicationId: application.id, version: 1, type: 'PROMISSORY_NOTE',
+        candidateExplanation: 'Promissory note for the accepted offer', proposedBy: initiator.id,
+      } });
       const item = await tx.hrCollateralItem.create({ data: {
         applicationId: application.id, type: 'PROMISSORY_NOTE', amountRials: '20000000',
+        collateralRequirementId: requirement.id,
         status: 'MISSING', recordedBy: initiator.id,
       } });
 
@@ -76,7 +82,7 @@ test('Accounting duties record and verify collateral atomically without granting
         applicationId: application.id, version: 1, contractNumber: 'PAPER-1',
         effectiveFrom: new Date('2026-08-23T00:00:00Z'), effectiveTo: new Date('2027-08-23T00:00:00Z'),
         storageName: 'paper-1.pdf', originalName: 'paper-1.pdf', mimeType: 'application/pdf', size: 12,
-        sha256: 'c'.repeat(64), malwareScanStatus: 'CLEAN', uploadedBy: recorder.id,
+        sha256: 'c'.repeat(64), uploadedBy: recorder.id,
         submittedBy: recorder.id, submittedAt: new Date('2026-08-23T08:00:00Z'),
       } });
       const ordinaryContractDuty = await createHrHiringContractReviewDuty(tx, { contractId: ordinaryContract.id, actorUserId: recorder.id });
@@ -94,7 +100,7 @@ test('Accounting duties record and verify collateral atomically without granting
         applicationId: application.id, version: 2, contractNumber: 'PAPER-WITHDRAW',
         effectiveFrom: new Date('2026-08-23T00:00:00Z'), effectiveTo: new Date('2027-08-23T00:00:00Z'),
         storageName: 'paper-withdraw.pdf', originalName: 'paper-withdraw.pdf', mimeType: 'application/pdf', size: 12,
-        sha256: 'e'.repeat(64), malwareScanStatus: 'CLEAN', uploadedBy: recorder.id,
+        sha256: 'e'.repeat(64), uploadedBy: recorder.id,
         submittedBy: recorder.id, submittedAt: new Date('2026-08-23T08:00:30Z'),
       } });
       const withdrawnContractDuty = await createHrHiringContractReviewDuty(tx, { contractId: withdrawnContract.id, actorUserId: recorder.id });
@@ -114,7 +120,7 @@ test('Accounting duties record and verify collateral atomically without granting
         applicationId: application.id, version: 3, contractNumber: 'PAPER-2',
         effectiveFrom: new Date('2026-08-23T00:00:00Z'), effectiveTo: new Date('2027-08-23T00:00:00Z'),
         storageName: 'paper-2.pdf', originalName: 'paper-2.pdf', mimeType: 'application/pdf', size: 12,
-        sha256: 'd'.repeat(64), malwareScanStatus: 'CLEAN', uploadedBy: manager.id,
+        sha256: 'd'.repeat(64), uploadedBy: manager.id,
         submittedBy: manager.id, submittedAt: new Date('2026-08-23T08:01:00Z'),
       } });
       const managerialContractDuty = await createHrHiringContractReviewDuty(tx, { contractId: managerialContract.id, actorUserId: manager.id });
@@ -216,6 +222,7 @@ test('Accounting duties record and verify collateral atomically without granting
       for (const actor of [manager, systemAdmin]) {
         const protectedItem = await tx.hrCollateralItem.create({ data: {
           applicationId: application.id, type: 'PROMISSORY_NOTE', required: false,
+          collateralRequirementId: requirement.id,
           status: 'MISSING', recordedBy: initiator.id,
         } });
         const protectedRecordingDuty = await createHrHiringFinanceDuty(tx, {

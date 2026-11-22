@@ -74,7 +74,7 @@ export const createAccountingDispatchDocumentRouter = (input: {
   router.get('/dispatch-waybills/:waybillId/artifacts/:artifactId', input.view, async (req: AuthRequest, res) => {
     try {
       const result = await input.service.retrieveArtifact({ artifactId: req.params.artifactId, waybillId: req.params.waybillId,
-        actorId: req.user!.id, correlationId: correlationId(req) });
+        actorId: req.user!.id, correlationId: correlationId(req), original: req.query.original === 'true' });
       bindPrintHandoffCompletion(res, result.complete);
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Length', String(result.bytes.byteLength));

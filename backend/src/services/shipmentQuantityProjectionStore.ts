@@ -1,3 +1,4 @@
+import { exactQuantityText, ExactQuantityDecimal } from './exactQuantity';
 import { createHash } from 'node:crypto';
 import { Prisma, PrismaClient } from '@prisma/client';
 import {
@@ -14,11 +15,7 @@ const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(valu
 const asRecord = (value: unknown): Record<string, any> =>
   value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {};
 
-const exactScaleThree = (value: unknown) => {
-  const decimal = new Prisma.Decimal(String(value));
-  if (!decimal.isFinite() || decimal.decimalPlaces() > 3) throw new Error(`Quantity exceeds canonical scale three: ${value}`);
-  return decimal.toFixed(3);
-};
+const exactShipmentQuantity = exactQuantityText;
 
 const inferUnit = (item: { productType: string | null }, snapshot: Record<string, any>) => {
   const explicit = String(snapshot.unit || snapshot.preparedUnit || snapshot.meta?.unit || '');
@@ -34,14 +31,14 @@ const inferUnit = (item: { productType: string | null }, snapshot: Record<string
 
 export const deriveContractedQuantity = (item: { quantity: Prisma.Decimal; productType: string | null }, snapshot: Record<string, any>, unit: string) => {
   if (unit === 'meter') {
-    const rawLength = new Prisma.Decimal(String(snapshot.length ?? snapshot.actualLength ?? snapshot.actualLengthMeters ?? 0));
+    const rawLength = new ExactQuantityDecimal(String(snapshot.length ?? snapshot.actualLength ?? snapshot.actualLengthMeters ?? 0));
     const length = snapshot.lengthUnit === 'cm' ? rawLength.div(100) : rawLength;
-    const count = new Prisma.Decimal(String(snapshot.quantity ?? 1));
-    if (length.gt(0) && count.gt(0)) return exactScaleThree(length.mul(count));
+    const count = new ExactQuantityDecimal(String(snapshot.quantity ?? 1));
+    if (length.gt(0) && count.gt(0)) return exactShipmentQuantity(length.mul(count));
   }
-  if (unit === 'squareMeter' && new Prisma.Decimal(String(snapshot.squareMeters ?? 0)).gt(0)) return exactScaleThree(snapshot.squareMeters);
-  if (['squareMeter', 'ton'].includes(unit) && new Prisma.Decimal(String(snapshot.preparedQuantity ?? 0)).gt(0)) return exactScaleThree(snapshot.preparedQuantity);
-  return exactScaleThree(snapshot.preparedQuantity ?? snapshot.quantity ?? item.quantity);
+  if (unit === 'squareMeter' && new ExactQuantityDecimal(String(snapshot.squareMeters ?? 0)).gt(0)) return exactShipmentQuantity(snapshot.squareMeters);
+  if (['squareMeter', 'ton'].includes(unit) && new ExactQuantityDecimal(String(snapshot.preparedQuantity ?? 0)).gt(0)) return exactShipmentQuantity(snapshot.preparedQuantity);
+  return exactShipmentQuantity(snapshot.preparedQuantity ?? snapshot.quantity ?? item.quantity);
 };
 
 export const resolveContractProductSnapshot = (contractData: unknown, identity: { productRowId: string | null; productId: string; legacyProductIndex?: number | null }) => {
@@ -66,7 +63,7 @@ const mapPersistedEvidence = (item: any, guardReturnValidated = false): Shipment
   productRowId: item.productRowId,
   unit: item.unit,
   kind: item.kind,
-  quantity: item.quantity.toFixed(3),
+  quantity: exactQuantityText(item.quantity),
   effectiveAt: item.effectiveAt.toISOString(),
   recordedAt: item.recordedAt.toISOString(),
   sourceType: item.sourceType,
@@ -188,8 +185,8 @@ export const guardReturnValidationFailure = (item: any, allReturns: readonly any
     && candidate.guardReturnMovementId === item.guardReturnMovementId
     && candidate.dispatchEvidenceId !== item.dispatchEvidenceId);
   if (incompatibleReuse) return 'Verified Guard return movement is reused for an incompatible dispatch';
-  const quantity = new Prisma.Decimal(item.quantity);
-  if (!quantity.gt(0) || quantity.gt(new Prisma.Decimal(item.dispatchEvidence.quantity))) return 'Verified Guard return quantity exceeds its dispatch attribution';
+  const quantity = new ExactQuantityDecimal(item.quantity);
+  if (!quantity.gt(0) || quantity.gt(new ExactQuantityDecimal(item.dispatchEvidence.quantity))) return 'Verified Guard return quantity exceeds its dispatch attribution';
   return null;
 };
 
@@ -220,7 +217,7 @@ const buildContractRowQuantityEvidence = (
     const version = {
       ...common, kind: 'CONTRACTED_SET' as const,
       quantity: approvedPricingRow
-        ? exactScaleThree(approvedPricingRow.contractedQuantity)
+        ? exactShipmentQuantity(approvedPricingRow.contractedQuantity)
         : deriveContractedQuantity(item, snapshot, unit),
       sourceType: 'FINANCIALLY_APPROVED_CONTRACT_QUANTITY_VERSION',
       metadata: {
@@ -365,7 +362,7 @@ export const readShipmentQuantityProjection = async (
         productRowId: row.productRowId,
         unit: row.unit,
         kind: 'CONTRACTED_SET',
-        quantity: row.contractedQuantity.toFixed(3),
+        quantity: exactQuantityText(row.contractedQuantity),
         effectiveAt: version.approvedAt.toISOString(),
         recordedAt: version.createdAt.toISOString(),
         sourceType: 'APPROVED_PRICING_QUANTITY',
@@ -456,14 +453,14 @@ export const readShipmentQuantityProjection = async (
         unit: line.unit, effectiveAt: effectiveAt.toISOString(), recordedAt: line.loading.updatedAt.toISOString(), kind,
       };
       evidence.push({
-        id: `legacy-loading:${line.id}`, ...base, quantity: line.quantity.toFixed(3), sourceType: 'LEGACY_LOADING_LINE',
-        sourceId: line.id, sourceVersion: 1, integrityHash: hash({ ...base, quantity: line.quantity.toFixed(3) }),
+        id: `legacy-loading:${line.id}`, ...base, quantity: exactQuantityText(line.quantity), sourceType: 'LEGACY_LOADING_LINE',
+        sourceId: line.id, sourceVersion: 1, integrityHash: hash({ ...base, quantity: exactQuantityText(line.quantity) }),
       });
       line.corrections.forEach((correction) => evidence.push({
-        id: `legacy-correction:${correction.id}`, ...base, quantity: correction.deltaQuantity.toFixed(3),
+        id: `legacy-correction:${correction.id}`, ...base, quantity: exactQuantityText(correction.deltaQuantity),
         effectiveAt: correction.createdAt.toISOString(), recordedAt: correction.createdAt.toISOString(),
         sourceType: 'LEGACY_LOADING_CORRECTION', sourceId: correction.id, sourceVersion: 1,
-        integrityHash: hash({ correctionId: correction.id, quantity: correction.deltaQuantity.toFixed(3) }),
+        integrityHash: hash({ correctionId: correction.id, quantity: exactQuantityText(correction.deltaQuantity) }),
       }));
     }
   }
@@ -473,7 +470,7 @@ export const readShipmentQuantityProjection = async (
       || (options.cutoff && row.lastVerifiedAt.toISOString() > options.cutoff)) return [];
     const normalized = {
       contractId: row.contractId, contractItemId: row.contractItemId, productRowId: row.productRowId, unit: row.unit,
-      quantities: { contracted: row.contracted.toFixed(3), finalizedReserved: row.finalizedReserved.toFixed(3), physicallyDispatched: row.physicallyDispatched.toFixed(3), availableToLoad: row.availableToLoad.toFixed(3) },
+      quantities: { contracted: exactQuantityText(row.contracted), finalizedReserved: exactQuantityText(row.finalizedReserved), physicallyDispatched: exactQuantityText(row.physicallyDispatched), availableToLoad: exactQuantityText(row.availableToLoad) },
       health: row.health, healthReasons: asRecord(row.healthReasons) as any, sourceEvidenceIds: row.sourceEvidenceIds as any,
       cutoff: row.cutoff.toISOString(), lastVerifiedAt: row.lastVerifiedAt.toISOString(),
     };

@@ -2,6 +2,7 @@ import express, { Response } from 'express';
 import fs from 'fs';
 import path from 'path';
 import multer from 'multer';
+import { createSharedDurableUpload } from '../services/sharedUploadFileRuntime';
 import { protect } from '../middleware/auth';
 import { requireAnyFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
 
@@ -16,7 +17,7 @@ const ensureUploadDir = () => {
   }
 };
 
-const storage = multer.diskStorage({
+const storage: multer.DiskStorageOptions = {
   destination: (_req, _file, cb) => {
     ensureUploadDir();
     cb(null, uploadDir);
@@ -26,9 +27,9 @@ const storage = multer.diskStorage({
     const safeName = `${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`;
     cb(null, safeName);
   }
-});
+};
 
-const upload = multer({
+const upload = createSharedDurableUpload(uploadDir, {
   storage,
   fileFilter: (_req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
@@ -67,6 +68,7 @@ router.post(
       });
     }
 
+    upload.retain(req, req.file);
     return res.status(201).json({
       success: true,
       data: {

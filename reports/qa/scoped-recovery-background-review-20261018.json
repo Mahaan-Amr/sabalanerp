@@ -1,0 +1,44 @@
+{
+  "head": "81b1afc1898845680383fe8d4f7cfa4538ad93af",
+  "sources": {
+    "backend/src/services/recoveryRuntime.ts": "062e055599bd28aabde08880f0a80209ceb6776439e452bff1ee395cb298b7b6",
+    "backend/src/services/onlineRuntimeWork.ts": "d1eafd7f102e6fd40828466e35abf7c01358bf0a757f378a31562a69bc9b40f4",
+    "backend/src/services/__tests__/scopedRecoveryBackground.test.ts": "286599823186f1377bccc616322cd06e189f5369bc477dc9e2bedb99fca8e8a8",
+    "scripts/run-online-scoped-work-local.mjs": "a79a0dfd751374d1b222ca99f2196b027607686c904a99fb7bd21891604532a1",
+    "tests/online-deployment/online-scoped-work.worker.cjs": "b1316f746bcd01770dd3ba95210955bf1efecec2b149e9492eb5e8c1814c599b",
+    "tests/online-deployment/online-native-owner.fixture.py": "539ff6ab2424281721670f29eee690ac4a330ef3615f6976a093adc48ca337df"
+  },
+  "dependencies": {
+    "backend/src/services/runtimeWorkBoundary.ts": "6d4934fc7a95afb3cb68db4fd2be0ec8ae913ab8f77ba509a04632ba36563f25",
+    "backend/src/services/runtimeWorkContext.ts": "9fcbc84ad7393eecc75ffe9bc8df73ebc051a4ba2050f2f31d6f00f7280c795d",
+    "backend/src/services/runtimeLeasedWorkContext.ts": "2b888eaf836ef5cabf41b96199dc57ee3a5e7fb73b1d3a2f31d42325512ef8be",
+    "backend/src/services/runtimeTaskAdmission.ts": "c45592ec5a5693c0aacbe794b481bd4198638dcf460e00240c4cae0e6ac7e9fa",
+    "backend/src/services/onlineRuntimeScope.ts": "6e8d5b7850edf2ef5b1db0821ed5f3dec7c3bacce165666afe180464bf074fce",
+    "backend/src/services/runtimeNativeAuthority.ts": "20310a85d21c74ba15485b59ea37e5adebc194144b588c5029ba55329b960df1",
+    "backend/src/services/runtimeControlOwnership.ts": "504179c7e9b570b9d234ba5a2a39f96985efb592bbf84c45452fd44b0b900dfe",
+    "backend/src/services/recoveryCoordinationState.ts": "d82ba189a66ecc42c27496c03e351da9e6f1c6d179296908a7db8b94564cf7b9",
+    "backend/src/services/backgroundJobLifecycle.ts": "86e47577060ee5c5106136d98e9ff9adef5ebf920c753dadf18ab2959e4fe248",
+    "backend/src/services/httpRequestLifecycle.ts": "1867b8adff3179f75ef408bb1df37867fd7e7d016a0a3408704e4f73aceab899",
+    "deploy/scripts/backend-runtime-owner.py": "7812ebf703fd3c68f0fa7e3d595034a8b27166e16865718934d284ca626d8865",
+    "deploy/scripts/online-runtime-owner.py": "5b6cb0eeda9b173e375c7d936a26e44a9621822ebc15d2b57c28afcce443c4d5"
+  },
+  "trackedPatchSha256": "db41084478e5078354cefe3dc7f0a7aa7310c099d987937ba3e680dfcbcec290",
+  "scope": "Private native jobs ownership composed into existing withRecoveryBackgroundWrite before first observed admission; no startup/role/controller or public activation.",
+  "nativeV1": "online-native-e5a1365ace94555ce35e75cb32ff3e3f.json",
+  "nativeV2": "RUNNING",
+  "kernel31": "scoped-background-kernel-regressions-20261018.json",
+  "unit6": "Passed existing actual timer/drain plus new refusal unit in tool output; final receipt pending",
+  "unacceptedAttempts": [
+    "online-native-12b92cbd6a2de009984c1af1fcec00cd",
+    "online-native-3e1c094ce0df05c20d7775c77ec3bf84",
+    "online-native-c1266a95f15ee21c70eb49b4912a3d7d",
+    "online-native-3975810d07e0acaa8068ade56fb423b8"
+  ],
+  "knownClosureReceipts": [
+    "scoped-recovery-background-startup-refusal-closure-20261018.json",
+    "scoped-recovery-background-startup-reference-closure-20261018.json",
+    "scoped-recovery-background-failed-fixture-native-closure-20261018.json"
+  ],
+  "productionMutation": false,
+  "wholeProgramComplete": false
+}

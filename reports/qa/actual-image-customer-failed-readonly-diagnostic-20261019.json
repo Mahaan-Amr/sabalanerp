@@ -1,0 +1,317 @@
+{
+  "operation": "actual-image-customer-dd67e319494eb352c7fd8729eb5b3fa8",
+  "rootExists": true,
+  "freeBytes": 1364897792,
+  "ownership-held-unproven.json": {
+    "phase": "OWNERSHIP_HELD_UNPROVEN",
+    "errorType": "RuntimeError",
+    "reason": "NATIVE_DAEMON_COMMAND_FAILED"
+  },
+  "docker-command-active.json": {
+    "phase": "ACTIVE",
+    "token": "stop-postgres"
+  },
+  "activeIntent": true,
+  "originalIntent": {
+    "operation": "actual-image-customer-dd67e319494eb352c7fd8729eb5b3fa8",
+    "root": "/root/sabalan-recovery-private/native-qa/actual-image-customer-dd67e319494eb352c7fd8729eb5b3fa8",
+    "pid": 2309491,
+    "startTicks": "133049743",
+    "bootId": "ee1b3aa2-d239-4849-b926-200549c77829",
+    "phase": "ACTUAL_IMAGE_PRIVATE_FINANCIAL_OVERLAP",
+    "sourceBaseSha256": "c4b485ccc756ea48e08a72ea9c8dbdfd00aa9d1a892c63b0788985f699957c09",
+    "controllerSha256": "c4e92092dd34209d40a30d7c42fbc26c01ebf882b088b307f66de0e92104f014",
+    "productionAdmission": false
+  },
+  "originalController": {
+    "startTicks": "133049743",
+    "threadChildren": {
+      "2309491": ""
+    },
+    "fds": {
+      "8": {
+        "link": "/run/lock/sabalan-backup-storage.lock",
+        "info": "pos:\t0\nflags:\t0500002\nmnt_id:\t34\nino:\t6\nlock:\t1: FLOCK  ADVISORY  WRITE 2309491 00:1d:6 0 EOF\n"
+      },
+      "9": {
+        "link": "/root/sabalan-recovery-private/drill-ownership.lock",
+        "info": "pos:\t0\nflags:\t0500002\nmnt_id:\t31\nino:\t13050\nlock:\t1: FLOCK  ADVISORY  WRITE 2309491 fc:01:13050 0 EOF\n"
+      }
+    }
+  },
+  "controllerSha256": "c4e92092dd34209d40a30d7c42fbc26c01ebf882b088b307f66de0e92104f014",
+  "originalNativeBirths": [
+    {
+      "file": "ready-3-native-start.json",
+      "pid": 2310077,
+      "startTicks": "133051749",
+      "liveStartTicks": null
+    },
+    {
+      "file": "create-backend-native-start.json",
+      "pid": 2310298,
+      "startTicks": "133052186",
+      "liveStartTicks": null
+    },
+    {
+      "file": "create-postgres-native-start.json",
+      "pid": 2309786,
+      "startTicks": "133051055",
+      "liveStartTicks": null
+    },
+    {
+      "file": "baseline-native-start.json",
+      "pid": 2310191,
+      "startTicks": "133052061",
+      "liveStartTicks": null
+    },
+    {
+      "file": "ready-0-native-start.json",
+      "pid": 2309868,
+      "startTicks": "133051156",
+      "liveStartTicks": null
+    },
+    {
+      "file": "ready-4-native-start.json",
+      "pid": 2310118,
+      "startTicks": "133051891",
+      "liveStartTicks": null
+    },
+    {
+      "file": "sql-census-native-start.json",
+      "pid": 2310450,
+      "startTicks": "133052504",
+      "liveStartTicks": null
+    },
+    {
+      "file": "run-backend-native-start.json",
+      "pid": 2310335,
+      "startTicks": "133052239",
+      "liveStartTicks": null
+    },
+    {
+      "file": "ready-5-native-start.json",
+      "pid": 2310159,
+      "startTicks": "133052030",
+      "liveStartTicks": null
+    },
+    {
+      "file": "rename-private-database-native-start.json",
+      "pid": 2310227,
+      "startTicks": "133052092",
+      "liveStartTicks": null
+    },
+    {
+      "file": "ready-2-native-start.json",
+      "pid": 2309994,
+      "startTicks": "133051597",
+      "liveStartTicks": null
+    },
+    {
+      "file": "ready-1-native-start.json",
+      "pid": 2309907,
+      "startTicks": "133051347",
+      "liveStartTicks": null
+    },
+    {
+      "file": "stop-postgres-native-start.json",
+      "pid": 2310488,
+      "startTicks": "133052530",
+      "liveStartTicks": null
+    },
+    {
+      "file": "private-infrastructure-native-start.json",
+      "pid": 2310263,
+      "startTicks": "133052114",
+      "liveStartTicks": null
+    },
+    {
+      "file": "start-postgres-native-start.json",
+      "pid": 2309804,
+      "startTicks": "133051104",
+      "liveStartTicks": null
+    }
+  ],
+  "postmasterPidExists": false,
+  "pgControlSha256": "00bbcf5cd96d2e8dd1f8ea29cbaeb2cb674e51e4718d6fc63670bfa9c5b2ae32",
+  "bootId": "ee1b3aa2-d239-4849-b926-200549c77829",
+  "diagnosticFiles": [
+    "stop-postgres-native-completion.json",
+    "run-backend-daemon-acknowledged.json",
+    "sql-census-native-completion.json",
+    "sql-census-native-start.json",
+    "run-backend-native-start.json",
+    "sql-census-daemon-acknowledged.json",
+    "run-backend-native-completion.json",
+    "stop-postgres-native-start.json"
+  ],
+  "diagnostics": {
+    "run-backend.log": "{\"actualImageCustomerClientsClosed\":true}\nError: Cannot find module '@sabalanerp/contract-product-graph'\nRequire stack:\n- /packages/partner-sales-contracts/dist/monetary-rounding.js\n- /packages/partner-sales-contracts/dist/index.js\n- /qa-fixture.cjs\n- /qa-overlap.cjs\n    at Function._resolveFilename (node:internal/modules/cjs/loader:1430:15)\n    at defaultResolveImpl (node:internal/modules/cjs/loader:1040:19)\n    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1045:22)\n    at Function._load (node:internal/modules/cjs/loader:1216:25)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:254:19)\n    at Module.require (node:internal/modules/cjs/loader:1527:12)\n    at require (node:internal/modules/helpers:147:16)\n    at Object.<anonymous> (/packages/partner-sales-contracts/dist/monetary-rounding.js:5:34)\n    at Module._compile (node:internal/modules/cjs/loader:1781:14)\n    at Object..js (node:internal/modules/cjs/loader:1913:10) {\n  code: 'MODULE_NOT_FOUND',\n  requireStack: [\n    '/packages/partner-sales-contracts/dist/monetary-rounding.js',\n    '/packages/partner-sales-contracts/dist/index.js',\n    '/qa-fixture.cjs',\n    '/qa-overlap.cjs'\n  ]\n}\n\nSABALAN_NATIVE_REAPED inner-backend 1\n\nSABALAN_NATIVE_REAPED run-backend 1\n",
+    "sql-census.log": "0:0\n\nSABALAN_NATIVE_REAPED sql-census 0\n",
+    "stop-postgres.log": "waiting for server to shut down....\nSABALAN_NATIVE_REAPED stop-postgres 137\n",
+    "stop-postgres-native-completion.json": "{\n  \"status\": 137,\n  \"outputSha256\": \"daba58bee71743bbf4beb8be3ee5b3a7d82e74137142971e5891a4c492768d16\"\n}",
+    "run-backend-daemon-acknowledged.json": "{\n  \"token\": \"run-backend\",\n  \"arguments\": [\n    \"docker\",\n    \"--host\",\n    \"unix:///var/run/docker.sock\",\n    \"start\",\n    \"--attach\",\n    \"e522d2a12bd5119c373c7035858cea6fc2e0427eb08f1cd442605ebd354f632b\"\n  ],\n  \"phase\": \"ACTIVE\"\n}",
+    "sql-census-native-completion.json": "{\n  \"status\": 0,\n  \"outputSha256\": \"5bcf589092b7bcf1bd89e4bb757db011dfd74dbc527b507622a593e4dec71fb2\"\n}",
+    "sql-census-native-start.json": "{\n  \"pid\": 2310450,\n  \"startTicks\": \"133052504\"\n}",
+    "run-backend-native-start.json": "{\n  \"pid\": 2310335,\n  \"startTicks\": \"133052239\"\n}",
+    "sql-census-daemon-acknowledged.json": "{\n  \"token\": \"sql-census\",\n  \"arguments\": [\n    \"docker\",\n    \"--host\",\n    \"unix:///var/run/docker.sock\",\n    \"exec\",\n    \"--user\",\n    \"70:70\",\n    \"a71ae8fbc0e6a95b06436dd25478effec6236d45d86fb4bedc0dd4aee72e7e83\",\n    \"psql\",\n    \"-X\",\n    \"-qAt\",\n    \"-v\",\n    \"ON_ERROR_STOP=1\",\n    \"-h\",\n    \"/qa-pg-socket\",\n    \"-U\",\n    \"sabalanerp\",\n    \"-d\",\n    \"postgres\",\n    \"-c\",\n    \"SELECT (SELECT count(*) FROM pg_stat_activity WHERE backend_type='client backend' AND pid<>pg_backend_pid())::text||':'||(SELECT count(*) FROM pg_prepared_xacts)::text\"\n  ],\n  \"phase\": \"ACTIVE\"\n}",
+    "run-backend-native-completion.json": "{\n  \"status\": 1,\n  \"outputSha256\": \"2d85726b8eb651c7241f9338cb1b7280f98c11c52d4d8896c813dcaf771a1792\"\n}",
+    "stop-postgres-native-start.json": "{\n  \"pid\": 2310488,\n  \"startTicks\": \"133052530\"\n}"
+  },
+  "containers": [
+    {
+      "id": "e522d2a12bd5119c373c7035858cea6fc2e0427eb08f1cd442605ebd354f632b",
+      "name": "/sabalan-customer-backend-8729eb5b3fa8",
+      "status": "exited",
+      "exitCode": 1,
+      "oom": false,
+      "pid": 0,
+      "execIDs": null,
+      "image": "sha256:13c89b392eb1903f55c1160f4f5f72a85d0ec57cd39476edff7928453516dde6",
+      "mounts": [
+        {
+          "Type": "bind",
+          "Source": "/root/sabalan-recovery-private/native-qa/actual-image-customer-dd67e319494eb352c7fd8729eb5b3fa8/qa-overlap.cjs",
+          "Destination": "/qa-overlap.cjs",
+          "Mode": "",
+          "RW": false,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/root/sabalan-recovery-private/native-qa/actual-image-customer-dd67e319494eb352c7fd8729eb5b3fa8/qa-financial.sql",
+          "Destination": "/qa-financial.sql",
+          "Mode": "",
+          "RW": false,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/root/sabalan-recovery-private/native-qa/actual-image-customer-dd67e319494eb352c7fd8729eb5b3fa8/socket",
+          "Destination": "/qa-pg-socket",
+          "Mode": "",
+          "RW": true,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/root/sabalan-recovery-private/native-qa/actual-image-customer-dd67e319494eb352c7fd8729eb5b3fa8/backend-control",
+          "Destination": "/qa-native-control",
+          "Mode": "",
+          "RW": true,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/root/sabalan-recovery-private/native-qa/actual-image-customer-dd67e319494eb352c7fd8729eb5b3fa8/native-owner",
+          "Destination": "/native-owner",
+          "Mode": "",
+          "RW": false,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/root/sabalan-recovery-private/native-qa/actual-image-customer-dd67e319494eb352c7fd8729eb5b3fa8/qa-fixture.cjs",
+          "Destination": "/qa-fixture.cjs",
+          "Mode": "",
+          "RW": false,
+          "Propagation": "rprivate"
+        }
+      ]
+    },
+    {
+      "id": "a71ae8fbc0e6a95b06436dd25478effec6236d45d86fb4bedc0dd4aee72e7e83",
+      "name": "/sabalan-customer-postgres-8729eb5b3fa8",
+      "status": "exited",
+      "exitCode": 0,
+      "oom": false,
+      "pid": 0,
+      "execIDs": null,
+      "image": "sha256:15283455b75304c90f51bf16b42c272a25fb52807945dc24830ec88e63cd896d",
+      "mounts": [
+        {
+          "Type": "bind",
+          "Source": "/root/sabalan-recovery-private/native-qa/actual-image-customer-dd67e319494eb352c7fd8729eb5b3fa8/pg-control",
+          "Destination": "/qa-pg-control",
+          "Mode": "",
+          "RW": true,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/root/sabalan-recovery-private/native-qa/actual-image-customer-dd67e319494eb352c7fd8729eb5b3fa8/restore-input.tar",
+          "Destination": "/restore-input.tar",
+          "Mode": "",
+          "RW": false,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/root/sabalan-recovery-private/native-qa/actual-image-customer-dd67e319494eb352c7fd8729eb5b3fa8/native-owner",
+          "Destination": "/native-owner",
+          "Mode": "",
+          "RW": false,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/root/sabalan-recovery-private/native-qa/actual-image-customer-dd67e319494eb352c7fd8729eb5b3fa8/restore.sh",
+          "Destination": "/restore.sh",
+          "Mode": "",
+          "RW": false,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/root/sabalan-recovery-private/native-qa/actual-image-customer-dd67e319494eb352c7fd8729eb5b3fa8/pgdata",
+          "Destination": "/var/lib/postgresql/data",
+          "Mode": "",
+          "RW": true,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/root/sabalan-recovery-private/native-qa/actual-image-customer-dd67e319494eb352c7fd8729eb5b3fa8/socket",
+          "Destination": "/qa-pg-socket",
+          "Mode": "",
+          "RW": true,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/root/sabalan-recovery-private/native-qa/actual-image-customer-dd67e319494eb352c7fd8729eb5b3fa8/restore.conf",
+          "Destination": "/restore.conf",
+          "Mode": "",
+          "RW": false,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/root/sabalan-recovery-private/native-qa/actual-image-customer-dd67e319494eb352c7fd8729eb5b3fa8/restore.hba",
+          "Destination": "/restore.hba",
+          "Mode": "",
+          "RW": false,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/root/sabalan-recovery-private/native-qa/actual-image-customer-dd67e319494eb352c7fd8729eb5b3fa8/restore.ident",
+          "Destination": "/restore.ident",
+          "Mode": "",
+          "RW": false,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/root/sabalan-recovery-private/native-qa/actual-image-customer-dd67e319494eb352c7fd8729eb5b3fa8/qa-infrastructure.sql",
+          "Destination": "/qa-infrastructure.sql",
+          "Mode": "",
+          "RW": false,
+          "Propagation": "rprivate"
+        }
+      ]
+    }
+  ],
+  "backendDiagnostic": "{\"actualImageCustomerClientsClosed\":true}\nError: Cannot find module '@sabalanerp/contract-product-graph'\nRequire stack:\n- /packages/partner-sales-contracts/dist/monetary-rounding.js\n- /packages/partner-sales-contracts/dist/index.js\n- /qa-fixture.cjs\n- /qa-overlap.cjs\n    at Function._resolveFilename (node:internal/modules/cjs/loader:1430:15)\n    at defaultResolveImpl (node:internal/modules/cjs/loader:1040:19)\n    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1045:22)\n    at Function._load (node:internal/modules/cjs/loader:1216:25)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:254:19)\n    at Module.require (node:internal/modules/cjs/loader:1527:12)\n    at require (node:internal/modules/helpers:147:16)\n    at Object.<anonymous> (/packages/partner-sales-contracts/dist/monetary-rounding.js:5:34)\n    at Module._compile (node:internal/modules/cjs/loader:1781:14)\n    at Object..js (node:internal/modules/cjs/loader:1913:10) {\n  code: 'MODULE_NOT_FOUND',\n  requireStack: [\n    '/packages/partner-sales-contracts/dist/monetary-rounding.js',\n    '/packages/partner-sales-contracts/dist/index.js',\n    '/qa-fixture.cjs',\n    '/qa-overlap.cjs'\n  ]\n}\n\nSABALAN_NATIVE_REAPED inner-backend 1\n",
+  "postgresDiagnostic": "backup successfully verified\n2026-10-19 01:37:33.950 GMT [7] LOG:  starting PostgreSQL 15.16 on x86_64-pc-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit\n2026-10-19 01:37:33.962 GMT [7] LOG:  listening on Unix socket \"/qa-pg-socket/.s.PGSQL.5432\"\npostgres: could not write external PID file \"\": No such file or directory\n2026-10-19 01:37:34.005 GMT [45] LOG:  database system was interrupted; last known up at 2026-10-18 07:34:24 GMT\n2026-10-19 01:37:34.094 GMT [46] FATAL:  the database system is starting up\n2026-10-19 01:37:34.813 GMT [45] LOG:  starting backup recovery with redo LSN 4/C7000028, checkpoint LSN 4/C7000060, on timeline ID 1\n2026-10-19 01:37:34.854 GMT [45] LOG:  redo starts at 4/C7000028\n2026-10-19 01:37:34.867 GMT [45] LOG:  completed backup recovery with redo LSN 4/C7000028 and end LSN 4/C700DFD8\n2026-10-19 01:37:34.867 GMT [45] LOG:  consistent recovery state reached at 4/C700DFD8\n2026-10-19 01:37:34.867 GMT [45] LOG:  redo done at 4/C700DFD8 system usage: CPU: user: 0.00 s, system: 0.00 s, elapsed: 0.01 s\n2026-10-19 01:37:35.082 GMT [43] LOG:  checkpoint starting: end-of-recovery immediate wait\n2026-10-19 01:37:35.188 GMT [43] LOG:  checkpoint complete: wrote 14 buffers (0.3%); 0 WAL file(s) added, 0 removed, 1 recycled; write=0.024 s, sync=0.030 s, total=0.117 s; sync files=12, longest=0.013 s, average=0.003 s; distance=16384 kB, estimate=16384 kB\n2026-10-19 01:37:35.209 GMT [7] LOG:  database system is ready to accept connections\n2026-10-19 01:37:40.356 GMT [7] LOG:  received fast shutdown request\n2026-10-19 01:37:40.368 GMT [7] LOG:  aborting any active transactions\n2026-10-19 01:37:40.375 GMT [7] LOG:  background worker \"logical replication launcher\" (PID 48) exited with exit code 1\n2026-10-19 01:37:40.377 GMT [43] LOG:  shutting down\n2026-10-19 01:37:40.386 GMT [43] LOG:  checkpoint starting: shutdown immediate\n2026-10-19 01:37:40.484 GMT [43] LOG:  checkpoint complete: wrote 94 buffers (2.3%); 0 WAL file(s) added, 0 removed, 0 recycled; write=0.016 s, sync=0.040 s, total=0.108 s; sync files=70, longest=0.028 s, average=0.001 s; distance=509 kB, estimate=14796 kB\n2026-10-19 01:37:40.495 GMT [7] LOG:  database system is shut down\n\nSABALAN_NATIVE_REAPED inner-postgres 0\n"
+}

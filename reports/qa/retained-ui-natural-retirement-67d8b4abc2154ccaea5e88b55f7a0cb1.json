@@ -1,0 +1,64 @@
+{
+  "operation": "67d8b4abc2154ccaea5e88b55f7a0cb1",
+  "privateRoot": "/app/online-runtime-acceptance/retained-ui-67d8b4abc2154ccaea5e88b55f7a0cb1",
+  "canonical": [
+    {
+      "id": "a1ea34a8d7d878b906fba7b4fdbe975df13a6b00d63a863eacce34b9827e86ff",
+      "image": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+      "startedAt": "2026-10-15T09:01:40.016187222Z"
+    },
+    {
+      "id": "ad23f762dc1b27d2be76c335a3d7a4e20d08832a9a2e055904a4af84a9248c21",
+      "image": "sha256:f0a8954596279ccb01c029de7316022daa109b711a297f716cc9367d4bc9ec53",
+      "startedAt": "2026-10-15T10:11:30.825468888Z"
+    },
+    {
+      "id": "6d161695e215498048ff24e56e9602ce77871bfb6b390bf1356caecfdf9807d8",
+      "image": "sha256:81eacc768f3c4b82bd0f0a01bef5600ae1321e87cb117bad49ca47dfba79a213",
+      "startedAt": "2026-10-12T15:17:49.463791361Z"
+    },
+    {
+      "id": "e553787e69f44c7bdf7dab94fad43a231f5ba99d988dc783234486a5a844a528",
+      "image": "sha256:3d0f7584ed7d04e27fa050d6683a74746608faf21f202be78460d679cc56461f",
+      "startedAt": "2026-10-12T15:17:49.481269377Z"
+    }
+  ],
+  "productionAdmission": false,
+  "held": {
+    "status": "RETIRED_WITH_HELD_UNKNOWN",
+    "heldRecordSha256": "125fc7e357eebc13193417d7e8b9c60936f46870461a279ff3da38dc8e56bd50",
+    "preservedUnknown": "5fd1594da9eea3c5c0fc9fd98648fe3a",
+    "originalExitCode": 75,
+    "actualRestartRefusedExitCode": 1,
+    "initialProxyStartedAt": "2026-10-17T11:47:02.031914761Z",
+    "postRestartProxyStartedAt": "2026-10-17T11:47:25.877977883Z",
+    "heldProxyFinishedAt": "2026-10-17T11:47:35.132878112Z",
+    "intentionalRestartGeneration": 2
+  },
+  "containers": [
+    {
+      "id": "5d0d3f492f09c1e4d1ee31dcdc9f4e32e2b3a46f1da0ae102fe491bd8c961a57",
+      "image": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+      "service": "frontend-online-proxy",
+      "startedAt": "2026-10-17T12:00:52.560340632Z",
+      "finishedAt": "2026-10-17T12:00:53.167015954Z",
+      "exitCode": 1
+    },
+    {
+      "id": "af95c464e7903f055160e649b69c9374df9d253a7fd45288a78f230676ee4004",
+      "image": "sha256:7962c5edcf434c7f0399844e952d410acbf6f21c43dad5a303f219821de873c6",
+      "service": "frontend-online-old",
+      "startedAt": "2026-10-17T11:47:01.507407043Z",
+      "finishedAt": "2026-10-17T12:00:56.658329629Z",
+      "exitCode": 0
+    },
+    {
+      "id": "d2fd138168b0dbe5ea15bd934092284dc4128fe6ca560d2d9df87289d34c1e3b",
+      "image": "sha256:263d04b2537b6402ad7663db62fed3f35add5705d7d6435b06e6b08fd1b9f2dc",
+      "service": "frontend-online-new",
+      "startedAt": "2026-10-17T11:47:01.759254538Z",
+      "finishedAt": "2026-10-17T11:47:28.021086584Z",
+      "exitCode": 0
+    }
+  ]
+}

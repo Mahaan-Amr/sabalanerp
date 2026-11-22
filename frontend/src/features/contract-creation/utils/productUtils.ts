@@ -1,4 +1,5 @@
-﻿// Product utility functions
+import {inferCatalogFamily,catalogSupportsFamily} from '@sabalanerp/partner-sales-contracts';
+// Product utility functions
 // Helper functions for product-related operations
 
 import type { Product, ContractUsageType, StairSystemConfig } from '../types/contract.types';
@@ -31,30 +32,7 @@ export const productSupportsContractType = (
 export const inferCatalogContractType = (
   product: Product
 ): Exclude<ContractUsageType, 'volumetric'> => {
-  const classification = [
-    product.cuttingDimensionNamePersian,
-    (product as Product & { cuttingDimensionName?: string }).cuttingDimensionName,
-    product.namePersian,
-    product.name
-  ].filter(Boolean).join(' ').toLocaleLowerCase('fa');
-
-  if (classification.includes('اسلب') || classification.includes('slab')) return 'slab';
-  if (
-    classification.includes('کیوبیک') ||
-    classification.includes('قطعات آماده') ||
-    classification.includes('حجمی') ||
-    classification.includes('cubic') ||
-    classification.includes('prepared') ||
-    classification.includes('cnc')
-  ) return 'prepared';
-  if (classification.includes('پله') || classification.includes('stair')) return 'stair';
-  if (classification.includes('طولی') || classification.includes('longitudinal')) return 'longitudinal';
-
-  if (product.availableInLongitudinalContracts) return 'longitudinal';
-  if (product.availableInStairContracts) return 'stair';
-  if (product.availableInSlabContracts) return 'slab';
-  if (product.availableInVolumetricContracts) return 'prepared';
-  return 'longitudinal';
+  return inferCatalogFamily(product);
 };
 
 /**
@@ -67,18 +45,7 @@ export const productSupportsContractRoute = (
   contractType?: ContractUsageType | null
 ): boolean => {
   if (!contractType) return true;
-  const normalizedType = contractType === 'volumetric'
-    ? 'prepared'
-    : contractType;
-  const catalogType = inferCatalogContractType(product);
-  if (normalizedType === 'stair') {
-    return (
-      catalogType === 'stair' ||
-      catalogType === 'longitudinal' ||
-      product.availableInStairContracts === true
-    );
-  }
-  return catalogType === normalizedType;
+  return catalogSupportsFamily(product,contractType==='volumetric'?'prepared':contractType);
 };
 
 /**

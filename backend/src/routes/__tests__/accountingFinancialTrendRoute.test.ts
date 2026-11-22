@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { RequestHandler } from 'express';
-import router, { createAccountingDashboardResponse, createAccountingFinancialTrendResponse } from '../accounting';
+import router, { createAccountingDashboardChangeResponse, createAccountingDashboardResponse, createAccountingFinancialTrendResponse } from '../accounting';
 
 type RouteLayer = {
   route?: {
@@ -70,5 +70,35 @@ test('complete dashboard uses the accounting view permission and passes one acto
   );
   assert.deepEqual(requested, { query: { range: '1y', due: 'overdue' }, range: '1y', actor: { userId: 'accountant-1' } });
   assert.deepEqual(responseBody, { success: true, data });
+  assert.equal(cacheControl, 'private, no-store');
+});
+
+test('dashboard change check is protected, actor scoped, and never cacheable', async () => {
+  const workspace = route('/workspace');
+  const change = route('/dashboard/change');
+  const dashboardWorkspace = route('/dashboard/workspace');
+  assert.ok(workspace);
+  assert.ok(change);
+  assert.ok(dashboardWorkspace);
+  assert.deepEqual(change.stack.slice(0, 3).map((layer) => layer.handle), workspace.stack.slice(0, 3).map((layer) => layer.handle));
+  assert.deepEqual(dashboardWorkspace.stack.slice(0, 3).map((layer) => layer.handle), workspace.stack.slice(0, 3).map((layer) => layer.handle));
+  let requested: unknown;
+  let responseBody: unknown;
+  let cacheControl: unknown;
+  const handler = createAccountingDashboardChangeResponse(async (query, actor) => {
+    requested = { query, actor };
+    return { workspaceChanged: false, trendChanged: false, accessChanged: false,
+      revisions: { access: 'a1', workspace: 'w1', trend: 't1' } };
+  });
+  await handler(
+    { query: { accessRevision: 'a1', workspaceRevision: 'w1', trendRevision: 't1' }, user: { id: 'accountant-1' } } as never,
+    { json(body: unknown) { responseBody = body; return this; }, status() { return this; },
+      set(name: string, value: string) { if (name === 'Cache-Control') cacheControl = value; return this; } } as never,
+  );
+  assert.deepEqual(requested, { query: { accessRevision: 'a1', workspaceRevision: 'w1', trendRevision: 't1' }, actor: { userId: 'accountant-1' } });
+  assert.deepEqual(responseBody, { success: true, data: {
+    workspaceChanged: false, trendChanged: false, accessChanged: false,
+    revisions: { access: 'a1', workspace: 'w1', trend: 't1' },
+  } });
   assert.equal(cacheControl, 'private, no-store');
 });

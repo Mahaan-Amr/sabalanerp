@@ -7,6 +7,7 @@ export type BiometricDiagnosticsResult = {
   mode: 'SIMULATOR' | 'PHYSICAL';
   availability: 'AVAILABLE' | 'UNAVAILABLE';
   liveEnrollmentEnabled: boolean;
+  lastCompletedEnrollmentAt?: string | null;
   checkedAt: string;
   device: { model: string; serial: string; connectorVersion: string; sdkVersion: string };
   supportedChecks: readonly string[];

@@ -1,0 +1,9 @@
+{
+  "operation": "native-compressed-import-probe-206dbae25e5040c8a45abbf9eddf8d0d",
+  "custodyOperation": "independent-image-custody-65cb95d50af8415aa569267d7ecd99bf",
+  "sources": {
+    "measure.py": "6765caba12f86127be876bb183a83747b36a4bf883f51c776fad927405a025da",
+    "materialize.py": "27e59113525ec4c1e7377fff9ffec623790bfcc8b4cc5777d21c53cd18549a40"
+  },
+  "scope": "tiny private tagless gzip-layer image import probe; no container/service/deletion/admission"
+}

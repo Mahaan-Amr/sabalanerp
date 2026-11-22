@@ -1,0 +1,8 @@
+{
+  "operation": "production-base-restore-dbfc6b6eca9741469ae3076756b165a8",
+  "remoteDirectoryKey": "private-base-transfer-57134361821f4d688fcd4712f3bc398a",
+  "sourceHashes": {
+    "decrypt-independent-production-base-20261018.cjs": "ed0c0052591a2c1b41001c83b84303140b690fb47358927cad4bf3fd3d8b58b3",
+    "recoveryCrypto.cjs": "b9cd157fa5ac98a2bbe1c41e651d6de134304c005acafbfa2fff2a7161b5d99b"
+  }
+}

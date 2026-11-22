@@ -43,6 +43,7 @@ test('Partner checks metadata, fetches only changes, and preserves search and an
   const search = page.getByPlaceholder('نام مشتری، شماره قرارداد یا محصول...');
   await search.fill('مشتری');
   const initialReads = fullReads, initialChecks = checks;
+  expect(initialReads, 'superseded StrictMode metadata checks must not start another full Case read').toBe(1);
   await page.clock.fastForward(20_001);
   await expect.poll(() => checks).toBeGreaterThan(initialChecks);
   expect(fullReads).toBe(initialReads);

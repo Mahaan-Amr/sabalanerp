@@ -8,13 +8,12 @@ import {
   ErpTextarea,
 } from "@/components/erp";
 import { LogisticsPage } from "@/features/logistics/LogisticsWorkspace";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   FaBan,
   FaCheck,
   FaPlus,
-  FaPrint,
   FaSearch,
   FaSync,
   FaTrash,
@@ -31,9 +30,12 @@ import {
   ErpQuickFilters,
 } from "@/components/erp";
 import { dashboardAPI, logisticsAPI } from "@/lib/api";
+import { normalizeDigits } from "@/lib/numberFormat";
 import { StatusBadge, dateFa, loadingDriversName } from "../logistics-ui";
 import { dispatchCaseReference } from "@/features/dispatch-case/dispatchCasePresentation";
 import { userFacingError } from "@/features/dispatch/userFacingError";
+
+const loadingHref = (row: { id: string; sourceKind?: string }, edit = false) => (row.sourceKind === "PARTNER_CASE" || edit) ? `/dashboard/logistics/loadings/new?draftId=${encodeURIComponent(row.id)}` : `/dashboard/logistics/loadings/${encodeURIComponent(row.id)}`;
 
 const actionLabel = (action: "finalize" | "delete" | "cancel" | "print") =>
   ({
@@ -44,6 +46,7 @@ const actionLabel = (action: "finalize" | "delete" | "cancel" | "print") =>
   })[action];
 
 export default function LogisticsLoadingsPage() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const [rows, setRows] = useState<any[]>([]);
   const [status, setStatus] = useState("ALL");
@@ -66,10 +69,10 @@ export default function LogisticsLoadingsPage() {
   const mutationLock = useRef(false);
   const may = (action: string) => actionAvailability[action]?.enabled === true;
   const canFinalize = (row: any) =>
-    may("FINALIZE_LOADING") && row.status === "DRAFT";
-  const canDelete = (row: any) => may("EDIT_LOADING") && row.status === "DRAFT";
+    row.sourceKind !== "PARTNER_CASE" && may("FINALIZE_LOADING") && row.status === "DRAFT";
+  const canDelete = (row: any) => row.sourceKind !== "PARTNER_CASE" && may("EDIT_LOADING") && row.status === "DRAFT";
   const canCancel = (row: any) =>
-    may("CANCEL_LOADING") && row.status !== "CANCELLED";
+    row.sourceKind !== "PARTNER_CASE" && may("CANCEL_LOADING") && row.status !== "CANCELLED";
   const canEdit = (row: any) => may("EDIT_LOADING") && row.status === "DRAFT";
 
   const load = async () => {
@@ -106,7 +109,7 @@ export default function LogisticsLoadingsPage() {
   );
 
   const filteredRows = useMemo(() => {
-    const normalized = search.trim().toLowerCase();
+    const normalized = normalizeDigits(search.trim()).toLowerCase();
     return rows.filter((row) => {
       if (status !== "ALL" && row.status !== status) return false;
       if (!normalized) return true;
@@ -117,7 +120,7 @@ export default function LogisticsLoadingsPage() {
         loadingDriversName(row),
         row.status,
       ].some((value) =>
-        String(value || "")
+        normalizeDigits(String(value || ""))
           .toLowerCase()
           .includes(normalized),
       );
@@ -180,6 +183,11 @@ export default function LogisticsLoadingsPage() {
     setMessage("");
     setError("");
 
+    if (action === "cancel" && row.status === "FINALIZED") {
+      router.push(`/dashboard/logistics/loadings/${row.id}?action=cancel`);
+      return;
+    }
+
     if (action === "print") {
       window.open(
         `/dashboard/logistics/loadings/${row.id}?print=1`,
@@ -196,7 +204,7 @@ export default function LogisticsLoadingsPage() {
   const eligibleRows = (action: "finalize" | "delete" | "cancel" | "print") => {
     if (action === "finalize") return selectedRows.filter(canFinalize);
     if (action === "delete") return selectedRows.filter(canDelete);
-    if (action === "cancel") return selectedRows.filter(canCancel);
+    if (action === "cancel") return selectedRows.filter(row => row.status === "DRAFT" && canCancel(row));
     return selectedRows;
   };
 
@@ -399,15 +407,6 @@ export default function LogisticsLoadingsPage() {
                 variant="outline"
                 disabled={!selectedRows.some(canDelete) || acting}
               />
-              <ErpButton
-                label="چاپ انتخاب‌شده‌ها"
-                icon={FaPrint}
-                onClick={() => {
-                  void runBulk("print");
-                }}
-                tone="neutral"
-                disabled={!selectedRows.length || acting}
-              />
             </div>
           </div>
         </ErpCard>
@@ -424,7 +423,7 @@ export default function LogisticsLoadingsPage() {
               {filteredRows.map(row => <tr key={row.id} className={`grid grid-cols-[44px_minmax(0,1fr)] items-start gap-y-3 p-3 md:grid-cols-[44px_minmax(0,1fr)_auto] lg:table-row lg:p-0 ${selectedIds.includes(row.id) ? 'bg-[var(--sds-accent-soft)]' : ''}`}>
                 <td className="block lg:table-cell lg:px-3 lg:py-3"><label className="inline-flex min-h-11 min-w-11 items-center justify-center"><ErpCheckboxControl aria-label={`انتخاب ${dispatchCaseReference(row.loadingNumber)}`} checked={selectedIds.includes(row.id)} onChange={() => toggleSelected(row.id)} /></label></td>
                 <td className="block min-w-0 lg:table-cell lg:px-3 lg:py-3">
-                  <ErpButton label={dispatchCaseReference(row.loadingNumber)} href={`/dashboard/logistics/loadings/${row.id}`} variant="ghost" className="max-w-full whitespace-normal text-right" />
+                  <ErpButton label={dispatchCaseReference(row.loadingNumber)} href={loadingHref(row)} variant="ghost" className="max-w-full whitespace-normal text-right" />
                   <p className="mt-1 text-base font-bold sds-text-primary">{row.customerName || 'مشتری ثبت نشده'}</p>
                   <p className="mt-1 text-sm sds-text-secondary">پروژه: {row.projectName || 'ثبت نشده'}</p>
                   <div className="mt-1 flex flex-wrap items-center gap-2 text-xs sds-text-secondary">{(row.lineCount || 0).toLocaleString('fa-IR')} ردیف {row.correctionCount > 0 && <ErpBadge tone="warning">{row.correctionCount.toLocaleString('fa-IR')} اصلاح</ErpBadge>}</div>
@@ -434,7 +433,7 @@ export default function LogisticsLoadingsPage() {
                 <td className="col-span-2 block text-xs sds-text-secondary md:col-span-1 md:text-left lg:table-cell lg:text-right lg:px-3 lg:py-3">{dateFa(row.loadingDate)}</td>
                 <td className="col-span-2 block w-full md:col-span-3 lg:table-cell lg:w-auto lg:min-w-44 lg:px-3 lg:py-3">
                   <div className="flex items-center justify-between gap-3">
-                    <ErpButton label={canEdit(row) ? 'ادامه' : 'مشاهده'} href={canEdit(row) ? `/dashboard/logistics/loadings/new?draftId=${row.id}` : `/dashboard/logistics/loadings/${row.id}`} variant="outline" />
+                    <ErpButton label={canEdit(row) ? 'ادامه' : 'مشاهده'} href={loadingHref(row, canEdit(row))} variant="outline" />
                         <ErpActionMenu
                           portal
                           label="اقدامات بیشتر"
@@ -452,18 +451,10 @@ export default function LogisticsLoadingsPage() {
                                   },
                                 ]
                               : []),
-                            {
-                              label: "چاپ",
-                              icon: FaPrint,
-                              disabled: acting,
-                              onClick: () => {
-                                void runSingle(row, "print");
-                              },
-                            },
                             ...(canCancel(row)
                               ? [
                                   {
-                                    label: "لغو بارگیری",
+                                    label: row.status === "FINALIZED" ? "لغو بارگیری نهایی‌شده پیش از خروج" : "لغو بارگیری",
                                     icon: FaBan,
                                     tone: "danger" as const,
                                     disabled: acting,
@@ -563,6 +554,9 @@ export default function LogisticsLoadingsPage() {
             }
           />
           {error && <ErpInlineState kind="error" title={error} />}
+          {actionRequest?.action === "cancel" && actionRequest.targets.some(row => row.status === "FINALIZED") && (
+            <ErpInlineState kind="stale" title="برای لغو پیش از خروج، ابتدا فاکتور و بارنامه‌های صادرشده را در حسابداری ابطال کنید." />
+          )}
           {actionRequest?.action === "cancel" && (
             <ErpField label="دلیل لغو" required>
               <ErpTextarea

@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+import {amountValue,mappedNeed,suggestedShare,remainingSelection,sumSelection} from './inquiryAmounts';
+import {scaled} from './inquiryOrderDefaults';
+assert.equal(amountValue('۱٬۲۳۴٫۵'),scaled('1234.5'));
+assert.equal(amountValue('٠٫٥'),scaled('0.5'));
+assert.equal(amountValue('1.'),null);
+assert.equal(sumSelection({a:'0.000000000000000000000000000001',b:'۲'}),scaled('2.000000000000000000000000000001'));
+assert.equal(suggestedShare('40','25',{other:'15'}),'25');
+assert.equal(suggestedShare(null,'25',{}),'25');
+assert.equal(remainingSelection([{quantity:'40'}],[{status:'OPEN',quantity:'1',purchaseQuantity:'30'}]),'10');
+const first=mappedNeed('1','3','1');assert.equal(first,'0.333333333333333333333333333333');
+assert.equal(mappedNeed('2','3','1','1',first),'0.666666666666666666666666666667');
+console.log('Purchasing selection/mapping: 9 exactness checks passed.');

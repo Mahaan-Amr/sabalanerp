@@ -25,7 +25,7 @@ const sha256 = (value: Uint8Array) => createHash('sha256').update(value).digest(
 
 const makeHarness = (options: { failStatementOnce?: boolean; failSecondStageOnce?: boolean; failSourceEvidence?: boolean;
   denyAcceptAfterStaging?: boolean; denyReplaceAfterStaging?: boolean; ambiguousAcceptAfterCommit?: boolean;
-  restrictStatementAccess?: boolean } = {}) => {
+  restrictStatementAccess?: boolean; reprintWaybill?: boolean } = {}) => {
   const files = new Map<string, Uint8Array>();
   const state = {
     commands: new Map<string, { command: string; fingerprint: string; value: unknown }>(),
@@ -155,6 +155,7 @@ const makeHarness = (options: { failStatementOnce?: boolean; failSecondStageOnce
   };
   let failedStatement = false;
   const service = createDispatchDocuments({ repository, storage, sourceReader,
+    reprintWaybill: options.reprintWaybill ? async () => bytes('pdf:WAYBILL:corrected') : undefined,
     publisher: { publish: async (input: DispatchDocumentRenderInput) => {
       if (options.failStatementOnce && input.kind === 'STATEMENT' && !failedStatement) {
         failedStatement = true;
@@ -229,6 +230,31 @@ const run = async () => {
   assert.equal(files.size, 2);
 
   const artifact = state.issued[0].artifacts[0] as PublishedDispatchArtifact;
+  {
+    const historical = makeHarness({ reprintWaybill: true });
+    await historical.service.decideCandidate({ candidateId: 'candidate-old', action: 'ACCEPT', idempotencyKey: 'old', actorId: 'accountant' });
+    const [old, statement] = historical.state.issued[0].artifacts as PublishedDispatchArtifact[];
+    const request = { waybillId: old.waybillId, actorId: 'allowed', correlationId: 'reprint-old' };
+    const correctedHash = sha256(bytes('pdf:WAYBILL:corrected'));
+    const download = await historical.service.retrieveArtifact({ ...request, artifactId: old.id });
+    assert.equal(sha256(download.bytes), correctedHash);
+    await download.complete.succeeded();
+    assert.equal(historical.state.retrievals[0].artifact.sha256, correctedHash);
+    const original = await historical.service.retrieveArtifact({ ...request, artifactId: old.id, original: true });
+    assert.equal(sha256(original.bytes), old.sha256);
+    const print = await historical.service.printHandoff({ ...request, idempotencyKey: 'old-print', kinds: ['WAYBILL', 'STATEMENT'] });
+    assert.deepEqual(print.documents.map(doc => sha256(doc.bytes)), [correctedHash, statement.sha256]);
+    await print.complete.succeeded();
+    assert.equal(historical.state.handoffs[0].artifacts[0].sha256, correctedHash);
+    assert.equal(sha256(historical.files.get(old.storageKey)!), old.sha256);
+    assert.equal(historical.state.issued.length, 1);
+    historical.files.set(old.storageKey, bytes('corrupt'));
+    await assert.rejects(() => historical.service.retrieveArtifact({ ...request, artifactId: old.id }), DispatchDocumentIntegrityError);
+  }
+  await service.verifyArtifactForIssuance({ artifactId: artifact.id, waybillId: artifact.waybillId, actorId: 'allowed', correlationId: 'internal-check' });
+  assert.equal(state.retrievals.length, 0, 'internal integrity verification must not claim delivery to the user');
+  await assert.rejects(() => service.verifyArtifactForIssuance({ artifactId: artifact.id, waybillId: artifact.waybillId,
+    actorId: 'denied', correlationId: 'internal-denied' }), /not available/i);
   const retrieved = await service.retrieveArtifact({ artifactId: artifact.id, waybillId: artifact.waybillId, actorId: 'allowed', correlationId: 'read-1' });
   assert.equal(sha256(retrieved.bytes), artifact.sha256);
   assert.equal(state.retrievals.length, 0, 'retrieval preparation is not a successful byte handoff');
@@ -278,6 +304,10 @@ const run = async () => {
 
   files.set(artifact.storageKey, bytes('corrupt'));
   await assert.rejects(() => service.retrieveArtifact({ artifactId: artifact.id, waybillId: artifact.waybillId, actorId: 'allowed', correlationId: 'read-3' }), DispatchDocumentIntegrityError);
+  const retrievalCount = state.retrievals.length;
+  await assert.rejects(() => service.verifyArtifactForIssuance({ artifactId: artifact.id, waybillId: artifact.waybillId,
+    actorId: 'allowed', correlationId: 'internal-corrupt' }), DispatchDocumentIntegrityError);
+  assert.equal(state.retrievals.length, retrievalCount, 'failed internal verification must not claim a document handoff');
   assert.equal(state.retrievals.at(-1).status, 'FAILED');
   assert.equal(state.incidents.at(-1).failureCode, 'ARTIFACT_INTEGRITY_FAILURE');
   await assert.rejects(() => service.printHandoff({ waybillId: artifact.waybillId, kinds: ['WAYBILL'], idempotencyKey: 'print-2',

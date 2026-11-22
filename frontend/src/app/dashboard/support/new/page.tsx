@@ -3,8 +3,12 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { FaChevronDown, FaImage, FaLifeRing, FaMicrophone, FaPaperPlane, FaPause, FaShieldAlt, FaTrash } from 'react-icons/fa';
-import { supportTicketsAPI } from '@/lib/api';
+import { supportTicketsAPI,browserSessionContinuation } from '@/lib/api';
+import {readOwnedSupportOrigin,supportOriginKey} from '@/features/support/supportOriginOwnership';
 import { featureLabelFa, workspaceLabelFa } from '@/lib/featureLabelsFa';
+import {useAuth} from '@/contexts/AuthContext';
+import {useSupportTicketDraftRecovery,supportFormEmpty} from '@/features/support/useSupportTicketDraftRecovery';
+import {SupportDraftRecovery} from '@/features/support/SupportDraftRecovery';
 import {
   ErpButton,
   ErpCard,
@@ -59,6 +63,8 @@ const impactOptions = [
 
 export default function NewSupportTicketPage() {
   const router = useRouter();
+  const {user}=useAuth();
+  const renderUser=useRef(user?.id);renderUser.current=user?.id;
   const [origin, setOrigin] = useState<Origin>({ route: '/dashboard' });
   const [context, setContext] = useState<{ workspaces: string[]; features: Array<{ workspace: string; feature: string; label?: string }> }>({ workspaces: [], features: [] });
   const [form, setForm] = useState({
@@ -78,22 +84,59 @@ export default function NewSupportTicketPage() {
   const [error, setError] = useState('');
   const [evidence, setEvidence] = useState<PendingEvidence[]>([]);
   const [recording, setRecording] = useState(false);
+  const [microphonePending,setMicrophonePending]=useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [evidencePending,setEvidencePending]=useState(false);
+  const recordingPendingRef=useRef(false);
+  const microphoneEpochRef=useRef(0);
+  const evidencePendingRef=useRef(false);
   const recorderRef = useRef<MediaRecorder | null>(null);
+  const initialWorkspaceRef=useRef('');
+  const recovery=useSupportTicketDraftRecovery({userId:user?.id||null,form,origin,evidence,detailsOpen,
+    recording:recording||recordingPendingRef.current,saving,evidencePending,initialWorkspace:initialWorkspaceRef.current,
+    isCaptureBusy:()=>recordingPendingRef.current||evidencePendingRef.current||recorderRef.current?.state==='recording'||recorderRef.current?.state==='paused'});
   const recordingChunksRef = useRef<Blob[]>([]);
   const recordingStartedRef = useRef(0);
+  const recordingTimerRef=useRef<ReturnType<typeof setTimeout>>();
+  const pageAliveRef=useRef(true);
+  const evidenceRef=useRef(evidence);evidenceRef.current=evidence;
   const originSelectionAppliedRef = useRef(false);
+  const originLoadedRef=useRef(false);
+  useEffect(()=>browserSessionContinuation.subscribe(()=>{
+    microphoneEpochRef.current++;
+    const recorder=recorderRef.current;
+    if(recorder&&(recorder.state==='recording'||recorder.state==='paused')){
+      recorder.stop();recorder.stream.getTracks().forEach(track=>track.stop());
+    }
+  }),[]);
+  useEffect(()=>{
+    if(recovery.scope&&!recovery.ownerCurrent){
+      microphoneEpochRef.current++;
+      const recorder=recorderRef.current;
+      if(recorder&&(recorder.state==='recording'||recorder.state==='paused')){
+        recorder.stop();recorder.stream.getTracks().forEach(track=>track.stop());
+      }
+    }
+  },[recovery.scope,recovery.ownerCurrent]);
 
   useEffect(() => {
-    try {
-      const stored = sessionStorage.getItem('support-ticket-origin');
+    const originalUser=user?.id;
+    if(!originalUser||originalUser!==recovery.originalOwner)return;
+    let cancelled=false;
+    void(async()=>{
+      const lease=await browserSessionContinuation.acquire();
+      const assertOwner=()=>{browserSessionContinuation.assertCurrent(lease);if(cancelled||lease.userId!==originalUser||renderUser.current!==originalUser)throw Error('SUPPORT_ORIGIN_OWNER_CHANGED');};
+      assertOwner();
+      if(!originLoadedRef.current){
+      const owner={userId:lease.userId,sessionId:lease.sessionId},key=supportOriginKey(owner);
+      const stored = sessionStorage.getItem(key);
       if (stored) {
-        const parsed = JSON.parse(stored) as Origin;
+        const parsed = readOwnedSupportOrigin(stored,owner) as Origin;assertOwner();
         setOrigin(parsed);
         if (parsed.sensitiveCandidate) {
           setForm((current) => ({ ...current, sensitiveEvidenceConsent: true }));
         }
-        sessionStorage.removeItem('support-ticket-origin');
+        sessionStorage.removeItem(key);
       }
       else setOrigin({
         route: window.location.pathname,
@@ -101,14 +144,21 @@ export default function NewSupportTicketPage() {
         viewport: { width: window.innerWidth, height: window.innerHeight },
         buildCommit: process.env.NEXT_PUBLIC_BUILD_COMMIT || 'local',
       });
-    } catch {
-      setOrigin({ route: window.location.pathname });
-    }
-    supportTicketsAPI.getContext().then((response) => setContext(response.data.data)).catch(() => setError('دریافت محدوده‌های دسترسی ممکن نشد.'));
-  }, []);
+      originLoadedRef.current=true;
+      }
+      const response=await supportTicketsAPI.getContext();assertOwner();setContext(response.data.data);
+    })().catch(requestError=>{if(!cancelled)setError(requestError.response?.data?.message||'دریافت اطلاعات همراه با مالک فعلی تأیید نشد.');});
+    return()=>{cancelled=true;};
+  }, [user?.id,recovery.originalOwner]);
 
-  useEffect(() => () => {
-    recorderRef.current?.stream.getTracks().forEach((track) => track.stop());
+  useEffect(() => {
+    pageAliveRef.current=true;
+    return()=>{
+      pageAliveRef.current=false;microphoneEpochRef.current++;if(recordingTimerRef.current)clearTimeout(recordingTimerRef.current);
+      const recorder=recorderRef.current;
+      if(recorder){recorder.onstop=null;recorder.ondataavailable=null;if(recorder.state==='recording')recorder.stop();recorder.stream.getTracks().forEach(track=>track.stop());}
+      evidenceRef.current.forEach(item=>{if(item.previewUrl)URL.revokeObjectURL(item.previewUrl);});
+    };
   }, []);
 
   useEffect(() => {
@@ -116,12 +166,16 @@ export default function NewSupportTicketPage() {
     const originatingWorkspace = origin.route.split(/[?#]/, 1)[0].split('/').filter(Boolean)[1] || '';
     originSelectionAppliedRef.current = true;
     if (context.workspaces.includes(originatingWorkspace)) {
+      initialWorkspaceRef.current=originatingWorkspace;
       setForm((current) => ({ ...current, reportedWorkspace: originatingWorkspace, reportedFeature: '' }));
     }
   }, [context.workspaces, origin.route]);
 
   const addFiles = async (files: FileList | null, kind: 'IMAGE' | 'AUDIO' | 'DOCUMENT') => {
-    if (!files) return;
+    if (!files||evidencePendingRef.current||saving) return;
+    evidencePendingRef.current=true;
+    setEvidencePending(true);
+    try {
     const next = await Promise.all(Array.from(files).slice(0, Math.max(0, 5 - evidence.length)).map(async (file) => {
       const previewUrl = ['IMAGE', 'AUDIO'].includes(kind) ? URL.createObjectURL(file) : undefined;
       let durationSeconds: number | undefined;
@@ -135,6 +189,7 @@ export default function NewSupportTicketPage() {
       return { id: crypto.randomUUID(), file, kind, previewUrl, durationSeconds };
     }));
     setEvidence((current) => [...current, ...next]);
+    } finally {evidencePendingRef.current=false;setEvidencePending(false);}
   };
 
   const removeEvidence = (id: string) => {
@@ -146,14 +201,27 @@ export default function NewSupportTicketPage() {
   };
 
   const startRecording = async () => {
+    if(recordingPendingRef.current)return;
     setError('');
+    recordingPendingRef.current=true;setMicrophonePending(true);
+    const expectedEpoch=microphoneEpochRef.current,originalUser=recovery.originalOwner;
+    let acquiredStream:MediaStream|undefined;
     try {
+      const lease=await recovery.assertFreshOwner();
+      browserSessionContinuation.assertCurrent(lease);
+      if(!pageAliveRef.current||expectedEpoch!==microphoneEpochRef.current||renderUser.current!==originalUser)throw Error('MICROPHONE_OWNER_CHANGED');
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      acquiredStream=stream;
+      try{
+        browserSessionContinuation.assertCurrent(lease);
+        if(!pageAliveRef.current||expectedEpoch!==microphoneEpochRef.current||renderUser.current!==originalUser)throw Error('MICROPHONE_OWNER_CHANGED');
+      }catch{stream.getTracks().forEach(track=>track.stop());throw Error('MICROPHONE_OWNER_CHANGED');}
       const recorder = new MediaRecorder(stream);
       recordingChunksRef.current = [];
       recordingStartedRef.current = Date.now();
       recorder.ondataavailable = (event) => event.data.size && recordingChunksRef.current.push(event.data);
       recorder.onstop = () => {
+        if(recordingTimerRef.current)clearTimeout(recordingTimerRef.current);
         const durationSeconds = Math.max(1, Math.round((Date.now() - recordingStartedRef.current) / 1000));
         const blob = new Blob(recordingChunksRef.current, { type: 'audio/webm' });
         const file = new File([blob], `voice-${Date.now()}.webm`, { type: 'audio/webm' });
@@ -166,24 +234,25 @@ export default function NewSupportTicketPage() {
           transcript: '',
         }]);
         stream.getTracks().forEach((track) => track.stop());
+        recordingPendingRef.current=false;setRecording(false);
       };
       recorder.start();
       recorderRef.current = recorder;
-      setRecording(true);
-      window.setTimeout(() => {
+      setRecording(true);setMicrophonePending(false);
+      recordingTimerRef.current=setTimeout(() => {
         if (recorder.state === 'recording') {
           recorder.stop();
-          setRecording(false);
         }
       }, 600_000);
     } catch {
+      acquiredStream?.getTracks().forEach(track=>track.stop());
+      recordingPendingRef.current=false;setRecording(false);setMicrophonePending(false);
       setError('دسترسی میکروفون داده نشد یا ضبط صدا در این مرورگر پشتیبانی نمی‌شود.');
     }
   };
 
   const stopRecording = () => {
     if (recorderRef.current?.state === 'recording') recorderRef.current.stop();
-    setRecording(false);
   };
 
   const features = useMemo(
@@ -191,12 +260,27 @@ export default function NewSupportTicketPage() {
     [context.features, form.reportedWorkspace],
   );
   const needsSensitiveConsent = form.type === 'SECURITY_PRIVACY' || Boolean(origin.sensitiveCandidate) || evidence.some((item) => item.kind === 'AUDIO');
+  const downloadEvidence=async(item:PendingEvidence)=>{
+    try{
+      await recovery.assertFreshOwner();
+      const url=URL.createObjectURL(item.file);
+      try{const link=document.createElement('a');link.href=url;link.download=item.file.name;link.click();}finally{URL.revokeObjectURL(url);}
+    }catch{setError('دریافت فایل با مالک فعلی تأیید نشد.');}
+  };
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
+    if(saving||recording||recordingPendingRef.current||evidencePending||recovery.submissionLocked)return;
     setSaving(true);
     setError('');
+    let createSent=false;
     try {
+      await recovery.assertFreshOwner();
+      const available=await supportTicketsAPI.getContext();setContext(available.data.data);
+      if(form.reportedWorkspace&&!available.data.data.workspaces.includes(form.reportedWorkspace)
+        ||form.reportedFeature&&!available.data.data.features.some((feature:{workspace:string;feature:string})=>feature.workspace===form.reportedWorkspace&&feature.feature===form.reportedFeature)){
+        throw Error('محدودهٔ انتخاب‌شده تغییر کرده است؛ آن را دوباره بررسی کنید.');
+      }
       const stagedAttachmentTokens: string[] = [];
       for (const item of evidence) {
         const payload = new FormData();
@@ -208,7 +292,7 @@ export default function NewSupportTicketPage() {
         const staged = await supportTicketsAPI.stageAttachment(payload);
         stagedAttachmentTokens.push(staged.data.data.token);
       }
-      const response = await supportTicketsAPI.create({
+      const requestBody = {
         ...form,
         reportedWorkspace: form.reportedWorkspace || null,
         reportedFeature: form.reportedFeature || null,
@@ -221,19 +305,47 @@ export default function NewSupportTicketPage() {
             }
           : null,
         diagnosticSnapshot: origin,
-      }, crypto.randomUUID());
-      sessionStorage.removeItem('support-ticket-origin');
+      };
+      const idempotencyKey=crypto.randomUUID();
+      const bodyHash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(requestBody)))),value=>value.toString(16).padStart(2,'0')).join('');
+      await recovery.recordSubmission({key:idempotencyKey,bodySha256:bodyHash,status:'UNCERTAIN'});
+      await recovery.assertFreshOwner();
+      createSent=true;
+      const response=await supportTicketsAPI.create(requestBody,idempotencyKey);
+      await recovery.recordSubmission({key:idempotencyKey,bodySha256:bodyHash,status:'CONFIRMED'}).catch(()=>{});
       router.push(`/dashboard/support/tickets/${response.data.data.id}`);
     } catch (requestError: any) {
-      setError(requestError.response?.data?.error || 'ثبت تیکت انجام نشد.');
+      if(!createSent||requestError.response?.data?.error==='API_BUILD_REFRESH_REQUIRED')await recovery.recordSubmission(null).catch(()=>{});
+      setError(requestError.response?.data?.message || requestError.response?.data?.error || requestError.message || 'ثبت تیکت انجام نشد.');
     } finally {
       setSaving(false);
     }
   };
 
+  if(!recovery.originalOwner||user?.id!==recovery.originalOwner||recovery.scope&&!recovery.ownerCurrent)return <ErpWorkspacePage title="ثبت درخواست پشتیبانی">
+    <ErpInlineState kind="stale" title="مالک یا ورود این فرم تغییر کرده است؛ اطلاعات اصلی در همین تب نگه داشته شده و پنهان است." />
+    {user?.id===recovery.originalOwner&&<ErpButton label="ورود فعلی همین حساب را بررسی و نسخهٔ محلی را باز کنم" onClick={()=>void recovery.reviewSameOwnerSession().catch(()=>setError('ورود حساب اصلی تأیید نشد.'))} />}
+  </ErpWorkspacePage>;
   return (
     <ErpWorkspacePage title="ثبت درخواست پشتیبانی" backHref="/dashboard/support/history">
       <form onSubmit={submit} className="space-y-5" dir="rtl">
+        <ErpInlineState kind="empty" title={recovery.status} />
+        <div className="flex flex-wrap gap-2">
+          <ErpButton label="حفظ پیش‌نویس" variant="outline" disabled={!recovery.scope||saving||recording||microphonePending||evidencePending} onClick={()=>void recovery.save().catch(()=>{})} />
+          {recovery.saved&&!saving&&!recording&&!microphonePending&&!evidencePending&&<ErpButton label="تازه‌سازی پس از حفظ کامل" variant="outline" onClick={()=>void recovery.refresh().catch(()=>setError('حفظ آخرین نسخه تأیید نشد؛ این صفحه را نبندید.'))} />}
+          {origin.sensitiveCandidate&&<ErpButton label="حذف اطلاعات خودکار حساس از پیش‌نویس" variant="outline" tone="warning" onClick={()=>setOrigin(({sensitiveCandidate:_candidate,...safe})=>safe)} />}
+          {recovery.scope&&<SupportDraftRecovery userId={recovery.scope.userId} tabId={recovery.scope.tabId}
+            ownerCurrent={recovery.ownerCurrent} assertOwner={recovery.assertOwner}
+            empty={supportFormEmpty(form,evidence,initialWorkspaceRef.current)} revision={recovery.revision} restore={(draft,files)=>{
+              setForm({...draft.form,sensitiveEvidenceConsent:false});setOrigin(draft.origin);setDetailsOpen(draft.detailsOpen);
+              evidenceRef.current.forEach(item=>{if(item.previewUrl)URL.revokeObjectURL(item.previewUrl);});
+              setEvidence(files.map(item=>({...item,...(['IMAGE','AUDIO'].includes(item.kind)?{previewUrl:URL.createObjectURL(item.file)}:{})})));
+              originSelectionAppliedRef.current=true;
+              recovery.adoptSubmission(draft.submission);
+            }} />}
+        </div>
+        {recovery.submissionLocked&&<ErpInlineState kind="stale" title="این نسخه سابقهٔ ارسال دارد؛ برای جلوگیری از ثبت دوباره، ابتدا تاریخچهٔ درخواست‌ها را بررسی کنید." />}
+        <fieldset disabled={saving} className="space-y-5">
         {error && <ErpInlineState kind="error" title={error} />}
         {form.type === 'SECURITY_PRIVACY' && (
           <ErpCard tone="danger">
@@ -294,7 +406,7 @@ export default function NewSupportTicketPage() {
         </ErpCard>
         <ErpCard>
           <h2 className="font-bold">تصویر، سند یا پیام صوتی</h2>
-          <p className="mt-1 text-sm text-[var(--sds-text-muted)]">حداکثر ۵ فایل؛ صوت حداکثر ۱۰ دقیقه است و همیشه شاهد حساس محسوب می‌شود.</p>
+          <p className="mt-1 text-sm text-[var(--sds-text-secondary)]">حداکثر ۵ فایل؛ صوت حداکثر ۱۰ دقیقه است و همیشه شاهد حساس محسوب می‌شود.</p>
           <div className="mt-4 flex flex-wrap gap-2">
             <label className="sds-action sds-tone-neutral sds-action-outline inline-flex min-h-11 cursor-pointer items-center gap-2 px-3 text-sm font-bold">
               <FaImage /> افزودن تصویر
@@ -314,12 +426,12 @@ export default function NewSupportTicketPage() {
               />
             </label>
             <ErpButton
-              label={recording ? 'پایان ضبط' : 'ضبط پیام صوتی'}
+              label={microphonePending?'در انتظار دسترسی میکروفون…':recording ? 'پایان ضبط' : 'ضبط پیام صوتی'}
               icon={recording ? FaPause : FaMicrophone}
               onClick={recording ? stopRecording : () => void startRecording()}
               tone={recording ? 'danger' : 'primary'}
               variant="outline"
-              disabled={!recording && evidence.some((item) => item.kind === 'AUDIO')}
+              disabled={!recovery.scope||microphonePending||!recording && evidence.some((item) => item.kind === 'AUDIO')}
             />
           </div>
           {evidence.length > 0 && (
@@ -330,6 +442,7 @@ export default function NewSupportTicketPage() {
                     <p className="truncate text-sm font-bold">{item.file.name}</p>
                     <ErpButton label="حذف" icon={FaTrash} onClick={() => removeEvidence(item.id)} tone="danger" variant="ghost" />
                   </div>
+                  <ErpButton label="دریافت فایل اصلی" variant="ghost" onClick={()=>void downloadEvidence(item)} />
                   {item.kind === 'IMAGE' && item.previewUrl && <img src={item.previewUrl} alt="پیش‌نمایش شاهد" className="mt-3 max-h-48 w-full rounded-lg object-contain" />}
                   {item.kind === 'AUDIO' && item.previewUrl && <audio className="mt-3 w-full" controls src={item.previewUrl}>مرورگر شما پخش صوت را پشتیبانی نمی‌کند.</audio>}
                   {item.kind === 'AUDIO' && (
@@ -343,7 +456,7 @@ export default function NewSupportTicketPage() {
                       />
                     </label>
                   )}
-                  <p className="mt-2 text-xs text-[var(--sds-text-muted)]">{(item.file.size / 1024 / 1024).toLocaleString('fa-IR', { maximumFractionDigits: 1 })} مگابایت</p>
+                  <p className="mt-2 text-xs text-[var(--sds-text-secondary)]">{(item.file.size / 1024 / 1024).toLocaleString('fa-IR', { maximumFractionDigits: 1 })} مگابایت</p>
                 </div>
               ))}
             </div>
@@ -380,13 +493,14 @@ export default function NewSupportTicketPage() {
           <ErpButton label="انصراف" href="/dashboard/support/history" tone="neutral" variant="outline" />
           <ErpPressable
             type="submit"
-            disabled={saving || !form.title.trim() || (!form.description.trim() && evidence.length === 0) || (evidence.some((item) => item.kind === 'AUDIO') && !form.sensitiveEvidenceConsent)}
+            disabled={saving || recording || microphonePending || evidencePending || recovery.submissionLocked || !recovery.scope || !form.title.trim() || (!form.description.trim() && evidence.length === 0) || (evidence.some((item) => item.kind === 'AUDIO') && !form.sensitiveEvidenceConsent)}
             className="sds-action sds-tone-primary sds-action-solid inline-flex min-h-11 items-center justify-center gap-2 px-4 text-sm font-bold disabled:opacity-50"
           >
             {saving ? <FaLifeRing className="h-4 w-4" /> : <FaPaperPlane className="h-4 w-4" />}
             {saving ? 'در حال ثبت…' : 'ثبت درخواست'}
           </ErpPressable>
         </div>
+        </fieldset>
       </form>
     </ErpWorkspacePage>
   );

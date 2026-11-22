@@ -23,7 +23,8 @@ async function resolvePartnerScopedAuthorityInPurpose(tx: Prisma.TransactionClie
   input: { actorId: string; root: AuthorizationRoot }, purpose?: 'ACCOUNTING' | 'RESPONDER') {
   const resolveActions = purpose === 'RESPONDER' ? readScopedActions : resolveScopedActions;
   const current = await resolveActions(tx, input.actorId, 'PARTNER');
-  const workspace = await resolvePartnerWorkspaceAuthority(tx, input.actorId, purpose);
+  const workspace = await resolvePartnerWorkspaceAuthority(tx, input.actorId, purpose,
+    { fencedPermissionReads: purpose === 'ACCOUNTING' });
   const explicit = await readExplicitPartnerDecisions(tx, input.actorId);
   const grants: AuthorizationEvidence<PartnerActionV2>['grants'] = [];
   for (const grant of current.grants) {
@@ -77,7 +78,8 @@ function bridgeWithinExplicitReadScope(grant: { action: string; rootKind: string
   current: Awaited<ReturnType<typeof readScopedActions>>['grants'], explicit: Set<string>) {
   const readAction = grant.purpose === 'ACCOUNTING' && grant.action !== 'ACCOUNTING_READ' ? 'ACCOUNTING_READ'
     : grant.purpose === 'CRM' && grant.action === 'CUSTOMER_WRITE' ? 'CUSTOMER_READ'
-    : grant.purpose === 'FULFILLMENT' && grant.action !== 'FULFILLMENT_READ' ? 'FULFILLMENT_READ' : undefined;
+    : grant.purpose === 'FULFILLMENT' && grant.action !== 'FULFILLMENT_READ' ? 'FULFILLMENT_READ'
+    : grant.purpose === 'MANAGEMENT' && grant.action === 'CASE_COMMERCIAL_RENEW' ? 'CASE_READ' : undefined;
   if (!readAction || !explicit.has(decisionKey({ ...grant, action: readAction }))) {
     return [{ ...grant, boundRootId: undefined, expiresAt: undefined }];
   }

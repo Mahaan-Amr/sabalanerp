@@ -8,6 +8,13 @@ import { createTemporaryConcurrencyDatabase } from './database';
 import { createConcurrentPricingFixture } from './pricingFixture';
 import { runSerializableWithRetry } from './retry';
 import { ConcurrencyTrace, type ScenarioResult } from './trace';
+import { createDispatchDocuments } from '../../dispatchDocuments/service';
+import { PrismaDispatchDocumentRepository } from '../../dispatchDocuments/prismaRepository';
+import { PrismaDispatchDocumentSourceReader, allocationPricingIntegrityVerifier } from '../../dispatchDocuments/prismaSourceReader';
+import { createPrismaDispatchDocumentAccessPolicy } from '../../dispatchDocuments/prismaAccessPolicy';
+import { createAuthorizedActorFixture } from './authorityFixture';
+import { createSalesInvoiceService } from '../../salesDispatchInvoice/service';
+import { issueLoadingDocuments } from '../../loadingDocumentIssuance';
 
 type ChildProof = Record<string, unknown> & { scenarios: ScenarioResult[]; events: Array<{
   scenario: string; actor: string; phase: string; outcome: string; detail?: Record<string, unknown>;
@@ -75,10 +82,16 @@ const run = async () => {
           durationMs: Number((performance.now() - actorStarted).toFixed(3)), databaseCode: null } });
       return value;
     };
-    const [firstResult, secondResult] = await Promise.all([
+    const outcomes = await Promise.allSettled([
       finalize(first, fixture.loadings[0], `${fixture.actorId}-first`),
       finalize(second, fixture.loadings[1], `${fixture.actorId}-second`),
     ]);
+    const failure = outcomes.find(result => result.status === 'rejected');
+    if (failure?.status === 'rejected') throw failure.reason;
+    const [firstResult, secondResult] = outcomes.map(result => {
+      if (result.status !== 'fulfilled') throw result.reason;
+      return result.value;
+    });
     assert.equal(firstResult.revisions.length, 1);
     assert.equal(secondResult.revisions.length, 1);
     const events = await observer.dispatchPricedAllocationEvent.findMany({ where: { pricingRowId: fixture.rowId }, orderBy: { recordedAt: 'asc' } });
@@ -120,7 +133,8 @@ const run = async () => {
     assert.match(String(financialProof.boundPricingVersionId), /^[0-9a-f-]{36}$/i);
     mergeChildProof(financialProof, trace, results);
 
-    const lockContracts = await observer.salesContract.findMany({ select: { id: true }, orderBy: { id: 'asc' }, take: 2 });
+    const lockContracts = await observer.salesContract.findMany({ where: { partnerCaseId: null, commercialFlowVersion: 0 },
+      select: { id: true }, orderBy: { id: 'asc' }, take: 2 });
     assert.equal(lockContracts.length, 2, 'Deadlock retry diagnostic requires two production contract rows.');
     const deadlockBarrier = new TwoPartyBarrier('opposite-order-deadlock-diagnostic', 10_000);
     const retryScenario = 'retry-after-serialization-deadlock-timeout-or-unknown-response';
@@ -137,8 +151,14 @@ const run = async () => {
         await tx.$queryRawUnsafe('SELECT "id" FROM "sales_contracts" WHERE "id" = $1 FOR UPDATE', lockOrder[1].id);
         return true;
       } });
-    assert.deepEqual(await Promise.all([deadlockDiagnostic(first, `${fixture.actorId}-deadlock-a`, false),
-      deadlockDiagnostic(second, `${fixture.actorId}-deadlock-b`, true)]), [true, true]);
+    const assertBothSucceeded = async (operations: Promise<boolean>[]) => {
+      const settled = await Promise.allSettled(operations);
+      const rejected = settled.find(result => result.status === 'rejected');
+      if (rejected?.status === 'rejected') throw rejected.reason;
+      assert.deepEqual(settled.map(result => result.status === 'fulfilled' && result.value), [true, true]);
+    };
+    await assertBothSucceeded([deadlockDiagnostic(first, `${fixture.actorId}-deadlock-a`, false),
+      deadlockDiagnostic(second, `${fixture.actorId}-deadlock-b`, true)]);
 
     const serializationBarrier = new TwoPartyBarrier('serialization-write-skew', 10_000);
     const serialization = (client: typeof first, actor: string) => runSerializableWithRetry({ client, actor,
@@ -148,8 +168,8 @@ const run = async () => {
         await tx.salesContract.update({ where: { id: lockContracts[0].id }, data: { notes: `issue260-${actor}-${attempt}` } });
         return true;
       } });
-    assert.deepEqual(await Promise.all([serialization(first, `${fixture.actorId}-serialization-a`),
-      serialization(second, `${fixture.actorId}-serialization-b`)]), [true, true]);
+    await assertBothSucceeded([serialization(first, `${fixture.actorId}-serialization-a`),
+      serialization(second, `${fixture.actorId}-serialization-b`)]);
 
     let releaseTimeoutLock!: () => void;
     const releaseTimeout = new Promise<void>(resolve => { releaseTimeoutLock = resolve; });
@@ -187,7 +207,7 @@ const run = async () => {
     const issuanceRun = spawnSync(process.execPath, [path.resolve(process.cwd(), 'node_modules', 'tsx', 'dist', 'cli.mjs'),
       path.resolve(process.cwd(), 'src', 'services', '__tests__', 'dispatchDocumentsIssuanceConcurrency.test.ts')], {
       cwd: process.cwd(), encoding: 'utf8', timeout: 120_000,
-      env: { ...process.env, DATABASE_URL: sourceDatabaseUrl, ISSUE260_PARENT_RUN_ID: database.runId,
+      env: { ...process.env, DATABASE_URL: database.databaseUrl, ISSUE260_PARENT_RUN_ID: database.runId,
         ISSUE260_PARENT_DATABASE_NAME: database.databaseName },
     });
     assert.equal(issuanceRun.error, undefined, `production issuance subprocess failed: ${issuanceRun.error?.message || ''}`);
@@ -219,6 +239,56 @@ const run = async () => {
     assert.equal(issuanceProof.issuedWaybills, 1);
     assert.equal(issuanceProof.issuedArtifacts, 2);
     mergeChildProof(issuanceProof, trace, results);
+
+    // Exercise the grouped command against the real finalized allocation and
+    // real invoice service in this temporary database. PDF rendering is a
+    // deterministic stub here; the Chromium PDF suite verifies actual output.
+    const groupedRevision = await observer.logisticsAllocationRevision.findFirstOrThrow({
+      where: { loadingId: fixture.loadings[0].id }, include: { candidate: true },
+    });
+    assert.ok(groupedRevision.candidate && groupedRevision.candidate.status === 'PENDING');
+    const { actor: accountingActor, authority: accountingAuthority } = await createAuthorizedActorFixture(observer, {
+      runId: database.runId, workspace: 'accounting', feature: 'accounting_dispatch_candidates_manage', workspacePermission: 'admin',
+    });
+    const retained = new Map<string, Uint8Array>();
+    const storage = { stage: async ({ storageKey, bytes }: { storageKey: string; bytes: Uint8Array }) => { retained.set(storageKey, bytes); },
+      read: async (storageKey: string) => retained.get(storageKey) ?? null,
+      discard: async (storageKey: string) => { retained.delete(storageKey); } };
+    const documents = createDispatchDocuments({
+      repository: new PrismaDispatchDocumentRepository(observer, allocationPricingIntegrityVerifier, storage),
+      sourceReader: new PrismaDispatchDocumentSourceReader(observer, 'test-v1', 'test-v1'), storage,
+      publisher: { publish: async input => {
+        assert.ok(input.vehiclePlate.startsWith('260-'), 'the immutable admission plate must reach each document');
+        return { bytes: new TextEncoder().encode('%PDF-test'), mediaType: 'application/pdf' };
+      } },
+      access: createPrismaDispatchDocumentAccessPolicy(observer), incidents: { report: async () => {} },
+    });
+    const invoices = createSalesInvoiceService(observer, async () => Buffer.from('%PDF-test-invoice'), storage);
+    const invoiceContext = { actorId: accountingActor.id, workspace: 'accounting' as const, requireDispatchDocumentGate: true,
+      expectedRevisionIds: [groupedRevision.id] };
+    const groupedPart = { candidateId: groupedRevision.candidate.id, revisionId: groupedRevision.id, state: 'PENDING' as const };
+    const groupedCommand = { loadingId: fixture.loadings[0].id, parts: [groupedPart], invoicePredecessorId: null,
+      issueWaybill: async (candidateId: string, idempotencyKey: string) => {
+        const result = await documents.decideCandidate({ candidateId, action: 'ACCEPT', idempotencyKey,
+          actorId: accountingActor.id, authority: accountingAuthority });
+        assert.equal(result.status, 'ACCEPTED');
+      },
+      issueInvoice: async (key: string) => { await invoices.issue(invoiceContext, fixture.loadings[0].id, key); },
+    };
+    await groupedCommand.issueWaybill(groupedPart.candidateId, `loading-document:${groupedPart.revisionId}`);
+    await assert.rejects(() => invoices.issue({ ...invoiceContext, expectedRevisionIds: ['stale-revision'] },
+      fixture.loadings[0].id, 'stale-revision-check'), /تخصیص راننده‌ها تغییر کرده است/);
+    assert.equal(await observer.salesDispatchInvoice.count({ where: { loadingId: fixture.loadings[0].id } }), 0);
+    const [key, original] = [...retained.entries()][0];
+    retained.set(key, new TextEncoder().encode('corrupt'));
+    await assert.rejects(() => issueLoadingDocuments({ ...groupedCommand, parts: [{ ...groupedPart, state: 'COMPLETE' }] }));
+    assert.equal(await observer.salesDispatchInvoice.count({ where: { loadingId: fixture.loadings[0].id } }), 0);
+    retained.set(key, original);
+    await issueLoadingDocuments({ ...groupedCommand, parts: [{ ...groupedPart, state: 'COMPLETE' }] });
+    await issueLoadingDocuments({ ...groupedCommand, parts: [{ ...groupedPart, state: 'COMPLETE' }] });
+    assert.equal(await observer.accountingDispatchWaybill.count({ where: { candidateId: groupedPart.candidateId } }), 1);
+    assert.equal(await observer.salesDispatchInvoice.count({ where: { loadingId: fixture.loadings[0].id } }), 1);
+    assert.equal(retained.size, 2);
 
     const adjustmentRun = spawnSync(process.execPath, [
       path.resolve(process.cwd(), 'node_modules', 'tsx', 'dist', 'cli.mjs'),
@@ -263,6 +333,11 @@ const run = async () => {
     assert.equal(report.summary.status, 'ZERO_ANOMALIES');
     console.log(JSON.stringify({ runId: database.runId, tracePath: report.tracePath, summaryPath: report.summaryPath,
       scenarios: results.map(result => result.name), anomalyCount: 0 }));
+  } catch (error) {
+    // Preserve the original test failure even when safe cleanup must retain a
+    // database with still-open sessions for later inspection.
+    console.error('SHIPMENT_CONCURRENCY_SCENARIO_FAILURE', error);
+    throw error;
   } finally {
     await Promise.all([first.$disconnect(), second.$disconnect(), observer.$disconnect()]);
     await database.cleanup();

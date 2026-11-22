@@ -14,7 +14,7 @@ Existing contracts also lack a universally reliable historical seller snapshot. 
 
 ## Decision
 
-Each Sales Contract has an explicit current responsible seller separate from its creator. CRM conversion defaults responsibility from the potential project's responsible seller; other creation defaults it from the creator. Authorized reassignment requires a reason and an append-only audit record. Pipeline reporting follows current responsibility.
+Each Sales Contract has an explicit current responsible seller separate from its creator. CRM conversion defaults responsibility from the potential project's responsible seller; other creation defaults it from the creator. Authorized reassignment requires an append-only audit record; a written reason is optional. A system administrator may reassign an ordinary contract to an active seller in another department who has effective Sales contract access. Responsibility extends access to that ordinary contract under the seller's existing workspace and feature permissions, without changing either department or granting access to unrelated contracts. Personal responsibility reports include those assigned contracts; departmental totals stay with the contract department. Legacy realized-credit assignment still requires an audit reason. Pipeline reporting follows current responsibility.
 
 The first transition to `SIGNED` or `PRINTED` snapshots the responsible seller as realized-sales credit. Later responsibility changes do not rewrite that credit. Realized value is represented by a dated original realization event plus dated positive or negative adjustment events, so corrections and cancellations affect their effective periods without silently rewriting prior periods.
 

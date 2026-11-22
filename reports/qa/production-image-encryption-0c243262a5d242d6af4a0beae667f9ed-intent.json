@@ -1,0 +1,9 @@
+{
+  "operation": "production-image-encryption-0c243262a5d242d6af4a0beae667f9ed",
+  "sources": {
+    "encrypt.cjs": "000a3a39ad247baa9bfb5998419a52a11189eb37233724fdd4dafb16ac81c268",
+    "recoveryCrypto.cjs": "b9cd157fa5ac98a2bbe1c41e651d6de134304c005acafbfa2fff2a7161b5d99b",
+    "native-owner": "c2b096894f7bdf920881c668deca48b1b7afedc4267956ed31e1743ed3687d83"
+  },
+  "scope": "private current image dual-recipient cipher components only"
+}

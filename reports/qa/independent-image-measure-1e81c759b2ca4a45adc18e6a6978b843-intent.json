@@ -1,0 +1,9 @@
+{
+  "operation": "independent-image-measure-1e81c759b2ca4a45adc18e6a6978b843",
+  "custodyOperation": "independent-image-custody-65cb95d50af8415aa569267d7ecd99bf",
+  "sources": {
+    "measure.py": "a28d98c169bf51f932e5d229c08b2017cacd47fff4735365ff0a93eb04ee36c2",
+    "materialize.py": "72c03205b4b1d4b535690ef977a63a13e6a8fe2d4a3ffbceda3a3cdc58eacf75"
+  },
+  "scope": "read-only expanded-layer measurement of accepted image copies; no staging/deletion/import/admission"
+}

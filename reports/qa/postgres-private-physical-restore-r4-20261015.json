@@ -1,0 +1,99 @@
+{
+  "status": "PRIVATE_PHYSICAL_RESTORE_VERIFIED",
+  "completedAt": "2026-10-15T10:49:02.445567+00:00",
+  "baseline": {
+    "tables": 199,
+    "records": "16700",
+    "sha256": "553597e5c7fd65fbbd0369fe4ff3dcf3588f2be0e7b01d83db444190b45ff665"
+  },
+  "restored": {
+    "tables": 199,
+    "records": "16700",
+    "sha256": "553597e5c7fd65fbbd0369fe4ff3dcf3588f2be0e7b01d83db444190b45ff665"
+  },
+  "component": {
+    "format": "sabalan-private-physical-base/v1",
+    "status": "NATIVE_VERIFIED_PRIVATE_ONLY",
+    "operationId": "physical-base-r2-20261015",
+    "source": {
+      "version": "150016",
+      "systemIdentifier": "7696494161395363875",
+      "timeline": 1,
+      "clusterBytes": 315103800,
+      "tablespaces": 0
+    },
+    "containerId": "c3059c1493fa3b1a931d8166389893be60fc22374a85a3b12214fd519d4f26aa",
+    "image": "sha256:15283455b75304c90f51bf16b42c272a25fb52807945dc24830ec88e63cd896d",
+    "archiveBytes": 335492096,
+    "archiveSha256": "298a5bce747f4db56c11edc37b410088853fc799ebca4b083c241fc6803dfbaf",
+    "manifestSha256": "462f5bcd4881341f3dbda05400b0d7eef9d2c7152658bae4219287c876b59690",
+    "walRanges": [
+      {
+        "Timeline": 1,
+        "Start-LSN": "0/84000028",
+        "End-LSN": "0/84000138"
+      }
+    ],
+    "nativeVerification": "backup successfully verified",
+    "encryptionRequired": true,
+    "independentRestoreRequired": true
+  },
+  "encryption": {
+    "sourceSha256": "298a5bce747f4db56c11edc37b410088853fc799ebca4b083c241fc6803dfbaf",
+    "encryptedSha256": "466824218145462e32b7aa4f574fb0937e2060edb3c3aaecc60d75cf25ef2acd",
+    "rsaRoundTrip": true,
+    "authenticatedCorruptionRejected": true,
+    "disposableSecondRecipient": true,
+    "productionRecoveryPoint": false
+  },
+  "native": {
+    "nativeVerification": "backup successfully verified\n\nSABALAN_NATIVE_REAPED physical-restore-r4-20261015-verify 0"
+  },
+  "tools": [
+    {
+      "containerId": "9161eee4a94c8bbfabfc23b62e827c8dbdbd5b4e0c0780cec547ae9bc1ea2994",
+      "kind": "business-before",
+      "image": "sha256:74321462a183ee36bf341c47c63eededd40af936d1f950796f8a0aa5b159316d",
+      "exitCode": 0,
+      "logSha256": "d100f6bb2bcc1f3af0ee6771304bfb07d8772819df5f152eba4c4f530533270b"
+    },
+    {
+      "containerId": "83f6155d3c1941c37c01f175819824e02062a2ded6b9750f3d5ec997db790aac",
+      "kind": "crypto",
+      "image": "sha256:74321462a183ee36bf341c47c63eededd40af936d1f950796f8a0aa5b159316d",
+      "exitCode": 0,
+      "logSha256": "110f905a387ec4bbce89e22e275c4b9b3799174bd1aeb337a646d1737ac98fea"
+    },
+    {
+      "containerId": "cb1bae607a4825da58246cc76ac150400782f4274d3f6de344cf57374c7ad4b9",
+      "kind": "verify",
+      "image": "sha256:15283455b75304c90f51bf16b42c272a25fb52807945dc24830ec88e63cd896d",
+      "exitCode": 0,
+      "logSha256": "208bf6a99d0687c914d6fa3ede99d9baf041f614f2da7c4a2c1658252bc2b4e2"
+    },
+    {
+      "containerId": "45f670e4e8a384f69f92356ae18a2c483a02a6638187851c9827fc3e359f6cf4",
+      "kind": "business-after",
+      "image": "sha256:74321462a183ee36bf341c47c63eededd40af936d1f950796f8a0aa5b159316d",
+      "exitCode": 0,
+      "logSha256": "91adb950f03f7ea0bf4c7727a8dae2389de7d4130d82bfd650423ea027e01fa7"
+    },
+    {
+      "containerId": "1b39a5ade9bd7aeb3cc081cd27bd5e8cc5f45a2c3ac5adc4a1c951195035844e",
+      "kind": "business-returned",
+      "image": "sha256:74321462a183ee36bf341c47c63eededd40af936d1f950796f8a0aa5b159316d",
+      "exitCode": 0,
+      "logSha256": "726eef1d6c1a287321974ad810b3748845ff204d19c1c479ec8bcb0176e99e70"
+    }
+  ],
+  "physicalContainerId": "34a2884abd6e5e151b10b2d1ad60b9497f3dbe9c83d4dfc7d38e1bab8551d708",
+  "returnedOriginalContainerId": "1330c530d388bafae86368805e1e6af5118da892f00724bc5d361b694ff0ebb6",
+  "originalDataPreserved": true,
+  "returnedBusiness": {
+    "tables": 199,
+    "records": "16700",
+    "sha256": "553597e5c7fd65fbbd0369fe4ff3dcf3588f2be0e7b01d83db444190b45ff665"
+  },
+  "foreignStableServicesUnchanged": true,
+  "productionRecoveryPoint": false
+}

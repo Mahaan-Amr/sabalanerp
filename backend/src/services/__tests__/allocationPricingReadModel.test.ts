@@ -21,6 +21,8 @@ const event = {
     productRowId: 'stable-row-1', unit: 'm2' },
 };
 const tx = {
+  dispatchStatementAdjustment: { findMany: async () => [] },
+  salesInvoiceCorrection: { findMany: async () => [] },
   logisticsAllocationRevision: { findUnique: async () => null },
   logisticsAllocationRevisionPricing: { findMany: async () => [{
     contractId: 'contract-1', pricingVersionId: 'version-1', expectedPricingHash: 'version-hash',
@@ -41,6 +43,16 @@ const main = async () => {
   });
   if ('sourceKind' in model) throw new Error('ordinary fixture returned Partner pricing');
   assert.equal(model.lines[0].contractItemId, 'item-1');
+  const secondPayload = { ...payload, evidence: { ...evidence, ledgerSequence: 2 } };
+  const secondEvent = { ...event, evidence: secondPayload.evidence, integrityHash: pricedAllocationIntegrityHash(secondPayload) };
+  const secondModel = await readBoundPricedAllocation({ ...tx,
+    dispatchPricedAllocationEvent: { findMany: async (query: any) => query.select
+      ? [{ evidence }, { evidence: secondPayload.evidence }] : [secondEvent] },
+  } as never, 'revision-1');
+  assert.equal(secondModel.lines[0].ledgerSequence, 2, 'a partial shipment uses the global row ledger prefix');
+  await assert.rejects(() => readBoundPricedAllocation({ ...tx,
+    dispatchPricedAllocationEvent: { findMany: async () => [secondEvent] },
+  } as never, 'revision-1'), /non-contiguous/);
   assert.deepEqual(await assessBoundAllocationPricingFreshness(tx as never, 'revision-1'), {
     status: 'CURRENT', staleContracts: [],
   });

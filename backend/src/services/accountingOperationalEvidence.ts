@@ -14,7 +14,7 @@ type EvidenceDatabase = PrismaClient | Prisma.TransactionClient;
 const publishAccountingOperationalEvidence = async (
   prisma: EvidenceDatabase,
   input: {
-    ownerWorkspace: 'accounting' | 'sales' | 'inventory' | 'security';
+    ownerWorkspace: 'accounting' | 'sales' | 'inventory' | 'security' | 'purchasing';
     sourceType: string;
     sourceId: string;
     sourceVersion: number;
@@ -59,6 +59,28 @@ export const publishGuardInboundOperationalEvidence = (
 ) => publishAccountingOperationalEvidence(prisma, {
   ownerWorkspace: 'security', sourceType: 'GUARD_INBOUND_MOVEMENT', ...input,
 });
+
+export const publishInventoryPurchaseOperationalEvidence = (
+  prisma: EvidenceDatabase,
+  input: { sourceId: string; sourceVersion: number; sourcePayload: unknown; occurredAt: Date },
+) => publishAccountingOperationalEvidence(prisma, {
+  ownerWorkspace: 'inventory', sourceType: 'INVENTORY_PURCHASE_ACCEPTANCE', ...input,
+});
+
+export const publishPurchasingMatchOperationalEvidence = (
+  prisma: EvidenceDatabase,
+  input: { sourceType: 'PURCHASING_ORDER_SLICE' | 'PURCHASING_RECEIPT_SLICE'; sourceId: string; sourceVersion: number; sourcePayload: unknown; occurredAt: Date },
+) => publishAccountingOperationalEvidence(prisma, {ownerWorkspace:'purchasing',...input});
+
+export const publishSupplierInvoiceOperationalEvidence = (
+  prisma: EvidenceDatabase,
+  input: {sourceId:string;sourceVersion:number;sourcePayload:unknown;occurredAt:Date},
+) => publishAccountingOperationalEvidence(prisma,{ownerWorkspace:'accounting',sourceType:'SUPPLIER_INVOICE',...input});
+
+export const publishPurchaseReservationRelease = (
+  prisma:EvidenceDatabase,
+  input:{sourceId:string;sourceVersion:number;sourcePayload:unknown;occurredAt:Date},
+) => publishAccountingOperationalEvidence(prisma,{ownerWorkspace:'inventory',sourceType:'INVENTORY_RESERVATION_RELEASE',...input});
 
 export const resolveAccountingOperationalEvidence = async (
   prisma: EvidenceDatabase,

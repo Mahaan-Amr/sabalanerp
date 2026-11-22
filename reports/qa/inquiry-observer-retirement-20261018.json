@@ -1,0 +1,105 @@
+{
+  "candidate": "8e214d862b771e4aaf85e10b3b2dd1f73067936271ced3af70f5af8980196f0f",
+  "operation": "9fa905492b2267d3eec2ade1adce1239",
+  "native": {
+    "activeClaimSha256": "6fedc81b7e5d65a622c5fc4f2a51b0cdff381e02c03bd831c10d88b138fe6262",
+    "commandSha256": "c5e4940544256c5228f204c598c9093f8ed1e4b5138c85a890e9dd31d7a30579",
+    "format": "sabalan-inquiry-native/v2",
+    "guardian": {
+      "bootId": "f413b3a9-8cd1-4993-9eea-956bc0a511f3",
+      "pid": 1,
+      "pidNamespace": "pid:[4026533070]",
+      "startTicks": "27318285"
+    },
+    "lock": {
+      "device": "2096",
+      "inode": "54956"
+    },
+    "nativeReaped": true,
+    "nativeStatus": 143,
+    "onlineLocks": {
+      "interlock": {
+        "descriptor": 11,
+        "device": "2096",
+        "file": "/app/online-runtime-acceptance/inquiry-next-9fa905492b2267d3eec2ade1adce1239/coordination/deployment-runtime-control.lock",
+        "inode": "38724",
+        "ownerUid": 0
+      }
+    },
+    "onlineScope": {
+      "device": "2096",
+      "file": "/run/sabalan-online/50a4a2aba12df8504298d4b613567dbe65cc643dbdca90bd5154abf92374ad88.json",
+      "helperSha256": "79dae60c026833dfdd737be60bfa1ea2ba605332d5a6fbfec85f0c7cfe611d85",
+      "inode": "54984",
+      "mountId": "1133",
+      "mountInfoSha256": "1f136885f50e030e9a66afdb844e640cd50fb9a331a8f3cee5bb00b3a8673772",
+      "mountNamespace": "mnt:[4026532450]",
+      "scope": {
+        "admission": {
+          "directory": "/app/online-runtime-acceptance/inquiry-next-9fa905492b2267d3eec2ade1adce1239/coordination/online/admission",
+          "scopeSha256": "79118ed0b3a3859f1ce08ba8fa29aa9ed9a1589234c27908ffc4bb62588b774d"
+        },
+        "boundaryDirectory": "/app/online-runtime-acceptance/inquiry-next-9fa905492b2267d3eec2ade1adce1239/coordination/online/work/50a4a2aba12df8504298d4b613567dbe65cc643dbdca90bd5154abf92374ad88",
+        "coordinationDirectory": "/app/online-runtime-acceptance/inquiry-next-9fa905492b2267d3eec2ade1adce1239/coordination",
+        "database": {
+          "name": "sabalanerp",
+          "systemIdentifier": "7667464637415309346"
+        },
+        "format": "sabalan-online-runtime-scope/v2",
+        "gate": {
+          "device": "2096",
+          "file": "/app/online-runtime-acceptance/inquiry-next-9fa905492b2267d3eec2ade1adce1239/coordination/deployment-write-admission.lock",
+          "inode": "36464",
+          "ownerUid": 0
+        },
+        "image": "sha256:fe07ee29c877ced00784d230402fa04e02d322e1a4e8100a7a5b20793f1f7d62",
+        "interlock": {
+          "device": "2096",
+          "file": "/app/online-runtime-acceptance/inquiry-next-9fa905492b2267d3eec2ade1adce1239/coordination/deployment-runtime-control.lock",
+          "inode": "38724",
+          "ownerUid": 0
+        },
+        "manifestSha256": "00113e1c840327554587a13e37dfec094eb0da1a73f9cb87ffcf0cce78f94b41",
+        "nativeDirectory": "/app/online-runtime-acceptance/inquiry-next-9fa905492b2267d3eec2ade1adce1239/coordination/online/native/50a4a2aba12df8504298d4b613567dbe65cc643dbdca90bd5154abf92374ad88",
+        "nonce": "ae1a6936cbbeb686557285e1e7884b180d3858af7a75de191686b63b8232e292",
+        "purpose": "http",
+        "releaseId": "private-native-inquiry-next",
+        "role": "serving",
+        "runtimeId": "50a4a2aba12df8504298d4b613567dbe65cc643dbdca90bd5154abf92374ad88",
+        "sourceCommit": "c0dfe554bba6f133e23c264d9f85b54a3b9f9ae4",
+        "worker": null
+      },
+      "sha256": "c57c5e75100b534e8e4adb7cc862002fae2e2b9b9a507e54ac357d58aa6137a3"
+    },
+    "phase": "QUIESCENT",
+    "sqlite": {
+      "databaseUrlSha256": "d92ff72fe2782904a1dd17ebd51795186fc42c220a1a27d8261f3319b4c61faf",
+      "device": "2096",
+      "file": "/app/online-runtime-acceptance/inquiry-next-9fa905492b2267d3eec2ade1adce1239/inquiry.db",
+      "inode": "54981",
+      "ownerUid": 0
+    },
+    "sqliteNativeClosed": true,
+    "stoppedBySignal": true
+  },
+  "census": "reports/qa/inquiry-fleet-e531ec748f67fa248076ad873a8acb68.json",
+  "diagnosticObserverFailure": "The observer rejected a redirect GET carrying its test header; fixed to observe native action POSTs only.",
+  "socketRecoveryObserved": {
+    "onlyOneExactDiagnosticGetSocketClosed": true,
+    "method": "GET",
+    "path": "/admin?_rsc",
+    "caseId": "26121b02eccf4928",
+    "localPort": 3001,
+    "remotePort": 52514,
+    "workPhase": "QUIESCENT",
+    "nativeRequests": 0,
+    "processExitInvoked": false
+  },
+  "inspectorClient": {
+    "receivedSuccessResponse": true,
+    "exitCode": 137,
+    "reason": "Container completed while separate Docker exec inspector client was disconnecting"
+  },
+  "automaticNativeForceKill": false,
+  "publicAdmission": false
+}

@@ -104,15 +104,9 @@ const activePerformanceErasureHold = async (tx: Client, operation: { encryptedSc
 const refreshOperationStatus = async (tx: Client, operationId: string, now = new Date()) => {
   const operation = await tx.performanceErasureOperation.findUniqueOrThrow({ where: { id: operationId } });
   const activeHold = operation.liveErasedAt ? await activePerformanceErasureHold(tx, operation) : null;
-  const expired = activeHold ? [] : await tx.performanceRecoverableCopy.findMany({ where: { operationId, location: 'INDEPENDENT_BACKUP',
-    status: 'RECOVERABLE', recoverableUntil: { lte: now } }, orderBy: { version: 'desc' } });
-  if (expired[0]) {
-    const latestBackup = await tx.performanceRecoverableCopy.findFirst({ where: { operationId, location: 'INDEPENDENT_BACKUP' }, orderBy: { version: 'desc' } });
-    if (latestBackup?.id === expired[0].id) await tx.performanceRecoverableCopy.create({ data: { operationId, location: 'INDEPENDENT_BACKUP',
-      copyKeyHash: sha256(`expired:${expired[0].id}`), status: 'ERASED', version: latestBackup.version + 1, checkedAt: now,
-      evidenceHash: canonicalPerformanceHash({ operationId, sourceCopyId: expired[0].id, recoverableUntil: expired[0].recoverableUntil?.toISOString(),
-        source: 'INDEPENDENT_BACKUP_RETENTION_EXPIRY' }) } });
-  }
+  // Retention time schedules inspection; it cannot prove that bytes and all
+  // dependent base/WAL/file versions were actually removed. Only a subsequent
+  // explicit copy observation can change the append-only evidence inventory.
   const [impact, approvals, rows] = await Promise.all([
     tx.performanceErasureImpactApproval.findUnique({ where: { policyVersionId: operation.policyVersionId } }),
     tx.performanceErasureApproval.findMany({ where: { operationId }, select: { actorUserId: true } }),
@@ -429,6 +423,7 @@ const ensureRestoreRetentionPolicyEvidence = async (
 export const replayPerformanceErasureAfterRestore = async (current: PrismaClient, safety: PrismaClient, now = new Date()) => {
   const prior = await safety.performanceErasureOperation.findMany({ where: { liveErasedAt: { not: null } }, orderBy: { liveErasedAt: 'asc' } });
   let replayed = 0;
+  const erasedArtifactPaths = new Set<string>();
   for (const source of prior) {
     const scope = await readPerformancePayload<ErasureScope>(safety, source.encryptedScopeId, performanceVaultKeyFromEnvironment());
     const expectedIdentity = performanceErasureOperationIdentity({ aggregateType: source.aggregateType,
@@ -447,12 +442,18 @@ export const replayPerformanceErasureAfterRestore = async (current: PrismaClient
       .some((location) => !['VERIFIED_ABSENT', 'ERASED'].includes(latestCopies.get(location) ?? 'UNKNOWN'))) {
       throw erasureError('شواهد نسخه‌های قابل بازیابی برای بازاجرای حذف کامل نیست.', 'PERFORMANCE_RESTORE_ERASURE_COPY_EVIDENCE_INVALID');
     }
-    await runPerformanceSerializableTransaction(current, async (tx) => {
+    const removedPaths = await runPerformanceSerializableTransaction(current, async (tx) => {
       await ensureRestoreRetentionPolicyEvidence(tx, safety, source.policyVersionId);
+      const [receipts, artifacts] = await Promise.all([
+        tx.performanceExportReceipt.findMany({ where: { id: { in: scope.graph.exportIds } }, select: { artifactPath: true } }),
+        tx.performanceExportArtifact.findMany({ where: { exportId: { in: scope.graph.exportIds } }, select: { artifactPath: true } }),
+      ]);
       await erasePerformanceExportArtifacts(tx, scope.graph.exportIds, now);
       await deleteLiveScope(tx, source, scope, null);
+      return [...receipts, ...artifacts].flatMap(row => row.artifactPath ? [row.artifactPath] : []);
     });
+    for (const artifactPath of removedPaths) erasedArtifactPaths.add(artifactPath);
     replayed += 1;
   }
-  return { replayed, verifiedAt: now };
+  return { replayed, verifiedAt: now, erasedArtifactPaths: [...erasedArtifactPaths] };
 };

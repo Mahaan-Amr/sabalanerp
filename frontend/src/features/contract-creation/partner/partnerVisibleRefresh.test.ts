@@ -17,3 +17,13 @@ test('visible inquiry polling runs every ten seconds, coalesces focus and backs 
   release(); release = undefined; await flush(); assert.equal(delay, 10_000);
   poll.stop(); assert.equal(scheduled, undefined); poll.refresh(); assert.equal(calls, 4);
 });
+
+ test('a just-hydrated wizard delays redundant polling; explicit refresh stays immediate and stop cancels it', async () => {
+  let calls = 0, scheduled: (() => void) | undefined, delay = 0;
+  const poll = createPartnerVisibleRefresh({ initialDelayMs: 10_000, visible: () => true,
+    refresh: async () => { calls++; }, schedule: (cb, ms) => { scheduled = cb; delay = ms; return 1; }, cancel: () => { scheduled = undefined; } });
+  poll.start(); poll.start(); assert.equal(calls, 0); assert.equal(delay, 10_000);
+  poll.refresh(); await flush(); assert.equal(calls, 1);
+  scheduled?.(); await flush(); assert.equal(calls, 2);
+  poll.stop(); assert.equal(scheduled, undefined);
+});

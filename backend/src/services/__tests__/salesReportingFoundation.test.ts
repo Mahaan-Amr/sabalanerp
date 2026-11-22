@@ -96,13 +96,10 @@ const run = async () => {
 
   const personalAccess = { userId: 'seller-1', role: 'USER', departmentId: 'sales-dept', canManage: false, canCompany: false };
   assert.deepEqual(buildSalesReportContractWhere(personalAccess, {}), {
-    departmentId: 'sales-dept',
-    OR: [
-      { responsibleSellerId: 'seller-1' },
-      { realizedSellerId: 'seller-1' },
-      { createdBy: 'seller-1' },
-    ],
-  }, 'personal reporting scope is reusable by summary surfaces');
+    OR: [{ departmentId: 'sales-dept', OR: [
+      { responsibleSellerId: 'seller-1' }, { realizedSellerId: 'seller-1' }, { createdBy: 'seller-1' },
+    ] }, { responsibleSellerId: 'seller-1', partnerKind: null, partnerCaseId: null }],
+  }, 'personal reporting includes explicitly assigned ordinary contracts across departments');
   assert.equal(buildSalesReportScope(personalAccess, {}).sellerId, 'seller-1');
 
   const companyAccess = { userId: 'admin-1', role: 'ADMIN', departmentId: null, canManage: true, canCompany: true };
@@ -196,7 +193,7 @@ const run = async () => {
         update: async () => { throw new Error('ordinary contract must not be reassigned'); },
       },
       user: {
-        findUnique: async () => ({
+        findUnique: async ({ where }: any) => where.id === 'manager' ? { role: 'ADMIN' } : ({
           id: 'irreversible-partner',
           isActive: true,
           departmentId: 'sales-department',

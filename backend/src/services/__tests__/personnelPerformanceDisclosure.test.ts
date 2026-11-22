@@ -54,8 +54,8 @@ const invalidPdfCheck = assert.rejects(
   (error: { code?: string }) => error.code === 'PERFORMANCE_EXPORT_PDF_INVALID',
   'raw page-like tokens are not valid PDF page-tree evidence',
 );
-const exportDeadlineCheck = assert.rejects(() => withinPerformanceExportDeadline((signal) => new Promise((_resolve) => {
-  signal.addEventListener('abort', () => { deadlineAborted = true; }, { once: true });
+const exportDeadlineCheck = assert.rejects(() => withinPerformanceExportDeadline((signal) => new Promise((resolve) => {
+  signal.addEventListener('abort', () => { deadlineAborted = true; resolve(undefined); }, { once: true });
 }), 5), /سقف مجاز/).then(() => assert.equal(deadlineAborted, true));
 
 const projected = buildPerformanceBadgeSummary({

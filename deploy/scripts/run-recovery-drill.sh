@@ -14,4 +14,4 @@ metadata_path="$(find "${DEPLOYMENT_REMOTE_MOUNT}" -type f -name '*.sabrec.json'
 DEPLOYMENT_DRILL_METADATA_PATH="${metadata_path}"
 export DEPLOYMENT_DRILL_METADATA_PATH
 cd "${SABALANERP_DRILL_APP_ROOT}/backend"
-exec node dist/scripts/deployment-recovery-drill.js
+exec sh "${SABALANERP_DRILL_APP_ROOT}/deploy/scripts/with-backend-control-ownership.sh" node dist/scripts/deployment-recovery-drill.js

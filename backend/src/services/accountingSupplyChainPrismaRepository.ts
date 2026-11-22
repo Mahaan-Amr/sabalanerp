@@ -71,6 +71,10 @@ const mapOutcome = (payload: Prisma.JsonValue): StoredOutcome => {
 class PrismaSupplyChainRepository implements AccountingSupplyChainRepository {
   constructor(private readonly db: DbClient, private readonly root?: PrismaClient) {}
 
+  async lockInventoryIdentities(ids:readonly string[]) {
+    for(const id of [...new Set(ids)].sort())await this.db.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${id}))`;
+  }
+
   async transaction<T>(operation: (repository: AccountingSupplyChainRepository) => Promise<T>): Promise<T> {
     const active = activeSupplyChainTransaction.getStore();
     if (active) return operation(new PrismaSupplyChainRepository(active));

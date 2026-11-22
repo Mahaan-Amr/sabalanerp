@@ -1,3 +1,5 @@
+import { saveRestPolicy, assignRestPolicy } from '../services/attendanceRestPolicy';
+import { correctPersonnelIdentity, identityUserSelect, personnelIdentityVersion, PersonnelIdentityError } from '../services/hrPersonnelIdentity';
 import { prisma } from '../lib/prisma';
 import express, { Response } from 'express';
 import { Prisma, PrismaClient } from '@prisma/client';
@@ -13,6 +15,8 @@ import { assertArchiveReason, assertArchivedRecordMutable, assertPermanentDeleti
 import { buildPersonnelErasurePlan, executePersonnelErasureGraph } from '../services/hrPersonnelErasureGraph';
 import { commitStagedHiringFiles, planHiringFilesForDeletion, restoreStagedHiringFiles, stagePlannedHiringFiles, type StagedHiringFile } from '../services/hrDeletionFileTransaction';
 import { PERSONNEL_ERASURE_LEASE_MS } from '../services/hrPersonnelErasureRecovery';
+import { versionedHrFileRuntime } from '../services/hrFileRuntime';
+import { eraseVersionedPersonnel } from '../services/hrVersionedPersonnelErasure';
 import {
   HR_REDESIGN_CATALOG,
   canReadLegacyAssessmentCompatibility,
@@ -183,6 +187,7 @@ const actorId = (req: WorkspaceRequest) => req.user!.id;
 const badRequest = (res: Response, error: unknown) => res.status(400).json({ success: false, error: error instanceof Error ? error.message : 'اطلاعات واردشده معتبر نیست.' });
 const handleError = (res: Response, error: unknown, context: string) => {
   console.error(context, error);
+  if (error instanceof PersonnelIdentityError) return res.status(error.status).json({ success: false, code: error.code, error: error.message });
   if (error instanceof FoundationVersionConflictError) {
     return res.status(409).json({ success: false, error: error.code, message: error.message });
   }
@@ -1629,6 +1634,13 @@ router.post('/personnel/:id/permanent-delete', viewAccess, requireSystemAdmin, a
     if (!impact) return res.status(404).json({ success: false, error: 'پرسنل پیدا نشد.' });
     if (!actor || !(await bcrypt.compare(String(req.body.adminPassword || ''), actor.password))) return res.status(403).json({ success: false, error: 'رمز عبور مدیر سامانه صحیح نیست.' });
     assertPermanentDeletionConfirmation({ expectedFingerprint: impact.plan.fingerprint, suppliedFingerprint: req.body.fingerprint, expectedFullName: impact.data.displayName, suppliedFullName: req.body.fullName, reason: req.body.reason, confirmed: req.body.confirmed });
+    const fileRuntime = versionedHrFileRuntime();
+    if (fileRuntime) {
+      const result = await eraseVersionedPersonnel({ database: prisma, work: fileRuntime.boundary.context,
+        roots: fileRuntime.roots, personnelId: req.params.id, actorUserId: actorId(req),
+        reason: req.body.reason, expectedFingerprint: impact.plan.fingerprint });
+      return res.status(202).json({ success: true, data: result });
+    }
     const receiptId = crypto.randomUUID();
     const operationToken = crypto.randomUUID();
     const leaseExpiry = () => new Date(Date.now() + PERSONNEL_ERASURE_LEASE_MS);
@@ -1871,12 +1883,52 @@ router.post('/personnel/exceptional', editAccess, requireHrManagerAuthority, req
   } catch (error) { handleError(res, error, 'Create exceptional HR personnel'); }
 });
 
+router.get('/personnel/:id/identity', viewAccess, async (req: WorkspaceRequest, res) => {
+  try {
+    const person = await prisma.personnel.findUnique({ where: { id: req.params.id }, include: { user: { select: identityUserSelect } } });
+    if (!person) return res.status(404).json({ success: false, error: 'پرسنل پیدا نشد.' });
+    const history = await prisma.hrPersonnelAudit.findMany({ where: { personnelId: person.id, eventType: 'IDENTITY_CORRECTED' }, orderBy: { createdAt: 'desc' }, take: 100 });
+    const actors = await prisma.user.findMany({ where: { id: { in: [...new Set(history.map(row => row.actorUserId))] } }, select: { id: true, firstName: true, lastName: true, erasedAt: true, erasedDisplayName: true } });
+    res.json({ success: true, data: {
+      id: person.id, firstName: person.firstName, lastName: person.lastName, nationalCode: person.nationalCode, employeeNumber: person.employeeNumber,
+      archivedAt: person.archivedAt, hasUser: Boolean(person.user), identityVersion: personnelIdentityVersion(person, person.user),
+      history: history.map(row => { const actor = actors.find(item => item.id === row.actorUserId); return { id: row.id, createdAt: row.createdAt, source: row.sourceCategory, changes: row.payloadJson, actorName: actor ? actor.erasedAt ? actor.erasedDisplayName || 'کاربر حذف‌شده' : `${actor.firstName} ${actor.lastName}` : 'کاربر پیشین' }; }),
+    } });
+  } catch (error) { handleError(res, error, 'Read HR personnel identity'); }
+});
+
 router.put('/personnel/:id', editAccess, async (req: WorkspaceRequest, res) => {
   try {
-    const nationalCode = nullableText(normalizeApplicantDigits(req.body.nationalCode)); if (nationalCode && !isValidIranianNationalCode(nationalCode)) throw new Error('کد ملی معتبر نیست.');
-    const record = await prisma.personnel.update({ where: { id: req.params.id }, data: { firstName: textValue(req.body.firstName), lastName: textValue(req.body.lastName), nationalCode, employeeNumber: nullableText(normalizeApplicantDigits(req.body.employeeNumber)) }, include: personnelInclude });
+    const record = await prisma.$transaction(async tx => {
+      await correctPersonnelIdentity(tx, { personnelId: req.params.id, actorUserId: actorId(req), source: 'PERSONNEL', expectedVersion: req.body.expectedIdentityVersion, fields: req.body });
+      return tx.personnel.findUniqueOrThrow({ where: { id: req.params.id }, include: personnelInclude });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     res.json({ success: true, data: record });
   } catch (error) { handleError(res, error, 'Update HR personnel'); }
+});
+
+router.get('/personnel-attendance-rest', viewAccess, async (req: WorkspaceRequest, res) => {
+  try {
+    const [policies, personnel, permissions] = await Promise.all([
+      prisma.attendanceRestPolicy.findMany({ orderBy: { effectiveFrom: 'desc' } }),
+      prisma.personnel.findMany({ where: { isActive: true }, select: { id: true, firstName: true, lastName: true, attendanceRestAssignments: { orderBy: { effectiveFrom: 'desc' } } }, orderBy: [{ lastName: 'asc' }, { id: 'asc' }] }),
+      activeHrActionPermissionsForUser(prisma, actorId(req)),
+    ]);
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ success: true, data: { policies, personnel, canEdit: permissions.includes('MANAGE_PERSONNEL_SCHEDULE') } });
+  } catch (error) { handleError(res, error, 'Read personnel rest policy'); }
+});
+router.post('/personnel-attendance-rest/policies', editAccess, requireHrActionPermission('MANAGE_PERSONNEL_SCHEDULE'), async (req: WorkspaceRequest, res) => {
+  try {
+    const row = await prisma.$transaction(db => saveRestPolicy(db, req.body, actorId(req)), { isolationLevel: 'Serializable' });
+    res.status(201).json({ success: true, data: row });
+  } catch (error) { handleError(res, error, 'Append personnel rest policy'); }
+});
+router.post('/personnel-attendance-rest/assignments', editAccess, requireHrActionPermission('MANAGE_PERSONNEL_SCHEDULE'), async (req: WorkspaceRequest, res) => {
+  try {
+    const rows = await prisma.$transaction(db => assignRestPolicy(db, req.body, actorId(req)), { isolationLevel: 'Serializable' });
+    res.status(201).json({ success: true, data: rows });
+  } catch (error) { handleError(res, error, 'Append personnel rest assignments'); }
 });
 
 router.put('/personnel/:id/work-schedule', editAccess, requireHrActionPermission('MANAGE_PERSONNEL_SCHEDULE'), async (req: WorkspaceRequest, res) => {

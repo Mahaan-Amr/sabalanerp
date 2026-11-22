@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { withHealthyDrill } from './deploymentCheckpointDrill.fixture';
 import { planLocalCheckpointCleanup, planRemoteCheckpointRetention } from '../deploymentCheckpointPolicy';
 
 const artifacts = [
@@ -19,18 +20,19 @@ assert.equal(
   false,
 );
 
-const remoteArtifacts = Array.from({ length: 14 }, (_, index) => ({
+const remoteArtifacts = Array.from({ length: 14 }, (_, index) => withHealthyDrill({
   id: `remote-${index}`,
   releaseId: `release-${index}`,
   createdAt: new Date(Date.UTC(2026, 7 - index, 1)),
   size: 100,
   remoteVerified: true,
+  restoreVerified: true,
   active: false,
   incidentOpen: false,
 }));
 const remotePlan = planRemoteCheckpointRetention(remoteArtifacts);
 assert.equal(remotePlan.keepIds.includes('remote-0'), true);
 assert.equal(remotePlan.deleteIds.includes('remote-13'), true);
-assert.equal(remotePlan.keepIds.length, 12);
+assert.equal(remotePlan.keepIds.length, 2);
 
 console.log('deployment checkpoint policy tests passed');

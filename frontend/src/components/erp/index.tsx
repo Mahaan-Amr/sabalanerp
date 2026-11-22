@@ -2,6 +2,7 @@
 export { default as ErpSearchableSelect } from './ErpSearchableSelect';
 
 import React from 'react';
+import { restoreErpSheetWorkflowFocus } from './sheetWorkflowFocus';
 import ErpFloatingActionMenu from './ErpFloatingActionMenu';
 import { ErpPresentationProvider, useErpPresentationScope } from './ErpPresentation';
 import { ErpNeumorphicMetricGrid } from './NeumorphicPrimitives';
@@ -12,9 +13,10 @@ import Link from 'next/link';
 import { workspaceBackDestination, WORKSPACE_HISTORY_KEY } from '@/lib/workspaceBackNavigation';
 import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { FaArrowRight, FaCheck, FaEllipsisV, FaExclamationTriangle, FaInfoCircle, FaRedo, FaSearch, FaTimes } from 'react-icons/fa';
+import { FaArrowRight, FaChevronDown, FaCheck, FaEllipsisV, FaExclamationTriangle, FaInfoCircle, FaRedo, FaSearch, FaTimes } from 'react-icons/fa';
 import EnhancedDropdown from '@/components/EnhancedDropdown';
 import { formatNumericInputText, normalizeDigits } from '@/lib/numberFormat';
+import { useUnarchivedDraftRefGuard } from '@/lib/useUnarchivedDraftGuard';
 
 type IconType = React.ComponentType<{ className?: string }>;
 
@@ -237,10 +239,18 @@ export function ErpIconButton({ label, icon: Icon, href, onClick, tone = 'neutra
 export const ErpInput = React.forwardRef<
   HTMLInputElement,
   React.InputHTMLAttributes<HTMLInputElement> & { numberFormat?: 'money' }
->(function ErpInput({ className, type, inputMode, onChange, numberFormat, value, ...props }, ref) {
+>(function ErpInput({ className, type, inputMode, onChange, onInput, numberFormat, value, ...props }, ref) {
   const inputRef = React.useRef<HTMLInputElement>(null);
   React.useImperativeHandle(ref, () => inputRef.current!, []);
   const money = numberFormat === 'money';
+  const badInput = React.useRef(false);
+  useUnarchivedDraftRefGuard('native-number-buffer', badInput);
+  const observeValidity = (input: HTMLInputElement) => {
+    badInput.current = !money && type === 'number' && input.validity.badInput;
+  };
+  React.useLayoutEffect(() => {
+    if (inputRef.current) observeValidity(inputRef.current);
+  });
   const controlClassName =
     type === 'checkbox'
       ? 'h-5 w-5 shrink-0 rounded border-[var(--sds-border-default)] accent-[var(--sds-accent)]'
@@ -255,7 +265,12 @@ export const ErpInput = React.forwardRef<
             : erpFieldClassName;
   return <input ref={inputRef} type={money ? 'text' : type} inputMode={money ? 'decimal' : inputMode} className={cx(controlClassName, className)} {...props}
     value={money && value != null ? formatNumericInputText(String(value)).displayText : value}
+    onInput={event => {
+      observeValidity(event.currentTarget);
+      onInput?.(event);
+    }}
     onChange={event => {
+      observeValidity(event.currentTarget);
       if (money) {
         const formatted = formatNumericInputText(event.currentTarget.value, event.currentTarget.selectionStart ?? event.currentTarget.value.length);
         event.currentTarget.value = formatted.canonicalText;
@@ -270,7 +285,9 @@ export const ErpInput = React.forwardRef<
       }
       if (inputMode === 'numeric' || inputMode === 'decimal' || inputMode === 'tel' ||
           type === 'number' || type === 'tel' || type === 'date' || type === 'datetime-local') {
-        event.currentTarget.value = normalizeDigits(event.currentTarget.value);
+        // Assigning even an empty string destroys the browser's pending numeric
+        // text (for example "1e"). Keep that buffer mounted until valid input.
+        if (!badInput.current) event.currentTarget.value = normalizeDigits(event.currentTarget.value);
       }
       onChange?.(event);
     }} />;
@@ -317,13 +334,16 @@ export function ErpRialInput({
 
 export const ErpSelect = React.forwardRef<
   HTMLSelectElement,
-  React.SelectHTMLAttributes<HTMLSelectElement>
->(function ErpSelect({ className, children, ...props }, ref) {
-  return (
-    <select ref={ref} className={cx(erpFieldClassName, className)} {...props}>
-      {children}
-    </select>
-  );
+  React.SelectHTMLAttributes<HTMLSelectElement> & { insetArrow?: boolean }
+>(function ErpSelect({ className, children, insetArrow = false, ...props }, ref) {
+  const select = <select ref={ref} className={cx(erpFieldClassName, className, insetArrow && 'appearance-none pl-8')} {...props}>
+    {children}
+  </select>;
+  if (!insetArrow) return select;
+  return <span className="relative block min-w-0">
+    {select}
+    <FaChevronDown aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xs sds-text-muted" />
+  </span>;
 });
 
 export function ErpCombobox({
@@ -405,7 +425,7 @@ export function ErpField({
         'aria-describedby': describedBy,
         'aria-invalid': error ? true : children.props['aria-invalid'],
       })}
-      {hint ? <p id={hintId} className="sds-text-muted text-xs leading-5">{hint}</p> : null}
+      {hint ? <p id={hintId} className="sds-text-secondary text-xs leading-5">{hint}</p> : null}
       {error ? <p id={errorId} className="text-sm text-[var(--sds-danger)]" role="alert">{error}</p> : null}
     </div>
   );
@@ -820,13 +840,14 @@ export function ErpSummaryGrid({ items, columns = 2 }: {
   );
 }
 
-export function ErpPage({ eyebrow, title, description, actions = [], metrics = [], children, backHref }: WithChildren & {
+export function ErpPage({ eyebrow, title, description, actions = [], metrics = [], children, backHref, onBack }: WithChildren & {
   eyebrow?: React.ReactNode;
   title: React.ReactNode;
   description?: React.ReactNode;
   actions?: ErpAction[];
   metrics?: ErpMetric[];
   backHref?: string;
+  onBack?: () => void;
 }) {
   const handleBack = useWorkspaceBack(backHref);
 
@@ -834,8 +855,8 @@ export function ErpPage({ eyebrow, title, description, actions = [], metrics = [
     <main className="sds-workspace mx-auto w-full max-w-7xl space-y-5">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex min-w-0 items-start gap-3">
-          {backHref && (
-            <ErpIconButton label="بازگشت" onClick={handleBack} icon={FaArrowRight} tone="neutral" />
+          {(onBack || backHref) && (
+            <ErpIconButton label="بازگشت" onClick={onBack ?? handleBack} icon={FaArrowRight} tone="neutral" />
           )}
           <div className="min-w-0">
             {eyebrow && <p className="text-xs font-semibold uppercase tracking-wide text-[var(--sds-accent)] dark:text-[var(--sds-accent)]">{eyebrow}</p>}
@@ -855,17 +876,21 @@ export function ErpPage({ eyebrow, title, description, actions = [], metrics = [
   );
 }
 
-export function ErpFilters({ filters }: { filters: ErpFilter[] }) {
+export function ErpFilters({ filters, layout = 'default', showLabels = false }: {
+  filters: ErpFilter[];
+  layout?: 'default' | 'wide-search';
+  showLabels?: boolean;
+}) {
   const filterGroupId = React.useId();
   if (!filters.length) return null;
   return (
     <ErpSection>
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <div className={cx('grid grid-cols-1 gap-3', layout === 'wide-search' ? 'items-end lg:grid-cols-[minmax(0,2.5fr)_minmax(0,1fr)_minmax(0,1fr)]' : 'md:grid-cols-2 xl:grid-cols-4')}>
         {filters.map((filter) => {
           const controlId = `${filterGroupId}-${filter.id}`;
           return filter.type === 'search' ? (
             <div key={filter.id} className="block">
-              <label htmlFor={controlId} className="sr-only">{filter.label}</label>
+              <label htmlFor={controlId} className={showLabels ? erpFieldLabelClassName : 'sr-only'}>{filter.label}</label>
               <div className="flex gap-2">
                 <div className="relative min-w-0 flex-1">
                   <FaSearch className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--sds-text-muted)]" />
@@ -886,7 +911,7 @@ export function ErpFilters({ filters }: { filters: ErpFilter[] }) {
             </div>
           ) : (
             <label key={filter.id} className="block">
-              <span className="sr-only">{filter.label}</span>
+              <span className={showLabels ? erpFieldLabelClassName : 'sr-only'}>{filter.label}</span>
               <EnhancedDropdown
                 value={filter.value}
                 onChange={filter.onChange}
@@ -944,20 +969,12 @@ function ErpListRowActions({ actions, mode }: { actions: ErpAction[]; mode: 'ico
   </>;
 }
 
-export function ErpListPage<T>({ rows, rowKey, columns, filters = [], sectionNavigation, rowActions, rowActionMode = 'icons', rowClassName, focusedRowKey, emptyState, isLoading, footer, children, ...pageProps }: {
-  rows: T[];
-  rowKey: (row: T) => string;
-  columns: ErpColumn<T>[];
+export function ErpListPage<T>({ rows, rowKey, columns, filters = [], filterLayout = 'default', showFilterLabels = false, sectionNavigation, rowActions, rowActionMode = 'icons', rowClassName, focusedRowKey, emptyState, isLoading, footer, children, mobileLayout = 'cards', ...pageProps }: {
   filters?: ErpFilter[];
+  filterLayout?: 'default' | 'wide-search';
+  showFilterLabels?: boolean;
   sectionNavigation?: React.ReactNode;
-  rowActions?: (row: T) => ErpAction[];
-  rowActionMode?: 'icons' | 'menu';
-  rowClassName?: (row: T) => string;
-  focusedRowKey?: string;
-  emptyState?: React.ReactNode;
-  isLoading?: boolean;
-  footer?: React.ReactNode;
-} & Omit<Parameters<typeof ErpPage>[0], 'children'> & { children?: React.ReactNode }) {
+} & Parameters<typeof ErpListContent<T>>[0] & Omit<Parameters<typeof ErpPage>[0], 'children'> & { children?: React.ReactNode }) {
   React.useEffect(() => {
     if (!focusedRowKey) return;
     const frame = window.requestAnimationFrame(() => {
@@ -973,76 +990,99 @@ export function ErpListPage<T>({ rows, rowKey, columns, filters = [], sectionNav
   return (
     <ErpPage {...pageProps}>
       {sectionNavigation}
-      <ErpFilters filters={filters} />
+      <ErpFilters filters={filters} layout={filterLayout} showLabels={showFilterLabels} />
       {children}
-      <ErpSection>
-        {isLoading ? (
-          <ErpLoading />
-        ) : rows.length === 0 ? (
-          emptyState
-        ) : (
-          <>
-            <div className="space-y-3 lg:hidden">
-              {rows.map((row) => (
-                <div key={rowKey(row)} data-erp-focused-row={focusedRowKey === rowKey(row) ? 'true' : undefined}>
-                <ErpCard
-                  interactive
-                  className={cx('scroll-mt-24 p-4', rowClassName?.(row), focusedRowKey === rowKey(row) && 'ring-2 ring-[var(--sds-focus-ring)]')}
-                >
-                  <div className="space-y-3">
-                    {columns.filter((column) => column.priority !== 'hidden-mobile').map((column) => (
-                      <div key={column.id} className={column.priority === 'primary' ? '' : 'flex items-start justify-between gap-3 text-sm'}>
-                        {column.priority !== 'primary' && <span className="text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{column.mobileLabel || column.header}</span>}
-                        <div className={cx('min-w-0 break-words', column.priority === 'primary' ? '' : 'text-left text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]')}>{column.cell(row)}</div>
-                      </div>
+      <ErpListContent rows={rows} rowKey={rowKey} columns={columns} rowActions={rowActions}
+        rowActionMode={rowActionMode} rowClassName={rowClassName} focusedRowKey={focusedRowKey}
+        emptyState={emptyState} isLoading={isLoading} footer={footer} mobileLayout={mobileLayout} />
+    </ErpPage>
+  );
+}
+
+export function ErpListContent<T>({
+  rows, rowKey, columns, rowActions, rowActionMode = 'icons', rowClassName,
+  focusedRowKey, emptyState, isLoading, footer, mobileLayout = 'cards',
+}: {
+  rows: T[];
+  rowKey: (row: T) => string;
+  columns: ErpColumn<T>[];
+  rowActions?: (row: T) => ErpAction[];
+  rowActionMode?: 'icons' | 'menu';
+  rowClassName?: (row: T) => string;
+  focusedRowKey?: string;
+  emptyState?: React.ReactNode;
+  isLoading?: boolean;
+  footer?: React.ReactNode;
+  mobileLayout?: 'cards' | 'table';
+}) {
+  return (
+    <ErpSection>
+      {isLoading ? (
+        <ErpLoading />
+      ) : rows.length === 0 ? (
+        emptyState
+      ) : (
+        <>
+          {mobileLayout === "cards" && <div className="space-y-3 lg:hidden">
+            {rows.map((row) => (
+              <div key={rowKey(row)} data-erp-focused-row={focusedRowKey === rowKey(row) ? 'true' : undefined}>
+              <ErpCard
+                interactive
+                className={cx('scroll-mt-24 p-4', rowClassName?.(row), focusedRowKey === rowKey(row) && 'ring-2 ring-[var(--sds-focus-ring)]')}
+              >
+                <div className="space-y-3">
+                  {columns.filter((column) => column.priority !== 'hidden-mobile').map((column) => (
+                    <div key={column.id} className={column.priority === 'primary' ? '' : 'flex items-start justify-between gap-3 text-sm'}>
+                      {column.priority !== 'primary' && <span className="text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{column.mobileLabel || column.header}</span>}
+                      <div className={cx('min-w-0 break-words', column.priority === 'primary' ? '' : 'text-left text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]')}>{column.cell(row)}</div>
+                    </div>
+                  ))}
+                  {rowActions && (
+                    <div className="flex flex-wrap gap-2 border-t border-[var(--sds-border-default)] pt-3 dark:border-[var(--sds-border-strong)]">
+                      <ErpListRowActions actions={rowActions(row)} mode={rowActionMode} />
+                    </div>
+                  )}
+                </div>
+              </ErpCard>
+              </div>
+            ))}
+          </div>}
+          <div className={cx("overflow-x-auto", mobileLayout === "cards" && "hidden lg:block")}>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]">
+                  {columns.map((column) => (
+                    <th key={column.id} className={cx('px-3 py-3 text-right text-xs font-semibold text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]', column.align === 'end' && 'text-left', column.align === 'center' && 'text-center')}>
+                      {column.header}
+                    </th>
+                  ))}
+                  {rowActions && <th className="px-3 py-3 text-left text-xs font-semibold text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">عملیات</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => (
+                  <tr key={rowKey(row)} data-erp-focused-row={focusedRowKey === rowKey(row) ? 'true' : undefined} className={cx('border-b border-[var(--sds-border-default)] transition hover:bg-[var(--sds-surface-subtle)] dark:border-[var(--sds-border-strong)] dark:hover:bg-[var(--sds-surface-raised)]', rowClassName?.(row), focusedRowKey === rowKey(row) && 'bg-[var(--sds-accent-soft)] ring-2 ring-inset ring-[var(--sds-focus-ring)]')}>
+                    {columns.map((column) => (
+                      <td key={column.id} className={cx('px-3 py-4 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]', column.align === 'end' && 'text-left', column.align === 'center' && 'text-center')}>
+                        {column.cell(row)}
+                      </td>
                     ))}
                     {rowActions && (
-                      <div className="flex flex-wrap gap-2 border-t border-[var(--sds-border-default)] pt-3 dark:border-[var(--sds-border-strong)]">
-                        <ErpListRowActions actions={rowActions(row)} mode={rowActionMode} />
-                      </div>
+                      <td className="px-3 py-4">
+                        <div className="flex justify-end gap-1">
+                          <ErpListRowActions actions={rowActions(row)} mode={rowActionMode} />
+                        </div>
+                      </td>
                     )}
-                  </div>
-                </ErpCard>
-                </div>
-              ))}
-            </div>
-            <div className="hidden overflow-x-auto lg:block">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]">
-                    {columns.map((column) => (
-                      <th key={column.id} className={cx('px-3 py-3 text-right text-xs font-semibold text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]', column.align === 'end' && 'text-left', column.align === 'center' && 'text-center')}>
-                        {column.header}
-                      </th>
-                    ))}
-                    {rowActions && <th className="px-3 py-3 text-left text-xs font-semibold text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">عملیات</th>}
                   </tr>
-                </thead>
-                <tbody>
-                  {rows.map((row) => (
-                    <tr key={rowKey(row)} data-erp-focused-row={focusedRowKey === rowKey(row) ? 'true' : undefined} className={cx('border-b border-[var(--sds-border-default)] transition hover:bg-[var(--sds-surface-subtle)] dark:border-[var(--sds-border-strong)] dark:hover:bg-[var(--sds-surface-raised)]', rowClassName?.(row), focusedRowKey === rowKey(row) && 'bg-[var(--sds-accent-soft)] ring-2 ring-inset ring-[var(--sds-focus-ring)]')}>
-                      {columns.map((column) => (
-                        <td key={column.id} className={cx('px-3 py-4 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]', column.align === 'end' && 'text-left', column.align === 'center' && 'text-center')}>
-                          {column.cell(row)}
-                        </td>
-                      ))}
-                      {rowActions && (
-                        <td className="px-3 py-4">
-                          <div className="flex justify-end gap-1">
-                            <ErpListRowActions actions={rowActions(row)} mode={rowActionMode} />
-                          </div>
-                        </td>
-                      )}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            {footer && <div className="mt-4 border-t border-[var(--sds-border-default)] pt-4 dark:border-[var(--sds-border-strong)]">{footer}</div>}
-          </>
-        )}
-      </ErpSection>
-    </ErpPage>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {footer && <div className="mt-4 border-t border-[var(--sds-border-default)] pt-4 dark:border-[var(--sds-border-strong)]">{footer}</div>}
+        </>
+      )}
+    </ErpSection>
   );
 }
 
@@ -1163,15 +1203,18 @@ export type ErpNeumorphicWorkflowStep = {
 
 export function ErpNeumorphicWorkflowLayout({
   title,
+  context,
   children,
   className,
 }: WithChildren & {
   title: React.ReactNode;
+  context?: React.ReactNode;
   className?: string;
 }) {
   return (
     <ErpWorkspacePage
       title={title}
+      context={context}
       className={cx('sds-neumorphic-workflow-scope relative z-0 py-4 sm:py-8', className)}
     >
       {children}
@@ -1491,17 +1534,17 @@ export function ErpInlineState({
   }[kind];
   const Icon = config.Icon;
   return (
-    <div className={cx('sds-tone-surface flex min-h-12 items-center justify-between gap-3 border-y px-3 py-3 text-sm', config.classes, className)} role={kind === 'error' ? 'alert' : 'status'}>
-      <span className="inline-flex items-center gap-2 font-semibold"><Icon className="h-3.5 w-3.5" aria-hidden="true" />{title}</span>
+    <div className={cx('sds-tone-surface flex min-h-12 flex-wrap items-center justify-between gap-3 border-y px-3 py-3 text-sm', config.classes, className)} role={kind === 'error' ? 'alert' : 'status'}>
+      <span className="inline-flex min-w-0 flex-[1_1_16rem] items-center gap-2 break-words font-semibold"><Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />{title}</span>
       {(action || actions.length > 0) && (
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          {action && <ErpButton {...action} variant={action.variant || 'ghost'} className={cx('min-h-11', action.className)} />}
+        <div className="flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2">
+          {action && <ErpButton {...action} variant={action.variant || 'ghost'} className={cx('min-h-11 max-w-full', action.className)} />}
           {actions.map(item => (
             <ErpButton
               {...item}
               key={item.label}
               variant={item.variant || 'ghost'}
-              className={cx('min-h-11', item.className)}
+              className={cx('min-h-11 max-w-full', item.className)}
             />
           ))}
         </div>
@@ -1565,6 +1608,33 @@ export function useErpOverlayPortalContainer() {
 }
 
 export function ErpSheet({ open, onClose, title, children, footer, presentation = 'sheet', size = 'default', scope, dismissible = true, pending = false, returnFocusElement = null }: WithChildren & { open: boolean; onClose: () => void; title: React.ReactNode; footer?: React.ReactNode; presentation?: 'sheet' | 'modal'; size?: 'default' | 'wide'; scope?: 'default' | 'workspace'; dismissible?: boolean; pending?: boolean; returnFocusElement?: HTMLElement | null }) {
+  const [viewport, setViewport] = React.useState({ height: '100dvh', width: '100vw', top: '0px', left: '0px' });
+  React.useEffect(() => {
+    if (!open) return;
+    const update = () => {
+      // CSS zoom does not reduce dvh. Bound the scrollable dialog to the actual
+      // visible viewport, including browser zoom and an on-screen keyboard.
+      const zoom = [document.documentElement, document.body].reduce((total, element) => {
+        const value = Number.parseFloat(getComputedStyle(element).getPropertyValue('zoom'));
+        return total * (Number.isFinite(value) && value > 0 ? value : 1);
+      }, 1);
+      const visible = window.visualViewport;
+      setViewport({ height: `${Math.min(window.innerHeight, visible?.height || window.innerHeight) / zoom}px`,
+        width: `${Math.min(window.innerWidth, visible?.width || window.innerWidth) / zoom}px`,
+        top: `${(visible?.offsetTop || 0) / zoom}px`, left: `${(visible?.offsetLeft || 0) / zoom}px` });
+    };
+    update();
+    window.addEventListener('resize', update);
+    window.visualViewport?.addEventListener('resize', update);
+    window.visualViewport?.addEventListener('scroll', update);
+    const observer = new MutationObserver(update);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['style', 'class'] });
+    observer.observe(document.body, { attributes: true, attributeFilter: ['style', 'class'] });
+    return () => {
+      window.removeEventListener('resize', update); window.visualViewport?.removeEventListener('resize', update);
+      window.visualViewport?.removeEventListener('scroll', update); observer.disconnect();
+    };
+  }, [open]);
   const inheritedScope = useErpPresentationScope();
   const presentationScope = scope ?? inheritedScope;
   const childPresentationScope = inheritedScope === 'workspace' ? presentationScope : 'default';
@@ -1587,9 +1657,11 @@ export function ErpSheet({ open, onClose, title, children, footer, presentation 
   React.useEffect(() => {
     if (!open) return;
     restoreFocusRef.current = returnFocusElementRef.current || document.activeElement as HTMLElement;
+    const restoreWorkflowForm = restoreFocusRef.current?.closest('form') ?? null;
+    const closingOverlay = overlayRootRef.current;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    window.setTimeout(() => {
+    const initialFocusTimer = window.setTimeout(() => {
       const firstFocusable = dialogRef.current?.querySelector<HTMLElement>('button:not([disabled]):not([tabindex="-1"]),a[href]:not([tabindex="-1"]),input:not([disabled]):not([tabindex="-1"]),select:not([disabled]):not([tabindex="-1"]),textarea:not([disabled]):not([tabindex="-1"]),[tabindex]:not([tabindex="-1"])');
       firstFocusable?.focus();
     }, 0);
@@ -1610,16 +1682,19 @@ export function ErpSheet({ open, onClose, title, children, footer, presentation 
     };
     window.addEventListener('keydown', onKeyDown);
     return () => {
+      window.clearTimeout(initialFocusTimer);
       document.body.style.overflow = previousOverflow;
       window.removeEventListener('keydown', onKeyDown);
-      restoreFocusRef.current?.focus();
+      restoreErpSheetWorkflowFocus(restoreFocusRef.current, restoreWorkflowForm, closingOverlay);
     };
   }, [open]);
   const sheet = (
     <ErpPresentationProvider scope={childPresentationScope}>
     <AnimatePresence>
       {open && (
-        <div ref={overlayRootRef} data-erp-overlay-root data-erp-sheet-root data-erp-presentation={childPresentationScope} className={`${presentationScope === 'workspace' ? 'sds-neumorphic-scope ' : ''}${presentationScope === 'workspace' && inheritedScope === 'workspace' ? 'sds-neumorphic-workflow-scope ' : ''}${isModal ? "fixed inset-0 z-[80] !m-0 flex items-center justify-center p-3 sm:p-4" : "fixed inset-0 z-[80] !m-0 flex items-end justify-center sm:items-stretch sm:justify-start"}`} role="presentation">
+        <div ref={overlayRootRef} data-erp-overlay-root data-erp-sheet-root data-erp-presentation={childPresentationScope}
+          style={{ ...viewport, right: 'auto', bottom: 'auto', '--erp-overlay-viewport-height': viewport.height } as React.CSSProperties}
+          className={`${presentationScope === 'workspace' ? 'sds-neumorphic-scope ' : ''}${presentationScope === 'workspace' && inheritedScope === 'workspace' ? 'sds-neumorphic-workflow-scope ' : ''}${isModal ? "fixed inset-0 z-[80] !m-0 flex items-center justify-center p-3 sm:p-4" : "fixed inset-0 z-[80] !m-0 flex items-end justify-center sm:items-stretch sm:justify-start"}`} role="presentation">
           <motion.button type="button" aria-label="بستن" disabled={!effectiveDismissible} onClick={onClose} className="absolute inset-0 bg-[var(--sds-surface-overlay)] backdrop-blur-sm disabled:cursor-wait" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} />
           <motion.div
             ref={dialogRef}
@@ -1627,13 +1702,14 @@ export function ErpSheet({ open, onClose, title, children, footer, presentation 
             aria-modal="true"
             aria-labelledby={titleId}
             aria-busy={pending || undefined}
+            style={isModal ? { maxHeight: 'calc(var(--erp-overlay-viewport-height, 100dvh) - 1.5rem)' } : undefined}
             initial={reduceMotion ? false : isModal ? { opacity: 0, scale: 0.96, y: 12 } : { opacity: 0, y: 32 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={isModal ? { opacity: 0, scale: 0.97, y: 8 } : { opacity: 0, y: 24 }}
             transition={{ duration: reduceMotion ? 0 : 0.24, ease: [0.22, 1, 0.36, 1] }}
             className={isModal
-              ? `relative z-10 flex max-h-full w-full flex-col overflow-hidden rounded-2xl border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] shadow-2xl dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] ${size === 'wide' ? 'max-w-6xl' : 'max-w-xl'}`
-              : "relative flex max-h-[92dvh] w-full flex-col rounded-t-3xl border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] shadow-2xl dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] sm:mr-auto sm:h-full sm:max-h-none sm:max-w-lg sm:rounded-none sm:rounded-r-3xl"}
+              ? `relative z-10 flex max-h-[calc(100dvh-1.5rem)] w-full flex-col overflow-hidden rounded-2xl border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] shadow-2xl dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] sm:max-h-[calc(100dvh-2rem)] ${size === 'wide' ? 'max-w-6xl' : 'max-w-xl'}`
+              : "relative flex max-h-[calc(var(--erp-overlay-viewport-height,100dvh)*0.92)] w-full flex-col rounded-t-3xl border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] shadow-2xl dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] sm:mr-auto sm:h-full sm:max-h-[var(--erp-overlay-viewport-height,100dvh)] sm:max-w-lg sm:rounded-none sm:rounded-r-3xl"}
           >
             <ErpOverlayPortalContext.Provider value={dialogRef}>
             <header className="flex min-h-16 shrink-0 items-center justify-between gap-3 border-b border-[var(--sds-border-default)] px-4 dark:border-[var(--sds-border-strong)]">

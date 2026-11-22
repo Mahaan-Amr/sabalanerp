@@ -4,6 +4,7 @@
   "description": "ERP system with Next.js frontend and Express.js backend",
   "main": "index.js",
   "scripts": {
+    "test:attendance-device:local": "node scripts/run-attendance-local-tests.mjs",
     "test:duty-performance": "npm --prefix backend run test:duty-read-performance && npm --prefix frontend run test:duty-count && node --test tests/duty-performance/hook-lifecycle.test.mjs",
     "duty:baseline": "node scripts/run-duty-baseline-local.mjs",
     "duty:reconcile:sales-contract-corrections": "node scripts/run-sales-contract-correction-duty-reconciliation-local.mjs",
@@ -35,10 +36,10 @@
     "docker:up": "docker-compose up -d",
     "docker:down": "docker-compose down",
     "docker:local:up": "docker compose -f docker-compose.local.yml up --build -d --wait",
-    "docker:local:down": "docker compose -f docker-compose.local.yml down",
+    "docker:local:down": "node scripts/stop-local-docker.mjs",
+    "test:docker:local:shutdown": "node --test tests/local-docker/planned-shutdown.test.mjs",
     "docker:local:logs": "docker compose -f docker-compose.local.yml logs -f",
     "docker:local:ps": "docker compose -f docker-compose.local.yml ps",
-    "docker:local:verify-antivirus": "node scripts/verify-local-antivirus.mjs",
     "docker:local:acceptance:build": "docker compose -f docker-compose.local.yml -f docker-compose.performance-acceptance.yml build",
     "docker:local:acceptance:up": "docker compose -f docker-compose.local.yml -f docker-compose.performance-acceptance.yml up -d --wait",
     "docker:dev": "node scripts/start-docker-dev.mjs",
@@ -104,7 +105,13 @@
     "test:hr-hiring:e2e:ci": "playwright test --config=playwright.hr-hiring.config.ts",
     "test:hr-hiring:e2e:down": "docker compose -f docker-compose.e2e.yml down -v",
     "prototype:shipment-statement-reconciliation": "node scripts/prototypes/shipment-statement-reconciliation/tui.mjs",
-    "test:dispatch-document-pdfs:docker": "node scripts/run-dispatch-document-pdf-qa.mjs"
+    "test:dispatch-document-pdfs:docker": "node scripts/run-dispatch-document-pdf-qa.mjs",
+    "test:external-vehicle-operations": "npm --prefix backend run test:external-vehicle-operations && npm --prefix frontend run test:external-vehicle-operations && npm run test:hr-vehicle-operations",
+    "test:hr-vehicle-operations": "npm --prefix backend run test:hr-vehicle-operations && npm --prefix frontend run test:hr-vehicle-operations",
+    "test:clamav-repair": "node --test tests/clamav-repair/health.test.mjs tests/clamav-repair/checkpoint.test.mjs tests/clamav-repair/readiness.test.mjs tests/clamav-repair/controller.test.mjs tests/clamav-repair/incident-recovery.test.mjs",
+    "test:clamav-repair:docker": "node --test tests/clamav-repair/updater-linux.test.mjs",
+    "test:clamav-repair:lifecycle:docker": "node --test tests/clamav-repair/lifecycle-linux.test.mjs",
+    "test:clamav-repair:restore:docker": "node --test tests/clamav-repair/restore-linux.test.mjs"
   },
   "keywords": [
     "erp",

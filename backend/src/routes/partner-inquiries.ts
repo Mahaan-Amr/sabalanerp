@@ -41,7 +41,7 @@ export function createPartnerInquiryRouter() {
     };
     return createPrismaPartnerInquiryService({ database: prisma, actorId: request.user.id, authorize,
       resolveInitialResponder: resolveProfileResponder, resolveResponder: resolveEligibleResponder,
-      resolveConfiguration: createSavedTechnicalConfigurationResolver(), ensureMissingResponderSupport, observeTiming });
+      resolveConfiguration: createSavedTechnicalConfigurationResolver({ history: 'REFERENCED' }), ensureMissingResponderSupport, observeTiming });
   };
   router.post('/commands', async (request: AuthRequest, response) => {
     const command = PartnerCommandSchema.safeParse(request.body);

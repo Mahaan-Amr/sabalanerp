@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { PrismaClient, type AccountingAuditLog } from '@prisma/client';
+import { Prisma, PrismaClient, type AccountingAuditLog } from '@prisma/client';
 import { attachAccountingTrendAuditState, readAuthorizedPartnerAuditWitnesses } from '../accountingReadProjection';
 import { buildAccountingFinancialTrend } from '../accountingFinancialTrend';
 import { assertPartnerAccountingWitnesses } from '../partnerSales/accounting/receivableEvidence';
@@ -63,6 +63,48 @@ test('chart projections preserve movement replay and private audit owners are re
       assert.deepEqual(result.witnesses[0].afterState, audits[0].afterState);
       assert.throws(() => assertPartnerAccountingWitnesses(result.witnesses[0].afterState,
         { owner: { caseId: 'expected-owner' }, debtor: {} } as any), 'authorized bodies still reject conflicting nested evidence');
+      const preparation: any = { owner: { caseId: 'expected-owner' }, internalRecordId: 'internal',
+        debtor: { partnerSellerId: 'seller', commercialAccountId: 'account' } };
+      const variants: Prisma.InputJsonValue[] = [
+        { ...heavy, nested: [[{ partnerCaseId: 'expected-owner' }, { owner: preparation.owner }]] },
+        { nested: [{ other: [{ internalRecordId: 'wrong' }] }] },
+        { partnerPreparation: preparation },
+        { partnerPreparation: null },
+        { owner: { ...preparation.owner, nested: { partnerCaseId: 'wrong' } } },
+        { partnerCaseId: null, odd: { commercialAccountId: ['account'] } },
+        { nested: [[[{ owner: null }]], { partnerSellerId: { invalid: true } }] },
+        { nested: [{ commercialAccountId: 'account', internalRecordId: 'internal' }], amount: 1234567890123.45 },
+        { nested: [{ partnerPreparation: { ...preparation, debtor: { ...preparation.debtor, partnerSellerId: 'wrong' } } }] },
+        [], 'a scalar', 42, { ignored: [{ deep: null }, {}] },
+      ];
+      const variantRows: AccountingAuditLog[] = [];
+      for (const [index, afterState] of variants.entries()) variantRows.push(await tx.accountingAuditLog.create({ data: {
+        recordId: 'allowed-invoice', action: 'TEST_PRIVATE_WITNESS', actorId: 'projection-test', afterState,
+        ...(index % 2 ? { beforeState: afterState } : {}),
+      } }));
+      variantRows.push(await tx.accountingAuditLog.create({ data: { recordId: 'allowed-invoice',
+        action: 'TEST_PRIVATE_WITNESS', actorId: 'projection-test', afterState: Prisma.JsonNull } }));
+      const nestedConflictPreparation: any = { ...preparation, extra: { nested: { partnerCaseId: 'wrong-owner' } } };
+      const nestedConflict = await tx.accountingAuditLog.create({ data: { recordId: 'allowed-invoice',
+        action: 'TEST_PRIVATE_WITNESS', actorId: 'projection-test', afterState: { partnerPreparation: nestedConflictPreparation } } });
+      const compact = await readAuthorizedPartnerAuditWitnesses(tx, variantRows.map(row => row.id),
+        new Map([['allowed-invoice', 'allowed-invoice']]), { projectStates: true });
+      assert.equal(compact.witnesses.length, variantRows.length);
+      for (const original of variantRows) {
+        const projectedWitness = compact.witnesses.find(row => row.id === original.id);
+        assert.ok(projectedWitness);
+        const accepted = (value: unknown) => {
+          try { assertPartnerAccountingWitnesses(value, preparation); return true; } catch { return false; }
+        };
+        assert.equal(accepted(projectedWitness.beforeState), accepted(original.beforeState));
+        assert.equal(accepted(projectedWitness.afterState), accepted(original.afterState), `witness validation differs for ${original.id}`);
+      }
+      assert(Buffer.byteLength(JSON.stringify(compact.witnesses)) < 20_000, 'unrelated large audit bodies are not transferred');
+      const nestedProjection = await readAuthorizedPartnerAuditWitnesses(tx, [nestedConflict.id, audits[1].id],
+        new Map([['allowed-invoice', 'allowed-invoice']]), { projectStates: true });
+      assert.deepEqual(nestedProjection.rejectedIds, [audits[1].id], 'unauthorized bodies stay excluded');
+      assert.throws(() => assertPartnerAccountingWitnesses(nestedConflict.afterState, nestedConflictPreparation));
+      assert.throws(() => assertPartnerAccountingWitnesses(nestedProjection.witnesses[0].afterState, nestedConflictPreparation));
       throw rollback;
     }, { timeout: 30_000 }), error => error === rollback);
   } finally { await db.$disconnect(); }

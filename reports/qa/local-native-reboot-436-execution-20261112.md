@@ -1,0 +1,13 @@
+# #436 local native reboot reconciliation — 2026-11-12
+
+This was an incident-specific recovery of the existing `sabalanerp-local` backend. It was not a production release or #432 rehearsal admission.
+
+The reviewed controller at `7bbec1874ad99e2f17b33f574b5c15f3169a8071` first stopped during PostgreSQL dump listing with a host-side `EPIPE`. It had written only the old backend inspect, rootfs export, and PostgreSQL dump under `C:\Users\PC\Documents\ChatGPT\sabalanerp-436-checkpoint-20261112`; its D: destination was empty. All six original service containers and data remained unchanged. The partial artifacts were retained. The dump-listing fix was separately reviewed before retry.
+
+The retry used new empty `C:\Users\PC\Documents\ChatGPT\sabalanerp-436-checkpoint-20261112-retry2` and `D:\sabalanerp-436-checkpoint-20261112-retry2`. The controller verified the exact six-service project and old backend container `d9b3fa7533bb54d39f355f479814517d71f5d4cdfecb99a8a54a38c28da7af4a` / image `sha256:80e43f635da51a9290281b12a1b0a3b7d0a9ad2da81d41e8111c8a50c8de642d`, VM boot, original ACTIVE bytes, PostgreSQL identity, no old/tagged SQL sessions or prepared transactions, and loopback ingress.
+
+Both checkpoint destinations contain the old container inspect/rootfs, a `pg_dump -Fc` archive checked with `pg_restore --list`, all nine existing backend/Inquiry named volume archives, a consistent SQLite backup, a checked Redis RDB, and the manifest. The dispatch-documents volume was absent beforehand and recorded as such. Every object was hashed and read back in both destinations before the backend was replaced. Independent post-run SHA-256 of both manifests was `ac45cb21320c484cb71fac2e812cb1463eb85d6480c381164af750e1594f773b`.
+
+The controller retained the old image tag, ran the FD9 and PostgreSQL-advisory-bound one-shot owner, and restored the normal backend using immutable image `sha256:ab17d2c1380b2c70352af3d1cff8c2d301624346637ea5ecb7480fe1a0f21ab9`. The new backend container is `00ac2640632a76be3d6bff5378511a14dc8c3b7834bf7754a5d70a0c169c671a`, healthy on `127.0.0.1:5000`. Independent `docker compose -f docker-compose.local.yml ps` showed all six services healthy; the other five container IDs were preserved by the controller. The original ACTIVE record remains ACTIVE and is archived by exact SHA. A separate receipt states `ABANDONED_ON_VM_REBOOT`, `nativeReaped:false`, `externalEffectsCompleted:false`, and `productionAdmission:false`; its checkpoint manifest SHA matches both copies.
+
+The existing local project is now available for #432 qualification. This receipt does not assert that unknown external effects completed, does not clear production authority, and does not qualify any candidate release.

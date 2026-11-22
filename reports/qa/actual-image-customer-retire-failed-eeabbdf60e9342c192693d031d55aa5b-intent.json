@@ -1,0 +1,12 @@
+{
+  "operation": "actual-image-customer-retire-failed-eeabbdf60e9342c192693d031d55aa5b",
+  "remoteFile": "D:\\sabalanerp-online-qa\\actual-image-customer-retire-failed-eeabbdf60e9342c192693d031d55aa5b-remote.py",
+  "remoteEnvelopeSha256": "64fbcc625b11622ef685beed6128cd2b920ed74c3ccc1e1e2060cea30f9b6c41",
+  "sources": {
+    "deploy/scripts/closed-derived-process-references.py": "a6570121bc431553a3f215ccaf73063d642921501fe8ab1b7310a8ec4175ff4a",
+    "deploy/scripts/closed-diagnostic-holds.py": "543c507fcd97ac32310e0dc0e8e73cde391669075fbdd55d3f7870bdfdd80b36",
+    "tests/online-deployment/production-image-customer-retire.fixture.py": "9134926393675ea4846e4dd925ff6fc132a8592df009672767f081b33fa08b54",
+    "tests/online-deployment/production-image-customer-cleanup-failed.fixture.py": "321e6d0c182e815f21143b801bf6f1fba54be3dfaa2addff2356963f86befc0f"
+  },
+  "productionAdmission": false
+}

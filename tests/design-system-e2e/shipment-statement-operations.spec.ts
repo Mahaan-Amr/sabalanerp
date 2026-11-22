@@ -56,7 +56,7 @@ test('Shipment statement control is responsive and protects a pending pause', as
   await expect(dialog.getByRole('button', { name: 'در حال ثبت' })).toBeDisabled();
   await page.keyboard.press('Escape');
   await expect(dialog).toBeVisible();
-  expect(transitionBody).toMatchObject({ action: 'PAUSE_PLANNED', expectedRevision: 7 });
+  await expect.poll(() => transitionBody).toMatchObject({ action: 'PAUSE_PLANNED', expectedRevision: 7 });
   release();
   await expect(dialog).toBeHidden();
 

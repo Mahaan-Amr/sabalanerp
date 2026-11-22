@@ -1,0 +1,35 @@
+{
+  "root": "/app/online-runtime-acceptance/online-native-12b92cbd6a2de009984c1af1fcec00cd",
+  "attemptAccepted": false,
+  "failure": "duplicate HTTP admission binding before work initialization",
+  "nativeClosures": [
+    {
+      "name": "http-a",
+      "nativeSha256": "6feea9f50df7ce8ac3fa3ee1926535853bd7decdbd74193ae415edaa764af148",
+      "nativeReaped": true,
+      "databaseQuiet": true,
+      "nativeStatus": 1
+    },
+    {
+      "name": "http-b",
+      "nativeSha256": "f5fb02fd34ec1a4f7ab5be1065478c7a6d1eb7054056b00a968e57448e817c1d",
+      "nativeReaped": true,
+      "databaseQuiet": true,
+      "nativeStatus": 1
+    },
+    {
+      "name": "jobs",
+      "nativeSha256": "dc8d8e762fa02cfaa0b0798f95a1cd39158d711a4a0ed24b0557637b953e1e32",
+      "nativeReaped": true,
+      "databaseQuiet": true,
+      "nativeStatus": 1
+    }
+  ],
+  "allOwnershipLocksAvailable": true,
+  "sessions": 0,
+  "prepared": 0,
+  "probeRows": 0,
+  "noForceOrProcessKill": true,
+  "productionMutation": false,
+  "droppedOwnedEmptyDatabase": "sabalanerp_concurrency_153cf333b6a49e82"
+}

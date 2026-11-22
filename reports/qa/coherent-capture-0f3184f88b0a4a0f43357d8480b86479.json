@@ -1,0 +1,69 @@
+{
+  "format": "sabalan-coherent-logical-capture-native/v1",
+  "pass": true,
+  "sourceDatabaseName": "sabalanerp_concurrency_fa2a8bebde56c9c3",
+  "systemIdentifier": "7667464637415309346",
+  "migrationCount": 427,
+  "lockedRelations": 541,
+  "restorePoint": {
+    "flushLsn": "C/7D000000",
+    "lsn": "C/7C3CA958",
+    "name": "sabalan-2f0aef6fc9f3f91d0e3fdede739a6a5219691de6ec88fb0d",
+    "switchLsn": "C/7C3CA970"
+  },
+  "fileGenerationSha256": "153e8c6163690e6cf01c8a18f2f419501d3e4b0ee75c40aac8a95ba79b4d9b19",
+  "files": {
+    "manifestSha256": "153e8c6163690e6cf01c8a18f2f419501d3e4b0ee75c40aac8a95ba79b4d9b19",
+    "files": 2,
+    "bytes": 12326
+  },
+  "databaseDumpSha256": "e704baf7276687c4fd0cf8ad8a2d734f4c10f41c8a6258790dc2de75a8ba71fe",
+  "lostClientCommitted": {
+    "amount": "123456789.12345678",
+    "quantity": "0.00000001"
+  },
+  "queuedUpdateCommittedExactlyOnce": "77.00000001",
+  "restoredAmount": "123456789.12345678",
+  "nativeReadersContinued": true,
+  "nativeSqlAndFileWritersBlockedUntilRelease": true,
+  "nativeCompletionProven": true,
+  "restoredTemporaryDatabaseDroppedWithoutForce": true,
+  "captureBoundaryMs": 2023,
+  "nativeRestoreMs": 33844,
+  "nativeCaptureGuardianClosed": true,
+  "nativeCaptureGateDescriptor": 10,
+  "nativeCaptureClaimSha256": "12a9f6c25ee05e3ff919e9142e9b55814934fd470d896d5560f5fab7a84e1057",
+  "workingRoot": "/app/online-runtime-acceptance/coherent-capture-0f3184f88b0a4a0f43357d8480b86479",
+  "productionRecoveryPoint": false,
+  "canonicalServicesUnchanged": {
+    "backend": {
+      "id": "a1ea34a8d7d878b906fba7b4fdbe975df13a6b00d63a863eacce34b9827e86ff",
+      "image": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+      "startedAt": "2026-10-15T09:01:40.016187222Z"
+    },
+    "frontend": {
+      "id": "ad23f762dc1b27d2be76c335a3d7a4e20d08832a9a2e055904a4af84a9248c21",
+      "image": "sha256:f0a8954596279ccb01c029de7316022daa109b711a297f716cc9367d4bc9ec53",
+      "startedAt": "2026-10-15T10:11:30.825468888Z"
+    },
+    "postgres": {
+      "id": "e553787e69f44c7bdf7dab94fad43a231f5ba99d988dc783234486a5a844a528",
+      "image": "sha256:3d0f7584ed7d04e27fa050d6683a74746608faf21f202be78460d679cc56461f",
+      "startedAt": "2026-10-12T15:17:49.481269377Z"
+    },
+    "inquiry": {
+      "id": "6d161695e215498048ff24e56e9602ce77871bfb6b390bf1356caecfdf9807d8",
+      "image": "sha256:81eacc768f3c4b82bd0f0a01bef5600ae1321e87cb117bad49ca47dfba79a213",
+      "startedAt": "2026-10-12T15:17:49.463791361Z"
+    }
+  },
+  "sources": {
+    "recovery-file-generations.py": "a3175e4afd4df2872cfef011ec9837178a341ff317217ecf72c9d3a59e882ae0",
+    "recovery-database-freeze.py": "7a6ecfd68b4592989a5cb26c0744c2c82d5a77f0599734bf021f1621004f428b",
+    "backend-runtime-owner.py": "f733ad5642c89242e5b62f8518fafbabbfc8633420eeb50007b4c2a9e205cf05",
+    "capture-coherent-components.py": "6c1efd3ce4624cbd2d679a70bf5509bd14bf24538a54790a7dd26ee467548cbd",
+    "fixture.py": "4d68bea4708a213dcce66a74dc3ca2923a9013583577e17e1848a83d1aedaf89",
+    "config.json": "d003ebc80cb56b886e74663004d74b9bf4ca05541b05b009c75704e6e6c85684"
+  },
+  "sourceTemporaryDatabaseDroppedWithoutForce": true
+}

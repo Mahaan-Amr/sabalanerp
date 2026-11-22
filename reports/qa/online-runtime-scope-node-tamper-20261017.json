@@ -1,0 +1,14 @@
+{
+  "result": {
+    "pass": true,
+    "mode": "cache-tamper",
+    "sameBytesReplacementRejected": true
+  },
+  "replacement": {
+    "oldInode": "1091083",
+    "newInode": "1091311",
+    "sha256": "ac94da11a9a1b66e96b5b81032515096062a21bf4dc447552ae9ca58ccf2772c",
+    "sameBytes": true
+  },
+  "root": "/app/online-runtime-acceptance/online-authority-790eaadca7834d19ba1e2cbf278cd0d1"
+}

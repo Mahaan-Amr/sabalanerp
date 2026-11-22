@@ -1,6 +1,20 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, type Locator, type Page, type TestInfo } from '@playwright/test';
 
+/** Reproduce the owner-scoped navigation handoff used by the contract wizard. */
+export const seedContractNavigation = async (page: Page, value: unknown) => {
+  await page.evaluate(async (draft) => {
+    const response = await fetch('/api/auth/me');
+    const user = (await response.json()).data;
+    if (!response.ok || typeof user?.id !== 'string') throw new Error('TEST_OWNER_UNAVAILABLE');
+    const key = 'contractWizardState';
+    const storageKey = `contract-navigation:v2:${encodeURIComponent(user.id)}:${encodeURIComponent(key)}`;
+    sessionStorage.setItem(storageKey, JSON.stringify({
+      format: 'sabalan-owner-draft/v2', userId: user.id, key, value: JSON.stringify(draft),
+    }));
+  }, value);
+};
+
 export const loginAsAdmin = async (page: Page, landingPath = '/dashboard') => {
   const username = process.env.DESIGN_SYSTEM_E2E_ADMIN_USERNAME || 'admin';
   const password = process.env.DESIGN_SYSTEM_E2E_ADMIN_PASSWORD || 'admin123';

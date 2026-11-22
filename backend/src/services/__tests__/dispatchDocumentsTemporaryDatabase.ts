@@ -14,11 +14,12 @@ const checkedName = (value: string) => {
 };
 
 const compose = (repositoryRoot: string, command: string) => {
-  verifySabalanerpLocalPostgres(repositoryRoot);
+  const runtimeRoot = process.env.SABALAN_LOCAL_REPOSITORY_ROOT || repositoryRoot;
+  verifySabalanerpLocalPostgres(runtimeRoot);
   return execFileSync('docker', [
-    'compose', '-f', path.join(repositoryRoot, 'docker-compose.local.yml'), 'exec', '-T', 'postgres',
+    'compose', '-f', path.join(runtimeRoot, 'docker-compose.local.yml'), 'exec', '-T', 'postgres',
     'sh', '-lc', command,
-  ], { cwd: repositoryRoot, stdio: 'pipe', encoding: 'utf8', timeout: 120_000 });
+  ], { cwd: runtimeRoot, stdio: 'pipe', encoding: 'utf8', timeout: 120_000 });
 };
 
 export const assertDispatchDocumentsMigrationTarget = (databaseUrl: string, expectedName: string) => {
@@ -48,8 +49,9 @@ export const assertSabalanerpLocalPostgres = (output: string) => {
 };
 
 const verifySabalanerpLocalPostgres = (repositoryRoot: string) => {
-  const output = execFileSync('docker', ['compose', '-f', path.join(repositoryRoot, 'docker-compose.local.yml'),
-    'ps', '--format', 'json'], { cwd: repositoryRoot, stdio: 'pipe', encoding: 'utf8', timeout: 30_000 });
+  const runtimeRoot = process.env.SABALAN_LOCAL_REPOSITORY_ROOT || repositoryRoot;
+  const output = execFileSync('docker', ['compose', '-f', path.join(runtimeRoot, 'docker-compose.local.yml'),
+    'ps', '--format', 'json'], { cwd: runtimeRoot, stdio: 'pipe', encoding: 'utf8', timeout: 30_000 });
   assertSabalanerpLocalPostgres(output);
 };
 
@@ -58,27 +60,36 @@ export const createDispatchDocumentsTemporaryDatabase = async (input: {
   sourceDatabaseUrl: string;
   schemaOnly?: boolean;
   referenceDataTables?: string[];
+  excludedDataTables?: string[];
 }) => {
   const runId = randomBytes(8).toString('hex');
   const databaseName = checkedName(`${DATABASE_PREFIX}${runId}`);
   const source = new URL(input.sourceDatabaseUrl);
-  if (source.protocol !== 'postgresql:' || !LOCAL_ENDPOINTS.has(source.host) || source.pathname !== '/sabalanerp') {
+  const parent = process.env.ISSUE260_PARENT_DATABASE_NAME || '';
+  const parentAllowed = /^sabalanerp_concurrency_[a-f0-9]{16}$/.test(parent) &&
+    parent === `sabalanerp_concurrency_${process.env.ISSUE260_PARENT_RUN_ID || ''}` && source.pathname === `/${parent}`;
+  if (source.protocol !== 'postgresql:' || !LOCAL_ENDPOINTS.has(source.host) || (source.pathname !== '/sabalanerp' && !parentAllowed)) {
     throw new Error(`Dispatch-document concurrency test only accepts sabalanerp-local; received ${source.host}${source.pathname}.`);
   }
+  const sourceName = parentAllowed ? parent : 'sabalanerp';
   const databaseUrl = new URL(source);
   databaseUrl.pathname = `/${databaseName}`;
   assertDispatchDocumentsMigrationTarget(databaseUrl.toString(), databaseName);
   const quoted = `"${databaseName}"`;
+  const excludedTables = (input.excludedDataTables ?? []).map(table => {
+    if (!/^[a-z][a-z0-9_]*$/.test(table)) throw new Error(`Invalid excluded-data table: ${table}`);
+    return `--exclude-table-data=public.${table}`;
+  }).join(' ');
   verifySabalanerpLocalPostgres(input.repositoryRoot);
   compose(input.repositoryRoot, `psql -v ON_ERROR_STOP=1 --username postgres --dbname postgres --command 'CREATE DATABASE ${quoted}'`);
   try {
-    compose(input.repositoryRoot, `set -o pipefail; pg_dump --username postgres --dbname sabalanerp --no-owner --no-privileges ${input.schemaOnly ? '--schema-only' : ''} | psql -v ON_ERROR_STOP=1 --username postgres --dbname ${quoted}`);
+    compose(input.repositoryRoot, `set -o pipefail; pg_dump --username postgres --dbname ${sourceName} --no-owner --no-privileges ${input.schemaOnly ? '--schema-only' : excludedTables} | psql -v ON_ERROR_STOP=1 --username postgres --dbname ${quoted}`);
     if (input.schemaOnly) {
       // Keep the source migration identities/checksums, but no business rows.
-      compose(input.repositoryRoot, `set -o pipefail; pg_dump --username postgres --dbname sabalanerp --no-owner --no-privileges --data-only --table=public._prisma_migrations | psql -v ON_ERROR_STOP=1 --username postgres --dbname ${quoted}`);
+      compose(input.repositoryRoot, `set -o pipefail; pg_dump --username postgres --dbname ${sourceName} --no-owner --no-privileges --data-only --table=public._prisma_migrations | psql -v ON_ERROR_STOP=1 --username postgres --dbname ${quoted}`);
       for (const table of input.referenceDataTables ?? []) {
         if (!/^[a-z][a-z0-9_]*$/.test(table)) throw new Error(`Invalid reference-data table: ${table}`);
-        compose(input.repositoryRoot, `set -o pipefail; pg_dump --username postgres --dbname sabalanerp --no-owner --no-privileges --data-only --table=public.${table} | psql -v ON_ERROR_STOP=1 --username postgres --dbname ${quoted}`);
+        compose(input.repositoryRoot, `set -o pipefail; pg_dump --username postgres --dbname ${sourceName} --no-owner --no-privileges --data-only --table=public.${table} | psql -v ON_ERROR_STOP=1 --username postgres --dbname ${quoted}`);
       }
     }
     assertDispatchDocumentsMigrationTarget(databaseUrl.toString(), databaseName);
@@ -105,15 +116,20 @@ export const createDispatchDocumentsTemporaryDatabase = async (input: {
       if (cleaned) return;
       checkedName(databaseName);
       let lastError: unknown;
-      for (let attempt = 1; attempt <= 3; attempt += 1) {
+      for (let attempt = 1; attempt <= 10; attempt += 1) {
         try {
-          compose(input.repositoryRoot, `psql -v ON_ERROR_STOP=1 --username postgres --dbname postgres --command "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${databaseName}' AND pid <> pg_backend_pid()"`);
+          const outstanding = compose(input.repositoryRoot,
+            `psql -v ON_ERROR_STOP=1 --tuples-only --no-align --username postgres --dbname postgres --command "SELECT (SELECT count(*) FROM pg_stat_activity WHERE datname = '${databaseName}') + (SELECT count(*) FROM pg_prepared_xacts WHERE database = '${databaseName}')"`).trim();
+          if (outstanding !== '0') throw new Error('Temporary database still has sessions or prepared transactions; preserving its data.');
           compose(input.repositoryRoot, `psql -v ON_ERROR_STOP=1 --username postgres --dbname postgres --command 'DROP DATABASE IF EXISTS ${quoted}'`);
           const remaining = compose(input.repositoryRoot,
             `psql -v ON_ERROR_STOP=1 --tuples-only --no-align --username postgres --dbname postgres --command "SELECT count(*) FROM pg_database WHERE datname = '${databaseName}'"`).trim();
           if (remaining === '0') { cleaned = true; return; }
           lastError = new Error(`Exact database still exists after cleanup attempt ${attempt}.`);
-        } catch (error) { lastError = error; }
+        } catch (error) {
+          lastError = error;
+          if (attempt < 10) await new Promise(resolve => setTimeout(resolve, 200));
+        }
       }
       throw new Error(`Temporary database cleanup failed for ${databaseName}: ${
         lastError instanceof Error ? lastError.message : String(lastError)}`);

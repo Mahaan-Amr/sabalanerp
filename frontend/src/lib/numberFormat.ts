@@ -208,7 +208,7 @@ export const formatPrice = (
   currency: string = 'تومان'
 ): string => {
   const formatted = formatMoneyNumber(value);
-  return `${formatted} ${currency}`;
+  return `${formatted} ${currency === 'IRT' ? 'تومان' : currency === 'IRR' ? 'ریال' : currency}`;
 };
 
 export const tomanToRial = (tomanValue: number | string | null | undefined): number => {

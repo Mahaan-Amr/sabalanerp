@@ -1,0 +1,56 @@
+{
+  "format": "sabalan-hr-erasure-file-recovery-local/v1",
+  "pass": false,
+  "productionAdmission": false,
+  "sources": {
+    "scripts/run-hr-erasure-file-recovery-local.mjs": "3b5ba0ee1132987e1084b7cb7383d6ba1226baf55a563cef3c8de009540a51f6",
+    "backend/src/services/__tests__/hrErasureFileRecovery.integration.test.ts": "65958f861719b0c84a312e974509a8093a07478fc48cfb1e3f608449a5d87f43",
+    "backend/src/services/hrPersonnelErasureRecovery.ts": "c00493a499e09eecf9380e46be76b2d4e5b54ebda69e3ddaa42a5fb955cccdac",
+    "backend/src/services/hrDeletionFileTransaction.ts": "50e2cf049f40f06297beabbceeb3bc8de9f8532243507983e8bc642fe5c30e81",
+    "backend/src/services/backgroundJobLifecycle.ts": "86e47577060ee5c5106136d98e9ff9adef5ebf920c753dadf18ab2959e4fe248",
+    "backend/src/services/hrHiringFileStorage.ts": "371d13833470e02874a2010065739f34eb5df418015770c4ce52c7686190f56f",
+    "backend/src/services/recoveryRuntime.ts": "062e055599bd28aabde08880f0a80209ceb6776439e452bff1ee395cb298b7b6",
+    "backend/src/services/deploymentMaintenance.ts": "c1c8eb44b40dac48dac046507924af1f881f6b3c8fc2d949b07e20b89e2689fa",
+    "backend/src/services/httpRequestLifecycle.ts": "1867b8adff3179f75ef408bb1df37867fd7e7d016a0a3408704e4f73aceab899",
+    "backend/src/services/runtimeNativeAuthority.ts": "20310a85d21c74ba15485b59ea37e5adebc194144b588c5029ba55329b960df1",
+    "backend/src/services/runtimeControlOwnership.ts": "504179c7e9b570b9d234ba5a2a39f96985efb592bbf84c45452fd44b0b900dfe",
+    "backend/src/services/recoveryCoordinationState.ts": "d82ba189a66ecc42c27496c03e351da9e6f1c6d179296908a7db8b94564cf7b9",
+    "backend/src/services/recoveryOperationAdmission.ts": "9b9f4b9b00c1ab71f1c38d97379e4e5d9e08af0eebdcd9c4d089c9611f04b612",
+    "backend/src/services/runtimeWorkBoundary.ts": "6d4934fc7a95afb3cb68db4fd2be0ec8ae913ab8f77ba509a04632ba36563f25",
+    "backend/src/services/onlineRuntimeScope.ts": "6e8d5b7850edf2ef5b1db0821ed5f3dec7c3bacce165666afe180464bf074fce",
+    "backend/src/services/runtimeLeasedWorkContext.ts": "2b888eaf836ef5cabf41b96199dc57ee3a5e7fb73b1d3a2f31d42325512ef8be",
+    "backend/src/services/runtimeWorkContext.ts": "9fcbc84ad7393eecc75ffe9bc8df73ebc051a4ba2050f2f31d6f00f7280c795d"
+  },
+  "bundleSha256": "33e855e3c7c16277384e898cd8223f6632e73371c5b245025ff0e6ca1240db41",
+  "schemaSha256": "1b0af4de96613269d2ea19c6d33154353bd2c980d4edc9f09288ebef7b027106",
+  "database": "qa_hr_erasure_a83be0e3cce8910c2acc68ab1fe9debe",
+  "databaseOid": "20432875",
+  "status": 1,
+  "signal": null,
+  "stdout": "TAP version 13\n# HR_ERASURE_TEST_DATABASE_CLIENT_CLOSED\n# Subtest: expired versioned or unknown file work preserves its receipt and never restores old bytes over a later upload\nnot ok 1 - expired versioned or unknown file work preserves its receipt and never restores old bytes over a later upload\n  ---\n  duration_ms: 195.9982\n  location: 'D:\\\\sabalanerp-online-qa\\\\hr-erasure-a83be0e3cce8910c2acc68ab1fe9debe\\\\fixture.cjs:958:30'\n  failureType: 'testCodeFailure'\n  error: |-\n    Expected values to be strictly equal:\n    \n    1 !== 0\n    \n  code: 'ERR_ASSERTION'\n  name: 'AssertionError'\n  expected: 0\n  actual: 1\n  operator: 'strictEqual'\n  stack: |-\n    TestContext.<anonymous> (D:\\sabalanerp-online-qa\\hr-erasure-a83be0e3cce8910c2acc68ab1fe9debe\\fixture.cjs:993:29)\n    async Test.run (node:internal/test_runner/test:932:9)\n    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)\n  ...\n1..1\n# tests 1\n# suites 0\n# pass 0\n# fail 1\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 358.8106\n",
+  "stderr": "",
+  "failure": "",
+  "canonicalBefore": {
+    "backend": {
+      "id": "a1ea34a8d7d878b906fba7b4fdbe975df13a6b00d63a863eacce34b9827e86ff",
+      "image": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+      "startedAt": "2026-10-15T09:01:40.016187222Z"
+    },
+    "frontend": {
+      "id": "ad23f762dc1b27d2be76c335a3d7a4e20d08832a9a2e055904a4af84a9248c21",
+      "image": "sha256:f0a8954596279ccb01c029de7316022daa109b711a297f716cc9367d4bc9ec53",
+      "startedAt": "2026-10-18T05:09:40.68305388Z"
+    },
+    "inquiry": {
+      "id": "6d161695e215498048ff24e56e9602ce77871bfb6b390bf1356caecfdf9807d8",
+      "image": "sha256:81eacc768f3c4b82bd0f0a01bef5600ae1321e87cb117bad49ca47dfba79a213",
+      "startedAt": "2026-10-12T15:17:49.463791361Z"
+    },
+    "postgres": {
+      "id": "e553787e69f44c7bdf7dab94fad43a231f5ba99d988dc783234486a5a844a528",
+      "image": "sha256:3d0f7584ed7d04e27fa050d6683a74746608faf21f202be78460d679cc56461f",
+      "startedAt": "2026-10-12T15:17:49.481269377Z"
+    }
+  },
+  "isolatedDatabaseRetired": true
+}

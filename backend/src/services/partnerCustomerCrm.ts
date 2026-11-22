@@ -64,7 +64,7 @@ export async function readPartnerCustomerCrm(tx: Prisma.TransactionClient, actor
   // Never spread Customer/Contract records into this projection. Full contracts,
   // snapshots, custom fields, lead values and histories contain private evidence.
   const response = { id: customer.id, firstName: customer.firstName, lastName: customer.lastName, companyName: customer.companyName,
-    customerType: customer.customerType, industry: customer.industry, brandName: customer.brandName, brandNameDescription: customer.brandNameDescription,
+    activityCategory: customer.activityCategory, customerType: customer.customerType, industry: customer.industry, brandName: customer.brandName, brandNameDescription: customer.brandNameDescription,
     homeNumber: customer.homeNumber, workNumber: customer.workNumber, projectManagerName: customer.projectManagerName, projectManagerNumber: customer.projectManagerNumber,
     referrerFirstName: customer.referrerFirstName, referrerLastName: customer.referrerLastName, referrerPhoneNumber: customer.referrerPhoneNumber, status: customer.status, nationalCode: customer.nationalCode,
     homeAddress: customer.homeAddress, workAddress: customer.workAddress, isBlacklisted: customer.isBlacklisted, isLocked: customer.isLocked,

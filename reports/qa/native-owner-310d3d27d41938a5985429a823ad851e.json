@@ -1,0 +1,81 @@
+{
+  "format": "sabalan-runtime-native-acceptance/v1",
+  "cases": [
+    {
+      "mode": "normal",
+      "nativeStatus": 0,
+      "nativeReaped": true,
+      "databaseQuiet": true,
+      "successorFreshNamespace": true,
+      "previousClosureArchived": true
+    },
+    {
+      "mode": "native-descendant",
+      "nativeStatus": 0,
+      "nativeReaped": true,
+      "databaseQuiet": true
+    },
+    {
+      "mode": "lost-runtime",
+      "nativeStatus": -9,
+      "nativeReaped": true,
+      "databaseQuiet": true
+    },
+    {
+      "mode": "guard-death",
+      "held": true,
+      "replacementRefused": true,
+      "activeSha256": "3f328fe7bd978b67c19684257a1e8e0c780cfd9efabf1c81f77a1b4fb6a56a98"
+    }
+  ],
+  "rows": [
+    {
+      "id": "descendant",
+      "amount": "123456789.12345678",
+      "quantity": "0.00000001"
+    },
+    {
+      "id": "guard-death",
+      "amount": "123456789.12345678",
+      "quantity": "0.00000001"
+    },
+    {
+      "id": "lost-runtime",
+      "amount": "123456789.12345678",
+      "quantity": "0.00000001"
+    }
+  ],
+  "droppedDatabase": "sabalanerp_concurrency_50ad65955e3d07a4",
+  "retainedHeldRoot": "/app/online-runtime-acceptance/native-owner-310d3d27d41938a5985429a823ad851e/guard-death",
+  "canonicalServicesUnchanged": {
+    "backend": {
+      "id": "a1ea34a8d7d878b906fba7b4fdbe975df13a6b00d63a863eacce34b9827e86ff",
+      "image": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+      "startedAt": "2026-10-15T09:01:40.016187222Z"
+    },
+    "frontend": {
+      "id": "ad23f762dc1b27d2be76c335a3d7a4e20d08832a9a2e055904a4af84a9248c21",
+      "image": "sha256:f0a8954596279ccb01c029de7316022daa109b711a297f716cc9367d4bc9ec53",
+      "startedAt": "2026-10-15T10:11:30.825468888Z"
+    },
+    "postgres": {
+      "id": "e553787e69f44c7bdf7dab94fad43a231f5ba99d988dc783234486a5a844a528",
+      "image": "sha256:3d0f7584ed7d04e27fa050d6683a74746608faf21f202be78460d679cc56461f",
+      "startedAt": "2026-10-12T15:17:49.481269377Z"
+    },
+    "inquiry": {
+      "id": "6d161695e215498048ff24e56e9602ce77871bfb6b390bf1356caecfdf9807d8",
+      "image": "sha256:81eacc768f3c4b82bd0f0a01bef5600ae1321e87cb117bad49ca47dfba79a213",
+      "startedAt": "2026-10-12T15:17:49.463791361Z"
+    }
+  },
+  "sources": {
+    "backend-runtime-owner.py": "d922cebd8eb5de43830786bcbe09a55b0260e4f4dc8dff23ee9a4cbd7d5185cf",
+    "with-backend-control-ownership.sh": "86ed167417895c184d67893a8e7fab81cca02a7ac12df7d764cea3b8703f476a",
+    "protected-bootstrap-state.py": "4e9b4e0a30d6ce9e63f18bd6a9dbc7bb93483f83fb6c21c2ca8438e706b9c3fe",
+    "runtime-native-owner.worker.cjs": "ed1a7410a6fa17ef5493349d26b637b5ef19012e4e7da61850b703bb5485b114",
+    "fixture.py": "4227914aa25d6687cd660bcd9e7420388039aa5bb3c4db765c975733a59a8b66",
+    "lib/prisma.js": "91c8fbff960236036678f26c42d99f9050316aae784b10d2ff937695bd8453df",
+    "services/runtimeNativeAuthority.js": "4b34b41a3139c955d96efee5cc8fb41d84bb918251b0d81b3338f2dc80a6df9d"
+  }
+}

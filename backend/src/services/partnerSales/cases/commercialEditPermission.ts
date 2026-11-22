@@ -27,19 +27,31 @@ export async function partnerInactiveIsCancellation(tx: Prisma.TransactionClient
     contract.inactiveAt?.getTime() === new Date(fact.recordedAt).getTime();
 }
 
-/** A finalized Case keeps its state while the approved correction is open.
- * Technical lease/read/write gates must consult the same manager permission
- * as the commercial save; finality alone never grants technical editing. */
+/** Financial history remains a correction boundary after voiding or deletion.
+ * A live financial record must be voided before an approved edit can proceed. */
+export async function readPartnerFinancialEditBoundary(tx: Prisma.TransactionClient, contractId: string) {
+  const contract = await tx.salesContract.findUnique({ where: { id: contractId }, select: {
+    firstFinancialRecordAt: true, partnerCase: { select: { internalRecordId: true } },
+  } });
+  const records = contract?.partnerCase?.internalRecordId ? await tx.accountingFinancialRecord.findMany({
+    where: { sourceKind: 'PARTNER_INTERNAL_RECORD', sourceId: contract.partnerCase.internalRecordId },
+    select: { status: true },
+  }) : [];
+  return { requiresCorrection: !!contract?.firstFinancialRecordAt || records.length > 0,
+    hasActiveRecord: records.some(record => record.status !== 'VOIDED') };
+}
+
 export async function partnerTechnicalCaseIsEditable(tx: Prisma.TransactionClient, input: {
   contractId: string; caseState: string; actorId: string;
 }) {
-  if (isPartnerCaseEditableState(input.caseState)) return true;
-  if (input.caseState !== 'COMMITTED') return false;
+  if (!isPartnerCaseEditableState(input.caseState) && input.caseState !== 'COMMITTED') return false;
   const contract = await tx.salesContract.findUnique({ where: { id: input.contractId }, select: {
-    isInactive: true, status: true, firstFinancialRecordAt: true, commercialExpiresAt: true,
+    isInactive: true, status: true, firstFinancialRecordAt: true, commercialExpiresAt: true, dispatchExpiryExempt: true,
   } });
   const now = new Date();
   if (!contract || contract.isInactive || ['CANCELLED', 'EXPIRED'].includes(contract.status) ||
-      (!contract.firstFinancialRecordAt && contract.commercialExpiresAt && contract.commercialExpiresAt <= now)) return false;
-  return !!await readPartnerCommercialEditPermission(tx, input.contractId, input.actorId, now);
+      (!contract.firstFinancialRecordAt && !contract.dispatchExpiryExempt && contract.commercialExpiresAt && contract.commercialExpiresAt <= now)) return false;
+  const boundary = await readPartnerFinancialEditBoundary(tx, input.contractId);
+  return !boundary.hasActiveRecord && (!boundary.requiresCorrection ||
+    !!await readPartnerCommercialEditPermission(tx, input.contractId, input.actorId, now));
 }

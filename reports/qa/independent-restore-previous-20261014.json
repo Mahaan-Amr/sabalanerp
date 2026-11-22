@@ -1,0 +1,52 @@
+{
+  "deploymentId": "deploy-20261013T071324Z-129b1f970e1a-release",
+  "checksum": "c5480bbedc7e82648ba6faed0d68a9b1c2e0e38abea92578ceb3e22bd9be8c5e",
+  "lastDrill": {
+    "status": "HEALTHY",
+    "operationId": "drill-deploy-20261013T071324Z-129b1f970e1a-release-1791983969858",
+    "startedAt": "2026-10-14T13:08:30.405Z",
+    "completedAt": "2026-10-14T13:32:46.021Z",
+    "durationMs": 1455616,
+    "compatibility": {
+      "compatible": true,
+      "reasons": []
+    },
+    "promoted": true,
+    "promotedFiles": {
+      "files": 1562,
+      "bytes": 938849838
+    },
+    "initialPromotedFiles": {
+      "files": 1562,
+      "bytes": 938849838
+    },
+    "verifiedErasureReplay": {
+      "operations": 0,
+      "erasedArtifacts": 0
+    },
+    "liveFileReferences": {
+      "checkedColumns": 11,
+      "readyPerformanceExports": 0
+    },
+    "applicationPayloads": {
+      "vaultKeyId": "performance-v1-20260906",
+      "exportKeyId": "performance-export-v1-20260906",
+      "payloads": 0
+    },
+    "businessData": {
+      "tables": 197,
+      "records": "16407",
+      "sha256": "6ead51b82fb5eda6152f485b3d12ef73d757fcdfdc6ac3ecbfe2b91470d73743"
+    },
+    "stagedPostgresRestore": true,
+    "stagedSqliteIntegrity": true,
+    "independentHost": "94.182.177.74",
+    "codeProof": {
+      "codeBundleSha256": "3f8c488ac694f60e75f1985948b68718d1f940a0b483d5ef7ab83ae641aeef26",
+      "patchSha256": "99f3f7219b77a92e562c6ed54de41035c7b158e7a06e155972083932ce9a0316",
+      "baseCommit": "12a1ab772fa88cc3fa29997d741678cf9b8aaf09",
+      "startedAt": "2026-10-14T12:24:38.934Z"
+    }
+  },
+  "publishedAt": "2026-10-14T13:34:59.968Z"
+}

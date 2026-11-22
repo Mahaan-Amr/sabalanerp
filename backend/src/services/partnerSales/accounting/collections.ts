@@ -1,4 +1,4 @@
-import { Prisma } from '@prisma/client';
+import { Prisma, type AccountingPaymentStatus } from '@prisma/client';
 import { InstantSchema, SignedDecimalSchema } from '@sabalanerp/partner-sales-contracts';
 import { subtract, sum } from '../reporting/money';
 import type { PartnerFinancialPreparation } from './source';
@@ -17,8 +17,16 @@ export async function readPartnerCollections(tx: Prisma.TransactionClient, input
 }): Promise<string | null> {
   const payments = await tx.accountingPaymentStatus.findMany({ where: {
     receivableId: input.receivableId, createdAt: { lte: input.asOf } } });
+  return sumPartnerCollections(payments, input);
+}
+
+/** Replay already selected rows from the same authorized read snapshot. */
+export function sumPartnerCollections(payments: readonly AccountingPaymentStatus[], input: {
+  currency: string; cutoff: Date; asOf: Date; preparation: PartnerFinancialPreparation;
+}): string | null {
   const amounts: string[] = [];
   for (const payment of payments) {
+    if (payment.createdAt > input.asOf) continue;
     if (payment.contractId || payment.currency !== input.currency) throw new PartnerCollectionIntegrityError('Partner collection currency/owner integrity conflict');
     assertPartnerAccountingWitnesses(payment.metadata, input.preparation);
     const movements = object(payment.metadata)?.collectionMovements;

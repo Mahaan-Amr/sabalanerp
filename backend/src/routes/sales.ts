@@ -1,3 +1,5 @@
+import { isPartnerCommercialFlow, partnerContractCanRenew } from '../services/partnerSales/cases/commercialLifecycle';
+import { salesContractAccessWhere } from '../services/salesContractAccess';
 import { OperationMinimumError } from '../services/operationMinimumGuard';
 import { casePdfContent, readCasePdfConfirmation } from '../services/partnerSales/customerOutput/casePdf';
 import { partnerCustomerPrintDetails, readPartnerPrintCodes } from '../utils/partnerProductPrint';
@@ -75,6 +77,7 @@ import { resolveWorkspaceRecipientIds } from '../services/domainNotificationReci
 import { ContractPartyIdentityValidationError } from '../services/contractPartyIdentity';
 import { createAuditedPartnerAuthorization } from '../services/partnerSales/authorization/audited';
 import { readCurrentPartnerCaseViews } from '../services/partnerSales/cases/lifecycle';
+import { readPartnerSalesContractDetail, partnerSalesContractDetailFailure, authorizePartnerSalesCaseRead } from '../services/partnerSales/cases/contractDetail';
 import { applyPartnerContractListScope, canPartnerReadSalesContract,
   readPartnerProfileId, ownsPartnerCustomerContract } from '../services/partnerSales/contractVisibility';
 import { ensureSalesErrorTracking, knownContractUpdateBusinessFailure, knownCustomerCreditFailure, salesBusinessErrorMessage, unexpectedSalesErrorResponse } from '../utils/salesOperationalError';
@@ -167,6 +170,11 @@ const canManageDiscountRanges = async (user: any) => {
 };
 
 const projectCommercialActions = async (contract: any, user: any) => {
+  if (isPartnerCommercialFlow(contract) && contract.partnerCaseId) {
+    const root = await prisma.partnerSaleCase.findUnique({ where: { id: contract.partnerCaseId }, select: { state: true } });
+    return { canRenew: !!root && validateContractAccess(contract, user) && partnerContractCanRenew(contract, root.state)
+      && await canManageCommercialSettings(prisma, user) };
+  }
   if (!isOrdinaryCommercialFlow(contract)) return undefined;
   const access = await getEffectiveUserAccess(prisma, { userId: user.id, userRole: user.role });
   const permitted = (feature: string) => user.role === 'ADMIN' || access.features.some(item => item.feature === feature && ['edit', 'admin'].includes(item.permission));
@@ -520,6 +528,9 @@ router.post(
           where: { id: contractId },
           select: {
             departmentId: true,
+            responsibleSellerId: true,
+            partnerKind: true,
+            partnerCaseId: true,
             isInactive: true,
             productGraphState: { select: { revision: true } }
           }
@@ -692,7 +703,7 @@ router.get('/contracts', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKS
     } else if (partnerProfileId) {
       whereClause = applyPartnerContractListScope(whereClause, partnerProfileId);
     } else if (req.user.departmentId) {
-      whereClause.departmentId = req.user.departmentId;
+      Object.assign(whereClause, salesContractAccessWhere(req.user));
     }
 
     if (search) {
@@ -902,7 +913,7 @@ router.get('/contracts/:id', protect, requireSalesDetailRead, async (req: any, r
     // Check if user has access to this contract
     const user = await prisma.user.findUnique({
       where: { id: req.user.id },
-      select: { role: true, departmentId: true }
+      select: { id: true, role: true, departmentId: true }
     });
 
     if (!user) {
@@ -924,25 +935,10 @@ router.get('/contracts/:id', protect, requireSalesDetailRead, async (req: any, r
       const correlationId = typeof req.headers['x-correlation-id'] === 'string'
         && /^[A-Za-z0-9][A-Za-z0-9:_-]{0,159}$/.test(req.headers['x-correlation-id'])
         ? req.headers['x-correlation-id'] : randomUUID();
-      const projected = await prisma.$transaction(async tx => {
-        if (!contract.partnerCaseId || !contract.partnerRevision || !contract.partnerIntegrityHash) return null;
-        const current = await readCurrentPartnerCaseViews(tx, contract.partnerCaseId);
-        if (!current || current.row.customerContractId !== contract.id ||
-            current.row.headRevision !== contract.partnerRevision ||
-            current.row.integrityHash !== contract.partnerIntegrityHash) return null;
-        const caseRead = await createAuditedPartnerAuthorization(tx, {
-          actorId: req.user.id, purpose: 'PARTNER', channel: 'DETAIL',
-        }, { correlationId }).authorize('CASE_READ', { kind: 'CASE', id: contract.partnerCaseId });
-        if (caseRead.ok === false) return { ok: false as const, error: caseRead.error };
-        const output = await createAuditedPartnerAuthorization(tx, {
-          actorId: req.user.id, purpose: 'CUSTOMER_OUTPUT', channel: 'API',
-        }, { correlationId }).authorize('CUSTOMER_OUTPUT', { kind: 'CASE', id: contract.partnerCaseId });
-        return { ok: true as const, view: current.partner, output: output.ok };
-      });
+      const projected = await readPartnerSalesContractDetail(prisma, { contract, actorId: req.user.id, correlationId });
       if (!projected || projected.ok === false) {
-        const status = projected && 'error' in projected ? projected.error.status : 409;
-        return res.status(status).json({ success: false,
-          error: status === 404 ? 'Contract not found' : 'Partner case evidence is unavailable' });
+        const failure = partnerSalesContractDetailFailure(projected && 'error' in projected ? projected.error : null, correlationId);
+        return res.status(failure.status).json(failure.body);
       }
       responseContract = { ...contract, partnerCaseView: projected.view,
         partnerActions: { canPreview: projected.output, canIssue: projected.output,
@@ -996,7 +992,7 @@ router.get('/contracts/:id/pdf', protect, requireWorkspaceAccess(WORKSPACES.SALE
 
     const user = await prisma.user.findUnique({
       where: { id: req.user.id },
-      select: { role: true, departmentId: true }
+      select: { id: true, role: true, departmentId: true }
     });
 
     if (!user) {
@@ -1311,7 +1307,7 @@ router.post(
     try {
       const contract = await prisma.salesContract.findUnique({
         where: { id: req.params.id },
-        select: { id: true, departmentId: true }
+        select: { id: true, departmentId: true, responsibleSellerId: true, partnerKind: true, partnerCaseId: true }
       });
       if (!contract) {
         return res.status(404).json({ success: false, error: 'قرارداد پیدا نشد؛ به فهرست قراردادها برگردید و قرارداد دیگری را انتخاب کنید.' });
@@ -1351,7 +1347,7 @@ router.get(
     try {
       const contract = await prisma.salesContract.findUnique({
         where: { id: req.params.id },
-        select: { id: true, departmentId: true }
+        select: { id: true, departmentId: true, responsibleSellerId: true, partnerKind: true, partnerCaseId: true }
       });
       if (!contract) {
         return res.status(404).json({ success: false, error: 'قرارداد پیدا نشد؛ به فهرست قراردادها برگردید و قرارداد دیگری را انتخاب کنید.' });
@@ -1378,7 +1374,7 @@ router.post(
     try {
       const contract = await prisma.salesContract.findUnique({
         where: { id: req.params.id },
-        select: { id: true, departmentId: true }
+        select: { id: true, departmentId: true, responsibleSellerId: true, partnerKind: true, partnerCaseId: true }
       });
       if (!contract) return res.status(404).json({ success: false, error: 'قرارداد پیدا نشد؛ به فهرست قراردادها برگردید و قرارداد دیگری را انتخاب کنید.' });
       if (!validateContractAccess(contract, req.user)) {
@@ -1590,7 +1586,7 @@ router.put('/contracts/:id/print', protect, requireFeatureAccess(FEATURES.SALES_
     }
 
     // Check if user has access to this contract
-    if (req.user.role !== 'ADMIN' && req.user.departmentId && contract.departmentId !== req.user.departmentId) {
+    if (!validateContractAccess(contract, req.user)) {
       return res.status(403).json({
         success: false,
         error: 'اجازه انجام این عملیات را ندارید؛ به صفحه قبل برگردید.'
@@ -1749,7 +1745,7 @@ router.put('/contracts/:id/sign', protect, requireFeatureAccess(FEATURES.SALES_C
     }
 
     // Check if user has access to this contract
-    if (req.user.role !== 'ADMIN' && req.user.departmentId && contract.departmentId !== req.user.departmentId) {
+    if (!validateContractAccess(contract, req.user)) {
       return res.status(403).json({
         success: false,
         error: 'اجازه انجام این عملیات را ندارید؛ به صفحه قبل برگردید.'
@@ -1777,7 +1773,7 @@ router.put('/contracts/:id/sign', protect, requireFeatureAccess(FEATURES.SALES_C
       if (!lockedContract || lockedContract.isInactive || lockedContract.status !== 'APPROVED') {
         throw new ApprovedPricingEvidenceError('Contract changed before finalization');
       }
-      if (req.user.role !== 'ADMIN' && req.user.departmentId && lockedContract.departmentId !== req.user.departmentId) {
+      if (!validateContractAccess(lockedContract, req.user)) {
         throw new ApprovedPricingEvidenceError('Contract access changed before finalization');
       }
       await assertContractQuantityEvidenceReadyForFinalization(tx, lockedContract.id);
@@ -1865,8 +1861,8 @@ router.put(
   protect,
   requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.ADMIN),
   [
-    body('sellerId').notEmpty().withMessage('فروشنده مسئول جدید الزامی است'),
-    body('reason').trim().notEmpty().withMessage('دلیل تغییر مسئول الزامی است')
+    body('sellerId').isString().trim().notEmpty().withMessage('فروشنده مسئول جدید الزامی است'),
+    body('reason').optional().isString().trim().isLength({ max: 1000 })
   ],
   async (req: any, res: Response) => {
     const errors = validationResult(req);
@@ -1933,7 +1929,7 @@ router.get('/dashboard/stats', protect, requireWorkspaceAccess(WORKSPACES.SALES,
     let whereClause: any = { isInactive: false };
     
     if (req.user.role !== 'ADMIN' && req.user.departmentId) {
-      whereClause.departmentId = req.user.departmentId;
+      Object.assign(whereClause, salesContractAccessWhere(req.user));
     }
 
     const [
@@ -2019,7 +2015,7 @@ router.get('/dashboard', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKS
     let whereClause: any = { isInactive: false };
     
     if (req.user.role !== 'ADMIN' && req.user.departmentId) {
-      whereClause.departmentId = req.user.departmentId;
+      Object.assign(whereClause, salesContractAccessWhere(req.user));
     }
 
     const [
@@ -2326,7 +2322,7 @@ router.post(
         return res.status(409).json({ success: false, error: 'قرارداد غیرفعال و فقط‌خواندنی است؛ قرارداد فعال را انتخاب کنید.' });
       }
 
-      if (req.user.role !== 'ADMIN' && req.user.departmentId && contract.departmentId !== req.user.departmentId) {
+      if (!validateContractAccess(contract, req.user)) {
         return res.status(403).json({
           success: false,
           error: 'اجازه انجام این عملیات را ندارید؛ به صفحه قبل برگردید.'
@@ -2388,7 +2384,7 @@ router.post(
         return res.status(409).json({ success: false, error: 'قرارداد غیرفعال و فقط‌خواندنی است؛ قرارداد فعال را انتخاب کنید.' });
       }
 
-      if (req.user.role !== 'ADMIN' && req.user.departmentId && contract.departmentId !== req.user.departmentId) {
+      if (!validateContractAccess(contract, req.user)) {
         return res.status(403).json({
           success: false,
           error: 'اجازه انجام این عملیات را ندارید؛ به صفحه قبل برگردید.'
@@ -2434,7 +2430,7 @@ router.get('/contracts/:contractId/confirmation-recipients', protect,
     try {
       const contract = await prisma.salesContract.findUnique({ where: { id: req.params.contractId } });
       if (!contract) return res.status(404).json({ success: false, error: 'قرارداد پیدا نشد.' });
-      if (req.user.role !== 'ADMIN' && req.user.departmentId && contract.departmentId !== req.user.departmentId) {
+      if (!validateContractAccess(contract, req.user)) {
         return res.status(403).json({ success: false, error: 'اجازه انجام این عملیات را ندارید.' });
       }
       const result = await contractConfirmationService.getConfirmationStatus(contract.id);
@@ -2453,8 +2449,9 @@ const cancellationNoticeAuthority = async (tx: Prisma.TransactionClient, req: an
     throw new Error('قرارداد در دسترس نیست.');
   }
   if (contract.partnerCaseId) {
-    const decision = await createAuditedPartnerAuthorization(tx, { actorId: req.user.id, purpose: 'PARTNER', channel: 'DETAIL' },
-      { correlationId: randomUUID() }).authorize('CASE_READ', { kind: 'CASE', id: contract.partnerCaseId });
+    const decision = await authorizePartnerSalesCaseRead(tx, {
+      actorId: req.user.id, caseId: contract.partnerCaseId, correlationId: randomUUID(),
+    });
     if (!decision.ok) throw new Error('اجازه مشاهده این پرونده را ندارید.');
     const output = await createAuditedPartnerAuthorization(tx, { actorId: req.user.id, purpose: 'CUSTOMER_OUTPUT', channel: 'API' },
       { correlationId: randomUUID() }).authorize('CUSTOMER_OUTPUT', { kind: 'CASE', id: contract.partnerCaseId });
@@ -2517,7 +2514,7 @@ router.get(
         });
       }
 
-      if (req.user.role !== 'ADMIN' && req.user.departmentId && contract.departmentId !== req.user.departmentId) {
+      if (!validateContractAccess(contract, req.user)) {
         return res.status(403).json({
           success: false,
           error: 'اجازه انجام این عملیات را ندارید؛ به صفحه قبل برگردید.'
@@ -2572,7 +2569,7 @@ router.post(
         return res.status(409).json({ success: false, error: 'قرارداد غیرفعال و فقط‌خواندنی است؛ قرارداد فعال را انتخاب کنید.' });
       }
 
-      if (req.user.role !== 'ADMIN' && req.user.departmentId && contract.departmentId !== req.user.departmentId) {
+      if (!validateContractAccess(contract, req.user)) {
         return res.status(403).json({
           success: false,
           error: 'اجازه انجام این عملیات را ندارید؛ به صفحه قبل برگردید.'
@@ -2634,7 +2631,7 @@ router.post(
           error: 'قرارداد غیرفعال و فقط‌خواندنی است؛ قرارداد فعال را انتخاب کنید.'
         });
       }
-      if (req.user.role !== 'ADMIN' && req.user.departmentId && contract.departmentId !== req.user.departmentId) {
+      if (!validateContractAccess(contract, req.user)) {
         return res.status(403).json({
           success: false,
           error: 'اجازه انجام این عملیات را ندارید؛ به صفحه قبل برگردید.'

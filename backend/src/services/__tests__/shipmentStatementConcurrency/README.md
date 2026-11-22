@@ -5,6 +5,9 @@ Compose project. Each run creates an exact `sabalanerp_concurrency_<16 lowercase
 snapshot of the local SabalanERP database with `pg_dump`, opens independent Prisma connections, and drops only that
 exact database in `finally`. Creation first verifies that the running Compose target is exactly
 `sabalanerp-local`/`postgres`; creation and cleanup reject every database name outside the fixed prefix and shape.
+Cleanup refuses any remaining session, including idle owned pools, or prepared transaction. The caller must
+finish its work and disconnect its clients first. A connection racing that check makes ordinary, unforced
+`DROP DATABASE` fail; cleanup never terminates another client's unfinished work.
 
 Run from `backend` with the host-local database URL:
 

@@ -1,0 +1,29 @@
+{
+  "allDiagnosticBytesAndImageRetained": true,
+  "bootId": "ee1b3aa2-d239-4849-b926-200549c77829",
+  "containerId": "4d0b9b5a413c0cb2fec1b3acc1f3083a214638eaa54e90dad485b2ed545433cf",
+  "containerNeverStarted": true,
+  "containerRetiredWithoutForce": true,
+  "controllerExactExitProven": true,
+  "controllerPid": 1091882,
+  "failedNativeLogSha256": "91a078fcc44db1ab4e04f4afa442ca20b94a118752311c28f918da6725299554",
+  "foreignServicesUnchanged": true,
+  "lockIdentities": [
+    [
+      64513,
+      13050
+    ],
+    [
+      29,
+      6
+    ]
+  ],
+  "nativeDataDirectoryEmpty": true,
+  "nativeDescendantsEmpty": true,
+  "nativeToolsReaped": true,
+  "originalKernelLocksReacquired": true,
+  "phase": "CLOSED_FAILED_DIAGNOSTIC",
+  "productionRecoveryPoint": false,
+  "sourceSha256": "56d5a04eb637467ff13bf428c2a3a925fbff3eaaa58715de524c3bd78fb6eb12",
+  "startTicks": "121420777"
+}

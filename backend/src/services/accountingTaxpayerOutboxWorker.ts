@@ -1,3 +1,4 @@
+import { startBackgroundJob } from './backgroundJobLifecycle';
 import type { PrismaClient } from '@prisma/client';
 import { processNextTaxOutboxMessagePrisma } from './accountingCustomerTreasuryPrisma';
 
@@ -39,8 +40,5 @@ export const startAccountingTaxpayerOutboxDelivery = (database: PrismaClient) =>
     catch (error) { console.error('Accounting Taxpayer outbox delivery failed:', error instanceof Error ? error.name : 'UNKNOWN'); }
     finally { running = false; }
   };
-  void run();
-  const timer = setInterval(() => void run(), POLL_INTERVAL_MS);
-  timer.unref();
-  return timer;
+  return startBackgroundJob({ name: 'startAccountingTaxpayerOutboxDelivery', intervalMs: POLL_INTERVAL_MS, run });
 };

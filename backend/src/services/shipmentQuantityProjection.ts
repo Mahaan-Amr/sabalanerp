@@ -1,3 +1,5 @@
+import { parseExactQuantityAtoms, formatExactQuantityAtoms } from './exactQuantity';
+
 export type ShipmentProjectionHealth =
   | 'CURRENT'
   | 'STALE'
@@ -87,21 +89,8 @@ export interface ShipmentQuantityProjection {
   }>;
 }
 
-const SCALE = 1_000n;
-
-export const parseShipmentQuantityToScaledInteger = (value: string): bigint => {
-  const normalized = String(value).trim();
-  const match = /^(-?)(\d+)(?:\.(\d{1,3}))?$/.exec(normalized);
-  if (!match) throw new Error(`Shipment quantity must have at most three decimal places: ${value}`);
-  const sign = match[1] === '-' ? -1n : 1n;
-  return sign * (BigInt(match[2]) * SCALE + BigInt((match[3] || '').padEnd(3, '0')));
-};
-
-export const formatShipmentQuantity = (value: bigint): string => {
-  const sign = value < 0n ? '-' : '';
-  const absolute = value < 0n ? -value : value;
-  return `${sign}${absolute / SCALE}.${String(absolute % SCALE).padStart(3, '0')}`;
-};
+export const parseShipmentQuantityToScaledInteger = parseExactQuantityAtoms;
+export const formatShipmentQuantity = formatExactQuantityAtoms;
 
 type PhysicalRowIdentity = { readonly productRowId: string; readonly unit: string };
 type QuantityEvidenceFor<T extends PhysicalRowIdentity> = Omit<ShipmentQuantityEvidence,

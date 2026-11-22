@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import {assertNoUnclosedContinuousWalOwners} from './continuousOnlineWalState';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -11,6 +12,11 @@ import { RECOVERY_FORMAT_VERSION, recoveryCompatibility, RecoveryPackageType } f
 import { RECOVERY_COORDINATION_DIR, RECOVERY_ROOT } from './recoveryRuntime';
 import { publishNotificationEvent } from './notificationService';
 import { decryptPerformanceExportArtifact, encryptPerformanceExportArtifact, performanceExportKeyFromEnvironment, performanceExportStorageDirectory } from './personnelPerformanceDisclosureStore';
+import { verifyRestoredFiles } from './deploymentRestoreEvidence';
+import { verifyRecoveredApplicationPayloads } from './deploymentDrillApplicationKeys';
+import { captureRecoveryBusinessProof, type RecoveryBusinessTableProof } from './deploymentRecoveryDataProof';
+import { adoptRecoveryStagedInquiry, captureInquiryBusinessProof, verifyInquiryTransformation,
+  type InquiryBusinessProof, type InquiryTransformation } from './inquiryMigrationPlan';
 
 const execFileAsync = promisify(execFile);
 const PACKAGES_DIR = path.join(RECOVERY_ROOT, 'packages');
@@ -86,6 +92,18 @@ export type RecoveryManifest = {
   postgresVersion: string;
   sanitized: boolean;
   components: Array<{ path: string; sha256: string; size: number }>;
+};
+
+export const verifyPromotedRecoveryFiles = async (manifest: RecoveryManifest, verifiedErasedPaths: readonly string[] = [],
+  inquiryTransformation?:InquiryTransformation, independentInquiryBusiness?:InquiryBusinessProof) => {
+  let components=manifest.components;
+  if(inquiryTransformation){
+    const originals=components.filter(component=>component.path==='inquiry/inquiry.db');
+    if(originals.length!==1)throw new Error('INQUIRY_TRANSFORMATION_COMPONENT_UNPROVEN');
+    await verifyInquiryTransformation(path.join(INQUIRY_SOURCE_DIR,'inquiry.db'),inquiryTransformation,originals[0],independentInquiryBusiness);
+    components=components.map(component=>component.path==='inquiry/inquiry.db'?{...component,...inquiryTransformation.target}:component);
+  }
+  return verifyRestoredFiles(components,[...FILE_RECOVERY_MAPPINGS,{payloadPath:'inquiry',livePath:INQUIRY_SOURCE_DIR}],verifiedErasedPaths);
 };
 
 const ensureDirectories = async () => {
@@ -509,16 +527,23 @@ export const validateRecoveryPackage = async (input: {
   passphrase: string;
   prisma: PrismaClient;
   verifyRestore?: boolean;
+  verifyApplicationPayloads?: boolean;
+  verifyBusinessData?: boolean;
 }) => {
   await ensureDirectories();
   const jobRoot = await fs.promises.mkdtemp(path.join(WORK_DIR, 'validate-'));
   const archivePath = path.join(jobRoot, 'payload.tar.gz');
   const payloadRoot = path.join(jobRoot, 'payload');
   let stagedDatabase: string | null = null;
+  let businessDataProof: RecoveryBusinessTableProof[] | undefined;
+  let inquiryBusinessProof:InquiryBusinessProof|undefined;
   try {
     await decryptRecoveryArchive(input.sourcePath, archivePath, input.passphrase);
     await fs.promises.mkdir(payloadRoot, { recursive: true });
     await extractRecoveryArchive(archivePath, payloadRoot);
+    // Only this job's fully extracted intermediate is retired. The encrypted
+    // source remains available for checksum verification, retries and recovery.
+    await fs.promises.unlink(archivePath);
     const manifest = JSON.parse(await fs.promises.readFile(path.join(payloadRoot, 'manifest.json'), 'utf8')) as RecoveryManifest;
     if (manifest.format !== 'sabalan-recovery') throw Object.assign(new Error('Invalid recovery manifest.'), { code: 'INVALID_RECOVERY_MANIFEST' });
     if (!['COMPLETE', 'SANITIZED_TEST'].includes(manifest.packageType) || !Array.isArray(manifest.components)) {
@@ -548,6 +573,7 @@ export const validateRecoveryPackage = async (input: {
       if (sqlite.stdout.trim() !== 'ok') {
         throw Object.assign(new Error(`Recovery SQLite integrity check failed: ${sqlite.stdout.trim()}`), { code: 'RECOVERY_SQLITE_INTEGRITY_FAILED' });
       }
+      inquiryBusinessProof=await captureInquiryBusinessProof(path.join(payloadRoot,'inquiry','inquiry.db'));
       stagedDatabase = safeDatabaseName('sabalan_checkpoint_verify');
       await createDatabase(process.env.DATABASE_URL || '', stagedDatabase);
       await restoreDatabase(process.env.DATABASE_URL || '', stagedDatabase, path.join(payloadRoot, 'database', 'main.dump'));
@@ -555,11 +581,13 @@ export const validateRecoveryPackage = async (input: {
       try {
         await stagedClient.$queryRawUnsafe('SELECT 1');
         await validateStoredFileReferences(stagedClient, payloadRoot);
+        if (input.verifyApplicationPayloads) await verifyRecoveredApplicationPayloads(stagedClient);
+        if (input.verifyBusinessData) businessDataProof = await captureRecoveryBusinessProof(stagedClient);
       } finally {
         await stagedClient.$disconnect();
       }
     }
-    return { manifest, compatibility };
+    return { manifest, compatibility, ...(businessDataProof ? { businessDataProof } : {}),...(inquiryBusinessProof?{inquiryBusinessProof}:{}) };
   } finally {
     if (stagedDatabase) await dropDatabase(process.env.DATABASE_URL || '', stagedDatabase);
     await fs.promises.rm(jobRoot, { recursive: true, force: true });
@@ -585,6 +613,7 @@ type RestoreJournal = {
   bootstrapUsername?: string;
   startedAt: string;
   preservePackage?: boolean;
+  inquiryTransformation?:InquiryTransformation;
 };
 
 export const RESTORE_JOURNAL_PATH = path.join(RECOVERY_COORDINATION_DIR, 'pending-restore.json');
@@ -632,6 +661,7 @@ const replaceDirectoryContents = async (source: string, destination: string, saf
 };
 
 export const restoreDirectoryFromSafety = async (safety: string, destination: string) => {
+  assertNoUnclosedContinuousWalOwners(RECOVERY_COORDINATION_DIR);
   if (!fs.existsSync(safety)) return;
   await fs.promises.mkdir(destination, { recursive: true });
   for (const name of await fs.promises.readdir(destination)) {
@@ -806,7 +836,7 @@ const validateStoredFileReferences = async (client: PrismaClient, payloadRoot: s
   }
 };
 
-export const validateLiveStoredFileReferences = async (client: PrismaClient) => {
+export const validateLiveStoredFileReferences = async (client: PrismaClient, dispatchRoot = DISPATCH_DOCUMENT_STORAGE_DIR) => {
   const columns = await client.$queryRawUnsafe<Array<{ tableName: string; columnName: string }>>(`
     SELECT table_name AS "tableName", column_name AS "columnName"
     FROM information_schema.columns
@@ -855,7 +885,37 @@ export const validateLiveStoredFileReferences = async (client: PrismaClient) => 
       details: missingPerformanceExports.slice(0, 25),
     });
   }
-  return { checkedColumns: columns.length, readyPerformanceExports: readyPerformanceExports.length };
+  const dispatchArtifacts = await client.dispatchDocumentArtifact.findMany({
+    select: { id: true, storageKey: true, byteLength: true, sha256: true },
+  });
+  const missingDispatchArtifacts: Array<{ id: string; storageKey: string }> = [];
+  const root = path.resolve(dispatchRoot);
+  for (const artifact of dispatchArtifacts) {
+    const key = String(artifact.storageKey).replace(/\\/g, '/');
+    const candidate = path.resolve(root, key);
+    if (!key.startsWith('dispatch-documents/') || key.split('/').some((part) => !part || part === '.' || part === '..')
+      || !candidate.startsWith(`${root}${path.sep}`)) {
+      missingDispatchArtifacts.push({ id: artifact.id, storageKey: artifact.storageKey });
+      continue;
+    }
+    const [stat, real] = await Promise.all([
+      fs.promises.lstat(candidate).catch(() => null),
+      fs.promises.realpath(candidate).catch(() => null),
+    ]);
+    if (!stat?.isFile() || stat.isSymbolicLink() || !real?.startsWith(`${root}${path.sep}`)
+      || BigInt(stat.size) !== BigInt(artifact.byteLength)
+      || await sha256File(candidate) !== artifact.sha256) {
+      missingDispatchArtifacts.push({ id: artifact.id, storageKey: artifact.storageKey });
+    }
+  }
+  if (missingDispatchArtifacts.length) {
+    throw Object.assign(new Error(`Live storage has missing or corrupt dispatch-document artifacts (${missingDispatchArtifacts.length}).`), {
+      code: 'DEPLOYMENT_DISPATCH_ARTIFACT_MISSING',
+      details: missingDispatchArtifacts.slice(0, 25),
+    });
+  }
+  return { checkedColumns: columns.length, readyPerformanceExports: readyPerformanceExports.length,
+    dispatchArtifacts: dispatchArtifacts.length };
 };
 
 export const stageAndPromoteRecovery = async (input: {
@@ -875,6 +935,7 @@ export const stageAndPromoteRecovery = async (input: {
   preservePackage?: boolean;
   onProgress: (progress: number) => Promise<void>;
 }) => {
+  assertNoUnclosedContinuousWalOwners(RECOVERY_COORDINATION_DIR);
   await ensureDirectories();
   const jobRoot = await fs.promises.mkdtemp(path.join(WORK_DIR, `restore-${input.operationId}-`));
   const archivePath = path.join(jobRoot, 'payload.tar.gz');
@@ -908,6 +969,7 @@ export const stageAndPromoteRecovery = async (input: {
     await decryptRecoveryArchive(input.sourcePath, archivePath, input.passphrase);
     await fs.promises.mkdir(payloadRoot, { recursive: true });
     await extractRecoveryArchive(archivePath, payloadRoot);
+    await fs.promises.unlink(archivePath);
     await input.onProgress(20);
     await createDatabase(process.env.DATABASE_URL || '', stagedDatabase);
     await restoreDatabase(process.env.DATABASE_URL || '', stagedDatabase, path.join(payloadRoot, 'database', 'main.dump'));
@@ -930,6 +992,19 @@ export const stageAndPromoteRecovery = async (input: {
       });
     } finally {
       await stagedClient.$disconnect();
+    }
+    if (input.applyMigrations !== false) {
+      // Source/component verification precedes the owned transformation of a
+      // private SQLite stage. Old-image rollback retains its original schema.
+      if(await sha256File(input.sourcePath)!==input.checksum)throw Object.assign(new Error('Recovery archive changed.'),{code:'RECOVERY_INTEGRITY_FAILED'});
+      const manifest=JSON.parse(await fs.promises.readFile(path.join(payloadRoot,'manifest.json'),'utf8')) as RecoveryManifest;
+      const sqliteComponent=manifest.components.filter(component=>component.path==='inquiry/inquiry.db');
+      const sqliteFile=path.join(payloadRoot,'inquiry','inquiry.db');
+      if(sqliteComponent.length!==1 || (await fs.promises.stat(sqliteFile)).size!==sqliteComponent[0].size
+        || await sha256File(sqliteFile)!==sqliteComponent[0].sha256)throw Object.assign(new Error('Recovery SQLite component changed.'),{code:'RECOVERY_INTEGRITY_FAILED'});
+      const adopted=await adoptRecoveryStagedInquiry({databaseFile:sqliteFile,operationId:input.operationId,checksum:input.checksum,
+        bootstrapPassword:input.packageType==='SANITIZED_TEST'?input.bootstrapPassword:undefined});
+      journal.inquiryTransformation=adopted.transformation;
     }
     await writeRestoreJournal(journal);
     await input.onProgress(50);
@@ -1004,6 +1079,11 @@ export const readRestoreJournal = async (): Promise<RestoreJournal | null> => {
 };
 
 export const finalizePromotedRecovery = async (prisma: PrismaClient, journal: RestoreJournal) => {
+  assertNoUnclosedContinuousWalOwners(RECOVERY_COORDINATION_DIR);
+  if(journal.inquiryTransformation){
+    if(journal.inquiryTransformation.operationId!==journal.operationId||journal.inquiryTransformation.archiveSha256!==journal.checksum)throw new Error('INQUIRY_TRANSFORMATION_JOURNAL_MISMATCH');
+    await verifyInquiryTransformation(path.join(INQUIRY_SOURCE_DIR,'inquiry.db'),journal.inquiryTransformation);
+  }
   const actorExists = await prisma.user.findUnique({ where: { id: journal.actorId }, select: { id: true } });
   const existing = await prisma.recoveryOperation.findUnique({ where: { id: journal.operationId } });
   if (!existing) {
@@ -1080,6 +1160,7 @@ export const finalizePromotedRecovery = async (prisma: PrismaClient, journal: Re
 export const isSanitizedRecoveryEnvironment = () => fs.existsSync(SANITIZED_MARKER_PATH);
 
 export const rollbackInterruptedRecovery = async (journal: RestoreJournal) => {
+  assertNoUnclosedContinuousWalOwners(RECOVERY_COORDINATION_DIR);
   const mappings = [
     ...FILE_RECOVERY_MAPPINGS.map(({ safetyName, livePath }) => [safetyName, livePath] as const),
     ['inquiry', INQUIRY_SOURCE_DIR],
@@ -1093,6 +1174,7 @@ export const rollbackInterruptedRecovery = async (journal: RestoreJournal) => {
 };
 
 export const removeRecoveryPackage = async (source: string, storageName?: string | null) => {
+  assertNoUnclosedContinuousWalOwners(RECOVERY_COORDINATION_DIR);
   if (!storageName) return;
   await fs.promises.rm(recoveryPackagePath(source, storageName), { force: true });
 };

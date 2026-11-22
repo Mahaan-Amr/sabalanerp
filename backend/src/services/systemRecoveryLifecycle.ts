@@ -1,4 +1,5 @@
 import fs from 'fs';
+import { startBackgroundJob } from './backgroundJobLifecycle';
 import { PrismaClient } from '@prisma/client';
 import {
   finalizePromotedRecovery,
@@ -19,7 +20,11 @@ const replayPerformanceErasureFromSafetyDatabase = async (prisma: PrismaClient, 
   return withSystemRecoveryDatabaseClient(safetyDatabase, (safety) => replayPerformanceErasureAfterRestore(prisma, safety));
 };
 
-const recoverInterruptedRestore = async (prisma: PrismaClient) => {
+type RecoveryInitializationOptions = {
+  onVerifiedErasureReplay?: (evidence: Awaited<ReturnType<typeof replayPerformanceErasureAfterRestore>>) => void;
+};
+
+const recoverInterruptedRestore = async (prisma: PrismaClient, options: RecoveryInitializationOptions) => {
   const journal = await readRestoreJournal();
   if (!journal) {
     await fs.promises.rm(INQUIRY_RESTART_MARKER, { force: true });
@@ -37,7 +42,8 @@ const recoverInterruptedRestore = async (prisma: PrismaClient) => {
   const names = new Set(databases.map((row) => row.datname));
   const promoted = journal.phase === 'DATABASE_PROMOTED' || (names.has(journal.safetyDatabase) && !names.has(journal.stagedDatabase));
   if (promoted) {
-    await replayPerformanceErasureFromSafetyDatabase(prisma, journal.safetyDatabase);
+    const replay = await replayPerformanceErasureFromSafetyDatabase(prisma, journal.safetyDatabase);
+    options.onVerifiedErasureReplay?.(replay);
     await finalizePromotedRecovery(prisma, journal);
   }
   else await rollbackInterruptedRecovery(journal);
@@ -82,9 +88,9 @@ const notifyStaleBackup = async (prisma: PrismaClient) => {
   });
 };
 
-export const initializeSystemRecovery = async (prisma: PrismaClient) => {
+export const initializeSystemRecovery = async (prisma: PrismaClient, options: RecoveryInitializationOptions = {}) => {
   try {
-    await recoverInterruptedRestore(prisma);
+    await recoverInterruptedRestore(prisma, options);
     await cleanupExpiredPackages(prisma);
     await notifyStaleBackup(prisma);
   } catch (error) {
@@ -94,10 +100,8 @@ export const initializeSystemRecovery = async (prisma: PrismaClient) => {
 };
 
 export const startSystemRecoveryMaintenance = (prisma: PrismaClient) => {
-  const timer = setInterval(() => {
-    cleanupExpiredPackages(prisma).then(() => notifyStaleBackup(prisma)).catch((error) => {
-      console.error('System recovery maintenance failed:', error);
-    });
-  }, 60 * 60 * 1000);
-  timer.unref();
+  return startBackgroundJob({ name: 'recovery-retention', intervalMs: 60 * 60 * 1000,
+    initialDelayMs: 60 * 60 * 1000,
+    run: async () => { await cleanupExpiredPackages(prisma); await notifyStaleBackup(prisma); },
+  });
 };

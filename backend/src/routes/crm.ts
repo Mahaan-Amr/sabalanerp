@@ -1,3 +1,4 @@
+import { customerActivityCategorySchema, recordCustomerActivityCategory } from '../services/customerActivityCategory';
 import { readPartnerCustomerCrm, mutatePartnerCustomerCrm, readPartnerCustomerContractFinance } from '../services/partnerCustomerCrm';
 import { customerCardVersion, updateAdminPartnerCustomerCard } from '../services/adminPartnerCustomerCard';
 import { canManageCustomerCredit, customerCreditBalance, updateCustomerCreditPolicy, CustomerCreditError } from '../services/specialCustomerCredit';
@@ -72,7 +73,7 @@ export const customerScopeForActor = (input: { userId: string; role: string; can
 };
 
 export function managedCustomerResponse<T extends Record<string, any>>(customer: T, canManageCustomerCard = false) {
-  const keys = ['id', 'firstName', 'lastName', 'companyName', 'customerType', 'trustCategory', 'status', 'nationalCode',
+  const keys = ['id', 'firstName', 'lastName', 'companyName', 'customerType', 'activityCategory', 'trustCategory', 'status', 'nationalCode',
     'homeAddress', 'homeNumber', 'workAddress', 'workNumber', 'brandName', 'brandNameDescription', 'industry', 'address', 'city', 'country',
     'projectManagerName', 'projectManagerNumber', 'referrerFirstName', 'referrerLastName', 'referrerPhoneNumber',
     'isBlacklisted', 'isLocked', 'isActive', 'createdAt', 'updatedAt', 'ownerUserId', 'ownerUser',
@@ -1135,6 +1136,7 @@ router.post('/customers', protect, ordinaryCustomerCreationGuard(prisma), requir
   body('firstName').notEmpty().withMessage('First name is required'),
   body('lastName').notEmpty().withMessage('Last name is required'),
   body('customerType').notEmpty().withMessage('Customer type is required'),
+  body('activityCategory').custom(value => customerActivityCategorySchema.safeParse(value).success).withMessage('دسته‌بندی فعالیت مشتری الزامی است؛ یکی از گزینه‌ها را انتخاب کنید.'),
   body('nationalCode').optional().custom((value, { req }) => {
     const normalized = typeof value === 'string' ? normalizeDigits(value) : '';
     const expectedLength = req.body?.customerType === 'Individual' ? 10 : 11;
@@ -1170,6 +1172,7 @@ router.post('/customers', protect, ordinaryCustomerCreationGuard(prisma), requir
       lastName,
       companyName,
       customerType,
+      activityCategory,
       industry,
       status,
       
@@ -1287,6 +1290,7 @@ router.post('/customers', protect, ordinaryCustomerCreationGuard(prisma), requir
             lastName,
             companyName,
             customerType,
+            activityCategory,
             industry,
             status: status || 'Active',
         
@@ -1382,6 +1386,7 @@ router.post('/customers', protect, ordinaryCustomerCreationGuard(prisma), requir
             }
           });
         }
+        await recordCustomerActivityCategory(tx, created.id, req.user.id, null, activityCategory);
         return created;
       });
     } catch (prismaError: any) {
@@ -1425,6 +1430,7 @@ router.post('/customers', protect, ordinaryCustomerCreationGuard(prisma), requir
 // @route   PUT /api/crm/customers/:id
 // @access  Private/CRM Workspace
 router.put('/customers/:id', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOMERS_EDIT, FEATURES.SALES_CUSTOMERS_EDIT], FEATURE_PERMISSIONS.EDIT), [
+  body('activityCategory').custom(value => customerActivityCategorySchema.safeParse(value).success).withMessage('دسته‌بندی فعالیت مشتری الزامی است؛ یکی از گزینه‌ها را انتخاب کنید.'),
   body('firstName').optional({ values: 'null' }).custom((value) => {
     if (value !== undefined && !normalizeNullableText(value)) {
       throw new Error('First name cannot be empty');
@@ -1532,17 +1538,19 @@ router.put('/customers/:id', protect, requireAnyFeatureAccess([FEATURES.CRM_CUST
       return;
     }
 
-    const updatedCustomer = await prisma.crmCustomer.update({
-      where: { id: req.params.id },
-      data: {
-        ...updateData,
-        updatedBy: req.user.id
-      },
-      include: {
-        primaryContact: true,
-        contacts: true
-      }
+    const updatedCustomer = await prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM crm_customers WHERE id = ${req.params.id} FOR UPDATE`;
+      const current = await tx.crmCustomer.findUniqueOrThrow({ where: { id: req.params.id } });
+      if (!(await ensureOwnershipOrDeny(req, res, current, 'update_customer'))) return null;
+      const updated = await tx.crmCustomer.update({
+        where: { id: req.params.id },
+        data: { ...updateData, activityCategory: bodyPayload.activityCategory, updatedBy: req.user.id },
+        include: { primaryContact: true, contacts: true }
+      });
+      await recordCustomerActivityCategory(tx, current.id, req.user.id, current.activityCategory, bodyPayload.activityCategory);
+      return updated;
     });
+    if (!updatedCustomer) return;
 
     res.json({
       success: true,

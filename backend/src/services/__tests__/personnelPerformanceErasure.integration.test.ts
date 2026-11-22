@@ -19,6 +19,8 @@ import { raceEvidenceMarker, runOrderedPerformanceRace } from './performanceAcce
 
 const main = async () => {
   const database = await createDispatchDocumentsTemporaryDatabase({
+    schemaOnly: true,
+    referenceDataTables: ['hr_workspace_catalogs', 'hr_feature_catalogs', 'performance_disclosure_revision'],
     repositoryRoot: path.resolve(process.cwd(), '..'),
     sourceDatabaseUrl: process.env.DATABASE_URL
       ?? 'postgresql://postgres:sabalanerp-local-only@127.0.0.1:55432/sabalanerp?connection_limit=4&pool_timeout=10',
@@ -119,6 +121,11 @@ const main = async () => {
       assert.equal(await tx.performanceDraft.count({ where: { id: draftId } }), 0);
       assert.equal(await tx.performanceEncryptedPayload.count({ where: { id: draftPayload.id } }), 0);
       assert.equal(await tx.performanceDeletionReceipt.count({ where: { deletedRecordId: { in: [draftId, draftPayload.id] } } }), 2);
+      const backupCopiesBeforeExpiry = await tx.performanceRecoverableCopy.count({ where: { operationId: operation.id, location: 'INDEPENDENT_BACKUP' } });
+      assert.equal((await executePerformanceErasureOperation(tx, operation.id, new Date('2027-01-02Z'))).status,
+        'LIVE_ERASED_BACKUP_PENDING', 'elapsed retention is not evidence that retained backup bytes were removed');
+      assert.equal(await tx.performanceRecoverableCopy.count({ where: { operationId: operation.id, location: 'INDEPENDENT_BACKUP' } }),
+        backupCopiesBeforeExpiry, 'the clock cannot invent a physical backup erasure receipt');
       const replay = await executePerformanceErasureOperation(tx, operation.id, new Date('2026-09-10Z'));
       assert.equal(replay.id, operation.id, 'a retry reuses the stable operation without duplicate deletion');
       const backupHold = await placePerformanceLegalHold(tx, { actorUserId: actor.id, aggregateType: 'EVALUATION',
@@ -136,6 +143,13 @@ const main = async () => {
       await recordPerformanceRecoverableCopy(tx, { actorUserId: actor.id, operationId: operation.id, location: 'INDEPENDENT_BACKUP',
         copyKey: `${suffix}:backup`, status: 'ERASED', evidenceHash: canonicalPerformanceHash({ suffix, backup: 'expired' }) });
       assert.equal((await tx.performanceErasureOperation.findUniqueOrThrow({ where: { id: operation.id } })).status, 'COMPLETED');
+      await recordPerformanceRecoverableCopy(tx, { actorUserId: actor.id, operationId: operation.id, location: 'INDEPENDENT_BACKUP',
+        copyKey: `${suffix}:backup`, status: 'UNKNOWN', evidenceHash: canonicalPerformanceHash({ suffix, backup: 'unproven-new-observation' }) });
+      const uncertainBackup = await tx.performanceErasureOperation.findUniqueOrThrow({ where: { id: operation.id } });
+      assert.equal(uncertainBackup.status, 'LIVE_ERASED_BACKUP_PENDING');
+      assert.equal(uncertainBackup.completedAt, null, 'new uncertainty must withdraw the completion claim');
+      await recordPerformanceRecoverableCopy(tx, { actorUserId: actor.id, operationId: operation.id, location: 'INDEPENDENT_BACKUP',
+        copyKey: `${suffix}:backup`, status: 'ERASED', evidenceHash: canonicalPerformanceHash({ suffix, backup: 'reverified-erased' }) });
       await tx.performanceEncryptedPayload.create({ data: checkpointPayload });
       await tx.performanceDraft.create({ data: checkpointDraft });
       const receiptCountBeforeReplay = await tx.performanceDeletionReceipt.count({ where: { deletedRecordId: { in: [draftId, draftPayload.id] } } });

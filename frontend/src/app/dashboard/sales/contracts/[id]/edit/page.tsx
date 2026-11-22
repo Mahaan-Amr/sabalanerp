@@ -13,7 +13,7 @@ import {
   contractCorrectionBannerTitle,
   contractCorrectionCategoryLabel,
 } from '@/features/contract-creation/services/contractCorrectionPresentation';
-import { readPartnerCases } from '@/features/partner-sales/cases/partnerCaseHttpPort';
+import { readPartnerCaseEditorEntry } from '@/features/partner-sales/cases/partnerCaseHttpPort';
 import { resolvePartnerContractRoute } from '@/features/partner-sales/cases/partnerContractRouting';
 import { assertSuccessfulSalesResponse, getSalesOperationalErrorKind, getSalesOperationalErrorMessage } from '@/features/sales/salesOperationalError';
 
@@ -92,8 +92,8 @@ export default function SalesContractEditPage() {
         const partner = resolvePartnerContractRoute(nextContract);
         if (partner.kind !== 'ordinary') {
           if (partner.kind === 'partner') {
-            const row = (await readPartnerCases(partner.caseId))[0];
-            if (row?.actions.canContinue && row.editRecovery) {
+            const row = await readPartnerCaseEditorEntry(partner.caseId);
+            if (row.canContinue && row.editRecovery) {
               router.replace(`/dashboard/sales/contracts/create?caseId=${encodeURIComponent(partner.caseId)}&draftId=${encodeURIComponent(row.editRecovery.recoveryId)}&baseRevision=${row.editRecovery.baseRevision}`);
             } else router.replace(`/dashboard/sales/contracts/${contractId}`);
           }

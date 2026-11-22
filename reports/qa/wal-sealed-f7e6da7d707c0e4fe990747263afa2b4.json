@@ -1,0 +1,56 @@
+{
+  "localWalSealPassed": true,
+  "captureReport": "reports/qa/wal-receiver-f7e6da7d707c0e4fe990747263afa2b4.json",
+  "captureReportSha256": "0834823d12f657ec40170affeb5aaec76345fc5c19afcff32087b84f45bc91fc",
+  "sealed": {
+    "format": "sabalan-wal-seal/v1",
+    "phase": "SEALED",
+    "namespace": "sabalan-wal-f7e6da7d707c0e4fe990747263afa2b4",
+    "captureSha256": "9582af1f66d59194abde252b5d0e17ae03481365a6a675a9ac4d27ef82c45baa",
+    "independentPublicKeySha256": "455e5a7ba5990866ca6992c0fd177fa0df5b22b5d3e985c41ee306e3a779b8af",
+    "range": {
+      "startLsn": "C/5D000028",
+      "endLsn": "C/5E000000",
+      "timeline": 1,
+      "segmentBytes": 16777216
+    },
+    "source": {
+      "currentLsn": "C/5D000028",
+      "databaseName": "sabalanerp_concurrency_f7e6da7d707c0e4f",
+      "databaseOid": "19159494",
+      "prepared": 0,
+      "segmentBytes": 16777216,
+      "sessions": 0,
+      "systemIdentifier": "7667464637415309346",
+      "timeline": 1,
+      "version": "150018",
+      "visible": true
+    },
+    "objects": [
+      {
+        "name": "capture.sabrec",
+        "rawSha256": "9582af1f66d59194abde252b5d0e17ae03481365a6a675a9ac4d27ef82c45baa",
+        "rawBytes": 801,
+        "encryptedSha256": "7f4940176d3d5cbf213b5bd511cef1484303664e08792a6dc908525e6e0cf736",
+        "encryptedBytes": 1941,
+        "localDecryptVerified": true
+      },
+      {
+        "name": "000000010000000C0000005D.sabrec",
+        "rawSha256": "3f3c2e6c6aa9a6b76eeff799b765231efd20ec39b545b7e8c871583aba02e1e0",
+        "rawBytes": 16777216,
+        "encryptedSha256": "1c5ce85be3b66fbb7fc72365ef7d3701392804d23f5b35bc091c8098c479e8a9",
+        "encryptedBytes": 16778356,
+        "localDecryptVerified": true
+      }
+    ]
+  },
+  "helperSha256": "5451b21cc8b982017b18fb680e38974628191c699cff60f485560348e23f2764",
+  "coverageSha256": "48df49e800b2d01f3d427b4d93d9b22beeb6189bae3c30face06a47f6c5718e5",
+  "fixtureSha256": "b3fcac29fa52b15cbc034db0d5a4c672005c95b1a9cefe7db1b383383454ecdd",
+  "limits": [
+    "local rollback key is retained private test authority, not production key",
+    "independent RSA decryption and remote equality still required",
+    "not a continuous coherent recovery point or release admission"
+  ]
+}

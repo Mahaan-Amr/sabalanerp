@@ -133,7 +133,7 @@ export type ApprovedPricingSource = {
           rawValue: string;
           sealedValue: string;
           unit: string;
-          rule: 'LEGACY_GRAPH_V1_ROUND_HALF_UP_SCALE_THREE';
+          rule: 'LEGACY_GRAPH_V1_ROUND_HALF_UP_SCALE_THREE' | 'SLAB_EXACT_ACCOUNTING_AREA_V1';
         }[];
         stairLayerPricingRecoveries?: readonly {
           productRowId: string;

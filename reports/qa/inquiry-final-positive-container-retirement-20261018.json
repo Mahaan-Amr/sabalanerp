@@ -1,0 +1,9 @@
+{
+  "candidate": "ed0eae3445504b38c335a40c9c3cc4cc239d5d6ddcaf2e3780a0e523dd865bd7",
+  "closedProof": "reports/qa/inquiry-retired-577d091a5aed614d60597291c0554888.json",
+  "census": "reports/qa/inquiry-fleet-69152716d935fd39651969b217aea631.json",
+  "removedOnlyExitedOwnedContainer": true,
+  "force": false,
+  "volumesRemoved": false,
+  "scopeAndNativeRecordsRetained": true
+}

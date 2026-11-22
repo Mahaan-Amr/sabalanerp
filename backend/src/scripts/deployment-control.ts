@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import {validateBinding,canonical,type PreservedClamavBinding} from '../../scripts/preserved-clamav-policy.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { disconnectDatabase, prisma } from '../lib/prisma';
@@ -17,6 +18,8 @@ import {
   readDeploymentMaintenance,
 } from '../services/deploymentMaintenance';
 import { RECOVERY_COORDINATION_DIR } from '../services/recoveryRuntime';
+import { assertProtectedBootstrapBoundary, compileProtectedBootstrapSource, runProtectedBootstrapBaseline } from '../services/protectedBootstrapMigrations';
+import { assertBootstrapNativeCompletion } from '../services/protectedBridgeMigrations';
 
 const REPORT_DIR = process.env.DEPLOYMENT_REPORT_DIR || '/app/deployment-reports';
 const SESSION_PATH = path.join(REPORT_DIR, 'active-deployment-session.json');
@@ -32,7 +35,10 @@ type Session = {
   phase: DeploymentPhase;
   bootstrap: boolean;
   controlImage: string;
-  rollbackReleaseSet: Record<'backend' | 'frontend' | 'inquiry' | 'nginx' | 'postgres' | 'clamav', string>;
+  preservedClamav?: PreservedClamavBinding;
+  clamavOperation?: 'repair' | 'incident-recovery';
+  clamavIncidentSnapshotSha256?: string;
+  rollbackReleaseSet: Record<'backend' | 'frontend' | 'inquiry' | 'nginx' | 'postgres', string> & { clamav?: string };
   rollbackPerformanceEnvironment?: Record<string, string>;
 };
 
@@ -42,7 +48,32 @@ const required = (name: string) => {
   return value;
 };
 
-const readSession = async (): Promise<Session> => JSON.parse(await fs.promises.readFile(SESSION_PATH, 'utf8')) as Session;
+const preservationMetadataName = (deploymentId: string) => {
+  if (!/^[a-zA-Z0-9_-]{1,160}$/.test(deploymentId)) throw new Error('Invalid scanner preservation deployment identity.');
+  return `preserved-clamav-${deploymentId}.json`;
+};
+const environmentPreservation = (): PreservedClamavBinding | undefined => {
+  const hex = process.env.DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX;
+  if (!hex) return undefined;
+  if (!/^(?:[a-f0-9]{2}){1,16384}$/.test(hex)) throw new Error('Invalid scanner preservation metadata.');
+  return validateBinding(JSON.parse(Buffer.from(hex, 'hex').toString('utf8')));
+};
+const readSession = async (): Promise<Session> => {
+  const session = JSON.parse(await fs.promises.readFile(SESSION_PATH, 'utf8')) as Session;
+  const binding = environmentPreservation();
+  if (session.preservedClamav || binding) {
+    if (!session.preservedClamav || !binding || canonical(validateBinding(session.preservedClamav)) !== canonical(binding)) throw new Error('Scanner preservation session binding changed.');
+    const name = preservationMetadataName(session.deploymentId);
+    for (const directory of [REPORT_DIR, RECOVERY_COORDINATION_DIR]) {
+      const file = path.join(directory, name);
+      const st = await fs.promises.lstat(file);
+      if (!st.isFile() || st.isSymbolicLink() || st.uid !== 0 || st.nlink !== 1 || (st.mode & 0o077)) throw new Error('Invalid scanner preservation recovery metadata.');
+      const metadata = JSON.parse(await fs.promises.readFile(file, 'utf8'));
+      if (canonical(validateBinding(metadata)) !== canonical(binding)) throw new Error('Scanner preservation recovery metadata changed.');
+    }
+  }
+  return session;
+};
 const writeSession = async (session: Session, createOnly = false) => {
   await fs.promises.mkdir(REPORT_DIR, { recursive: true });
   const temporary = `${SESSION_PATH}.${process.pid}.tmp`;
@@ -69,6 +100,12 @@ const journal = async (session: Session, event: string, details?: Record<string,
   });
 
 const prepare = async () => {
+  const clamavOperation = process.env.DEPLOYMENT_CLAMAV_OPERATION || 'repair';
+  if (!['repair', 'incident-recovery'].includes(clamavOperation)) throw new Error('Unknown ClamAV operation.');
+  const incidentSha = process.env.DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256;
+  if (clamavOperation === 'incident-recovery' && (process.env.DEPLOYMENT_CLAMAV_REPAIR !== 'true' || !/^[a-f0-9]{64}$/.test(incidentSha || ''))) {
+    throw new Error('Incident recovery requires an explicitly bound degraded-instance snapshot.');
+  }
   const rollbackPerformanceEnvironment = JSON.parse(process.env.DEPLOYMENT_PREVIOUS_PERFORMANCE_ENVIRONMENT || '{}');
   const identityKey = /^PERFORMANCE_(RELEASE_(COMMIT|SOURCE_HASH|SCHEMA_HASH|POLICY_HASH|INFRASTRUCTURE_HASH|BACKEND_IMAGE|FRONTEND_IMAGE|INQUIRY_IMAGE)|RUNTIME_INFRASTRUCTURE_HASH)$/;
   if (!rollbackPerformanceEnvironment || typeof rollbackPerformanceEnvironment !== 'object' || Array.isArray(rollbackPerformanceEnvironment)
@@ -76,6 +113,8 @@ const prepare = async () => {
       || typeof value !== 'string' || (value !== '' && !/^(sha256:)?[a-f0-9]{40,64}$/.test(value)))) {
     throw new Error('Invalid previous performance runtime identity.');
   }
+  const preservedClamav = environmentPreservation();
+  if (preservedClamav && (process.env.DEPLOYMENT_CLAMAV_REPAIR === 'true' || clamavOperation === 'incident-recovery')) throw new Error('Scanner preservation cannot perform repair.');
   const session: Session = {
     deploymentId: process.env.DEPLOYMENT_ID || `deploy-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
     leaseToken: crypto.randomBytes(32).toString('hex'),
@@ -85,19 +124,36 @@ const prepare = async () => {
     phase: 'PREFLIGHT',
     bootstrap: false,
     controlImage: required('DEPLOYMENT_CONTROL_IMAGE'),
+    clamavOperation: clamavOperation as 'repair' | 'incident-recovery',
+    ...(clamavOperation === 'incident-recovery' ? { clamavIncidentSnapshotSha256: incidentSha } : {}),
     rollbackPerformanceEnvironment,
+    ...(preservedClamav ? {preservedClamav} : {}),
     rollbackReleaseSet: {
       backend: required('DEPLOYMENT_PREVIOUS_BACKEND_IMAGE'),
       frontend: required('DEPLOYMENT_PREVIOUS_FRONTEND_IMAGE'),
       inquiry: required('DEPLOYMENT_PREVIOUS_INQUIRY_IMAGE'),
       nginx: required('DEPLOYMENT_PREVIOUS_NGINX_IMAGE'),
       postgres: required('DEPLOYMENT_PREVIOUS_POSTGRES_IMAGE'),
-      clamav: required('DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE'),
+      ...(process.env.DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE ? { clamav: required('DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE') } : {}),
     },
   };
+  if (preservedClamav) {
+    const name = preservationMetadataName(session.deploymentId);
+    for (const directory of [REPORT_DIR, RECOVERY_COORDINATION_DIR]) {
+      await fs.promises.mkdir(directory, {recursive: true});
+      const handle = await fs.promises.open(path.join(directory, name), 'wx', 0o600);
+      try { await handle.writeFile(canonical(preservedClamav)); await handle.sync(); } finally { await handle.close(); }
+      const parent = await fs.promises.open(directory, 'r');
+      try { await parent.sync(); } finally { await parent.close(); }
+    }
+  }
   await writeSession(session, true);
   await fs.promises.rm(JOURNAL_PATH, { force: true });
-  await journal(session, 'deployment-prepared');
+  await journal(session, 'deployment-prepared', {
+    clamavOperation: session.clamavOperation,
+    ...(preservedClamav ? {preservedClamav} : {}),
+    ...(session.clamavIncidentSnapshotSha256 ? { clamavIncidentSnapshotSha256: session.clamavIncidentSnapshotSha256 } : {}),
+  });
   return session;
 };
 
@@ -130,7 +186,21 @@ const main = async () => {
   }
 
   const session = await readSession();
-  if (command === 'cancel-preflight') {
+  if (command === 'incident-boundary-state') {
+    if (session.clamavOperation !== 'incident-recovery' || session.deploymentId !== required('DEPLOYMENT_ID')
+      || session.clamavIncidentSnapshotSha256 !== required('DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256')) {
+      throw new Error('Incident boundary inspection requires its exact prepared operation.');
+    }
+    const maintenance = await readDeploymentMaintenance(RECOVERY_COORDINATION_DIR);
+    if (maintenance && maintenance.deploymentId !== session.deploymentId) throw new Error('A different operation owns maintenance.');
+    const entries = await validateDeploymentHostJournal(JOURNAL_PATH);
+    if (!entries.length || entries[0].event !== 'deployment-prepared' || entries.some(entry => entry.deploymentId !== session.deploymentId)) {
+      throw new Error('Incident boundary history is missing or belongs to another operation.');
+    }
+    const protectedBoundary = Boolean(maintenance) || !['PREFLIGHT', 'LEASE_ACQUIRED', 'MAINTENANCE_REQUESTED'].includes(session.phase)
+      || entries.some(entry => entry.event === 'maintenance-activated');
+    console.log(protectedBoundary ? 'PROTECTED' : 'PRE_MAINTENANCE');
+  } else if (command === 'cancel-preflight') {
     if (session.phase !== 'PREFLIGHT') {
       throw Object.assign(new Error('Only an owned pre-lease session may be cancelled locally.'), { code: 'DEPLOYMENT_PREFLIGHT_CANCEL_DENIED' });
     }
@@ -166,12 +236,30 @@ const main = async () => {
     await writeSession(session);
     await journal(session, 'initial-schema-bootstrap-using-host-and-advisory-leases');
     console.log(JSON.stringify({ ok: true, session }));
-  } else if (command === 'bootstrap-adopt') {
-    if (!session.bootstrap || session.phase !== 'MIGRATIONS_APPLIED') {
+  } else if (command === 'bootstrap-migrate-baseline' || command === 'bootstrap-adopt') {
+    if (!session.bootstrap || session.phase !== 'MUTATION_STARTED') {
       throw Object.assign(new Error('Bootstrap journal can only be adopted immediately after the deployment-control migration.'), { code: 'DEPLOYMENT_BOOTSTRAP_DENIED' });
     }
-    const checkpointPath = path.join(RECOVERY_COORDINATION_DIR, 'deployment-checkpoint.json');
-    const checkpointJson = JSON.parse(await fs.promises.readFile(checkpointPath, 'utf8'));
+    const checkpointJson = assertProtectedBootstrapBoundary(session);
+    if (command === 'bootstrap-migrate-baseline') {
+      await runProtectedBootstrapBaseline(session);
+      await journal(session, 'historical-baseline-applied-before-owned-bridge');
+      console.log(JSON.stringify({ ok: true }));
+      return;
+    }
+    const completion = assertBootstrapNativeCompletion(RECOVERY_COORDINATION_DIR);
+    if (!completion || completion.deploymentId !== session.deploymentId || completion.releaseId !== session.releaseId
+      || completion.nativeStatus !== 0 || completion.failed !== false) {
+      throw Object.assign(new Error('Bootstrap native completion requires inspection.'), { code: 'BOOTSTRAP_NATIVE_COMPLETION_UNPROVEN' });
+    }
+    const baseline = compileProtectedBootstrapSource(path.resolve(__dirname, '../../prisma/migrations'));
+    const history = await prisma.$queryRaw<Array<{ name: string; checksum: string; finished: Date | null }>>`
+      SELECT migration_name AS name,checksum,finished_at AS finished FROM public._prisma_migrations WHERE rolled_back_at IS NULL`;
+    if (history.length !== baseline.length || new Set(history.map(row => row.name)).size !== baseline.length
+      || history.some(row => !row.finished || !baseline.some(source => source.name === row.name
+        && crypto.createHash('sha256').update(source.bytes).digest('hex') === row.checksum))) {
+      throw Object.assign(new Error('Bootstrap baseline history requires inspection.'), { code: 'DEPLOYMENT_BOOTSTRAP_HISTORY_UNPROVEN' });
+    }
     await prisma.deploymentOperation.create({
       data: {
         id: session.deploymentId,

@@ -1,0 +1,105 @@
+import pathlib,json,hashlib,base64,uuid,subprocess
+repo=pathlib.Path('C:/Users/mahan/.codex/worktrees/online-deployment/sabalanerp')
+def result(name):return json.loads(json.loads((repo/'reports/qa'/name).read_text())['stdout'])
+success=result('native-production-base-98b8b8d122ff42b990376b69eba155f9.json');failure=result('failed-base-closure-8ae28338850c4adf802757bc56055c6a.json')
+assert success['nativePostgresRestoreVerified'] and success['nativeProcessClosureVerified'] and failure['locksReacquired']
+read=json.loads((repo/'reports/qa/owned-closed-base-drill-storage-readonly-743a897dce5b4b37bca5d34251128d41.json').read_text());observed=json.loads(read['stdout']);assert read['exitCode']==0
+child=pathlib.Path('D:/sabalanerp-online-qa/retire-closed-production-base-derived-files-20261018.py').read_bytes()
+guard=pathlib.Path('D:/sabalanerp-online-qa/closed-base-mount-guard-20261018.py').read_bytes()
+spec={'operation':'retire-derived-base-'+uuid.uuid4().hex,'success':success,'failure':failure,'observed':observed,'child':base64.b64encode(child).decode(),'childSha256':hashlib.sha256(child).hexdigest(),'guard':base64.b64encode(guard).decode(),'guardSha256':hashlib.sha256(guard).hexdigest()}
+remote=r'''import os,pathlib,json,stat,fcntl,subprocess,hashlib,base64,time,shutil,pwd
+P=pathlib.Path;spec=json.loads(INPUT);os.umask(0o077)
+private=P('/root/sabalan-recovery-private');qa=private/'native-qa';work=P(spec['observed']['root']);root=work/spec['operation'];active=qa/'derived-base-cleanup-active.json';mutated=False;closed=False
+def require(v,c):
+ if not v:raise RuntimeError(c)
+def sync(p):
+ fd=os.open(p,os.O_RDONLY|os.O_NOFOLLOW)
+ try:os.fsync(fd)
+ finally:os.close(fd)
+def write(p,b,mode=0o400):
+ with p.open('xb') as f:os.fchmod(f.fileno(),mode);f.write(b);f.flush();os.fsync(f.fileno())
+ sync(p.parent)
+def save(p,v):write(p,json.dumps(v,indent=2).encode())
+def regular(p,owners={0}):
+ s=p.lstat();require(p.resolve(strict=True)==p and stat.S_ISREG(s.st_mode) and s.st_uid in owners and s.st_nlink==1 and not s.st_mode&0o022,'UNSAFE_FILE');return [s.st_dev,s.st_ino,s.st_uid,s.st_size,s.st_mtime_ns,s.st_ctime_ns]
+def sha(p,owners={0}):
+ before=regular(p,owners);h=hashlib.sha256()
+ with p.open('rb') as f:
+  while b:=f.read(1048576):h.update(b)
+ require(regular(p,owners)==before,'FILE_CHANGED');return h.hexdigest()
+def docker(*args):return subprocess.check_output(['docker',*args],text=True,timeout=30)
+def foreign():
+ ids=docker('ps','-q').split();rows=json.loads(docker('inspect',*ids)) if ids else []
+ return sorted([{'id':v['Id'],'image':v['Image'],'startedAt':v['State']['StartedAt']} for v in rows if (v['Config'].get('Labels') or {}).get('com.docker.compose.project')!='sabalanerp-backup-drill'],key=lambda v:v['id'])
+def mutate(args,token):
+ global mutated
+ save(root/(token+'-intent.json'),{'arguments':args,'phase':'ACTIVE'});mutated=True
+ # Only new control output is allocated. Deleted sibling trees are deliberately
+ # outside the nftw guard root, so deletion cannot race its own storage walk.
+ env=dict(os.environ,SABALAN_NATIVE_STORAGE_ROOT=str(root),SABALAN_NATIVE_STORAGE_MAX_BYTES=str(64*1024**2),SABALAN_NATIVE_STORAGE_RESERVE_BYTES=str(1024**3))
+ p=subprocess.Popen([str(owner),'300',token,*args],env=env,pass_fds=(9,8),stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
+ birth=P('/proc/'+str(p.pid)+'/stat').read_text().rsplit(') ',1)[1].split()[19];save(root/(token+'-native-start.json'),{'pid':p.pid,'startTicks':birth,'bootId':intent['bootId']})
+ output=bytearray()
+ with (root/(token+'.log')).open('xb') as f:
+  while chunk:=p.stdout.read(65536):
+   require(len(output)+len(chunk)<=2*1024**2,'NATIVE_OUTPUT_BOUND');output.extend(chunk);f.write(chunk)
+  status=p.wait();f.flush();os.fsync(f.fileno())
+ require(output.endswith(('\nSABALAN_NATIVE_REAPED '+token+' '+str(status)+'\n').encode()),'NATIVE_COMPLETION_UNPROVEN')
+ save(root/(token+'-native-completion.json'),{'status':status,'outputSha256':hashlib.sha256(output).hexdigest()});require(status==0,'NATIVE_CLEANUP_FAILED');return bytes(output)
+try:
+ for p,mask in [(private,0o077),(qa,0o022),(work,0o077)]:
+  s=p.lstat();require(p.resolve(strict=True)==p and stat.S_ISDIR(s.st_mode) and s.st_uid==0 and not s.st_mode&mask,'UNSAFE_ROOT')
+ require(work.parent==qa,'WORK_ROOT_INVALID');lockfds=[]
+ for item in spec['failure']['originalLockIdentities']:
+  p=P(item['path']);before=regular(p);require(before[:2]==[item['device'],item['inode']],'ORIGINAL_LOCK_CHANGED');fd=os.open(p,os.O_RDWR|os.O_NOFOLLOW);require([os.fstat(fd).st_dev,os.fstat(fd).st_ino]==before[:2],'LOCK_CHANGED');saved=fcntl.fcntl(fd,fcntl.F_DUPFD_CLOEXEC,20);os.close(fd);lockfds.append((saved,item['fd']))
+ require(sorted(t for f,t in lockfds)==[8,9],'LOCK_SET_INVALID')
+ for fd,target in lockfds:os.dup2(fd,target,inheritable=True);fcntl.flock(target,fcntl.LOCK_EX|fcntl.LOCK_NB)
+ for parent in [private,qa]:
+  for n in ['production-base-active.json','coherent-component-active.json','derived-base-cleanup-active.json','derived-mount-regression-active.json']:require(not os.path.lexists(parent/n),'ACTIVE_DRILL_EXISTS')
+ before=foreign();owner=qa/'native-owner-storage-final-20261017/owner';require(sha(owner)=='c2b096894f7bdf920881c668deca48b1b7afedc4267956ed31e1743ed3687d83','NATIVE_OWNER_CHANGED')
+ successful=P(spec['success']['root']);failed=P(spec['failure']['originalIntent']['root']);require(successful.parent==work and failed.parent==work,'SOURCE_ROOT_CHANGED')
+ require(json.loads((successful/'independent-proof.json').read_text())==spec['success'] and json.loads((failed/(spec['failure']['closureResumptionOperation']+'.json')).read_text())==spec['failure'],'CLOSURE_PROOF_CHANGED')
+ require(json.loads((failed/'closed-failed-owner-intent.json').read_text())==spec['failure']['originalIntent'],'FAILED_OWNER_NOT_CLOSED')
+ require((successful/'closed-owner-intent.json').is_file() and not (successful/'pgdata/postmaster.pid').exists() and not (failed/'pgdata/postmaster.pid').exists(),'POSTGRES_NOT_CLOSED')
+ base=work/'base.tar';base_sha='c4b485ccc756ea48e08a72ea9c8dbdfd00aa9d1a892c63b0788985f699957c09';require(sha(base)==base_sha,'ORIGINAL_BASE_CHANGED')
+ cipher=P('/srv/sabalanerp-recovery/checkpoints/private-base-transfer-57134361821f4d688fcd4712f3bc398a/base.sabrec');owners={0,pwd.getpwnam('sabalan-backup').pw_uid};require(sha(cipher,owners)=='e1e1c633bda9699868d50073adcf3c34d84488e8f070a3455215ce5c7742e8d1','ORIGINAL_CIPHER_CHANGED')
+ image_archive=P('/srv/sabalanerp-recovery/checkpoints/images/6db61fe859b1274c0ba8b0253fd5f6c7bc96f6e3f46b3f868fde4fe44289e89f.docker.tar.gz');archive_identity=regular(image_archive,owners)
+ retained={}
+ for directory in [failed,successful]:
+  retained[str(directory)]={p.name:sha(p) for p in directory.iterdir() if p.is_file() and p.name!='restore-input.tar'}
+ cid=spec['success']['containerId'];require(docker('ps','-aq','--no-trunc','--filter','label=com.docker.compose.project=sabalanerp-backup-drill').split()==[cid],'UNKNOWN_DRILL_CONTAINER')
+ [container]=json.loads(docker('inspect',cid));state=container['State'];native_closed=json.loads((successful/'native-component-closed.json').read_text())
+ require(container['Id']==cid and container['Image']==spec['success']['imageId'] and container['Config']['Labels'].get('sabalan.drill.operation')==successful.name and state['Status']=='exited' and state['ExitCode']==0 and state['Pid']==0 and not state['OOMKilled'] and all(state[k]==v for k,v in native_closed['state'].items()),'EXACT_CONTAINER_NOT_TERMINAL')
+ targets=[]
+ for directory in [failed,successful]:
+  for name in ['pgdata','restore-input.tar']:
+   p=directory/name;s=p.lstat();expected=next(v for v in spec['observed']['knownDerivedDirectories'][directory.name] if v['name']==name)
+   require(p.resolve(strict=True)==p and s.st_dev==work.stat().st_dev and s.st_ino==expected['inode'] and s.st_uid==70,'DERIVED_TARGET_CHANGED')
+   if name=='restore-input.tar':require(sha(p,{70})==base_sha,'DERIVED_INPUT_NOT_EXACT_COPY')
+   parent=p.parent.stat();targets.append({'path':str(p),'identity':[s.st_dev,s.st_ino,s.st_uid,s.st_size,s.st_mtime_ns,s.st_ctime_ns],'parentIdentity':[parent.st_dev,parent.st_ino]})
+ require(shutil.disk_usage(work).free>=1024**3,'CLEANUP_CONTROL_CAPACITY_REQUIRED');available_before=shutil.disk_usage(work).free
+ root.mkdir(mode=0o700);sync(work);child=base64.b64decode(spec['child'],validate=True);require(hashlib.sha256(child).hexdigest()==spec['childSha256'],'CHILD_SOURCE_CHANGED');write(root/'cleanup.py',child);guard=base64.b64decode(spec['guard'],validate=True);require(hashlib.sha256(guard).hexdigest()==spec['guardSha256'],'GUARD_SOURCE_CHANGED');write(root/'mount_guard.py',guard);save(root/'cleanup-plan.json',{'work':str(work),'targets':targets})
+ intent={'operation':spec['operation'],'root':str(root),'pid':os.getpid(),'startTicks':P('/proc/self/stat').read_text().rsplit(') ',1)[1].split()[19],'bootId':P('/proc/sys/kernel/random/boot_id').read_text().strip(),'phase':'RETIRE_EXACT_CLOSED_DERIVED_COPIES','containerId':cid,'targets':targets,'force':False,'healthyApplicationPoint':False,'publicOnlineAdmission':False}
+ save(active,intent)
+ mutate(['docker','rm',cid],'retire-container');require(not docker('ps','-aq','--no-trunc','--filter','label=com.docker.compose.project=sabalanerp-backup-drill').strip(),'DRILL_CONTAINER_REMAINS')
+ mutate(['python3','-I','-B',str(root/'cleanup.py'),str(root)],'remove-derived-copies')
+ require(all(not os.path.lexists(v['path']) for v in targets),'DERIVED_COPY_REMAINS')
+ for directory,files in retained.items():
+  for name,value in files.items():require(sha(P(directory)/name)==value,'RECOVERY_EVIDENCE_CHANGED')
+ require(sha(base)==base_sha and sha(cipher,owners)=='e1e1c633bda9699868d50073adcf3c34d84488e8f070a3455215ce5c7742e8d1' and regular(image_archive,owners)==archive_identity,'PROTECTED_SOURCE_CHANGED')
+ require(json.loads(docker('image','inspect',spec['success']['imageId']))[0]['Id']==spec['success']['imageId'],'RESTORE_IMAGE_LOST')
+ after=foreign();available_after=shutil.disk_usage(work).free;result={'operation':spec['operation'],'root':str(root),'removedContainerId':cid,'removedWithoutForce':True,'removedDerivedCopies':[v['path'] for v in targets],'nativeClosureVerified':True,'originalBaseAndCipherFullReadbackVerified':True,'allProofFilesRetained':True,'legacyImageArchiveIdentityRetained':True,'restoreImageRetained':True,'foreignBefore':before,'foreignAfter':after,'foreignIdentitiesUnchanged':before==after,'availableBeforeBytes':available_before,'availableAfterBytes':available_after,'observedReclaimedBytes':available_after-available_before,'healthyApplicationPoint':False,'publicOnlineAdmission':False}
+ save(root/'cleanup-proof.json',result);require(json.loads(active.read_text())==intent,'ACTIVE_INTENT_CHANGED');os.rename(active,root/'closed-owner-intent.json');sync(root);sync(qa);closed=True
+ print(json.dumps(result));raise SystemExit(0 if before==after else 1)
+except BaseException:
+ if mutated and not closed:
+  try:save(root/'ownership-held-unproven.json',{'phase':'OWNERSHIP_HELD_UNPROVEN'})
+  except BaseException:pass
+  while True:time.sleep(1)
+ raise
+'''.replace('INPUT',repr(json.dumps(spec)),1)
+compile(remote,'frozen_remote_cleanup','exec')
+if __name__=='__main__':
+ (repo/('reports/qa/'+spec['operation']+'-intent.json')).write_text(json.dumps({'operation':spec['operation'],'childSourceSha256':spec['childSha256'],'mountGuardSourceSha256':spec['guardSha256'],'scope':'closed private derived copies, no source checkpoint retention change'},indent=2)+'\n')
+ r=subprocess.run(['ssh','-i','C:/Users/mahan/.ssh/sabalan_codex_deploy_ed25519','-o','BatchMode=yes','-o','StrictHostKeyChecking=yes','-o','ConnectTimeout=15','-o','ServerAliveInterval=15','-o','ServerAliveCountMax=3','root@94.182.177.74','python3 -B -'],input=remote,text=True,capture_output=True)
+ report={'sshExitCode':r.returncode,'stdout':r.stdout,'stderr':r.stderr};(repo/('reports/qa/'+spec['operation']+'.json')).write_text(json.dumps(report,indent=2)+'\n');print(json.dumps(report));raise SystemExit(r.returncode)

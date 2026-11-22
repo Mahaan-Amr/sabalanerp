@@ -1,0 +1,45 @@
+import {expect,test} from '@playwright/test';
+import {loginAsAdmin,setTheme,setViewportAndZoom,assertNoSeriousAxeViolations} from './support/design-system';
+for (const [width,theme] of [[1280,'light'],[390,'dark']] as const) test(`external registry management and shared list at ${width}`,async({page},testInfo)=>{
+ const capabilities={canManageProfiles:true,canManageCompanyVehicles:true,canManagePlates:true,canManageAssignments:true,canManageEligibility:true,canManageBiometricEnrollment:true};
+ const plate={plate:'12 ب 345 ایران 63',effectiveFrom:'2026-01-01',effectiveTo:null};
+ const v1={id:'v1',vehicleType:'کامیون',status:'ACTIVE',plates:[plate],fleetCode:'خودروی اول'};
+ const v2={...v1,id:'v2',fleetCode:'خودروی دوم',plates:[{...plate,plate:'22 ب 345 ایران 63'}]};
+ let current:any={id:'a1',driverId:'external-driver',vehicleId:'v1',vehicle:v1,effectiveFrom:'2026-01-01',effectiveTo:null};
+ const driver=()=>({id:'external-driver',firstName:'راننده',lastName:'بیرونی',nationalCode:'1234567890',phone:'09121111111',licenceNumber:'1234',licenceClass:'پایه یک',licenceExpiresAt:'2029-01-01',status:'ACTIVE',currentEligibility:{status:'ELIGIBLE'},currentAssignment:current,readiness:{status:'READY',blockers:[]}});
+ let created:any; let transferBody:any;
+ await page.route('**/api/dispatch-master-data/vehicle-operations/internal-drivers**',r=>r.fulfill({json:{success:true,data:[],capabilities}}));
+ await page.route('**/api/dispatch-master-data/company-vehicles**',r=>r.fulfill({json:{success:true,data:[],capabilities}}));
+ await page.route('**/api/dispatch-master-data/driver-vehicle-assignments',r=>r.fulfill({json:{success:true,data:{assignments:[],plans:[]}}}));
+ await page.route('**/api/dispatch-master-data/external-registry**',r=>r.fulfill({json:{success:true,data:{drivers:[driver()],vehicles:[v1,v2],legacyPairs:[{id:'legacy-only',firstName:'سابقه',lastName:'قدیمی',vehiclePlate:'پلاک قدیمی'}],capabilities}}}));
+ await page.route('**/api/dispatch-master-data/external-drivers',async r=>{created=r.request().postDataJSON();await r.fulfill({status:400,json:{success:false,error:'کد ملی قبلاً ثبت شده است. رکورد موجود را بررسی کنید.'}});});
+ await page.route('**/api/dispatch-master-data/external/driver-vehicle-assignments',async r=>{
+  if(r.request().method()==='POST'){transferBody=r.request().postDataJSON();current={...current,id:'a2',vehicleId:'v2',vehicle:v2};await r.fulfill({json:{success:true,data:current}});}
+  else await r.fulfill({json:{success:true,data:{assignments:[{...current,driver:driver()}],plans:[]}}});
+ });
+ await page.route('**/api/dispatch-master-data/external/driver-vehicle-assignments/preview',r=>r.fulfill({json:{success:true,data:{driver:driver(),vehicle:v2,current:[{...current,driver:driver()}],conflictingPlans:[],anticipatedPlans:[]}}}));
+ await loginAsAdmin(page); await page.goto('/dashboard/hr/vehicle-operations'); await setViewportAndZoom(page,{width,height:1000});await setTheme(page,theme);
+ await page.getByRole('button',{name:'بیرونی',exact:true}).click();
+ await page.getByRole('button',{name:/سوابق ترکیبی قدیمی/}).click();
+ await expect(page.getByText('فقط سابقه',{exact:true})).toBeVisible();
+ await expect(page.getByRole('link',{name:'راننده بیرونی',exact:true})).toHaveAttribute('href','/dashboard/hr/external-drivers/external-driver');
+ await page.getByRole('button',{name:'افزودن راننده',exact:true}).click();
+ const dialog=page.getByRole('dialog',{name:'افزودن راننده بیرونی',exact:true});
+ await expect(dialog.getByRole('textbox',{name:/دلیل|پرسنل/})).toHaveCount(0);
+ await dialog.getByRole('textbox',{name:'نام',exact:true}).fill('جدید');await dialog.getByRole('textbox',{name:'نام خانوادگی',exact:true}).fill('آزمون');
+ await dialog.getByRole('textbox',{name:'کد ملی',exact:true}).fill('1234567890');await dialog.getByRole('textbox',{name:'شماره همراه',exact:true}).fill('09121111111');
+ await dialog.getByRole('button',{name:'ثبت پیش‌نویس راننده',exact:true}).click();
+ await expect(dialog.getByText(/کد ملی قبلاً ثبت شده/)).toBeVisible();await expect(dialog.getByRole('textbox',{name:'نام',exact:true})).toHaveValue('جدید');
+ expect(created.personnelId).toBeUndefined();expect(created.reason).toBeUndefined();
+ await dialog.getByRole('button',{name:'انصراف',exact:true}).click();
+ await page.getByRole('button',{name:'عملیات راننده',exact:true}).click();await page.getByRole('button',{name:'تغییر خودرو',exact:true}).click();
+ await page.getByRole('combobox',{name:'انتخاب خودرو',exact:true}).click();await page.getByRole('option',{name:/خودروی دوم/}).click();
+ await page.getByRole('button',{name:'ثبت تخصیص',exact:true}).click();
+ const confirm=page.getByRole('dialog',{name:'تأیید تخصیص خودرو',exact:true});await expect(confirm).toBeVisible();
+ await confirm.getByRole('button',{name:'تأیید و ثبت',exact:true}).click();await expect(page.getByText('تخصیص یا برنامه خودرو ثبت شد.',{exact:true})).toBeVisible();
+ expect(transferBody.driverId).toBe('external-driver');expect(transferBody.vehicleId).toBe('v2');expect(transferBody.reason).toBeUndefined();
+ await page.getByRole('button',{name:'همه',exact:true}).click();await expect(page.getByRole('link',{name:'راننده بیرونی',exact:true})).toBeVisible();
+ await assertNoSeriousAxeViolations(page);await setViewportAndZoom(page,{width,height:1000},2);
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+1)).toBe(true);
+ await page.screenshot({path:`.codex-tmp/external-registry-${width}-${theme}.png`,fullPage:true});
+});

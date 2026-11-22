@@ -2,6 +2,7 @@ import { prisma } from '../lib/prisma';
 import { Request, Response, NextFunction } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { parseCookies, resolveAuthoritativeSession, SESSION_COOKIE } from '../services/identitySessionService';
+import { matchesRequestSessionBinding } from '../services/requestSessionBinding';
 
 
 export interface AuthRequest extends Request {
@@ -39,6 +40,17 @@ export const protect = async (req: AuthRequest, res: Response, next: NextFunctio
       });
       return;
     }
+
+    if (!matchesRequestSessionBinding({ expectedUser: req.get('x-sabalan-expected-user'),
+      expectedSession: req.get('x-sabalan-expected-session'),
+      userOnlyProbe: req.method === 'GET' && req.originalUrl.split('?')[0] === '/api/auth/me',
+    }, { id: session!.id, userId: user.id })) {
+      res.setHeader('Cache-Control', 'no-store, private');
+      res.status(401).json({ success: false, code: 'AUTH_CONTEXT_CHANGED',
+        error: 'نشست این صفحه تغییر کرده است؛ نوشته‌هایتان را نگه دارید و دوباره وارد شوید.' });
+      return;
+    }
+    if (req.get('x-sabalan-expected-user')) res.setHeader('Cache-Control', 'no-store, private');
 
     req.user = {
       id: user.id,

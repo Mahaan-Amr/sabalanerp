@@ -5,6 +5,7 @@ import { protect } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES, WorkspaceRequest } from '../middleware/workspace';
 import { FEATURE_PERMISSIONS, FEATURES, requireFeatureAccess } from '../middleware/feature';
 import { generatePdfFromHtml } from '../utils/pdf';
+import { downloadAndRemoveDocumentPdf } from '../services/documentPdfDownload';
 import { renderReportPdfHeaderTemplate, renderYekanFontFaces } from '../utils/printTemplate';
 import { buildBiSnapshot, BiSnapshot } from '../services/biSnapshotService';
 import { buildBiAnalysisPage } from '../services/biAnalysisService';
@@ -200,7 +201,7 @@ router.get('/sales/summary.pdf', requireBiAccess, async (req: WorkspaceRequest, 
       }),
       margin: { top: '34mm', right: '5mm', bottom: '8mm', left: '5mm' },
     });
-    res.download(filePath, `sabalan-bi-sales-${Date.now()}.pdf`);
+    await downloadAndRemoveDocumentPdf(req, res, filePath, `sabalan-bi-sales-${Date.now()}.pdf`);
   } catch (error) {
     console.error('BI sales PDF error:', error);
     res.status(500).json({ success: false, error: 'Server error' });

@@ -1,6 +1,13 @@
 export type DeploymentPhase =
   | 'PREFLIGHT'
   | 'LEASE_ACQUIRED'
+  | 'ONLINE_CHECKPOINTING'
+  | 'ONLINE_EXPANDING'
+  | 'ONLINE_ACCEPTING'
+  | 'ONLINE_READY'
+  | 'ONLINE_PUBLISHING'
+  | 'ONLINE_SERVING'
+  | 'ONLINE_ROLLBACK_PUBLISHING'
   | 'MAINTENANCE_REQUESTED'
   | 'TRAFFIC_BLOCKED'
   | 'SERVICES_DRAINED'
@@ -231,7 +238,14 @@ export const acquireDeploymentLease = async (
 
 const allowedTransitions: Record<DeploymentPhase, DeploymentPhase[]> = {
   PREFLIGHT: ['LEASE_ACQUIRED', 'ABORTED'],
-  LEASE_ACQUIRED: ['MAINTENANCE_REQUESTED', 'ABORTED'],
+  LEASE_ACQUIRED: ['MAINTENANCE_REQUESTED', 'ONLINE_CHECKPOINTING', 'ABORTED'],
+  ONLINE_CHECKPOINTING: ['ONLINE_EXPANDING', 'ABORTED'],
+  ONLINE_EXPANDING: ['ONLINE_ACCEPTING', 'RECOVERY_REQUIRED'],
+  ONLINE_ACCEPTING: ['ONLINE_READY', 'RECOVERY_REQUIRED'],
+  ONLINE_READY: ['ONLINE_PUBLISHING', 'RECOVERY_REQUIRED'],
+  ONLINE_PUBLISHING: ['ONLINE_SERVING', 'RECOVERY_REQUIRED'],
+  ONLINE_SERVING: ['COMPLETED', 'ONLINE_ROLLBACK_PUBLISHING', 'RECOVERY_REQUIRED'],
+  ONLINE_ROLLBACK_PUBLISHING: ['ROLLED_BACK', 'RECOVERY_REQUIRED'],
   MAINTENANCE_REQUESTED: ['TRAFFIC_BLOCKED', 'ABORTED'],
   TRAFFIC_BLOCKED: ['SERVICES_DRAINED', 'ABORTED'],
   SERVICES_DRAINED: ['LOCAL_CHECKPOINT_VERIFIED', 'ABORTED'],
@@ -302,6 +316,10 @@ const phasesBeforeMutation = new Set<DeploymentPhase>([
 ]);
 
 export const deploymentFailureAction = (phase: DeploymentPhase, rollbackAlreadyAttempted: boolean) => {
+  if (phase === 'ONLINE_CHECKPOINTING') return 'ABORT_AND_REOPEN_PREVIOUS' as const;
+  // The maintenance rollback mutates/restores state. Online failures require
+  // the original paired publisher and current-data rollback epoch protocol.
+  if (phase.startsWith('ONLINE_')) return 'FAIL_CLOSED_RECOVERY_REQUIRED' as const;
   if (phasesBeforeMutation.has(phase)) return 'ABORT_AND_REOPEN_PREVIOUS' as const;
   if (phase === 'COMPLETED' || phase === 'ROLLED_BACK') return 'NONE' as const;
   if (rollbackAlreadyAttempted || phase === 'ROLLBACK_STARTED' || phase === 'RECOVERY_REQUIRED') return 'FAIL_CLOSED_RECOVERY_REQUIRED' as const;

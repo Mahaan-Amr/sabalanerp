@@ -1,0 +1,10 @@
+{
+  "freeze": "http-borrowed-review-20261018.json",
+  "evidence": "http-borrowed-evidence-20261018.json",
+  "standardsReview": "PASS",
+  "specReview": "PASS",
+  "typecheck": "PASS with repository compiler options",
+  "architectureCheck": "PASS",
+  "productionAdmission": false,
+  "wholeProgramComplete": false
+}

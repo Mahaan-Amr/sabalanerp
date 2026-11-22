@@ -27,10 +27,13 @@ import {
   ErpSummaryGrid,
   ErpTextarea,
 } from "@/components/erp";
-import { dashboardAPI, logisticsAPI } from "@/lib/api";
+import api, { dashboardAPI, logisticsAPI } from "@/lib/api";
 import RoleAwareDispatchCases from "@/features/dispatch-case/RoleAwareDispatchCases";
+import SalesDispatchInvoices from "@/features/accounting/SalesDispatchInvoices";
 import { dispatchCaseReference } from "@/features/dispatch-case/dispatchCasePresentation";
+import { loadingDriverSnapshots } from '../../loading-driver-snapshots';
 import { userFacingError } from "@/features/dispatch/userFacingError";
+import { normalizeDigits } from "@/lib/numberFormat";
 import {
   StatusBadge,
   dateFa,
@@ -42,6 +45,11 @@ import {
 type DetailSection = "summary" | "items" | "print" | "cases";
 type DetailAction = "finalize" | "delete" | "cancel" | "correct" | null;
 
+type CancellationPreview = {
+  documents: { id: string; number: string; kind: "INVOICE" | "WAYBILL" }[];
+  canVoidDocuments: boolean;
+};
+
 export default function LoadingDetailPage() {
   const mutationLock = useRef(false);
   const requestedActionHandled = useRef(false);
@@ -51,11 +59,28 @@ export default function LoadingDetailPage() {
   const [section, setSection] = useState<DetailSection>("summary");
   const [action, setAction] = useState<DetailAction>(null);
   const [loading, setLoading] = useState<any>(null);
+  const [activeInvoiceId, setActiveInvoiceId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [actionError, setActionError] = useState("");
   const [dispatchTimelineStale, setDispatchTimelineStale] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
+  const [cancellationPreview, setCancellationPreview] = useState<CancellationPreview | null>(null);
+  const [previewError, setPreviewError] = useState("");
+  const [previewRefresh, setPreviewRefresh] = useState(0);
+  const usesUnifiedCancellation = Boolean(loading?.canonicalAllocationRevisions?.length);
+  useEffect(() => {
+    setCancellationPreview(null);
+    setPreviewError("");
+    if (action !== "cancel" || !usesUnifiedCancellation) return;
+    let current = true;
+    logisticsAPI.getCancellationDocuments(params.id).then(response => {
+      if (current) setCancellationPreview(response.data.data);
+    }).catch(error => {
+      if (current) setPreviewError(userFacingError(error, "بررسی اسناد بارگیری انجام نشد."));
+    });
+    return () => { current = false; };
+  }, [action, params.id, previewRefresh, usesUnifiedCancellation]);
   const [correction, setCorrection] = useState({
     sourceContractItemId: "",
     loadingLineId: "",
@@ -71,22 +96,44 @@ export default function LoadingDetailPage() {
         logisticsAPI.getLoading(params.id),
         dashboardAPI.getActionAvailability("logistics"),
       ]);
-      if (response.data.success) setLoading(response.data.data);
+      if (response.data.success) {
+        const record = response.data.data;
+        if (record.source?.sourceKind === "PARTNER_CASE") {
+          router.replace(`/dashboard/logistics/loadings/new?draftId=${encodeURIComponent(params.id)}`);
+          return;
+        }
+        setLoading(record);
+      }
       setActionAvailability(availability.data.data || {});
     } catch (error: any) {
       setActionError(userFacingError(error, "اطلاعات بارگیری دریافت نشد."));
     } finally {
       setIsLoading(false);
     }
-  }, [params.id]);
+  }, [params.id, router]);
 
   useEffect(() => {
     void load();
   }, [load]);
-  useEffect(() => {
-    if (!isLoading && loading && searchParams.get("print") === "1")
-      window.setTimeout(() => window.print(), 250);
-  }, [isLoading, loading, searchParams]);
+  const printInvoice = async () => {
+    if (!activeInvoiceId) return;
+    const preview = window.open("", "_blank");
+    if (!preview) { setActionError("مرورگر پنجره چاپ را مسدود کرد."); return; }
+    try {
+      const list = await api.get(`/logistics/loadings/${encodeURIComponent(params.id)}/sales-invoices`);
+      if (!list.data.data.invoices.some((invoice: { id: string; status: string }) => invoice.id === activeInvoiceId && invoice.status === "ISSUED")) {
+        throw new Error("فاکتور دیگر معتبر نیست؛ اطلاعات را به‌روزرسانی کنید.");
+      }
+      const response = await api.get(`/logistics/loadings/${encodeURIComponent(params.id)}/sales-invoices/${encodeURIComponent(activeInvoiceId)}/pdf`, { responseType: "blob" });
+      const url = URL.createObjectURL(new Blob([response.data], { type: "application/pdf" }));
+      preview.location.href = url;
+      window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (error) {
+      preview.close();
+      setActiveInvoiceId(null);
+      setActionError(userFacingError(error, "فاکتور معتبر برای چاپ در دسترس نیست."));
+    }
+  };
 
   const runAction = async (command: () => Promise<any>): Promise<boolean> => {
     if (mutationLock.current) return false;
@@ -130,7 +177,7 @@ export default function LoadingDetailPage() {
     const requested = searchParams.get('action');
     if (requested === 'finalize' && loading.status === 'DRAFT' && actionAvailability.FINALIZE_LOADING?.enabled === true) setAction('finalize');
     if (requested === 'delete' && loading.status === 'DRAFT' && actionAvailability.EDIT_LOADING?.enabled === true) setAction('delete');
-    if (requested === 'cancel' && loading.status !== 'CANCELLED' && actionAvailability.CANCEL_LOADING?.enabled === true) setAction('cancel');
+    if (requested === 'cancel' && loading.cancellationRequest?.status !== "PENDING" && loading.status !== 'CANCELLED' && actionAvailability.CANCEL_LOADING?.enabled === true) setAction('cancel');
   }, [isLoading, loading, actionAvailability, searchParams]);
 
   if (isLoading) return <ErpLoading />;
@@ -145,7 +192,7 @@ export default function LoadingDetailPage() {
     );
 
   const driver = loading.driverSnapshot || {};
-  const assignedDrivers = loading.driverAssignments || [];
+  const assignedDrivers = loadingDriverSnapshots(loading).map(driverSnapshot => ({ driverSnapshot }));
   const driverSummary = loadingDriversName(loading);
   const plateSummary = assignedDrivers.length
     ? assignedDrivers
@@ -179,9 +226,16 @@ export default function LoadingDetailPage() {
   const canEditDraft =
     actionAvailability.EDIT_LOADING?.enabled === true &&
     loading.status === "DRAFT";
+  const canCompleteCancellation = loading.status === "CANCELLED" && Boolean(loading.finalizedAt) &&
+    loading.guardQueueTurns?.some((turn: { status: string }) => turn.status === "LOADING_FINALIZED");
+  const cancelLabel = canCompleteCancellation ? "تکمیل لغو و آزادسازی نوبت گارد" :
+    loading.status === "FINALIZED" ? "لغو بارگیری نهایی‌شده پیش از خروج" : "لغو بارگیری";
+  const cancellationRequest = loading.cancellationRequest;
+  const needsAccountingReview = cancellationPreview?.canVoidDocuments === false;
   const canCancel =
+    cancellationRequest?.status !== "PENDING" &&
     actionAvailability.CANCEL_LOADING?.enabled === true &&
-    loading.status !== "CANCELLED";
+    (loading.status !== "CANCELLED" || canCompleteCancellation);
   const canCorrect =
     actionAvailability.CREATE_CORRECTION?.enabled === true &&
     loading.status === "FINALIZED";
@@ -209,7 +263,7 @@ export default function LoadingDetailPage() {
     ...(canCancel
       ? [
           {
-            label: "لغو بارگیری",
+            label: cancelLabel,
             icon: FaBan,
             tone: "danger" as const,
             onClick: () => {
@@ -253,15 +307,21 @@ export default function LoadingDetailPage() {
               },
             ]
           : []),
-        {
-          label: "چاپ",
+        ...(activeInvoiceId ? [{
+          label: "چاپ فاکتور فروش",
           icon: FaPrint,
-          onClick: () => window.print(),
-          tone: "neutral",
-        },
+          onClick: () => void printInvoice(),
+          tone: "neutral" as const,
+        }] : []),
         { label: "به‌روزرسانی", icon: FaSync, onClick: load, tone: "neutral" },
       ]}
     >
+      {cancellationRequest?.status === "PENDING" && (
+        <ErpInlineState kind="stale" title="درخواست لغو در انتظار تصمیم حسابداری است." />
+      )}
+      {cancellationRequest?.status === "REJECTED" && loading.status !== "CANCELLED" && (
+        <ErpInlineState kind="stale" title={`حسابداری درخواست لغو را رد کرد. دلیل رد: ${cancellationRequest.reason || "ثبت نشده"}`} />
+      )}
       {actionError && (
         <ErpInlineState
           kind="error"
@@ -308,7 +368,7 @@ export default function LoadingDetailPage() {
               title="این بارگیری هنوز پیش‌نویس است و مانده قرارداد را کاهش نمی‌دهد."
             />
           )}
-          {loading.status === "FINALIZED" && (
+          {(loading.status === "FINALIZED" || canCompleteCancellation) && (
             <ErpInlineState
               className="mt-4"
               kind="success"
@@ -362,7 +422,7 @@ export default function LoadingDetailPage() {
       {section === "print" && (
         <ErpSection
           title="برگه چاپی بارگیری"
-          description="پیش‌نمایش سند؛ برای نسخه چاپی از دکمه «چاپ» بالای صفحه استفاده کنید."
+          description="خلاصه اطلاعات بارگیری؛ فاکتور فروش صادرشده سند چاپی این صفحه است."
         >
           <div className="rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] p-5 text-sm leading-7 sds-text-primary">
             <div className="mb-4 flex items-start justify-between gap-4 border-b pb-3">
@@ -412,6 +472,7 @@ export default function LoadingDetailPage() {
         </ErpSection>
       )}
 
+      {loading.status !== 'DRAFT' && <div hidden={section === 'print'}><SalesDispatchInvoices workspace="logistics" loadingId={loading.id} refreshKey={loading} onActiveInvoiceChange={setActiveInvoiceId}/></div>}
       <div hidden={section !== "cases"}>
         <RoleAwareDispatchCases
           workspace="logistics"
@@ -501,7 +562,7 @@ export default function LoadingDetailPage() {
             setCancelReason("");
           }
         }}
-        title="لغو بارگیری"
+        title={cancelLabel}
         presentation="modal"
         scope="workspace"
         pending={saving}
@@ -517,14 +578,16 @@ export default function LoadingDetailPage() {
               }}
             />
             <ErpButton
-              label="تأیید لغو"
+              label={needsAccountingReview ? "ارسال درخواست به حسابداری" : cancellationPreview?.documents.length ? "ابطال اسناد و تأیید لغو" : "تأیید لغو"}
               icon={FaBan}
               tone="danger"
-              disabled={dispatchTimelineStale || saving || !cancelReason.trim()}
+              disabled={dispatchTimelineStale || saving || !cancelReason.trim() ||
+                (usesUnifiedCancellation && (!cancellationPreview || (cancellationPreview.documents.length > 0 && cancelReason.trim().length < 3)))}
               onClick={async () => {
                 if (
-                  await runAction(() =>
-                    logisticsAPI.cancelLoading(loading.id, cancelReason.trim()),
+                  await runAction(() => needsAccountingReview
+                    ? logisticsAPI.requestLoadingCancellation(loading.id, cancelReason.trim())
+                    : logisticsAPI.cancelLoading(loading.id, cancelReason.trim(), cancellationPreview?.documents.map(doc => doc.id)),
                   )
                 ) {
                   setAction(null);
@@ -537,11 +600,30 @@ export default function LoadingDetailPage() {
       >
         <div className="space-y-4">
           {sheetError}
+          {usesUnifiedCancellation && (
+            previewError ? <ErpInlineState kind="error" title={previewError}
+              action={{ label: "تلاش مجدد", onClick: () => setPreviewRefresh(value => value + 1) }} />
+            : !cancellationPreview ? <ErpLoading />
+            : <>
+                {cancellationPreview.documents.length > 0 && <ul className="space-y-1 text-sm">
+                  {cancellationPreview.documents.map(doc => <li key={doc.id}>
+                    {doc.kind === "INVOICE" ? "فاکتور فروش" : "بارنامه"} شمارهٔ {doc.number.replace(/\d/g, digit => "۰۱۲۳۴۵۶۷۸۹"[Number(digit)])}
+                  </li>)}
+                </ul>}
+                {cancellationPreview.canVoidDocuments
+                  ? <p className="text-sm sds-text-secondary">{cancellationPreview.documents.length ? "اسناد بالا ابطال می‌شوند. " : ""}بار آزاد می‌شود و پذیرش راننده باز می‌ماند و راننده و خودروی واجد شرایط برای بارگیری بعدی آماده می‌شوند.</p>
+                  : <div className="space-y-2">
+                      <ErpInlineState kind="stale" title="برای این بارگیری سند فعال صادر شده است. ابطال فاکتور و بارنامه به دسترسی ویرایش حسابداری و مجوز مدیریت اسناد ارسال نیاز دارد. حساب کاربری شما مجوز لازم برای ابطال این اسناد را ندارد." />
+                      <p className="text-sm sds-text-secondary">دلیل لغو را بنویسید و درخواست را ارسال کنید. حسابداری آن را در وظایف بین‌واحدی بررسی می‌کند. با تأیید حسابداری، اسناد ابطال می‌شوند و بار آزاد می‌شود. پذیرش راننده و خودرو در گارد باز می‌ماند.</p>
+                    </div>}
+              </>
+          )}
           <ErpField label="دلیل لغو" required>
             <ErpTextarea
               value={cancelReason}
               onChange={(event) => setCancelReason(event.target.value)}
               rows={4}
+              maxLength={2000}
             />
           </ErpField>
         </div>
@@ -624,7 +706,7 @@ export default function LoadingDetailPage() {
               onChange={(event) =>
                 setCorrection((current) => ({
                   ...current,
-                  deltaQuantity: event.target.value,
+                  deltaQuantity: normalizeDigits(event.target.value),
                 }))
               }
               placeholder="برای کاهش از علامت منفی استفاده کنید"

@@ -1,4 +1,5 @@
 'use client';
+import {useUnarchivedDraftGuard} from '@/lib/useUnarchivedDraftGuard';
 
 import React from 'react';
 import { useProductPricingVisibility } from './productPricingVisibility';
@@ -77,6 +78,7 @@ function CompactDecimalField({
 }) {
   const [draft, setDraft] = React.useState(value);
   const [entryError, setEntryError] = React.useState<string>();
+  useUnarchivedDraftGuard('contract-longitudinal-raw',draft!==value);
   const editingRef = React.useRef(false);
   React.useEffect(() => {
     if (!editingRef.current) setDraft(value);

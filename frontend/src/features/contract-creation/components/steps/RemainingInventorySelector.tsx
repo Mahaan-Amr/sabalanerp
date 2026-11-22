@@ -1,4 +1,5 @@
 'use client';
+import {useUnarchivedDraftGuard} from '@/lib/useUnarchivedDraftGuard';
 
 import React, { useState } from 'react';
 import { ErpInput, ErpPressable } from '@/components/erp';
@@ -8,6 +9,8 @@ export function RemainingInventorySelector({ quantity, lengthMeters, widthMeters
   totalSquareMeters, onUse }: { quantity: number; lengthMeters: number; widthMeters: number;
   pieceSquareMeters: number; totalSquareMeters: number; onUse: (quantity: number) => void }) {
   const [requestedQuantity, setRequestedQuantity] = useState(1);
+  const [usedQuantity,setUsedQuantity]=useState(1);
+  useUnarchivedDraftGuard('contract-remainder-quantity',requestedQuantity!==usedQuantity);
   const safeQuantity = Math.min(quantity, Math.max(1, Math.trunc(Number(requestedQuantity) || 1)));
   return <div className="rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] p-2.5">
     <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -18,7 +21,7 @@ export function RemainingInventorySelector({ quantity, lengthMeters, widthMeters
           onChange={event => { const value = Math.trunc(parseFormattedNumber(event.target.value));
             setRequestedQuantity(Math.min(quantity, Math.max(1, value || 1))); }}
           className="mt-1 block w-24 px-2 text-center" aria-label="تعداد قطعات باقی‌مانده برای استفاده" />
-      </label><ErpPressable type="button" onClick={() => onUse(safeQuantity)} tone="primary" variant="solid"
+      </label><ErpPressable type="button" onClick={() => {onUse(safeQuantity);setUsedQuantity(safeQuantity);}} tone="primary" variant="solid"
         className="px-3 text-xs font-semibold">استفاده</ErpPressable></div>
     </div>
   </div>;

@@ -1,11 +1,10 @@
 'use client';
 import { accountingCorrectionFields } from '@/features/accounting/accountingCorrectionFields';
 import { contractLifecycleLabel, contractLifecycleFilterOptions } from '@/features/sales/contractLifecyclePresentation';
-import { ErpButton, ErpPressable } from '@/components/erp';
+import { ErpButton } from '@/components/erp';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
-  FaCheckCircle,
   FaExclamationTriangle,
   FaEye,
   FaDownload,
@@ -42,8 +41,6 @@ import {
   AccountingContractRow,
   accountingActionAvailability,
   accountingFailureMessage,
-  FinancialInvoiceApprovalForm,
-  FinancialInvoiceApprovalPayload,
   StatusBadge,
   dateFa,
   contractStatusLabels,
@@ -88,10 +85,6 @@ export default function AccountingContractsPage() {
   const [reviewActionUrl, setReviewActionUrl] = useState<string | null>(null);
   const [correctionTarget, setCorrectionTarget] = useState<AccountingContractRow | null>(null);
   const [flagTarget, setFlagTarget] = useState<AccountingContractRow | null>(null);
-  const [approvalTarget, setApprovalTarget] = useState<{
-    contract: AccountingContractRow;
-    invoice: NonNullable<AccountingContractRow['financialRecords']>[number];
-  } | null>(null);
 
   const replaceQuery = useCallback((next: ReturnType<typeof canonicalizeContractsQuery>) => {
     const serialized = next.params.toString();
@@ -163,11 +156,12 @@ export default function AccountingContractsPage() {
         search: query.search || undefined,
         status: query.status,
         sourceStatus: query.sourceStatus,
+        sourceKind: query.sourceKind,
         dateFrom: query.dateFrom || undefined,
         dateTo: query.dateTo || undefined,
         page: query.page,
         pageSize: pagination.pageSize,
-  }), [contractsLoader, pagination.pageSize, query.dateFrom, query.dateTo, query.lifecycleView, query.page, query.search, query.sourceStatus, query.status, query.view]);
+  }), [contractsLoader, pagination.pageSize, query.dateFrom, query.dateTo, query.lifecycleView, query.page, query.search, query.sourceKind, query.sourceStatus, query.status, query.view]);
 
   useEffect(() => {
     void loadContracts();
@@ -210,30 +204,6 @@ export default function AccountingContractsPage() {
     dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
     idempotencyKey: `receivable:${contract.contractId}:planned`,
   });
-
-  const getPendingInvoiceCandidates = (contract: AccountingContractRow) =>
-    (contract.financialRecords || []).filter((record) => (
-      record.kind === 'INVOICE_CANDIDATE' &&
-      !['ISSUED', 'POSTED', 'VOIDED'].includes(record.status)
-    ));
-
-  const openApprovalModal = (contract: AccountingContractRow) => {
-    const pendingInvoices = getPendingInvoiceCandidates(contract);
-    if (pendingInvoices.length !== 1) return;
-    setApprovalTarget({ contract, invoice: pendingInvoices[0] });
-  };
-
-  const approveFinancialInvoice = async (payload: FinancialInvoiceApprovalPayload) => {
-    if (!approvalTarget) return;
-    await execute(approvalTarget.contract, {
-      kind: 'APPROVE_FINANCIAL_INVOICE',
-      invoiceId: payload.invoiceId,
-      systemInvoiceNumber: payload.systemInvoiceNumber,
-      systemInvoiceDate: payload.systemInvoiceDate,
-      sepidarAmount: payload.sepidarAmount,
-    });
-    setApprovalTarget(null);
-  };
 
   const openPdfUrl = (url: string, tryPrint: boolean) => {
     const viewerUrl = toPdfViewerUrl(url);
@@ -471,10 +441,10 @@ export default function AccountingContractsPage() {
       disabled: actionLoading === `${contract.contractId}:PRINT_SALES_PDF`,
       onClick: () => void openPartnerInternalPdf(contract, true) },
     ...(accountingActionAvailability(contract, 'APPROVE_FINANCIAL_INVOICE')?.visible ? [{
-      label: 'تایید مالی', icon: FaCheckCircle, tone: 'success',
-      disabled: accountingActionAvailability(contract, 'APPROVE_FINANCIAL_INVOICE')?.enabled !== true,
+      label: 'بررسی و تأیید مالی', icon: FaEye, tone: 'success',
+      disabled: accountingActionAvailability(contract, 'APPROVE_FINANCIAL_INVOICE')?.enabled !== true || !contract.partnerContext?.caseId,
       title: accountingActionAvailability(contract, 'APPROVE_FINANCIAL_INVOICE')?.reason ?? undefined,
-      onClick: () => openApprovalModal(contract),
+      href: contract.partnerContext?.caseId ? `/dashboard/accounting/contracts/partner/${encodeURIComponent(contract.partnerContext.caseId)}` : undefined,
     } as ErpAction] : []),
     { label: 'دریافتنی', icon: FaReceipt, tone: 'success',
       disabled: (Boolean(contract.partnerCommercialStatus) && contract.partnerCommercialStatus !== 'FINAL') || !['ISSUED', 'POSTED'].includes(contract.accounting.invoiceStatus),
@@ -494,7 +464,9 @@ export default function AccountingContractsPage() {
         title: accountingActionAvailability(contract, 'CREATE_CORRECTION_REQUEST')?.reason || undefined,
         onClick: () => setCorrectionTarget(contract) } as ErpAction] : []),
   ] : [
-    { label: 'مشاهده', href: `/dashboard/accounting/contracts/${contract.contractId}`, icon: FaEye, tone: 'primary' },
+    { label: 'مشاهده پرونده',
+      href: `/dashboard/accounting/contracts/${encodeURIComponent(contract.contractId)}?section=financial&returnTo=${encodeURIComponent(`${pathname}${searchParams.toString() ? `?${searchParams.toString()}` : ''}`)}`,
+      icon: FaEye, tone: 'primary' },
     {
       label: 'دانلود PDF قرارداد',
       icon: FaDownload,
@@ -527,16 +499,6 @@ export default function AccountingContractsPage() {
       title: accountingActionAvailability(contract, 'CREATE_RECEIVABLE')?.reason || contract.accounting.eligibilityReason || (contract.accounting.invoiceStatus !== 'ISSUED' ? 'ابتدا صورتحساب را تایید مالی کنید' : undefined),
       onClick: () => createReceivable(contract),
     } as ErpAction] : []),
-    ...(accountingActionAvailability(contract, 'APPROVE_FINANCIAL_INVOICE')?.visible ? [{
-      label: 'تایید مالی',
-      icon: FaCheckCircle,
-      tone: 'success',
-      disabled: accountingActionAvailability(contract, 'APPROVE_FINANCIAL_INVOICE')?.enabled !== true || !contract.accounting.eligibleForFinancialRecords || contract.accounting.openCorrections > 0 || contract.accounting.openBlockerFlags > 0 || getPendingInvoiceCandidates(contract).length !== 1 || actionLoading === `${contract.contractId}:APPROVE_FINANCIAL_INVOICE`,
-      title: contract.accounting.openCorrections > 0
-        ? 'ابتدا درخواست‌های اصلاح باز را ببندید'
-        : getPendingInvoiceCandidates(contract).length !== 1 ? 'برای تایید سریع باید دقیقا یک صورتحساب تایید نشده وجود داشته باشد' : undefined,
-      onClick: () => openApprovalModal(contract),
-    } as ErpAction] : []),
     ...(accountingActionAvailability(contract, 'FLAG_CONTRACT')?.visible
       ? [{ label: 'پرچم', icon: FaFlag, tone: 'warning', disabled: accountingActionAvailability(contract, 'FLAG_CONTRACT')?.enabled !== true, title: accountingActionAvailability(contract, 'FLAG_CONTRACT')?.reason || undefined, onClick: () => setFlagTarget(contract) } as ErpAction]
       : []),
@@ -552,6 +514,18 @@ export default function AccountingContractsPage() {
       description="قراردادهای همکار از یادداشت نمایش داده می‌شوند؛ اقدامات مالی آن‌ها پس از قطعی‌شدن فعال است."
       actions={[{ label: 'به‌روزرسانی', icon: FaSync, onClick: loadContracts, tone: 'neutral' }]}
       filters={[
+        {
+          id: 'sourceKind',
+          label: 'نوع قرارداد',
+          type: 'select',
+          value: query.sourceKind,
+          onChange: (value) => updateQuery({ sourceKind: value as ContractsQueryState['sourceKind'] }),
+          options: [
+            { label: 'همه', value: 'ALL' },
+            { label: 'داخلی', value: 'SALES_CONTRACT' },
+            { label: 'همکار', value: 'PARTNER_INTERNAL_RECORD' },
+          ],
+        },
         {
           id: 'lifecycleView',
           label: 'نمای قراردادها',
@@ -609,7 +583,7 @@ export default function AccountingContractsPage() {
         />
       }
     >
-      {actionError && !flagTarget && !correctionTarget && !approvalTarget && (
+      {actionError && !flagTarget && !correctionTarget && (
         <div className="rounded-lg border border-[var(--sds-danger-border)] bg-[var(--sds-danger-surface)] px-4 py-3 text-sm text-[var(--sds-danger)] dark:border-[var(--sds-danger-border)] dark:bg-[var(--sds-danger-surface)] dark:text-[var(--sds-danger)]">
           {actionError}
           {reviewActionUrl && (
@@ -640,36 +614,6 @@ export default function AccountingContractsPage() {
         </div>
       </ErpSection>
 
-      {approvalTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--sds-surface-raised)] p-4">
-          <div className="w-full max-w-2xl rounded-xl border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] p-5 shadow-2xl dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]">
-            <div className="mb-4 flex items-start justify-between gap-3">
-              <div>
-                <p className="text-xs font-semibold text-[var(--sds-accent)] dark:text-[var(--sds-accent)]">تایید مالی</p>
-                <h2 className="mt-1 text-lg font-bold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
-                  {approvalTarget.contract.contractNumber}
-                </h2>
-                <p className="mt-1 text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
-                  {approvalTarget.contract.customer.displayName}
-                </p>
-              </div>
-              <ErpPressable
-                type="button"
-                onClick={() => setApprovalTarget(null)}
-                className="rounded-lg border border-[var(--sds-border-default)] px-3 py-2 text-sm text-[var(--sds-text-secondary)] hover:bg-[var(--sds-surface-subtle)] dark:border-[var(--sds-border-strong)] dark:text-[var(--sds-text-primary)] dark:hover:bg-[var(--sds-surface-raised)]"
-              >
-                بستن
-              </ErpPressable>
-            </div>
-            <FinancialInvoiceApprovalForm
-              invoice={approvalTarget.invoice}
-              busy={actionLoading === `${approvalTarget.contract.contractId}:APPROVE_FINANCIAL_INVOICE`}
-              compact
-              onApprove={approveFinancialInvoice}
-            />
-          </div>
-        </div>
-      )}
       <AccountingActionModal
         open={Boolean(flagTarget)}
         title="پرچم حسابداری"

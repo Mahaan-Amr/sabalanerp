@@ -1,0 +1,29 @@
+{
+  "canonical": [
+    {
+      "id": "a1ea34a8d7d878b906fba7b4fdbe975df13a6b00d63a863eacce34b9827e86ff",
+      "startedAt": "2026-10-15T09:01:40.016187222Z",
+      "image": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505"
+    },
+    {
+      "id": "ad23f762dc1b27d2be76c335a3d7a4e20d08832a9a2e055904a4af84a9248c21",
+      "startedAt": "2026-10-15T10:11:30.825468888Z",
+      "image": "sha256:f0a8954596279ccb01c029de7316022daa109b711a297f716cc9367d4bc9ec53"
+    },
+    {
+      "id": "6d161695e215498048ff24e56e9602ce77871bfb6b390bf1356caecfdf9807d8",
+      "startedAt": "2026-10-12T15:17:49.463791361Z",
+      "image": "sha256:81eacc768f3c4b82bd0f0a01bef5600ae1321e87cb117bad49ca47dfba79a213"
+    },
+    {
+      "id": "e553787e69f44c7bdf7dab94fad43a231f5ba99d988dc783234486a5a844a528",
+      "startedAt": "2026-10-12T15:17:49.481269377Z",
+      "image": "sha256:3d0f7584ed7d04e27fa050d6683a74746608faf21f202be78460d679cc56461f"
+    }
+  ],
+  "fixtureRoot": "/app/online-runtime-acceptance/browser-routing-1842c8f43b714cbe9c4904840641fb25",
+  "databaseMutated": false,
+  "productionAdmitted": false,
+  "sourceCommit": "79c082fa",
+  "operation": "1842c8f43b714cbe9c4904840641fb25"
+}

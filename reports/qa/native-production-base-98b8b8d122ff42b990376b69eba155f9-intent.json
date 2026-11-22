@@ -1,0 +1,8 @@
+{
+  "operation": "native-production-base-98b8b8d122ff42b990376b69eba155f9",
+  "importOperation": "import-pg-dfcb5decb67945d2b379db3fc18345aa",
+  "sources": {
+    "restore.sh": "582cc85ecfac6e83bb2da5f7031197b2aaac8dc7448a2d3873c4dfc7fce1a376",
+    "restore-check.sql": "593239d6051aea8166821841f46fc91cd1911314a1e7eaed9966640afec06a44"
+  }
+}

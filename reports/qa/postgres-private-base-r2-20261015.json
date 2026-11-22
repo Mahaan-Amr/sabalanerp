@@ -1,0 +1,27 @@
+{
+  "format": "sabalan-private-physical-base/v1",
+  "status": "NATIVE_VERIFIED_PRIVATE_ONLY",
+  "operationId": "physical-base-r2-20261015",
+  "source": {
+    "version": "150016",
+    "systemIdentifier": "7696494161395363875",
+    "timeline": 1,
+    "clusterBytes": 315103800,
+    "tablespaces": 0
+  },
+  "containerId": "c3059c1493fa3b1a931d8166389893be60fc22374a85a3b12214fd519d4f26aa",
+  "image": "sha256:15283455b75304c90f51bf16b42c272a25fb52807945dc24830ec88e63cd896d",
+  "archiveBytes": 335492096,
+  "archiveSha256": "298a5bce747f4db56c11edc37b410088853fc799ebca4b083c241fc6803dfbaf",
+  "manifestSha256": "462f5bcd4881341f3dbda05400b0d7eef9d2c7152658bae4219287c876b59690",
+  "walRanges": [
+    {
+      "Timeline": 1,
+      "Start-LSN": "0/84000028",
+      "End-LSN": "0/84000138"
+    }
+  ],
+  "nativeVerification": "backup successfully verified",
+  "encryptionRequired": true,
+  "independentRestoreRequired": true
+}

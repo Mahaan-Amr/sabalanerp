@@ -1,0 +1,73 @@
+{
+  "format": "sabalan-obsolete-private-ui-retirement/v1",
+  "operation": "8f417154f543d7ca2ff58268f457a7c7",
+  "root": "/app/online-runtime-acceptance/retained-ui-8f417154f543d7ca2ff58268f457a7c7",
+  "canonical": [
+    {
+      "id": "a1ea34a8d7d878b906fba7b4fdbe975df13a6b00d63a863eacce34b9827e86ff",
+      "image": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+      "startedAt": "2026-10-15T09:01:40.016187222Z"
+    },
+    {
+      "id": "ad23f762dc1b27d2be76c335a3d7a4e20d08832a9a2e055904a4af84a9248c21",
+      "image": "sha256:f0a8954596279ccb01c029de7316022daa109b711a297f716cc9367d4bc9ec53",
+      "startedAt": "2026-10-15T10:11:30.825468888Z"
+    },
+    {
+      "id": "6d161695e215498048ff24e56e9602ce77871bfb6b390bf1356caecfdf9807d8",
+      "image": "sha256:81eacc768f3c4b82bd0f0a01bef5600ae1321e87cb117bad49ca47dfba79a213",
+      "startedAt": "2026-10-12T15:17:49.463791361Z"
+    },
+    {
+      "id": "e553787e69f44c7bdf7dab94fad43a231f5ba99d988dc783234486a5a844a528",
+      "image": "sha256:3d0f7584ed7d04e27fa050d6683a74746608faf21f202be78460d679cc56461f",
+      "startedAt": "2026-10-12T15:17:49.481269377Z"
+    }
+  ],
+  "original": {
+    "id": "d8265b41e3bc8de7fd0d7d44fea0d9ec8794e90793647818ca1ed7f3f1986471",
+    "image": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+    "startedAt": "2026-10-17T11:32:36.13643483Z"
+  },
+  "failedUpstream": {
+    "id": "ea87f79d89c98a4106594820d89c8e2c0f10c15e8bcc9267430c937228e3dab2",
+    "image": "sha256:e4113e20e13bcd26c5d9593bc84dfc76875ed88267e762c333d07669f670c0e7",
+    "finishedAt": "2026-10-17T11:32:38.484919923Z"
+  },
+  "native": {
+    "birth": {
+      "bootId": "f413b3a9-8cd1-4993-9eea-956bc0a511f3",
+      "pidNamespace": "pid:[4026533224]",
+      "startTicks": "21997018"
+    },
+    "tcpDescriptors": 0,
+    "children": 0,
+    "retainedPublicationLock": {
+      "device": "2096",
+      "inode": "992474"
+    }
+  },
+  "pendingOperations": [
+    {
+      "format": "sabalan-browser-operation/v1",
+      "id": "2a545e0ce20528cccf7bebe0dae7f38c",
+      "instanceId": "a3c110491683378f769dd3147ec62937b40187b94cdc3818162f62e233b68d98",
+      "registryIdentity": "c455d3baa39854b497aa10348961febdf4495d2b7efe2eca54ebe61c1eac3a64",
+      "generation": 2,
+      "buildId": "erp_draft_handoff_20261017",
+      "slotId": "slot_erp_new",
+      "image": "sha256:e4113e20e13bcd26c5d9593bc84dfc76875ed88267e762c333d07669f670c0e7",
+      "manifestSha256": "b664f604be5074afba57939dda259fbb0afb8a97196cdcc0b8d6e0833b7c6b7b",
+      "method": "GET",
+      "startedAt": "2026-10-17T11:32:38.904Z"
+    }
+  ],
+  "publicationSha256": "282841b0314fa7df4d9c40dbfc6f73d60646d97963319cc9cc582558a7112f55",
+  "status": "HELD_NOT_DRAINED",
+  "productionAdmission": false,
+  "retirement": {
+    "obsoleteControllerExitCode": 137,
+    "previousRuntimeExitCode": 0,
+    "heldRecordSha256": "b9ebf7eb0b2ae29b2cf0ab7fb600ddb1d697cdd12db2e6100e5e8c645149f56c"
+  }
+}

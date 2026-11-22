@@ -1,0 +1,49 @@
+{
+  "format": "sabalan-versioned-file-publication-native/v1",
+  "suite": "publication",
+  "pass": true,
+  "tap": "TAP version 13\n# Subtest: acknowledged replacement and deletion retain independent exact historical file bytes\nok 1 - acknowledged replacement and deletion retain independent exact historical file bytes\n  ---\n  duration_ms: 1647.005329\n  type: 'test'\n  ...\n# Subtest: the Dispatch storage adapter retains staged bytes and records transaction-discard deletion\nok 2 - the Dispatch storage adapter retains staged bytes and records transaction-discard deletion\n  ---\n  duration_ms: 984.148044\n  type: 'test'\n  ...\n# Subtest: a refused duplicate create preserves the acknowledged artifact without leaving unfinished mutation work\nok 3 - a refused duplicate create preserves the acknowledged artifact without leaving unfinished mutation work\n  ---\n  duration_ms: 771.085551\n  type: 'test'\n  ...\n# Subtest: an actual exclusive cut seals already retained versions and refuses untracked live mutations\nok 4 - an actual exclusive cut seals already retained versions and refuses untracked live mutations\n  ---\n  duration_ms: 1259.105969\n  type: 'test'\n  ...\n# Subtest: independent object copies detect corruption without damaging identical retained bytes\nok 5 - independent object copies detect corruption without damaging identical retained bytes\n  ---\n  duration_ms: 993.392059\n  type: 'test'\n  ...\n# Subtest: separate admitted processes cannot overwrite each other during concurrent create\nok 6 - separate admitted processes cannot overwrite each other during concurrent create\n  ---\n  duration_ms: 895.153824\n  type: 'test'\n  ...\n# Subtest: actual process death after live publication retains unresolved intent and refuses replacement and sealing\nok 7 - actual process death after live publication retains unresolved intent and refuses replacement and sealing\n  ---\n  duration_ms: 753.392322\n  type: 'test'\n  ...\n# {\"event\":\"file-version-component-cut-timing\",\"kind\":\"keys\",\"heads\":10000,\"coldSeedAdoptionMilliseconds\":205080.69233299998,\"warmMilliseconds\":30542.455874000007,\"productionBudgetProof\":false}\n# {\"event\":\"file-version-component-cut-timing\",\"kind\":\"directories\",\"heads\":20,\"coldSeedAdoptionMilliseconds\":336.75904799997807,\"warmMilliseconds\":95.0754190000007,\"productionBudgetProof\":false}\n# Subtest: exhausted distinct-key and directory reservations refuse before live mutation and preserve the previous cut\nok 8 - exhausted distinct-key and directory reservations refuse before live mutation and preserve the previous cut\n  ---\n  duration_ms: 250635.24639\n  type: 'test'\n  ...\n# Subtest: different processes reserve the last distinct-key capacity atomically\nok 9 - different processes reserve the last distinct-key capacity atomically\n  ---\n  duration_ms: 67549.128299\n  type: 'test'\n  ...\n# Subtest: escaped key metadata is reserved before a write can exceed the 16 MiB cut budget\nok 10 - escaped key metadata is reserved before a write can exceed the 16 MiB cut budget\n  ---\n  duration_ms: 62234.026813\n  type: 'test'\n  ...\n1..10\n# tests 10\n# suites 0\n# pass 10\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 387817.725594\n",
+  "workingRoot": "/app/online-runtime-acceptance/versioned-file-publication-27f24f743da59dc85bf6b86a0ee5cc29",
+  "canonicalServicesUnchanged": {
+    "backend": {
+      "id": "a1ea34a8d7d878b906fba7b4fdbe975df13a6b00d63a863eacce34b9827e86ff",
+      "image": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+      "startedAt": "2026-10-15T09:01:40.016187222Z"
+    },
+    "frontend": {
+      "id": "ad23f762dc1b27d2be76c335a3d7a4e20d08832a9a2e055904a4af84a9248c21",
+      "image": "sha256:f0a8954596279ccb01c029de7316022daa109b711a297f716cc9367d4bc9ec53",
+      "startedAt": "2026-10-18T05:09:40.68305388Z"
+    },
+    "postgres": {
+      "id": "e553787e69f44c7bdf7dab94fad43a231f5ba99d988dc783234486a5a844a528",
+      "image": "sha256:3d0f7584ed7d04e27fa050d6683a74746608faf21f202be78460d679cc56461f",
+      "startedAt": "2026-10-12T15:17:49.481269377Z"
+    },
+    "inquiry": {
+      "id": "6d161695e215498048ff24e56e9602ce77871bfb6b390bf1356caecfdf9807d8",
+      "image": "sha256:81eacc768f3c4b82bd0f0a01bef5600ae1321e87cb117bad49ca47dfba79a213",
+      "startedAt": "2026-10-12T15:17:49.463791361Z"
+    }
+  },
+  "sourceHashes": {
+    "kernelWriteAdmission.ts": "8952c65ddde926fbc5136be933d1c7401ea269191cbcba64dd20ba6d95bdd875",
+    "runtimeBoundaryJournal.ts": "d94912a6fb15d759d8270c067e96c81964f1a5464cc54c26df28636ccbe2e9eb",
+    "runtimeTaskAdmission.ts": "c45592ec5a5693c0aacbe794b481bd4198638dcf460e00240c4cae0e6ac7e9fa",
+    "runtimeWorkContext.ts": "9fcbc84ad7393eecc75ffe9bc8df73ebc051a4ba2050f2f31d6f00f7280c795d",
+    "durableFilePublication.ts": "5c1ecdf41aeae4259daf6ebef0f1556fc39135e9c07b80da1ff831bf64a1095a",
+    "versionedFilePublication.ts": "9fe4680fa4087e02f18b649fa7f296f17bb13d8f1b265eadebb3f497a6363d4a",
+    "dispatchDocuments/filesystemStorage.ts": "fdf6fbb74562b030c03208c629ec5fe0d89084e00833a18d92815a00b7f283e7"
+  },
+  "sources": {
+    "fixture.cjs": "0529127b7f7d13180b325e2091837e765393da6e9f626d4cf8adc03b7862bda4",
+    "kernelWriteAdmission.js": "b8dd4d6443eb4f525613fd48d10fa838ccbbd81f43d412674464da31af6c710b",
+    "runtimeBoundaryJournal.js": "c75bd2c91cfeff77f52e6f245fc23c2b88c54397ab3d9bc89f4b316e7b48d5dc",
+    "runtimeTaskAdmission.js": "9e1a08c587f07b76b67becbe9367c7fbcfc79e061b1147dfee212da953196648",
+    "runtimeWorkContext.js": "ed0a47227bb39a5b0e3ea1aae8be6f753bb2d88e0247832b7108f29d1e10156a",
+    "durableFilePublication.js": "3b9ba70126478bbb1922b01e14bb537d6cc1a4c6528a0bec30e07a7e465d259d",
+    "versionedFilePublication.js": "615b985439a866d4ce5e4e5660c778470a1bc39818f3bbde056d5fc0f418a077",
+    "dispatchDocuments/filesystemStorage.js": "0a36a4ef7ef6a0fc5f5ef3acac3383b2f1f9b0923e64e729ea6da8aa9b725198"
+  },
+  "productionAdmission": false
+}

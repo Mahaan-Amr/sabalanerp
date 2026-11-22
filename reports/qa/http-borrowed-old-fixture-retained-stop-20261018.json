@@ -1,0 +1,6 @@
+{
+  "exitCode": 1,
+  "signal": null,
+  "stdout": "",
+  "stderr": "TypeError: fetch failed\n    at node:internal/deps/undici/undici:15157:13\n    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)\n    at async [stdin]:2:29\n"
+}

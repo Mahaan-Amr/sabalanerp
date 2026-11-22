@@ -1,0 +1,29 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import {randomBytes} from 'node:crypto';
+import {originalBackendBaseCommands} from './lib/production-backend-base-process.mjs';
+import {stableBackendBaseFile} from './lib/production-backend-base-artifacts.mjs';
+import {localPrismaCompose,localPrismaSources,localPrismaInspect,localPrismaImageInspect,localPrismaRows,prismaSha,validateLocalPrismaController,unpackLocalPrismaArchive,readCurrentLocalLinuxPrismaGeneration} from './lib/current-linux-prisma-receipt.mjs';
+const repository=path.resolve(import.meta.dirname,'..'),args=process.argv.slice(2);assert.ok(args.length===1&&['--inspect','--generate'].includes(args[0]));
+if(args[0]==='--inspect'){console.log(JSON.stringify({format:'sabalan-private-local-linux-prisma-plan/v1',compose:localPrismaCompose,service:'backend',newContainer:false,generationOnly:true,databaseConnected:false,sharedClientModified:false,generationExecuted:false}));}
+else{
+ const sourcePins=Object.fromEntries(localPrismaSources.map(file=>[file,stableBackendBaseFile(path.join(repository,file))]));const source=fs.readFileSync(path.join(repository,'backend/prisma/schema.prisma')),helper=fs.readFileSync(path.join(repository,'scripts/private-local-linux-prisma-worker.cjs'));const operation='private-local-linux-prisma-'+randomBytes(16).toString('hex'),root=path.resolve('D:/sabalanerp-online-qa',operation),client=path.join(root,'client');assert.equal(fs.existsSync(root),false);assert.ok(fs.statfsSync('D:/',{bigint:true}).bavail*fs.statfsSync('D:/',{bigint:true}).bsize>=1024n**3n);fs.mkdirSync(root,{mode:0o700});
+ const owner=originalBackendBaseCommands(),commands=[];let report={format:'sabalan-private-local-linux-prisma-controller/v1',operation,pass:false,productionAdmission:false};
+ const request=Buffer.from(JSON.stringify({operation,sourceSchemaSha256:prismaSha(source),sourceBase64:source.toString('base64'),helperSha256:prismaSha(helper)}));
+ function sources(){for(const[file,pin]of Object.entries(sourcePins))assert.deepEqual(stableBackendBaseFile(path.join(repository,file)),pin);}
+ async function run(args,input){const result=await owner.run('docker',args,{input,maximum:128*1024**2});commands.push({executable:'docker',args,...(input?{inputSha256:prismaSha(input)}:{}),...result});owner.assertSuccessful(result);return result;}
+ async function ps(){const r=await run([...localPrismaCompose]);const rows=localPrismaRows(r.stdout);assert.equal(rows.length,10);assert.ok(rows.every(x=>x.Project==='sabalanerp-local'&&x.State==='running'&&x.Health==='healthy'));return rows;}
+ async function docker(args,input){await ps();return run(args,input);}
+ async function identities(ids){const selected=ids??(await ps()).map(x=>x.ID??x.Name);const result=await docker(['inspect','--format',localPrismaInspect,...selected]);return localPrismaRows(result.stdout).sort((a,b)=>a.service.localeCompare(b.service));}
+ function write(file,bytes){const fd=fs.openSync(file,'wx',0o600);try{fs.writeFileSync(fd,bytes);fs.fsyncSync(fd);}finally{fs.closeSync(fd);}}
+ try{
+  sources();const census=await ps();const selected=census.sort((a,b)=>a.Service.localeCompare(b.Service)).map(x=>x.ID);assert.ok(selected.every(x=>/^[a-f0-9]{64}$/.test(x)));const before=await identities(selected),backend=before.find(x=>x.service==='backend');assert.ok(backend);report.before=before;
+  const image=JSON.parse((await docker(['image','inspect','--format',localPrismaImageInspect,backend.image])).stdout);report.image=image;const generation=JSON.parse((await docker(['exec','-i','--workdir','/tmp',backend.id,'node','-e',helper.toString()],request)).stdout);report.generation=generation;report.requestSha256=prismaSha(request);const after=await identities(before.map(x=>x.id));sources();assert.deepEqual(after,before);report={...report,after,allTenIdentitiesUnchanged:true,pass:true};
+ }catch(error){report.error=String(error.message).slice(0,2048);}
+ finally{report.originalClosure=await owner.close();report.originalCommands=commands;const file=path.join(root,'controller.json');write(file,Buffer.from(JSON.stringify(report,null,2)+'\n'));if(!report.pass){console.log(JSON.stringify({file,pass:false,error:report.error,originalClosure:report.originalClosure}));process.exitCode=1;}}
+ if(report.pass){
+  validateLocalPrismaController(report,source,helper);const archive=unpackLocalPrismaArchive(report.generation);write(path.join(root,'client.tar'),archive.raw);write(path.join(root,'client.tar.gz'),archive.compressed);fs.mkdirSync(client,{mode:0o700});const outputs={};for(const[name,bytes]of Object.entries(archive.outputs)){const file=path.join(client,name);fs.mkdirSync(path.dirname(file),{recursive:true,mode:0o700});assert.equal(fs.realpathSync(path.dirname(file)),path.dirname(file));write(file,bytes);outputs[name]=stableBackendBaseFile(file);}
+  const receipt={format:'sabalan-private-local-linux-prisma-extraction/v1',operation,pass:true,root,client,sourcePins,controller:stableBackendBaseFile(path.join(root,'controller.json'),128*1024**2),outputs,generationOnly:true,databaseConnected:false,productionAdmission:false};const receiptFile=path.join(root,'local-extraction-receipt.json');write(receiptFile,Buffer.from(JSON.stringify(receipt,null,2)+'\n'));const read=file=>fs.readFileSync(file);readCurrentLocalLinuxPrismaGeneration({repositoryRoot:repository,extractionReceiptFile:receiptFile,captureExternalSource:read});sources();console.log(JSON.stringify({pass:true,receiptFile,sha256:stableBackendBaseFile(receiptFile).sha256,models:report.generation.models,files:Object.keys(outputs).length,bytes:report.generation.totalBytes,allOriginalChildrenClosed:report.originalClosure.allOriginalChildrenClosed,allTenIdentitiesUnchanged:true,databaseConnected:false,productionAdmission:false}));
+ }
+}

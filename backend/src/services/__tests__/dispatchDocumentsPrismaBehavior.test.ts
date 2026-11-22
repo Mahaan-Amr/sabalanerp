@@ -10,7 +10,22 @@ const advisoryLocks: string[] = [];
 let replacementMode = false;
 const tx = {
   $executeRawUnsafe: async (_query: string, key: string) => { advisoryLocks.push(key); return 1; },
+  $queryRaw: async () => [],
   $queryRawUnsafe: async () => [],
+  // These pricing-publication fixtures must first satisfy the actual ordinary
+  // contract dispatch guard. Keep ordinary identities and explicit current
+  // approval/financial evidence; never relabel them as partner contracts to
+  // bypass that guard merely to reach the stale-pricing assertion below.
+  salesContract: { findMany: async () => ['contract-a', 'contract-b'].map(id => ({
+    id, partnerKind: null, partnerCaseId: null, commercialFlowVersion: 1,
+    commercialRevision: 1, salesApprovalRevision: 1, customerAcceptanceRevision: 1,
+    status: 'SIGNED', isInactive: false, totalAmount: new Prisma.Decimal(100), currency: 'IRR',
+  })) },
+  accountingFinancialRecord: { findMany: async () => [{
+    amount: new Prisma.Decimal(100), sepidarAmount: new Prisma.Decimal(100),
+    systemInvoiceNumber: 'fixture-approved-invoice', systemInvoiceDate: new Date('2026-08-09T00:00:00Z'),
+    sourceSnapshot: { commercialRevision: 1 },
+  }] },
   dispatchCutoverControl: { findUnique: async () => ({ phase: 'CANONICAL_LIVE' }) },
   dispatchDocumentCommandResult: { findUnique: async () => null, create: async () => { writes.push('command'); return {}; } },
   accountingDispatchCandidate: {

@@ -12,11 +12,13 @@ import { requestAccountingSalesContractCorrection } from '../salesContractCorrec
 import { respondToCrossWorkspaceDuty } from '../crossWorkspaceDutyModule';
 import { completeSalesCorrectionEditDuty } from '../crossWorkspaceDutyAdapters/salesContractCorrectionDutyAdapter';
 import { ordinaryContractDispatchEligible } from '../ordinaryContractDispatchEligibility';
+import { createContractDispatchDuty } from '../crossWorkspaceDutyAdapters/contractDispatchDutyAdapter';
 
 const databaseUrl = process.env.ORDINARY_CONTRACT_QA_DATABASE_URL
   || 'postgresql://postgres:sabalanerp-local-only@127.0.0.1:55432/sabalanerp?connection_limit=2&pool_timeout=10';
 const location = new URL(databaseUrl);
-assert.ok(['localhost', '127.0.0.1'].includes(location.hostname) && location.port === '55432'
+assert.ok((['localhost', '127.0.0.1'].includes(location.hostname) && location.port === '55432'
+  || location.hostname === 'postgres' && location.port === '5432')
   && location.pathname === '/sabalanerp', 'Integration QA requires existing sabalanerp-local database');
 
 class RollbackFixture extends Error {}
@@ -39,6 +41,31 @@ const inFixture = async (run: (tx: Prisma.TransactionClient, contract: any) => P
     }, { timeout: 30_000 }), RollbackFixture);
   } finally { await database.$disconnect(); }
 };
+
+test('commercial editor save supersedes pending dispatch duty and commits the next revision atomically', () => inFixture(async (tx, contract) => {
+  const source = await tx.salesContract.findFirstOrThrow({ where: { partnerKind: null, partnerCaseId: null,
+    productGraphState: { isNot: null }, id: { not: contract.id }, contractData: { not: Prisma.DbNull } } });
+  const admin = await tx.user.findFirstOrThrow({ where: { role: 'ADMIN' } });
+  await tx.salesContract.update({ where: { id: contract.id }, data: {
+    contractData: source.contractData as Prisma.InputJsonValue, content: source.content,
+    totalAmount: source.totalAmount, currency: source.currency,
+  } });
+  const request = await tx.contractDispatchAuthority.create({ data: { contractId: contract.id, kind: 'MANAGER',
+    revision: contract.commercialRevision, requestedBy: admin.id } });
+  const duty = await createContractDispatchDuty(tx, request.id);
+  const client = new Proxy(tx, { get(target, property) {
+    if (property === '$transaction') return (work: (transaction: Prisma.TransactionClient) => unknown) => work(tx);
+    return Reflect.get(target, property);
+  } }) as unknown as PrismaClient;
+  const saved = await updateContract(contract.id, { notes: 'ذخیره ویرایش همراه پایان درخواست نسخه قبل' }, admin.id, client);
+  assert.equal(saved.commercialRevision, contract.commercialRevision + 1);
+  assert.equal((await tx.contractDispatchAuthority.findUniqueOrThrow({ where: { id: request.id } })).status, 'SUPERSEDED');
+  const closed = await tx.crossWorkspaceDuty.findUniqueOrThrow({ where: { id: duty.id } });
+  assert.equal(closed.status, 'CANCELLED');
+  assert.equal(closed.respondedAt, null);
+  assert.equal(closed.respondedByUserId, null);
+  assert.ok(await tx.accountingAuditLog.findFirst({ where: { contractId: contract.id, action: 'DISPATCH_AUTHORITY_SUPERSEDED' } }));
+}));
 
 for (const flowVersion of [0, 1]) test(`editor save commits its edits and cancellation together (flow ${flowVersion})`, () => inFixture(async (tx, contract) => {
   await tx.contractPublicConfirmation.create({ data: { contractId: contract.id, tokenHash: randomUUID(),

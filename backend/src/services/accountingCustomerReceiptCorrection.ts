@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
+import { requireCustomerSourceSharesWithin } from './customerSemanticCompatibility';
 import { AccountingCustomerTreasuryError, type CustomerTreasuryActor } from './accountingCustomerTreasury';
 import { allocateCustomerReceiptPrisma, reverseCustomerAllocationPrisma, requireCustomerConsumptionDate } from './accountingCustomerTreasuryPrisma';
 import { effectiveCustomerReceiptRials } from './accountingCustomerReceiptBalance';
@@ -44,6 +45,7 @@ export async function reverseReceiptConsumptionWithin(tx: Prisma.TransactionClie
 }
 
 export async function correctCustomerReceiptWithin(tx: Prisma.TransactionClient, input: CustomerReceiptCorrection) {
+  await requireCustomerSourceSharesWithin(tx);
   if (input.idempotencyKey.length < 8) fail('ACCOUNTING_EVIDENCE_REQUIRED', 'کلید مستقل فرمان اصلاح لازم است.');
   const commandHash = hashAccountingEvidence({ ...input, actor: undefined });
   const prior = await tx.accountingCustomerReceiptAdjustment.findUnique({ where: { idempotencyKey: input.idempotencyKey } });

@@ -1,9 +1,25 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { partnerError } from '@sabalanerp/partner-sales-contracts';
 import { createPartnerTechnicalHttpPorts, createPartnerTechnicalPolicyHttpPort } from '../../contract-creation/partner/partnerTechnicalHttpPorts';
 
 const access = { schemaVersion: 1 as const, recoveryId: 'draft-1', browserSessionId: 'browser-1',
   leaseToken: 'lease-1', baseRevision: 0 };
+
+test('technical HTTP save preserves a validated component correction message and rejects injected diagnostics', async () => {
+  const error = partnerError('CATALOG_COMPONENT_UNAVAILABLE', { kind: 'TOOL', title: 'پوساب پالیش پله', reason: 'INACTIVE' });
+  for (const message of [error.message, 'private SQL diagnostic']) {
+    const ports = createPartnerTechnicalHttpPorts({ post: async () => {
+      throw { response: { status: 409, data: { code: error.code, error: message, component: error.component } } };
+    }, put: async () => { throw new Error('unused'); } });
+    const result = await ports.saved.save({ ...access, expectedRecoveryRevision: 0, idempotencyKey: 'save',
+      draft: { schemaVersion: 1, inputRevision: 1, rows: [] } });
+    assert.ok(!result.ok);
+    assert.equal(result.error.code, message === error.message ? error.code : 'INTEGRITY_CONFLICT');
+    if (message === error.message) assert.deepEqual(result.error, error);
+    assert.doesNotMatch(result.error.message, /private|SQL/);
+  }
+});
 
 test('technical HTTP adapter preserves server failure categories without exposing private diagnostics', async () => {
   for (const [status, code] of [[503, 'TEMPORARY_FAILURE'], [500, 'INTERNAL_ERROR']] as const) {

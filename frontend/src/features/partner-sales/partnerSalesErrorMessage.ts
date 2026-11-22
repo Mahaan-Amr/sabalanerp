@@ -8,12 +8,12 @@ export const partnerSalesActionFeedback = (error: unknown, failedAction: string)
   }) };
 };
 
-export const getPartnerSalesErrorMessage = (error: Pick<PartnerError, 'code'>): string =>
-  partnerError(error.code).message;
+export const getPartnerSalesErrorMessage = (error: Pick<PartnerError, 'code' | 'component'>): string =>
+  partnerError(error.code, error.component).message;
 
 export const normalizePartnerSalesOperationalError = (error: unknown): unknown => {
   const parsed = PartnerErrorSchema.safeParse(error);
   if (!parsed.success) return error;
-  const canonical = partnerError(parsed.data.code);
+  const canonical = partnerError(parsed.data.code, parsed.data.component);
   return { response: { status: canonical.status, data: { error: canonical.message } } };
 };

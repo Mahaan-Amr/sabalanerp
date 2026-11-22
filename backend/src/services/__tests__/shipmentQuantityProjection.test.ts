@@ -182,10 +182,19 @@ test('does not infer a missing contracted quantity as zero', () => {
   assert.equal(result.totalsByUnit[0]?.contracted, null);
 });
 
-test('rejects quantities that cannot be represented at canonical scale three', () => {
+test('rejects quantities exceeding exact storage capacity without rounding', () => {
   assert.throws(() => projectShipmentQuantities([
-    evidence('too-precise', 'CONTRACTED_SET', '1.0004'),
-  ]), /at most three decimal places/);
+    evidence('too-precise', 'CONTRACTED_SET', `1.${'0'.repeat(30)}1`),
+  ]), /exact storage capacity/);
+});
+
+test('preserves exact slab area across reservations and availability', () => {
+  const result = projectShipmentQuantities([
+    evidence('exact-contract', 'CONTRACTED_SET', '15.4875'),
+    evidence('exact-reserved', 'ALLOCATION_FINALIZED', '5.1625'),
+  ]);
+  assert.equal(result.rows[0]?.quantities?.contracted, '15.4875');
+  assert.equal(result.rows[0]?.quantities?.availableToLoad, '10.325');
 });
 
 test('keeps dispatched truth and reports a verified return awaiting Accounting', () => {

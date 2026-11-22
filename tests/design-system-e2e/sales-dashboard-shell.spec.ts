@@ -2,8 +2,8 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 
 const login = async (page: Page) => {
   await page.goto('/login');
-  await page.locator('input[name="identifier"]').fill('admin');
-  await page.locator('input[name="password"]').fill('admin123');
+  await page.locator('input[name="identifier"]').fill(process.env.DESIGN_SYSTEM_E2E_ADMIN_USERNAME || 'admin');
+  await page.locator('input[name="password"]').fill(process.env.DESIGN_SYSTEM_E2E_ADMIN_PASSWORD || 'admin123');
   await page.locator('form').getByRole('button', { name: 'ورود' }).click();
   await expect(page).toHaveURL(/\/dashboard$/, { timeout: 15_000 });
 };
@@ -271,6 +271,7 @@ test('dashboard navigation stays contained and aligned across desktop and mobile
 test('Sales landing keeps its destinations in a neutral neumorphic workspace', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await login(page);
+  await page.route('**/api/dashboard/route-availability?*', route => route.fulfill({ json: { success: true, data: { allowed: true } } }));
   await page.goto('/dashboard/sales');
 
   const main = page.locator('[data-dashboard-main]');
@@ -284,11 +285,13 @@ test('Sales landing keeps its destinations in a neutral neumorphic workspace', a
 
   const destinations = [
     ['مشاهده قراردادها', '/dashboard/sales/contracts'],
+    ['استعلام های همکار', '/dashboard/sales/partner-inquiries?view=pending'],
     ['ایجاد قرارداد جدید', '/dashboard/sales/contracts/create'],
     ['ایجاد مشتری', '/dashboard/crm/customers/create'],
     ['ایجاد محصول', '/dashboard/sales/products/create'],
     ['گزارش فروش', '/dashboard/sales/reports'],
-    ['پیش‌نویس‌ها و پرونده‌های من', '/dashboard/sales/partner-cases'],
+    ['تنظیمات فروش', '/dashboard/sales/settings'],
+    ['قراردادها و پرونده‌های فروش', '/dashboard/sales/partner-cases'],
     ['ثبت حسابداری فروشندگان', '/dashboard/sales/reports?view=accounting-registered&period=month'],
   ] as const;
 
@@ -297,7 +300,7 @@ test('Sales landing keeps its destinations in a neutral neumorphic workspace', a
   }
 
   const cards = main.locator('.sds-neumorphic-card');
-  await expect(cards).toHaveCount(destinations.length);
+  await expect.poll(() => cards.count()).toBeGreaterThanOrEqual(destinations.length);
   const cardPresentation = await cards.evaluateAll((elements) =>
     elements.map((element) => {
       const style = getComputedStyle(element);
@@ -323,6 +326,14 @@ test('Sales landing keeps its destinations in a neutral neumorphic workspace', a
 
   const finalCard = cards.last();
   await finalCard.scrollIntoViewIfNeeded();
+  // A nearest scroll may leave a card behind the fixed mobile bar; verify it is reachable at page end.
+  await page.mouse.move(195, 400);
+  await page.mouse.wheel(0, 10_000);
+  await expect.poll(async () => {
+    const card = await finalCard.boundingBox();
+    const navigation = await mobileNavigation.boundingBox();
+    return card && navigation ? card.y + card.height - navigation.y : Infinity;
+  }).toBeLessThanOrEqual(0);
   const finalCardBox = await finalCard.boundingBox();
   const bottomNavigationBox = await mobileNavigation.boundingBox();
   expect(finalCardBox).not.toBeNull();

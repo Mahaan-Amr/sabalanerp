@@ -1,0 +1,39 @@
+const fs=require('node:fs');
+const path=require('node:path');
+const crypto=require('./recoveryCrypto.cjs');
+const fail=code=>{throw Object.assign(new Error(code),{code});};
+const same=(a,b)=>a.dev===b.dev&&a.ino===b.ino&&a.size===b.size&&a.mtimeNs===b.mtimeNs&&a.ctimeNs===b.ctimeNs;
+function safeFile(file,max,privateBytes=true){
+ if(!path.isAbsolute(file)||fs.realpathSync(file)!==file)fail('PRIVATE_FILE_ALIAS');
+ const fd=fs.openSync(file,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW|fs.constants.O_NONBLOCK);
+ try{const s=fs.fstatSync(fd,{bigint:true});if(!s.isFile()||s.nlink!==1n||s.uid!==0n||(s.mode&(privateBytes?0o077n:0o022n))||s.size>BigInt(max))fail('PRIVATE_FILE_UNSAFE');return s;}finally{fs.closeSync(fd);}
+}
+async function syncFile(file){const f=await fs.promises.open(file,'r');try{await f.sync();}finally{await f.close();}}
+async function syncDirectory(file){const f=await fs.promises.open(file,fs.constants.O_RDONLY|fs.constants.O_DIRECTORY|fs.constants.O_NOFOLLOW);try{await f.sync();}finally{await f.close();}}
+async function main(){
+ const [componentFile,secretRoot,sourceDirectory]=process.argv.slice(2);
+ safeFile(componentFile,1024*1024);
+ const point=JSON.parse(fs.readFileSync(componentFile,'utf8'));
+ if(point.format!=='sabalan-private-physical-base/v1'||point.status!=='NATIVE_VERIFIED_PRIVATE_ONLY'||!/^[a-f0-9]{64}$/.test(point.archiveSha256))fail('PRIVATE_COMPONENT_UNPROVEN');
+ const source=path.join(path.dirname(componentFile),'base.tar');
+ const before=safeFile(source,2**31);
+ if(Number(before.size)!==point.archiveBytes||await crypto.sha256File(source)!==point.archiveSha256)fail('PRIVATE_SOURCE_CHANGED');
+ for(const dir of [secretRoot,sourceDirectory]){const s=fs.lstatSync(dir);if(fs.realpathSync(dir)!==dir||!s.isDirectory()||s.uid!==0||(s.mode&0o077))fail('PRIVATE_DIRECTORY_UNSAFE');}
+ const localPath=path.join(secretRoot,'local-rollback-key'),remotePath=path.join(secretRoot,'remote-recovery-public.pem');
+ safeFile(localPath,16384);safeFile(remotePath,16384,false);
+ const passphrase=fs.readFileSync(localPath,'utf8').trim(),publicKeyPem=fs.readFileSync(remotePath,'utf8');
+ if(passphrase.length<32||/REPLACE|CHANGE_ME|UNCONFIGURED/.test(passphrase)||!publicKeyPem.includes('BEGIN PUBLIC KEY'))fail('PRIVATE_RECIPIENT_INVALID');
+ const cipher=path.join(sourceDirectory,'base.sabrec'),roundtrip=path.join(sourceDirectory,'validated-base.tar');
+ if(fs.existsSync(cipher)||fs.existsSync(roundtrip))fail('PRIVATE_DESTINATION_EXISTS');
+ await crypto.encryptRecoveryArchiveForRecipients(source,cipher,[{keyId:'local-rollback',passphrase},{keyId:'independent-recovery',publicKeyPem}]);
+ await syncFile(cipher);await syncDirectory(sourceDirectory);
+ await crypto.decryptRecoveryArchive(cipher,roundtrip,passphrase);
+ await syncFile(roundtrip);await syncDirectory(sourceDirectory);
+ if(await crypto.sha256File(roundtrip)!==point.archiveSha256||!same(before,fs.lstatSync(source,{bigint:true})))fail('PRIVATE_LOCAL_ROUNDTRIP_INVALID');
+ const proof={format:'sabalan-private-physical-cipher/v1',operationId:point.operationId,sourceSha256:point.archiveSha256,sourceBytes:point.archiveBytes,
+  cipherSha256:await crypto.sha256File(cipher),cipherBytes:fs.statSync(cipher).size,localDecryptVerified:true,independentDecryptVerified:false,
+  healthyApplicationPoint:false,publicOnlineAdmission:false};
+ const fd=fs.openSync(path.join(sourceDirectory,'encryption-proof.json'),'wx',0o600);try{fs.writeFileSync(fd,JSON.stringify(proof,null,2)+'\n');fs.fsyncSync(fd);}finally{fs.closeSync(fd);}
+ await syncDirectory(sourceDirectory);console.log(JSON.stringify(proof));
+}
+main().catch(e=>{console.error(JSON.stringify({ok:false,failureClass:e.code||e.name}));process.exitCode=1;});

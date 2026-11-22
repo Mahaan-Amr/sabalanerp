@@ -1,0 +1,96 @@
+{
+  "nativeWalReceiverPassed": true,
+  "databaseName": "sabalanerp_concurrency_f7e6da7d707c0e4f",
+  "temporaryDatabaseDroppedWithoutForce": true,
+  "observations": [
+    {
+      "dockerExecClientLostBeforeReceiverStart": true,
+      "emptySenderSnapshotDidNotAuthorizeCleanup": true
+    },
+    {
+      "committedLsn": "C/5D000150",
+      "captured": {
+        "configurationSha256": "2da04748584ee59400af973d6602e6d8f99e73e6e72b11398b16df5c900f82c2",
+        "databaseQuiet": true,
+        "endLsn": "C/5E000000",
+        "namespace": "sabalan-wal-f7e6da7d707c0e4fe990747263afa2b4",
+        "nativeLogSha256": "858645c073a08c9100c8c466b5901a9716d9fd81a6b340d9bae4336f6fbe7e54",
+        "nativeReaped": true,
+        "nativeStatus": 0,
+        "phase": "COMPLETE",
+        "segments": [
+          {
+            "bytes": 16777216,
+            "name": "000000010000000C0000005D",
+            "sha256": "3f3c2e6c6aa9a6b76eeff799b765231efd20ec39b545b7e8c871583aba02e1e0"
+          }
+        ],
+        "source": {
+          "currentLsn": "C/5D000028",
+          "databaseName": "sabalanerp_concurrency_f7e6da7d707c0e4f",
+          "databaseOid": "19159494",
+          "prepared": 0,
+          "segmentBytes": 16777216,
+          "sessions": 0,
+          "systemIdentifier": "7667464637415309346",
+          "timeline": 1,
+          "version": "150018",
+          "visible": true
+        },
+        "startLsn": "C/5D000028"
+      },
+      "replicationSlotsUnchanged": true,
+      "nativeReceiverExitedNaturally": true,
+      "dockerExecClient": {
+        "code": null,
+        "signal": "SIGTERM"
+      },
+      "temporaryLeastPrivilegeReplicationRole": "sabalan_wal_f7e6da7d707c0e4fe990747263afa2b4",
+      "temporaryExactIpScramHba": {
+        "directory": "/var/lib/postgresql/data/.sabalan-wal-auth-f7e6da7d707c0e4fe990747263afa2b4",
+        "persistentVolume": "sabalanerp-local_postgres_data",
+        "originalHash": "85c57882d53ed4fd928e9250e4aedad83266b84bffdadf51254ed2deca077d55",
+        "installedHash": "e378e7e93cf664429f31a1b209913edb0fd54867bb023e3bf448ca4122f9c92c",
+        "originalMetadata": "70:70:600",
+        "path": "/var/lib/postgresql/data/pg_hba.conf",
+        "exactRole": "sabalan_wal_f7e6da7d707c0e4fe990747263afa2b4",
+        "exactIp": "172.18.0.10",
+        "committed": true,
+        "restoredHash": "85c57882d53ed4fd928e9250e4aedad83266b84bffdadf51254ed2deca077d55"
+      }
+    },
+    {
+      "originalHbaRestored": true,
+      "freshReplicationConnectionDeniedAfterRestore": true
+    }
+  ],
+  "canonicalBeforeAndAfter": [
+    {
+      "id": "a1ea34a8d7d878b906fba7b4fdbe975df13a6b00d63a863eacce34b9827e86ff",
+      "image": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+      "startedAt": "2026-10-15T09:01:40.016187222Z"
+    },
+    {
+      "id": "ad23f762dc1b27d2be76c335a3d7a4e20d08832a9a2e055904a4af84a9248c21",
+      "image": "sha256:f0a8954596279ccb01c029de7316022daa109b711a297f716cc9367d4bc9ec53",
+      "startedAt": "2026-10-15T10:11:30.825468888Z"
+    },
+    {
+      "id": "6d161695e215498048ff24e56e9602ce77871bfb6b390bf1356caecfdf9807d8",
+      "image": "sha256:81eacc768f3c4b82bd0f0a01bef5600ae1321e87cb117bad49ca47dfba79a213",
+      "startedAt": "2026-10-12T15:17:49.463791361Z"
+    },
+    {
+      "id": "e553787e69f44c7bdf7dab94fad43a231f5ba99d988dc783234486a5a844a528",
+      "image": "sha256:3d0f7584ed7d04e27fa050d6683a74746608faf21f202be78460d679cc56461f",
+      "startedAt": "2026-10-12T15:17:49.481269377Z"
+    }
+  ],
+  "receiverSha256": "022ffd8217d650d3fbfdaf8c5cac5a9b1d10fe0fb86e27fbbc300f653785f250",
+  "fixtureSha256": "f2481d3b203e0dee53ece1cd2b5de0fb168d08931ee0429e50d63203127dedad",
+  "limits": [
+    "physical WAL includes cluster-private data; private artifacts retained",
+    "native bounded WAL component, not continuous coherent recovery publication",
+    "no independent restore or production admission"
+  ]
+}

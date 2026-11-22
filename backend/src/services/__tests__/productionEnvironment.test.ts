@@ -55,6 +55,14 @@ const preflight = deploy.indexOf('run_backend node dist/scripts/validate-product
 assert.ok(preflight > 0);
 assert.ok(preflight < deploy.indexOf('\ncontrol prepare\n'), 'invalid startup configuration must fail before the maintenance session exists');
 const startup = fs.readFileSync(path.resolve(process.cwd(), 'src/index.ts'), 'utf8');
-assert.match(startup, /import \{ validateProductionEnvironment \} from '\.\/services\/productionEnvironment'/);
-assert.match(startup, /validateProductionEnvironment\(\)/);
+const application = fs.readFileSync(path.resolve(process.cwd(), 'src/application.ts'), 'utf8');
+assert.match(startup, /import \{ createApplication \} from '\.\/application'/);
+assert.ok(startup.indexOf('= createApplication(') > 0 && startup.indexOf('= createApplication(') < startup.indexOf('startRuntime(runtimeRole,'),
+  'protected application must validate configuration before runtime activation');
+assert.match(application, /import \{ validateProductionEnvironment \} from '\.\/services\/productionEnvironment'/);
+assert.match(application, /function createHttpApplication\([\s\S]*?validateProductionEnvironment\(\)/);
+const start = application.indexOf('export function createApplication(');
+const end = application.indexOf('\nfunction createHttpApplication(', start);
+assert.ok(start >= 0 && end > start && application.slice(start, end).includes('createHttpApplication('));
+assert.doesNotMatch(application, /from ['\"]\.\/services\/online/);
 console.log('production environment preflight tests passed');

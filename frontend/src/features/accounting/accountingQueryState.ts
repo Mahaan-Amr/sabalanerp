@@ -65,7 +65,7 @@ const DUE_BUCKETS = new Set(['overdue', 'next7', 'days8to30', 'later30']);
 const DEADLINE_TYPES = new Set(['all', 'receivable', 'check']);
 
 const ACCOUNTING_DASHBOARD_KEYS = ['due', 'deadlineType'] as const;
-const CONTRACT_KEYS = ['view', 'lifecycleView', 'search', 'status', 'sourceStatus', 'dateFrom', 'dateTo', 'page', 'pageSize', 'sort'] as const;
+const CONTRACT_KEYS = ['view', 'lifecycleView', 'search', 'status', 'sourceStatus', 'sourceKind', 'dateFrom', 'dateTo', 'page', 'pageSize', 'sort'] as const;
 const INVOICE_KEYS = ['view', 'search', 'status', 'period', 'date', 'cutoff', 'page', 'pageSize'] as const;
 const STATUS_DRILLDOWN_KEYS = ['view', 'search', 'status', 'page', 'pageSize'] as const;
 const AUDIT_KEYS = ['search', 'action', 'page', 'pageSize'] as const;
@@ -78,6 +78,7 @@ export type ContractsQueryState = {
   search: string;
   status: string;
   sourceStatus: string;
+  sourceKind: 'ALL' | 'SALES_CONTRACT' | 'PARTNER_INTERNAL_RECORD';
   dateFrom: string;
   dateTo: string;
   page: number;
@@ -214,6 +215,9 @@ export const canonicalizeContractsQuery = (
     : 'active';
   const rawSourceStatus = source.get('sourceStatus') || '';
   const sourceStatus = CONTRACT_SOURCE_STATUSES.has(rawSourceStatus) ? rawSourceStatus : 'ALL';
+  const rawSourceKind = source.get('sourceKind');
+  const sourceKind = rawSourceKind === 'SALES_CONTRACT' || rawSourceKind === 'PARTNER_INTERNAL_RECORD'
+    ? rawSourceKind : 'ALL';
   const search = normalizedSearch(source);
   const rawDateFrom = source.get('dateFrom') || '';
   const rawDateTo = source.get('dateTo') || '';
@@ -226,12 +230,13 @@ export const canonicalizeContractsQuery = (
   if (search) params.set('search', search);
   if (status !== 'ALL') params.set('status', status);
   if (sourceStatus !== 'ALL') params.set('sourceStatus', sourceStatus);
+  if (sourceKind !== 'ALL') params.set('sourceKind', sourceKind);
   if (dateFrom) params.set('dateFrom', dateFrom);
   if (dateTo) params.set('dateTo', dateTo);
   if (page > 1) params.set('page', String(page));
 
   return {
-    state: { view, lifecycleView, search, status, sourceStatus, dateFrom, dateTo, page },
+    state: { view, lifecycleView, search, status, sourceStatus, sourceKind, dateFrom, dateTo, page },
     params,
   };
 };

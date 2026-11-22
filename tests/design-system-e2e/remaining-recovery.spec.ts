@@ -1,6 +1,7 @@
+import { scopeContractNavigationFixture } from './support/contract-navigation-fixture';
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
-import { loginAsAdmin } from './support/design-system';
+import { loginAsAdmin, seedContractNavigation } from './support/design-system';
 import { remainingRecoveryGuidance } from '../../backend/src/services/remainingRecoveryGuidance';
 
 const products = JSON.parse(readFileSync('packages/contract-product-graph/src/__tests__/fixtures/remaining-child-chain.json', 'utf8'));
@@ -25,12 +26,8 @@ test('remaining recovery error keeps every row and shows exact chain guidance on
         productRowId: products[1].rowId, ...guidance, message }] }) });
   });
   await loginAsAdmin(page);
-  await page.evaluate(products => {
-    for (const key of Object.keys(localStorage)) {
-      if (key.startsWith('sabalan-contract-active-draft:') || key.startsWith('contract-recovery:')) localStorage.removeItem(key);
-    }
-    const project = { id: 'e2e-project', customerId: 'e2e-customer', address: 'آدرس آزمون', city: 'شیراز', isActive: true };
-    localStorage.setItem('contractWizardState', JSON.stringify({ currentStep: 8, wizardData: {
+  const project = { id: 'e2e-project', customerId: 'e2e-customer', address: 'آدرس آزمون', city: 'شیراز', isActive: true };
+  await seedContractNavigation(page, { currentStep: 8, wizardData: {
       contractKind: 'standard', contractDate: '1405/06/04', contractNumber: 'E2E-REMAINING', creatorSequenceNumber: null,
       customerId: 'e2e-customer', customer: { id: 'e2e-customer', firstName: 'مشتری', lastName: 'آزمون', customerType: 'Individual',
         status: 'Active', projectAddresses: [project], phoneNumbers: [], isBlacklisted: false, isLocked: false },
@@ -40,7 +37,8 @@ test('remaining recovery error keeps every row and shows exact chain guidance on
       discount: null, signature: null
     } }));
   }, products);
-  await page.goto('/dashboard/sales/contracts/create?returnTo=contract&step=8', { waitUntil: 'domcontentloaded' });
+  await scopeContractNavigationFixture(page);
+  await page.goto('/dashboard/sales/contracts/create?fresh=1&returnTo=contract&step=8', { waitUntil: 'domcontentloaded' });
   const submit = page.getByRole('button', { name: 'ثبت قرارداد', exact: true });
   await expect(submit).toBeEnabled({ timeout: 60_000 });
   await submit.click();

@@ -1,0 +1,22 @@
+TAP version 13
+# Subtest: native restart refuses retained transport-shutdown-held.json including publication between precheck and lock acquisition
+ok 1 - native restart refuses retained transport-shutdown-held.json including publication between precheck and lock acquisition
+  ---
+  duration_ms: 19.978927
+  type: 'test'
+  ...
+# Subtest: native restart refuses retained obsolete-proxy-retirement-held.json including publication between precheck and lock acquisition
+ok 2 - native restart refuses retained obsolete-proxy-retirement-held.json including publication between precheck and lock acquisition
+  ---
+  duration_ms: 9.39463
+  type: 'test'
+  ...
+1..2
+# tests 2
+# suites 0
+# pass 2
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 113.436962

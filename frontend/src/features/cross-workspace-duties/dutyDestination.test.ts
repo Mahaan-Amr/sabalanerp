@@ -49,3 +49,5 @@ assert.equal(destinationDutyHref('accounting', {
   id: 'dispatch-duty', status: 'OPEN', sourceActionCode: 'CONTRACT_DISPATCH_DECISION',
   destinationHref: '/dashboard/accounting/contracts/contract-1',
 }), '/dashboard/accounting/contracts/contract-1');
+
+assert.equal(destinationDutyHref('purchasing', { id: 'purchase-duty', status: 'OPEN', sourceActionCode: 'PURCHASING_INQUIRY_REVIEW', destinationHref: '/dashboard/purchasing/inquiries?document=example' }), '/dashboard/purchasing/inquiries?document=example');

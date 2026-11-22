@@ -8,6 +8,8 @@ import {
   FaUsers,
   FaUserTie,
   FaCalculator,
+  FaShoppingCart,
+  FaExchangeAlt,
   FaMoneyCheckAlt,
   FaWarehouse,
   FaShieldAlt,
@@ -53,6 +55,8 @@ import { ErpPressable, useErpPresentationScope } from '@/components/erp';
 import { DutyCountBadge } from '@/features/cross-workspace-duties/DutyCountBadge';
 import { useCrossWorkspaceDutyCount } from '@/features/cross-workspace-duties/useCrossWorkspaceDutyCount';
 import { projectHrNavigation } from '@/features/hr/hrAccessNavigation';
+import { purchasingAPI } from '@/features/purchasing/api';
+import { accountingGroupHref, accountingNavigationGroups } from '@/features/accounting/accountingNavigation';
 
 interface NavigationItem {
   name: string;
@@ -94,11 +98,13 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
   const [canOpenSecurityShiftReport, setCanOpenSecurityShiftReport] =
     useState(false);
   const [partnerRouteAccess, setPartnerRouteAccess] = useState<Record<string, boolean>>({});
+  const [purchasingSections,setPurchasingSections]=useState<string[]>([]);
   const pathname = usePathname();
   const crmPresentation = useErpPresentationScope() === 'workspace';
   const dutyCount = useCrossWorkspaceDutyCount(currentWorkspace || null);
 
   const collapsed = !!collapsedProp;
+  useEffect(()=>{if(currentWorkspace!==WORKSPACES.PURCHASING)return;let active=true;setPurchasingSections([]);void purchasingAPI.access().then(r=>{if(active)setPurchasingSections(r.data.data.sections);}).catch(()=>{if(active)setPurchasingSections([]);});return()=>{active=false;};},[currentWorkspace,currentUser?.id]);
 
   useEffect(() => {
     loadCurrentUser();
@@ -176,6 +182,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
         currentUser.role !== "MANAGER"
       ) {
         const workspaceIcons: Record<string, any> = {
+          FaShoppingCart,
           FaFileContract,
           FaUsers,
           FaUserTie,
@@ -585,6 +592,11 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
           },
         ];
 
+      case WORKSPACES.PURCHASING:
+        return [{name:'PurchasingDashboard',namePersian:'داشبورد خرید',href:'/dashboard/purchasing',icon:FaShoppingCart,show:true,exact:true},
+          {name:'inquiries',namePersian:'استعلام‌های ثبت‌شده',href:'/dashboard/purchasing/inquiries',icon:FaClipboardList,show:purchasingSections.includes('inquiries')},
+          {name:'purchase-records',namePersian:'سوابق و جزئیات',href:'/dashboard/purchasing/requests',icon:FaHistory,show:true,children:[
+          ...[['requests','درخواست‌های خرید',FaClipboardList],['orders','سفارش‌های خرید',FaClipboardList],['receipts','دریافت بار',FaTruck],['exchanges','تعویض‌ها',FaExchangeAlt],['suppliers','تأمین‌کنندگان',FaBuilding],['inventory','بارهای پذیرفته‌شده',FaWarehouse],['finance','پیگیری حسابداری',FaCalculator],['changes','تغییر و لغو',FaHistory]].map(([id,label,icon])=>({name:String(id),namePersian:String(label),href:`/dashboard/purchasing/${id}`,icon,show:purchasingSections.includes(String(id))}))]}];
       case WORKSPACES.HR:
         return projectHrNavigation(currentUser?.permissions?.features || [], currentUser?.role).map((item) => ({
           name: item.id,
@@ -606,30 +618,9 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
       case WORKSPACES.ACCOUNTING:
         return [
           {
-            name: "دفترکل",
-            namePersian: "دفترکل و کدینگ",
-            href: "/dashboard/accounting/ledger",
-            icon: FaCalculator,
-            show: true,
-          },
-          {
-            name: "Supply Chain Accounting",
-            namePersian: "خرید، موجودی و بهای تمام‌شده",
-            href: "/dashboard/accounting/supply-chain",
-            icon: FaClipboardList,
-            show: true,
-          },
-          {
-            name: "Accounting Dashboard",
-            namePersian: "داشبورد حسابداری",
+            name: "Accounting work",
+            namePersian: "کارهای امروز",
             href: "/dashboard/accounting",
-            icon: FaChartLine,
-            show: true,
-          },
-          {
-            name: "Period End",
-            namePersian: "پایان دوره و گزارش قانونی",
-            href: "/dashboard/accounting/period-end",
             icon: FaClipboardList,
             show: true,
           },
@@ -647,76 +638,13 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
             icon: FaTruck,
             show: true,
           },
-          {
-            name: "Contracts",
-            namePersian: "قراردادهای قابل بررسی",
-            href: "/dashboard/accounting/contracts",
-            icon: FaFileContract,
+          ...accountingNavigationGroups.map((group) => ({
+            name: group.id,
+            namePersian: group.label,
+            href: accountingGroupHref(group.id),
+            icon: ({ review: FaClipboardList, money: FaMoneyCheckAlt, records: FaCalculator, reports: FaChartLine })[group.id],
             show: true,
-          },
-          {
-            name: "Invoice Candidates",
-            namePersian: "پیش‌نویس صورتحساب‌ها",
-            href: "/dashboard/accounting/invoice-candidates",
-            icon: FaFileAlt,
-            show: true,
-          },
-          {
-            name: "Receivables",
-            namePersian: "دریافتنی‌ها",
-            href: "/dashboard/accounting/receivables",
-            icon: FaCalculator,
-            show: true,
-          },
-          {
-            name: "Customer Accounts",
-            namePersian: "حساب‌های مالی مشتریان",
-            href: "/dashboard/accounting/customer-accounts",
-            icon: FaCalculator,
-            show: true,
-          },
-          {
-            name: "Payments",
-            namePersian: "دریافت‌ها و چک‌ها",
-            href: "/dashboard/accounting/payments",
-            icon: FaCalculator,
-            show: true,
-          },
-          {
-            name: "Treasury Control",
-            namePersian: "کنترل خزانه‌داری",
-            href: "/dashboard/accounting/treasury",
-            icon: FaMoneyCheckAlt,
-            show: true,
-          },
-          {
-            name: "Tax",
-            namePersian: "مالیات و سامانه مودیان",
-            href: "/dashboard/accounting/tax",
-            icon: FaClipboardList,
-            show: true,
-          },
-          {
-            name: "Tax Operations",
-            namePersian: "عملیات مالیاتی قطعی",
-            href: "/dashboard/accounting/tax-center",
-            icon: FaClipboardList,
-            show: true,
-          },
-          {
-            name: "Audit",
-            namePersian: "سوابق عملیات",
-            href: "/dashboard/accounting/audit",
-            icon: FaChartLine,
-            show: true,
-          },
-          {
-            name: "Accountant Performance",
-            namePersian: "عملکرد حسابداران",
-            href: "/dashboard/accounting/performance",
-            icon: FaUserClock,
-            show: true,
-          },
+          })),
           {
             name: "Biometric Connector",
             namePersian: "وضعیت اسکنر اثر انگشت",
@@ -725,13 +653,6 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
             show:
               currentUser?.role === "ADMIN" ||
               Boolean(currentUser?.permissions?.features?.some((permission) => permission.feature === "accounting_biometric_diagnostics_view")),
-          },
-          {
-            name: "Settings",
-            namePersian: "تنظیمات حسابداری",
-            href: "/dashboard/accounting/settings",
-            icon: FaCog,
-            show: true,
           },
         ];
 

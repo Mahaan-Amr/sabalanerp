@@ -1,0 +1,9 @@
+{
+  "operation": "derived-base-mount-qa-4861e9d243ea43ffb2bf44a19dd5516b",
+  "sources": {
+    "cleanup.py": "846be6afa1dd787a0f0ec5b77f4509614746d8db7c6198f0293c65ffeddc5991",
+    "mount_guard.py": "165101a51ecc00db4b12ff65a5b2fe55f7037b4407ccdde5e799afa7bda54cd7",
+    "fixture.py": "0dac886621e8b434adfd032c5f7b54a6bb51b87fc31585e61dab43e58a470b3a"
+  },
+  "scope": "private same-device mount sentinel fixture only"
+}

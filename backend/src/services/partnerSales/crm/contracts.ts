@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { customerActivityCategorySchema } from '../../customerActivityCategory';
 
 // Keep runtime decoding on the backend's single Zod instance. The public
 // package is consumed for wire types, but composing schemas from two physical
@@ -37,7 +38,7 @@ export const PartnerContractCustomerCreateSchema = z.object({
   payloadHash: z.string().regex(/^sha256-v1:[a-f0-9]{64}$/), reason: PersianReasonSchema,
   customer: z.object({
     firstName: TextSchema.max(120), lastName: TextSchema.max(120),
-    customerType: z.enum(['Individual', 'Company', 'Government']), companyName: optionalText,
+    customerType: z.enum(['Individual', 'Company', 'Government']), activityCategory: customerActivityCategorySchema, companyName: optionalText,
     phoneNumber1: z.string().trim().refine(value => /^09\d{9}$/.test(identifierDigits(value)),
       'شماره تماس اصلی باید موبایل معتبر ایران باشد'),
     phoneNumber2: z.string().trim().optional().refine(value => !value || /^09\d{9}$/.test(identifierDigits(value)),
@@ -70,7 +71,7 @@ export type PartnerContractProjectCreate = z.infer<typeof PartnerContractProject
 
 export const PartnerCustomerCreateSchema = z.object({ schemaVersion: z.literal(1), commandId: IdSchema,
   correlationId: IdSchema, firstName: TextSchema.max(120), lastName: TextSchema.max(120),
-  companyName: optionalText, customerType: z.enum(['Individual', 'Company']), city: optionalText,
+  companyName: optionalText, customerType: z.enum(['Individual', 'Company']), activityCategory: customerActivityCategorySchema, city: optionalText,
   address: TextSchema.max(1000).optional(), nationalCode: z.string().trim().min(5).max(30).optional(),
   phone: z.string().trim().min(7).max(30), reason: PersianReasonSchema,
   idempotencyKey: IdSchema, payloadHash: z.string().regex(/^sha256-v1:[a-f0-9]{64}$/),
@@ -80,7 +81,7 @@ export type PartnerCustomerCreate = z.infer<typeof PartnerCustomerCreateSchema>;
 export const PartnerCustomerUpdateSchema = z.object({ schemaVersion: z.literal(1), commandId: IdSchema,
   correlationId: IdSchema, customerId: IdSchema, expectedRevision: RevisionSchema,
   firstName: TextSchema.max(120), lastName: TextSchema.max(120), companyName: optionalText,
-  customerType: z.enum(['Individual', 'Company']), city: optionalText, address: TextSchema.max(1000).optional(),
+  customerType: z.enum(['Individual', 'Company']), activityCategory: customerActivityCategorySchema, city: optionalText, address: TextSchema.max(1000).optional(),
   nationalCode: z.string().trim().min(5).max(30).optional(), phone: z.string().trim().min(7).max(30),
   isBlacklisted: z.boolean().optional(), isLocked: z.boolean().optional(),
   reason: PersianReasonSchema, idempotencyKey: IdSchema,
@@ -140,7 +141,7 @@ export type PartnerTransferCancel = z.infer<typeof PartnerTransferCancelSchema>;
 
 export type PartnerCustomerSummary = { schemaVersion: 1; purpose: 'PARTNER_CRM_CUSTOMER'; customerId: string;
   revision: number; displayName: string; firstName: string; lastName: string; companyName?: string;
-  customerType: 'Individual' | 'Company' | 'Government'; personType: 'NATURAL' | 'LEGAL'; status: string;
+  activityCategory: string | null; customerType: 'Individual' | 'Company' | 'Government'; personType: 'NATURAL' | 'LEGAL'; status: string;
   isBlacklisted: boolean; isLocked: boolean; nationalCode?: string; city?: string; address?: string;
   phone: string; projectCount: number; responsibleSeller?: { id: string; displayName: string } };
 export type PartnerProjectView = { projectId: string; revision: number; title: string; status: string; workType: string;

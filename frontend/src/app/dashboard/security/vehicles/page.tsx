@@ -39,6 +39,12 @@ import {
 } from "@/contexts/WorkspaceContext";
 import { operationalStatusLabel } from "@/features/dispatch/operationalStatusPresentation";
 import { userFacingError } from "@/features/dispatch/userFacingError";
+import CompanyPlateFields from "@/features/dispatch-master-data/CompanyPlateFields";
+import {
+  completeCompanyPlate,
+  emptyCompanyPlate,
+  formatCompanyPlate,
+} from "@/features/dispatch-master-data/companyVehicleEntry";
 
 const labelClass = erpFieldLabelClassName;
 
@@ -147,11 +153,17 @@ export default function SecurityVehiclesPage() {
     externalVehicles: [],
   });
   const [admissionSource, setAdmissionSource] = useState<
-    "INTERNAL" | "EXTERNAL"
+    "INTERNAL" | "EXTERNAL" | "CUSTOMER_PICKUP"
   >("INTERNAL");
   const [internalDriverId, setInternalDriverId] = useState("");
   const [externalDriverId, setExternalDriverId] = useState("");
   const [externalVehicleId, setExternalVehicleId] = useState("");
+  const [pickupVehicleType, setPickupVehicleType] = useState("");
+  const [pickupPlate, setPickupPlate] = useState(emptyCompanyPlate);
+  const [pickupPhone, setPickupPhone] = useState("");
+  const admissionReady = admissionSource === "INTERNAL" ? Boolean(internalDriverId)
+    : admissionSource === "EXTERNAL" ? Boolean(externalDriverId && externalVehicleId)
+    : Boolean(pickupVehicleType && completeCompanyPlate(pickupPlate) && pickupPhone.trim());
   const [queueReason, setQueueReason] = useState("");
   const [voidTarget, setVoidTarget] = useState<any>(null);
   const [queueActionTarget, setQueueActionTarget] = useState<{
@@ -345,21 +357,21 @@ export default function SecurityVehiclesPage() {
         : externalDriverId;
     const vehicleId =
       admissionSource === "INTERNAL" ? undefined : externalVehicleId;
-    if (!driverId || (admissionSource === "EXTERNAL" && !vehicleId))
-      return false;
+    if (!admissionReady) return false;
     if (mutationLock.current) return false;
     mutationLock.current = true;
     setSaving(true);
     setError("");
     try {
-      await securityAPI.admitCanonicalQueueTurn({
-        source: admissionSource,
-        driverId,
-        vehicleId,
-      });
+      await securityAPI.admitCanonicalQueueTurn(admissionSource === "CUSTOMER_PICKUP"
+        ? { source: admissionSource, vehicleType: pickupVehicleType, plate: formatCompanyPlate(pickupPlate), phone: pickupPhone.trim() }
+        : { source: admissionSource, driverId, vehicleId });
       setInternalDriverId("");
       setExternalDriverId("");
       setExternalVehicleId("");
+      setPickupVehicleType("");
+      setPickupPlate(emptyCompanyPlate);
+      setPickupPhone("");
       setMessage("پذیرش راننده و خودرو در صف ثبت شد.");
       await loadData(true);
       return true;
@@ -641,9 +653,7 @@ export default function SecurityVehiclesPage() {
                   disabled={
                     dispatchTimelineStale ||
                     saving ||
-                    (admissionSource === "INTERNAL"
-                      ? !internalDriverId
-                      : !externalDriverId || !externalVehicleId)
+                    !admissionReady
                   }
                   onClick={async () => {
                     if (await admitQueueTurn()) setAdmissionOpen(false);
@@ -654,15 +664,37 @@ export default function SecurityVehiclesPage() {
           >
             <div className="space-y-4">
               {error && <ErpInlineState kind="error" title={error} />}
-              <ErpSegmentedControl<"INTERNAL" | "EXTERNAL">
+              <ErpSegmentedControl<"INTERNAL" | "EXTERNAL" | "CUSTOMER_PICKUP">
                 value={admissionSource}
                 onChange={setAdmissionSource}
                 options={[
                   { value: "INTERNAL", label: "راننده داخلی" },
-                  { value: "EXTERNAL", label: "راننده متفرقه" },
+                  { value: "EXTERNAL", label: "راننده بیرونی" },
+                  { value: "CUSTOMER_PICKUP", label: "راننده متفرقه" },
                 ]}
               />
-              {admissionSource === "INTERNAL" ? (
+              {admissionSource === "CUSTOMER_PICKUP" ? (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label>
+                    <span className={labelClass}>نوع خودرو</span>
+                    <ErpSelect value={pickupVehicleType} onChange={event => setPickupVehicleType(event.target.value)}>
+                      <option value="">انتخاب کنید</option>
+                      <option value="کامیون">کامیون</option>
+                      <option value="وانت">وانت</option>
+                    </ErpSelect>
+                  </label>
+                  <CompanyPlateFields
+                    label="شماره پلاک"
+                    value={pickupPlate}
+                    onChange={setPickupPlate}
+                  />
+                  <label>
+                    <span className={labelClass}>شماره همراه مشتری یا راننده</span>
+                    <ErpInput type="tel" dir="ltr" value={pickupPhone} maxLength={20}
+                      onChange={event => setPickupPhone(event.target.value)} />
+                  </label>
+                </div>
+              ) : admissionSource === "INTERNAL" ? (
                 <label>
                   <span className={labelClass}>راننده و خودروی آماده</span>
                   <ErpSelect
@@ -686,9 +718,10 @@ export default function SecurityVehiclesPage() {
                     <span className={labelClass}>راننده</span>
                     <ErpSelect
                       value={externalDriverId}
-                      onChange={(event) =>
-                        setExternalDriverId(event.target.value)
-                      }
+                      onChange={(event) => {
+                        setExternalDriverId(event.target.value);
+                        setExternalVehicleId(admissionOptions.externalDrivers.find((d: any) => d.id === event.target.value)?.vehicleId || "");
+                      }}
                     >
                       <option value="">انتخاب کنید</option>
                       {admissionOptions.externalDrivers.map((option: any) => (
@@ -702,12 +735,13 @@ export default function SecurityVehiclesPage() {
                     <span className={labelClass}>خودرو</span>
                     <ErpSelect
                       value={externalVehicleId}
+                      disabled
                       onChange={(event) =>
                         setExternalVehicleId(event.target.value)
                       }
                     >
                       <option value="">انتخاب کنید</option>
-                      {admissionOptions.externalVehicles.map((option: any) => (
+                      {admissionOptions.externalVehicles.filter((option: any) => option.id === externalVehicleId).map((option: any) => (
                         <option key={option.id} value={option.id}>
                           {option.vehicleType} · {option.plate}
                         </option>
@@ -1134,7 +1168,6 @@ export default function SecurityVehiclesPage() {
           {activeSection === "sales-exit" && (
             <ErpSection
               title="خروج مجاز گیت"
-              description="فقط بارنامه‌ای که مجوز یک‌بارمصرف معتبر دارد در این فهرست دیده می‌شود؛ نسخه چاپی به‌تنهایی اجازه خروج نمی‌دهد."
             >
               {authorizedExits.length === 0 ? (
                 <ErpEmptyState
@@ -1155,8 +1188,13 @@ export default function SecurityVehiclesPage() {
                             <p className="mt-1 text-sm sds-text-muted">
                               {snapshot.driver?.firstName}{" "}
                               {snapshot.driver?.lastName} ·{" "}
-                              {snapshot.plate?.plate || "بدون پلاک"}
+                              {authorization.summary?.driverSource === "PERSONAL_PICKUP" ? "سواری" : snapshot.plate?.plate || "بدون پلاک"}
                             </p>
+                            {authorization.summary?.personalPickup && <div className="mt-2 space-y-1 text-sm sds-text-secondary">
+                              <p>مشتری: {authorization.summary.customerName}</p>
+                              {authorization.summary.personalPickup.partners.map((partner: any) => <p key={partner.caseId}>همکار: {partner.name}</p>)}
+                              <p>قرارداد: {authorization.summary.personalPickup.contracts.map((contract: any) => contract.number).join("، ")}</p>
+                            </div>}
                             <p className="mt-1 text-xs sds-text-muted">
                               اعتبار تا{" "}
                               {new Date(

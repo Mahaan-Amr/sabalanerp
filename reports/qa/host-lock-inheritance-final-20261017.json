@@ -1,0 +1,1 @@
+{"pass_": true, "originalCollisionReproduced": true, "distinctLocksRetainedAfterControllerDeath": true, "controllerReaped": true, "nativeWorkerReaped": true, "sourceSha256": "73a353e17e814b91e0c0235056fd894bbd88d94de1547c141b870cd6ee48ebee", "workingRoot": "/app/online-runtime-acceptance/host-lock-inheritance-90d442f92888412186eb7de014ee1749"}

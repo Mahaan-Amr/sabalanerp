@@ -1,0 +1,79 @@
+import pathlib,json,hashlib,base64,uuid,subprocess,sys
+repo=pathlib.Path('C:/Users/mahan/.codex/worktrees/online-deployment/sabalanerp')
+def build(name):
+ assert name=='independent-image-custody-65cb95d50af8415aa569267d7ecd99bf.json'
+ record=json.loads((repo/'reports/qa'/name).read_text());assert record['sshExitCode']==1
+ custody=json.loads(record['stdout']);assert custody['nativeExitCode']==0 and custody['nativeClosureVerified'] and custody['foreignIdentitiesUnchanged'] is False
+ assert custody['custody']['backupNativeDurabilityVerified'] and custody['custody']['freshRootOwnedInodes'] and custody['decryption']['independentDecryptVerified']
+ assert not custody['healthyApplicationPoint'] and not custody['publicOnlineAdmission']
+ files={}
+ for name,source in [('measure.py',pathlib.Path('D:/sabalanerp-online-qa/measure-independent-production-images-20261018.py')),('materialize.py',repo/'deploy/scripts/materialize-private-image.py')]:
+  b=source.read_bytes();files[name]={'bytes':base64.b64encode(b).decode(),'sha256':hashlib.sha256(b).hexdigest()}
+ return {'operation':'independent-image-measure-'+uuid.uuid4().hex,'custody':custody,'files':files}
+REMOTE=r"""import os,pathlib,stat,fcntl,hashlib,json,base64,subprocess,shutil,time,pwd,resource
+P=pathlib.Path;spec=json.loads(INPUT);os.umask(0o077);resource.setrlimit(resource.RLIMIT_CORE,(0,0))
+private=P('/root/sabalan-recovery-private');qa=private/'native-qa';root=qa/spec['operation'];active=qa/'independent-image-measure-active.json';mutated=False;closed=False;native_closed=False
+def require(v,c):
+ if not v:raise RuntimeError(c)
+def sync(p):
+ fd=os.open(p,os.O_RDONLY|os.O_NOFOLLOW)
+ try:os.fsync(fd)
+ finally:os.close(fd)
+def save(p,v):
+ with p.open('x') as f:os.fchmod(f.fileno(),0o400);json.dump(v,f,indent=2);f.flush();os.fsync(f.fileno())
+ sync(p.parent)
+def regular(p):
+ s=p.lstat();require(p.resolve(strict=True)==p and stat.S_ISREG(s.st_mode) and s.st_uid==0 and s.st_nlink==1 and not s.st_mode&0o022,'UNSAFE_FILE');return s
+def foreign():
+ ids=subprocess.check_output(['docker','ps','-q'],text=True).split();rows=json.loads(subprocess.check_output(['docker','inspect',*ids],text=True)) if ids else []
+ return sorted([{'id':v['Id'],'image':v['Image'],'startedAt':v['State']['StartedAt']} for v in rows],key=lambda v:v['id'])
+try:
+ for p,mask in [(private,0o077),(qa,0o022)]:
+  s=p.lstat();require(p.resolve(strict=True)==p and stat.S_ISDIR(s.st_mode) and s.st_uid==0 and not s.st_mode&mask,'UNSAFE_PRIVATE_ROOT')
+ lockfds=[]
+ for path,device,inode,target in [(private/'drill-ownership.lock',64513,13050,9),(P('/run/lock/sabalan-backup-storage.lock'),29,6,8)]:
+  s=regular(path);require((s.st_dev,s.st_ino)==(device,inode),'ORIGINAL_LOCK_CHANGED');fd=os.open(path,os.O_RDWR|os.O_NOFOLLOW);require((os.fstat(fd).st_dev,os.fstat(fd).st_ino)==(device,inode),'LOCK_CHANGED');saved=fcntl.fcntl(fd,fcntl.F_DUPFD_CLOEXEC,20);os.close(fd);lockfds.append((saved,target))
+ for fd,target in lockfds:os.dup2(fd,target,inheritable=True);fcntl.flock(target,fcntl.LOCK_EX|fcntl.LOCK_NB)
+ for parent in [private,qa]:
+  for p in parent.glob('*active*.json'):require(False,'ACTIVE_DRILL_REQUIRES_AUDIT')
+ require(not subprocess.check_output(['docker','ps','-aq','--filter','label=com.docker.compose.project=sabalanerp-backup-drill'],text=True).strip(),'UNKNOWN_DRILL_CONTAINER')
+ before=foreign();owner=qa/'native-owner-storage-final-20261017/owner';regular(owner);require(hashlib.sha256(owner.read_bytes()).hexdigest()=='c2b096894f7bdf920881c668deca48b1b7afedc4267956ed31e1743ed3687d83','NATIVE_OWNER_CHANGED')
+ require(shutil.disk_usage(qa).free>=1024**3+64*1024**2,'MEASUREMENT_CAPACITY_INSUFFICIENT')
+ source=P(spec['custody']['root']);require(source.parent==qa and source.resolve(strict=True)==source,'CUSTODY_ROOT_INVALID');require(json.loads((source/'host-independent-image-proof.json').read_text())==spec['custody'] and (source/'closed-owner-intent.json').is_file(),'CUSTODY_SOURCE_UNPROVEN');receipt=json.loads((source/'native-control/native-completion.json').read_text());require(receipt['status']==0 and hashlib.sha256((source/'native-control/native.log').read_bytes()).hexdigest()==receipt['outputSha256'],'CUSTODY_NATIVE_RECEIPT_CHANGED')
+ root.mkdir(mode=0o700);sync(qa)
+ for name,item in spec['files'].items():
+  b=base64.b64decode(item['bytes'],validate=True);require(hashlib.sha256(b).hexdigest()==item['sha256'],'SOURCE_BYTES_CHANGED')
+  with (root/name).open('xb') as f:os.fchmod(f.fileno(),0o400);f.write(b);f.flush();os.fsync(f.fileno())
+ save(root/'measure-spec.json',spec)
+ intent={'operation':spec['operation'],'root':str(root),'pid':os.getpid(),'startTicks':P('/proc/self/stat').read_text().rsplit(') ',1)[1].split()[19],'bootId':P('/proc/sys/kernel/random/boot_id').read_text().strip(),'phase':'PRIVATE_READ_ONLY_IMAGE_MEASUREMENT','healthyApplicationPoint':False,'publicOnlineAdmission':False};save(active,intent);mutated=True
+ # Read-only source measurement; monitor the new stable control directory.
+ control=root/'native-control';control.mkdir(mode=0o700);sync(root)
+ env=dict(os.environ,SABALAN_NATIVE_STORAGE_ROOT=str(control),SABALAN_NATIVE_STORAGE_MAX_BYTES=str(16*1024**2),SABALAN_NATIVE_STORAGE_RESERVE_BYTES=str(1024**3))
+ token=spec['operation'];p=subprocess.Popen([str(owner),'900',token,'python3','-I','-B',str(root/'measure.py'),str(root/'measure-spec.json'),str(root)],env=env,pass_fds=(9,8),stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
+ save(control/'native-start.json',{'pid':p.pid,'startTicks':P('/proc/'+str(p.pid)+'/stat').read_text().rsplit(') ',1)[1].split()[19],'bootId':intent['bootId']});output=bytearray()
+ with (control/'native.log').open('xb') as f:
+  while chunk:=p.stdout.read(65536):
+   require(len(output)+len(chunk)<=4*1024**2,'NATIVE_OUTPUT_BOUND');output.extend(chunk);f.write(chunk)
+  status=p.wait();f.flush();os.fsync(f.fileno())
+ require(output.endswith(('\nSABALAN_NATIVE_REAPED '+token+' '+str(status)+'\n').encode()),'NATIVE_CLOSURE_UNPROVEN');save(control/'native-completion.json',{'status':status,'outputSha256':hashlib.sha256(output).hexdigest()});native_closed=True
+ result={'operation':spec['operation'],'root':str(root),'nativeExitCode':status,'nativeClosureVerified':True,'sourceHashes':{n:v['sha256'] for n,v in spec['files'].items()},'healthyApplicationPoint':False,'publicOnlineAdmission':False}
+ if status==0:result['measurement']=json.loads((root/'image-measurement-proof.json').read_text())
+ after=foreign();result.update(foreignBefore=before,foreignAfter=after,foreignIdentitiesUnchanged=before==after,availableBytes=shutil.disk_usage(qa).free);save(root/'host-image-measurement-proof.json',result)
+ require(json.loads(active.read_text())==intent,'ACTIVE_INTENT_CHANGED');os.rename(active,root/'closed-owner-intent.json');sync(root);sync(qa);closed=True
+ print(json.dumps(result));raise SystemExit(0 if status==0 and before==after else 1)
+except BaseException:
+ if mutated and not closed:
+  try:save(root/'ownership-held-unproven.json',{'nativeClosed':native_closed,'phase':'OWNERSHIP_HELD_UNPROVEN'})
+  except BaseException:pass
+  while True:time.sleep(1)
+ raise
+"""
+def main():
+ spec=build(sys.argv[1]);remote=REMOTE.replace('INPUT',repr(json.dumps(spec)),1);compile(remote,'frozen_remote_image_custody','exec')
+ pre=subprocess.run([sys.executable,'D:/sabalanerp-online-qa/refresh-both-host-preflight-20261018.py'],capture_output=True,text=True)
+ require=pre.returncode==0
+ if not require:raise RuntimeError('BOTH_HOST_PREFLIGHT_FAILED_BEFORE_CUSTODY')
+ (repo/('reports/qa/'+spec['operation']+'-intent.json')).write_text(json.dumps({'operation':spec['operation'],'custodyOperation':spec['custody']['operation'],'sources':{n:v['sha256'] for n,v in spec['files'].items()},'scope':'read-only expanded-layer measurement of accepted image copies; no staging/deletion/import/admission'},indent=2)+'\n')
+ r=subprocess.run(['ssh','-i','C:/Users/mahan/.ssh/sabalan_codex_deploy_ed25519','-o','BatchMode=yes','-o','StrictHostKeyChecking=yes','-o','ConnectTimeout=15','-o','ServerAliveInterval=15','-o','ServerAliveCountMax=3','root@94.182.177.74','python3 -B -'],input=remote,text=True,capture_output=True)
+ report={'sshExitCode':r.returncode,'stdout':r.stdout,'stderr':r.stderr};(repo/('reports/qa/'+spec['operation']+'.json')).write_text(json.dumps(report,indent=2)+'\n');print(json.dumps(report));raise SystemExit(r.returncode)
+if __name__=='__main__':main()

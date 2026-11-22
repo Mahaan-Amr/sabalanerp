@@ -1,0 +1,9 @@
+{
+  "operation": "private-image-storage-inventory-a62cde4726fa4747b27b867bc58ad4c0",
+  "custodyOperation": "independent-image-custody-65cb95d50af8415aa569267d7ecd99bf",
+  "sources": {
+    "measure.py": "5663eb6977efd720236d2518c956eccd4ffca5d9e6509952ae9ae35623e37136",
+    "materialize.py": "f3566569af10fb8857e911352eb17b58426cf7b4e43984ec63bbf3691aeb2ef2"
+  },
+  "scope": "read-only private derived-file and Docker image inventory; no staging/deletion/import/admission"
+}

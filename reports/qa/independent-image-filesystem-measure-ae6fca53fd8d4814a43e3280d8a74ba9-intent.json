@@ -1,0 +1,10 @@
+{
+  "operation": "independent-image-filesystem-measure-ae6fca53fd8d4814a43e3280d8a74ba9",
+  "custodyOperation": "independent-image-custody-65cb95d50af8415aa569267d7ecd99bf",
+  "sources": {
+    "measure.py": "be050ed9cec344a3d05553ce9494c7ee4cc65b1a0abe605bfee34b2783b26dc6",
+    "materialize.py": "f3566569af10fb8857e911352eb17b58426cf7b4e43984ec63bbf3691aeb2ef2",
+    "capacity.py": "0b92b45deda6247707d868a16e795281043a7c03cd4f03babb508c6a42b974a3"
+  },
+  "scope": "read-only filesystem allocation/inode accounting of accepted image copies; no staging/deletion/import/admission"
+}

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
+import { requireCustomerSourceSharesWithin } from './customerSemanticCompatibility';
 import { AccountingCustomerTreasuryError, type CustomerTreasuryActor } from './accountingCustomerTreasury';
 import { effectiveCustomerReceiptRials } from './accountingCustomerReceiptBalance';
 import { reverseReceiptConsumptionWithin, type CustomerReceiptAllocationReversal } from './accountingCustomerReceiptCorrection';
@@ -17,6 +18,7 @@ export type CustomerCheckBankCommand = {
 };
 const fail = (code: string, message: string): never => { throw new AccountingCustomerTreasuryError(code, message, 409); };
 export async function recordCustomerCheckBankWithin(tx: Prisma.TransactionClient, input: CustomerCheckBankCommand) {
+  await requireCustomerSourceSharesWithin(tx);
   const hash = hashAccountingEvidence({ ...input, actor: undefined });
   const prior = await tx.accountingCheckInstrumentEvent.findUnique({ where: { idempotencyKey: input.idempotencyKey } });
   const receipt = await tx.accountingTreasuryTransaction.findUnique({ where: { id: input.receiptId }, include: {

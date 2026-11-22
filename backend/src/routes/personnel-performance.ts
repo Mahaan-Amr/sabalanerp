@@ -1,4 +1,5 @@
 import { assessPerformanceEvaluationRetention } from '../services/personnelPerformanceRetentionStore';
+import { runtimeHttpRequests } from '../services/httpRequestLifecycle';
 import {
   approvePerformanceBulkErasure,
   approvePerformanceErasureImpact,
@@ -147,6 +148,7 @@ export const performanceRequestObservationOutcome = (responseStatus: number, com
 });
 router.use((req, res, next) => {
   const metricKey = classifyPerformanceRequestMetric(req.method, req.path);
+  const metricWrite = metricKey ? runtimeHttpRequests.reserveWrite(req) : undefined;
   const startedAt = performance.now();
   let recorded = false;
   const record = (completed: boolean) => {
@@ -154,8 +156,8 @@ router.use((req, res, next) => {
     recorded = true;
     if (!metricKey) return;
     const outcome = performanceRequestObservationOutcome(res.statusCode, completed);
-    void recordPerformanceRequestObservation(prisma, { metricKey, durationMs: Math.max(0, Math.round(performance.now() - startedAt)),
-      ...outcome }).catch(() => console.error('Personnel performance request metric failed closed: PERFORMANCE_METRIC_WRITE_FAILED'));
+    void metricWrite!.run(() => recordPerformanceRequestObservation(prisma, { metricKey, durationMs: Math.max(0, Math.round(performance.now() - startedAt)),
+      ...outcome })).catch(() => console.error('Personnel performance request metric failed closed: PERFORMANCE_METRIC_WRITE_FAILED'));
   };
   res.once('finish', () => record(true));
   res.once('close', () => record(false));
@@ -665,20 +667,23 @@ router.get('/exports/:exportId', requestExport, async (req: AuthRequest, res, ne
 });
 
 router.get('/exports/:exportId/download', requestExport, async (req: AuthRequest, res, next) => {
+  let completion: ReturnType<typeof runtimeHttpRequests.reserveWrite> | undefined;
   try {
+    completion = runtimeHttpRequests.reserveWrite(req);
     const artifact = await claimPerformanceExportDownload(prisma, { exportId: req.params.exportId, actorUserId: req.user!.id, token: String(req.query.token ?? '') });
     res.type(artifact.mimeType);
     res.attachment(artifact.filename);
     let finished = false;
-    res.once('finish', () => {
+    const recordDelivery = (delivered: boolean) => {
+      if (finished) return;
       finished = true;
-      void completePerformanceExportDownload(prisma, { exportId: req.params.exportId, actorUserId: req.user!.id, delivered: true }).catch(next);
-    });
-    res.once('close', () => {
-      if (!finished) void completePerformanceExportDownload(prisma, { exportId: req.params.exportId, actorUserId: req.user!.id, delivered: false }).catch(next);
-    });
+      void completion!.run(() => completePerformanceExportDownload(prisma, { exportId: req.params.exportId, actorUserId: req.user!.id, delivered })).catch(next);
+    };
+    res.once('finish', () => recordDelivery(true));
+    res.once('close', () => recordDelivery(false));
+    if (res.destroyed) recordDelivery(false);
     return res.end(artifact.bytes);
-  } catch (error) { return next(error); }
+  } catch (error) { completion?.cancel(); return next(error); }
 });
 
 router.post('/consequence-handoffs', createConsequence, requirePersonnelPerformanceWriteGate('CREATE_CONSEQUENCE_HANDOFF', subjectIdForHandoff), async (req: AuthRequest, res, next) => {

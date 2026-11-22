@@ -97,6 +97,7 @@ const main = async () => {
       return [];
     },
     performanceExportReceipt: { findMany: async () => [] },
+    dispatchDocumentArtifact: { findMany: async () => [] },
   } as any;
 
   await validateLiveStoredFileReferences(fakeClient);
@@ -105,6 +106,27 @@ const main = async () => {
     /table_name\s*<>\s*'recovery_operations'/,
     'expired recovery packages must not be treated as live business-file references',
   );
+
+  const dispatchRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'dispatch-live-reference-'));
+  const dispatchKey = 'dispatch-documents/issued.pdf';
+  const dispatchFile = path.join(dispatchRoot, dispatchKey);
+  const dispatchBytes = Buffer.from('restored dispatch artifact');
+  const dispatchClient = {
+    $queryRawUnsafe: async () => [],
+    performanceExportReceipt: { findMany: async () => [] },
+    dispatchDocumentArtifact: { findMany: async () => [{ id: 'issued', storageKey: dispatchKey,
+      byteLength: BigInt(dispatchBytes.length), sha256: createHash('sha256').update(dispatchBytes).digest('hex') }] },
+  } as any;
+  try {
+    await fs.promises.mkdir(path.dirname(dispatchFile), { recursive: true });
+    await fs.promises.writeFile(dispatchFile, dispatchBytes);
+    await validateLiveStoredFileReferences(dispatchClient, dispatchRoot);
+    await fs.promises.rm(dispatchFile);
+    await assert.rejects(() => validateLiveStoredFileReferences(dispatchClient, dispatchRoot),
+      (error: any) => error?.code === 'DEPLOYMENT_DISPATCH_ARTIFACT_MISSING');
+  } finally {
+    await fs.promises.rm(dispatchRoot, { recursive: true, force: true });
+  }
 
   const payloadRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'performance-recovery-reference-'));
   const artifactPath = path.join(recoveryEngineInternals.performanceExportStorageDirectory, 'ready-export.enc');

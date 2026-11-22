@@ -1,3 +1,13 @@
+import type { DispatchProductPrintRow } from '../../utils/printTemplate';
+import type { DispatchContractContact } from './contractPrintSource';
+
+export type WaybillPrintData = {
+  loadingNumber: string;
+  contacts: DispatchContractContact[];
+  rows: Record<string, Array<Omit<DispatchProductPrintRow, 'rate' | 'total'>>>;
+  loadedPieceCounts?: Record<string, string>;
+};
+
 export const DISPATCH_DOCUMENT_KINDS = [
   'WAYBILL',
   'STATEMENT',
@@ -94,6 +104,8 @@ export type DispatchDocumentRenderBase = {
 
 export type WaybillRenderInput = DispatchDocumentRenderBase & {
   kind: 'WAYBILL';
+  driverName?: string;
+  print?: WaybillPrintData;
   payload: {
     allocationRevisionId: string;
     contracts: DispatchDocumentContractGroup[];

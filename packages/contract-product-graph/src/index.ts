@@ -249,6 +249,7 @@ export {
 export { calculateSlabTechnical } from './slabTechnical';
 export type { SlabTechnicalInput, SlabTechnicalResult, SlabTechnicalCalculation } from './slabTechnical';
 export { calculateStairPartTechnical } from './stairTechnical';
+export { stairMandatoryDefaults } from './stairMandatoryDefaults';
 export type { StairPartTechnicalInput, StairPartTechnicalResult, StairPartTechnicalCalculation } from './stairTechnical';
 export { calculateStairLayerTechnical, replayStairLayerTechnical } from './stairLayerTechnical';
 export { calculateLayerSideOperations } from './layerSideOperations';

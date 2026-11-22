@@ -239,8 +239,9 @@ export const createAccountingPeriodEndPrismaRepository = (
 };
 
 export const listAccountingPeriodEndOverview = async (database: Database, bookId: string) => {
-  const [assets, payroll, schedules, estimates, taxes, closeRuns, snapshots, mappings, statutoryFormats, archiveEvidence, restatements] = await Promise.all([
+  const [assets, assetPolicies, payroll, schedules, estimates, taxes, closeRuns, snapshots, mappings, statutoryFormats, archiveEvidence, restatements] = await Promise.all([
     database.accountingFixedAsset.findMany({ where: { bookId }, orderBy: { registerNumber: 'asc' }, include: { components: true } }),
+    database.accountingAssetClassPolicy.findMany({ where: { bookId }, orderBy: [{ classCode: 'asc' }, { version: 'desc' }] }),
     database.accountingPayrollHandoff.findMany({ where: { bookId }, orderBy: { createdAt: 'desc' }, include: { obligations: true }, take: 50 }),
     database.accountingRecognitionSchedule.findMany({ where: { bookId }, orderBy: [{ nextReviewAt: 'asc' }, { createdAt: 'desc' }], take: 100 }),
     database.accountingEstimateCase.findMany({ where: { bookId }, orderBy: { nextReviewAt: 'asc' }, take: 100 }),
@@ -253,7 +254,7 @@ export const listAccountingPeriodEndOverview = async (database: Database, bookId
     database.accountingRestatementCase.findMany({ where: { bookId }, orderBy: { discoveredAt: 'desc' }, take: 50 }),
   ]);
   return {
-    assets, payroll, schedules, estimates, taxes, closeRuns, snapshots, mappings, statutoryFormats, restatements,
+    assets, assetPolicies, payroll, schedules, estimates, taxes, closeRuns, snapshots, mappings, statutoryFormats, restatements,
     archiveEvidence: archiveEvidence.map(({ storageKey: _protectedStorageKey, ...evidence }) => evidence),
   };
 };

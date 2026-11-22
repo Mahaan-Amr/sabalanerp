@@ -1,0 +1,39 @@
+{
+  "proofs": [
+    {
+      "root": "/app/online-runtime-acceptance/online-native-c1266a95f15ee21c70eb49b4912a3d7d",
+      "name": "lost-worker",
+      "guardianPid": 85738,
+      "beforeWork": "QUIESCENT",
+      "beforeSqlSessions": 0,
+      "beforePrepared": 0,
+      "originalGuardianCancellation": "SIGTERM",
+      "afterNative": "QUIESCENT",
+      "nativeReaped": true,
+      "databaseQuiet": true,
+      "nativeStatus": -15,
+      "afterNativeSha256": "d325450eddc6c96219cb7b83bf2a7e3c6bbc658c7fdd15265fc5d041b3cf98c0",
+      "retainedDatabase": "sabalanerp_concurrency_f5f6c12e9a8222b1",
+      "attemptAccepted": false
+    },
+    {
+      "root": "/app/online-runtime-acceptance/online-native-3975810d07e0acaa8068ade56fb423b8",
+      "name": "pause-http",
+      "guardianPid": 86694,
+      "beforeWork": "QUIESCENT",
+      "beforeSqlSessions": 0,
+      "beforePrepared": 0,
+      "originalGuardianCancellation": "SIGTERM",
+      "afterNative": "QUIESCENT",
+      "nativeReaped": true,
+      "databaseQuiet": true,
+      "nativeStatus": -15,
+      "afterNativeSha256": "75a04ad6ba493bc9926886649b9588dae1e904d8bf2b01c13392f45009f2d3bb",
+      "retainedDatabase": "sabalanerp_concurrency_f92210f9c128bec6",
+      "attemptAccepted": false
+    }
+  ],
+  "noDirectChildKillOrSigkill": true,
+  "allOriginalJournalsPreserved": true,
+  "productionMutation": false
+}

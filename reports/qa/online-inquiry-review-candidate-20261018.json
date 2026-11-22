@@ -1,0 +1,28 @@
+{
+  "format": "sabalan-online-inquiry-review-candidate/v1",
+  "rootBase": "b19a16ce667e3dbaa8d378e8ef7b26130251a456",
+  "inquiryBase": "a1196ba3363743d01d4c7d1d07040bf12569cae3",
+  "sourceHashes": {
+    "backend/src/services/onlineInquiryWork.ts": "31469cf2148c7fc3888d2b2fb28b8c01fd504a026a54774c59d79ff5af50101a",
+    "deploy/scripts/online-inquiry-owner.py": "6976b96e92a2b5c73c51c242541e0a77dcbd2f70b726751702b2c7f8e04c9e62",
+    "deploy/scripts/run-inquiry-with-recovery.sh": "0fe62f76bbef405bad254e4bc21e316dd209482ff3c778bec1dd376bfdc20dfb",
+    "deploy/docker/inquiry.Dockerfile": "426b4a738ac243564205750119bf36a61225781cc03f88980eeeac02cf46c333",
+    "scripts/build-inquiry-runtime-bundle.mjs": "f79250d8bb05f784126a9816ddab8e159f0f027ff2c00f796ecda10164ca9f76",
+    "scripts/run-online-inquiry-native-local.mjs": "8d3b3f5e7b2a7a0e9d26a3b0b01c5f9af39b2f0c38aa1b88a67112158d8efc13",
+    "scripts/run-inquiry-build-local.mjs": "0674cc3ca75e88fb2be0e12c1f617609f2053ae4421ddf2d8f1732e97f19a035",
+    "tests/online-deployment/online-inquiry-native.worker.cjs": "b861e90e6b43cb668749311fef829d968830d922ba49b1de29ea101dd87732c8",
+    "tests/online-deployment/online-inquiry-sqlite.worker.py": "4cefe106b623fce93893442cab1a306ffe61b1cf2a0f5b54726b94c69327eab8",
+    "tests/online-deployment/online-inquiry-native.fixture.py": "c935fd14485e7e9049f45a4df4dfab6adc7687665ebe57452abdd90b58880332",
+    "tests/online-deployment/online-inquiry-faults.fixture.py": "d17f92b5d7a3e40828a561565bf3b0aed4de6774f87eea2dee422a11e72f0c59",
+    "tests/online-deployment/online-inquiry-prisma.worker.cjs": "ffebde94043e22e58bcc9e5f88aac8da19c12685fec55fec10d154c9b889eb18",
+    "apps/sabalan-inquiry/lib/prisma.ts": "80a0bb376cf981075d325bf6793065dd9b0ceb28c96090e12a446654304a207f",
+    "apps/sabalan-inquiry/lib/runtime-work.ts": "c0ffeb235d3bd77dd7c46c2586db47ac9e19641725e014d15340b9edd14d4c67",
+    "apps/sabalan-inquiry/instrumentation.ts": "b0392d527e2c62fcd48a2056c412de342666375b986f218fcbfb6ecc707389fc",
+    "apps/sabalan-inquiry/app/actions.ts": "5527e2b3f3b9dff50d8022d31b87bd914223e6870bc75c9f0e2e49fa8796476e",
+    "apps/sabalan-inquiry/app/admin/actions.ts": "9a5792d2c0a1023002e8e6134e61262f4bab60391944ba393effa31f24d872fc",
+    "apps/sabalan-inquiry/tests/runtime-work.test.cjs": "21407587c08463c9970ac00238d3c48c7d5b5190658450a3b01a752e0b006d05"
+  },
+  "nativeEvidence": "reports/qa/inquiry-native-a59ea489b617ca3888890bf0ea552f09.json",
+  "nativeNextBuildPending": true,
+  "productionAdmission": false
+}

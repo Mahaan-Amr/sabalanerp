@@ -123,7 +123,8 @@ export function partnerPhysicalPrintDetails(productRowId: string, graphValue: un
     if (details.operations.some(item => item.id === id)) return;
     details.operations.push({ id, name, category, quantity, unit, edges: selectedEdges, code: operationCode });
   };
-  const lines = [...array(snapshot.pricingLines), ...array(snapshot.cuttingPricingLines)];
+  const lines = [...array(snapshot.pricingLines), ...array(snapshot.cuttingPricingLines),
+    ...(snapshot.verticalCutPricingLine ? [object(snapshot.verticalCutPricingLine)] : [])];
   for (const line of lines) {
     const id = text(line.lineId), name = id && cutNames[id];
     if (id && name && positive(line.quantity)) addOperation(`cut:${id}`, name, 'برش', decimal(line.quantity), id === 'slab-cut-square-meter' ? 'squareMeter' : 'meter');
@@ -206,7 +207,8 @@ export function partnerCustomerPrintDetails(output: CustomerContractOutput, grap
     if (!new D(String(commercial.totalAmountToman)).mul(conversion).eq(total)) return [result];
     // Read-only reconstruction of the frozen operation witnesses; never rates
     // from today's catalogs, and never the wholesale envelope.
-    const candidates = [...array(snapshot.pricingLines), ...array(snapshot.cuttingPricingLines)];
+    const candidates = [...array(snapshot.pricingLines), ...array(snapshot.cuttingPricingLines),
+      ...(snapshot.verticalCutPricingLine ? [object(snapshot.verticalCutPricingLine)] : [])];
     const money = new Map<string, { rate?: string; amount: string }>();
     for (const line of candidates) {
       const id = text(line.lineId), amount = decimal(line.amountToman);

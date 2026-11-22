@@ -2,8 +2,15 @@ import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { validateReleaseEnvironment } from './performance-deployment-environment.mjs';
 
-const services = ['backend', 'frontend', 'inquiry', 'nginx', 'postgres', 'clamav'];
+export function releaseServices(backend) {
+  const policy = backend?.Config?.Labels?.['io.sabalan.release.upload-policy'];
+  if (policy !== undefined && policy !== 'no-malware-scan') throw new Error('Unknown upload policy in backend release identity.');
+  const services = ['backend', 'frontend', 'inquiry', 'nginx', 'postgres'];
+  return policy === 'no-malware-scan' ? services : [...services, 'clamav'];
+}
 export function existingRelease(containers) {
+  const backend = containers.find(c => c.Config?.Labels?.['com.docker.compose.service'] === 'backend');
+  const services = releaseServices(backend);
   const images = {};
   let identity;
   for (const service of services) {

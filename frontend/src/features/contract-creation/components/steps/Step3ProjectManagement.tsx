@@ -1,3 +1,4 @@
+import { contractNavigationStorage } from '@/features/contract-creation/utils/contractNavigationStorage';
 ﻿// Step 3: Project Management Component
 // Project selection from customer's projects
 
@@ -28,7 +29,7 @@ export const Step3ProjectManagement: React.FC<Step3ProjectManagementProps> = ({
   const [storageError, setStorageError] = useState<string | null>(null);
 
   const persistAndCreateProject = () => {
-    const persisted = persistContractLocalValue(localStorage, 'contractWizardState', {
+    const persisted = persistContractLocalValue(contractNavigationStorage, 'contractWizardState', {
       currentStep,
       wizardData
     });

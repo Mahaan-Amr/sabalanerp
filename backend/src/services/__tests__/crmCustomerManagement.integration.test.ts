@@ -177,7 +177,7 @@ async function cardFixture(tx: Prisma.TransactionClient) {
 test('Admin edits complete Partner card and flags preserving owner and private evidence', () => fixture(async (tx, admin) => {
   const initial = await cardFixture(tx);
   const edited = await updateAdminPartnerCustomerCard(cardDatabase(tx), admin, initial.id, 'EDIT', {
-    expectedRevision: initial.partnerRevision, expectedCardVersion: customerCardVersion(initial), firstName: 'اصلاح‌شده',
+    expectedRevision: initial.partnerRevision, activityCategory: 'NONE', expectedCardVersion: customerCardVersion(initial), firstName: 'اصلاح‌شده',
     phones: initial.phoneNumbers.map(p => ({ id: p.id, number: p.number, type: p.type, isPrimary: true, isActive: true })),
     projects: initial.projectAddresses.map(p => ({ id: p.id, address: 'نشانی جدید', isActive: true })),
     contacts: [{ firstName: 'مخاطب', lastName: 'جدید', isPrimary: true, isActive: true }] });
@@ -197,7 +197,7 @@ test('Partner owner, manager and revoked Admin cannot use Admin card authority',
   assert.equal((await tx.crmCustomer.findUniqueOrThrow({ where: { id: initial.id } })).partnerRevision, 1);
 }));
 test('stale revision, changed child and foreign child reject edits before writes', () => fixture(async (tx, admin) => {
-  const initial = await cardFixture(tx); const payload = { expectedRevision: 1, expectedCardVersion: customerCardVersion(initial), firstName: 'نباید ذخیره شود' };
+  const initial = await cardFixture(tx); const payload = { expectedRevision: 1, activityCategory: 'NONE', expectedCardVersion: customerCardVersion(initial), firstName: 'نباید ذخیره شود' };
   await assert.rejects(updateAdminPartnerCustomerCard(cardDatabase(tx), admin, initial.id, 'EDIT', { ...payload, expectedRevision: 2 }), blocked('CUSTOMER_CARD_STALE'));
   await assert.rejects(updateAdminPartnerCustomerCard(cardDatabase(tx), admin, initial.id, 'EDIT', { ...payload, projects: [{ id: randomUUID(), address: 'دیگر', isActive: true }] }), blocked('CUSTOMER_CARD_STALE'));
   await tx.projectAddress.update({ where: { id: initial.projectAddresses[0].id }, data: { address: 'ویرایش همکار' } });
@@ -208,7 +208,7 @@ test('stale revision, changed child and foreign child reject edits before writes
 test('foreign ownership payload and duplicate phone reject without card or audit changes', () => fixture(async (tx, admin) => {
   const initial = await cardFixture(tx);
   await tx.crmCustomer.create({ data: { firstName: 'دیگر', lastName: 'مشتری', phoneNumbers: { create: { number: '09120009992', type: 'mobile' } } } });
-  const base = { expectedRevision: 1, expectedCardVersion: customerCardVersion(initial), firstName: 'نباید ذخیره شود' };
+  const base = { expectedRevision: 1, activityCategory: 'NONE', expectedCardVersion: customerCardVersion(initial), firstName: 'نباید ذخیره شود' };
   await assert.rejects(updateAdminPartnerCustomerCard(cardDatabase(tx), admin, initial.id, 'EDIT', { ...base, ownerUserId: admin }), blocked('INVALID_CUSTOMER_CARD'));
   await assert.rejects(updateAdminPartnerCustomerCard(cardDatabase(tx), admin, initial.id, 'EDIT', { ...base,
     phones: initial.phoneNumbers.map(p => ({ id: p.id, number: '09120009992', type: 'mobile', isPrimary: true, isActive: true })) }), blocked('DUPLICATE_CUSTOMER'));

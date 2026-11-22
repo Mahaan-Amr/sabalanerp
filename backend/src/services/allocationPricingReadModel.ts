@@ -1,3 +1,5 @@
+import { exactQuantityText } from './exactQuantity';
+import { readShipmentPriceCorrections } from './shipmentPricingHistory';
 import type { Prisma } from '@prisma/client';
 import { pricedAllocationIntegrityHash, sumExactMoney } from './pricedAllocationLedger';
 import { approvedPricingOperationalContractItemId } from './approvedPricing';
@@ -120,7 +122,7 @@ export const readBoundPricedAllocation = async (
       const evidence = record(event.evidence), ledgerSequence = Number(evidence.ledgerSequence);
       const payload = { sourceKind: 'PARTNER_CASE' as const, caseId: reference.caseId,
         internalRecordId: reference.internalRecordId, allocationRevisionLineId: line.id,
-        productRowId: line.productRowId, quantity: event.quantity.toFixed(3), unit: line.unit,
+        productRowId: line.productRowId, quantity: exactQuantityText(event.quantity), unit: line.unit,
         pricingVersionId: reference.financialApprovalEvidenceId, pricingRowId: event.approvalEvidenceId,
         grossAmount: event.grossAmount.toFixed(12), discountAmount: event.discountAmount.toFixed(12),
         netAmount: event.netAmount.toFixed(12), consumesFinalRemainder: event.consumesFinalRemainder,
@@ -130,7 +132,7 @@ export const readBoundPricedAllocation = async (
           line.partnerCaseId !== reference.caseId || line.partnerCaseRevision !== reference.caseRevision ||
           line.partnerIntegrityHash !== reference.integrityHash || line.partnerLineageId === null ||
           line.sourceContractId !== null || line.sourceContractItemId !== null || line.productId !== null ||
-          line.quantity.toFixed(3) !== event.quantity.toFixed(3)) throw new Error('Partner priced allocation event failed integrity verification.');
+          exactQuantityText(line.quantity) !== exactQuantityText(event.quantity)) throw new Error('Partner priced allocation event failed integrity verification.');
       sequences.set(event.approvalEvidenceId, [...(sequences.get(event.approvalEvidenceId) || []), ledgerSequence]);
       return { allocationRevisionLineId: line.id, productRowId: line.productRowId, unit: line.unit,
         quantity: payload.quantity, grossAmount: payload.grossAmount, discountAmount: payload.discountAmount,
@@ -175,7 +177,7 @@ export const readBoundPricedAllocation = async (
       allocationRevisionLineId: event.allocationRevisionLineId,
       pricingVersionId: event.pricingVersionId,
       pricingRowId: event.pricingRowId,
-      quantity: event.quantity.toFixed(3),
+      quantity: exactQuantityText(event.quantity),
       grossAmount: event.grossAmount.toFixed(12),
       discountAmount: event.discountAmount.toFixed(12),
       netAmount: event.netAmount.toFixed(12),
@@ -194,7 +196,7 @@ export const readBoundPricedAllocation = async (
       || approvedPricingOperationalContractItemId(event.pricingRow) !== revisionLine.sourceContractItemId
       || event.pricingRow.productRowId !== revisionLine.productRowId
       || event.pricingRow.unit !== revisionLine.unit
-      || event.quantity.toFixed(3) !== revisionLine.quantity.toFixed(3)) {
+      || exactQuantityText(event.quantity) !== exactQuantityText(revisionLine.quantity)) {
       throw new Error(`Priced allocation event ${event.id} attribution changed.`);
     }
     sequencesByRow.set(event.pricingRowId, [...(sequencesByRow.get(event.pricingRowId) || []), ledgerSequence]);
@@ -213,7 +215,13 @@ export const readBoundPricedAllocation = async (
   }).sort((left, right) => left.contractId.localeCompare(right.contractId)
     || left.contractItemId.localeCompare(right.contractItemId) || left.ledgerSequence - right.ledgerSequence);
   for (const [pricingRowId, sequences] of sequencesByRow) {
-    if (sequences.sort((left, right) => left - right).some((sequence, index) => sequence !== index + 1)) {
+    // Ledger sequences span partial shipments, not just the current revision.
+    // A later shipment legitimately starts at 2 (or later); verify its global prefix.
+    const ledger = await tx.dispatchPricedAllocationEvent.findMany({ where: { pricingRowId }, select: { evidence: true } });
+    const correctionEvents = await readShipmentPriceCorrections(tx, [pricingRowId]);
+    const prefix = [...ledger.map(event => Number(record(event.evidence).ledgerSequence)), ...correctionEvents.map(event => Number(event.ledgerSequence))]
+      .filter(sequence => sequence <= Math.max(...sequences)).sort((a, b) => a - b);
+    if (prefix.length !== Math.max(...sequences) || prefix.some((sequence, index) => sequence !== index + 1)) {
       throw new Error(`Priced allocation row ${pricingRowId} has a non-contiguous ledger sequence.`);
     }
   }

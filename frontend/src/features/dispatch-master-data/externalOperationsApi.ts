@@ -1,0 +1,21 @@
+import { dispatchMasterDataAPI, externalVehicleAssignmentsAPI } from '@/lib/api';
+export const externalOperationsApi = {
+  ...dispatchMasterDataAPI,
+  getVehicleOperationsDrivers: async () => { const r = await dispatchMasterDataAPI.getExternalRegistry({ archived: 'include' }); return { ...r, data: { ...r.data, data: r.data.data.drivers, legacyPairs: r.data.data.legacyPairs, capabilities: r.data.data.capabilities } }; },
+  getCompanyVehicles: async (_params?: any) => { const r = await dispatchMasterDataAPI.getExternalRegistry({ archived: 'include' }); return { ...r, data: { ...r.data, data: r.data.data.vehicles, capabilities: r.data.data.capabilities } }; },
+  getVehicleAssignments: externalVehicleAssignmentsAPI.list,
+  previewVehicleAssignment: externalVehicleAssignmentsAPI.preview,
+  assignCompanyVehicle: externalVehicleAssignmentsAPI.assign,
+  endVehicleAssignment: externalVehicleAssignmentsAPI.end,
+  updateVehicleAssignmentPlan: externalVehicleAssignmentsAPI.updatePlan,
+  cancelVehicleAssignmentPlan: externalVehicleAssignmentsAPI.cancelPlan,
+  executeVehicleAssignmentPlan: externalVehicleAssignmentsAPI.executePlan,
+  updateInternalDrivingProfile: dispatchMasterDataAPI.updateExternalDriver,
+  transitionInternalDrivingProfile: dispatchMasterDataAPI.transitionExternalDriverStatus,
+  endInternalDriverActivity: (id: string, data: any) => dispatchMasterDataAPI.transitionExternalDriverStatus(id, { ...data, status: 'ARCHIVED' }),
+  createCompanyVehicle: dispatchMasterDataAPI.createExternalVehicle,
+  updateCompanyVehicle: dispatchMasterDataAPI.updateExternalVehicle,
+  deleteCompanyVehicleDraft: (id: string) => dispatchMasterDataAPI.deleteExternalVehicleDraft(id, ""),
+  transitionCompanyVehicleStatus: (id: string, data: any) => dispatchMasterDataAPI.transitionExternalVehicleStatus(id, { ...data, status: data.status === 'OUT_OF_SERVICE' ? 'RESTRICTED' : data.status }),
+  changeCompanyVehiclePlate: dispatchMasterDataAPI.changeExternalVehiclePlate,
+};

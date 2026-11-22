@@ -48,6 +48,7 @@ COPY backend/prisma ./prisma
 COPY backend/tsconfig.json ./
 COPY backend/tsconfig.cutover.json ./
 COPY backend/scripts/shipment-statement-cutover.ts ./scripts/shipment-statement-cutover.ts
+COPY backend/scripts/clamav-checkpoint.mjs backend/scripts/clamav-checkpoint.d.mts backend/scripts/clamav-incident-policy.mjs backend/scripts/preserved-clamav-policy.mjs backend/scripts/preserved-clamav-policy.d.mts ./scripts/
 COPY backend/src ./src
 
 # Generate once the real schema is present, rather than during dependency install.
@@ -69,9 +70,9 @@ RUN printf 'Types: deb\nURIs: %s\nSuites: bookworm\nComponents: main\nSigned-By:
   && HTTP_PROXY= HTTPS_PROXY= http_proxy= https_proxy= \
   apt-get -o Acquire::ForceIPv4=true install -y --no-install-recommends \
   openssl \
-  clamdscan \
   ffmpeg \
   postgresql-client \
+  util-linux \
   sqlite3 \
   tar \
   ca-certificates \
@@ -111,19 +112,33 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/dist-cutover ./dist-cutover
 COPY backend/public ./public
 COPY backend/scripts ./scripts
+COPY deploy/scripts/with-backend-control-ownership.sh ./scripts/with-backend-control-ownership.sh
+COPY deploy/scripts/protected-bootstrap-owner.py deploy/scripts/protected-bootstrap-state.py ./scripts/
+COPY deploy/scripts/protected-file-adoption-owner.py deploy/scripts/protected-file-adoption-state.py ./scripts/
+COPY deploy/scripts/backend-runtime-owner.py deploy/scripts/local-native-reboot.py deploy/scripts/local-native-reboot-440.py deploy/scripts/local-native-reboot-20261117.py deploy/scripts/local-native-reboot-macos-20261118.py deploy/scripts/online-runtime-scope.py deploy/scripts/online-runtime-owner.py ./scripts/
+COPY deploy/scripts/online-capture-admission.py ./scripts/online-capture-admission.py
+COPY deploy/scripts/online-release-runtime.mjs deploy/scripts/online-release-inner-controller.py ./scripts/
+COPY deploy/scripts/online-common-release-edge.mjs deploy/scripts/common-release-edge.mjs deploy/scripts/api-release-routing.mjs deploy/scripts/browser-operation-journal.mjs deploy/scripts/browser-release-proxy.mjs deploy/scripts/browser-release-routing.mjs deploy/scripts/browser-routing-store.mjs deploy/scripts/release-endpoint-catalog.mjs deploy/scripts/release-forwarding.mjs deploy/scripts/socket-release-proxy.mjs ./scripts/
+COPY deploy/scripts/online-backend-boundary.py deploy/scripts/online-inquiry-boundary.py deploy/scripts/recovery-database-freeze.py deploy/scripts/recovery-file-generations.py deploy/scripts/capture-coherent-components.py ./scripts/
+COPY deploy/scripts/coherent-versioned-file-cuts.py deploy/scripts/native-versioned-file-sealer.py deploy/scripts/recovery-versioned-files.py ./scripts/
+COPY deploy/scripts/receive-postgres-wal.py deploy/scripts/seal-online-checkpoint.cjs ./scripts/
+COPY deploy/scripts/online-checkpoint-inventory.py ./scripts/online-checkpoint-inventory.py
+COPY deploy/scripts/capture-coordination-history.py ./scripts/capture-coordination-history.py
+COPY deploy/scripts/retire-protected-online-legacy-records.py ./scripts/retire-protected-online-legacy-records.py
+COPY deploy/scripts/continuous-online-wal-state.py ./scripts/continuous-online-wal-state.py
+COPY deploy/scripts/online-runtime-scope.py ./dist/services/online-runtime-scope.py
 COPY docs/qa/partner-sales/release/release-package.mjs ./partner-release-verifier/release-package.mjs
 COPY backend/src/documents/dispatch/__fixtures__/baselines ./dispatch-document-baselines
 COPY backend/excel ./excel
 
-RUN printf 'TCPSocket 3310\nTCPAddr clamav\n' > /etc/clamav/clamd-remote.conf \
-  && chmod +x /app/scripts/hr-clamdscan.sh \
-  && mkdir -p /app/storage/contracts /app/storage/hr-hiring /app/storage/accounting-contracts /app/storage/recovery /app/uploads /app/recovery-sources/inquiry /app/recovery-coordination
+RUN mkdir -p /app/storage/contracts /app/storage/hr-hiring /app/storage/accounting-contracts /app/storage/recovery /app/uploads /app/recovery-sources/inquiry /app/recovery-coordination
 
 ARG PERFORMANCE_SOURCE_COMMIT=unattested
 ARG PERFORMANCE_SOURCE_HASH=unattested
+LABEL io.sabalan.release.upload-policy=no-malware-scan
 LABEL io.sabalan.performance.source-commit=$PERFORMANCE_SOURCE_COMMIT \
   io.sabalan.performance.source-hash=$PERFORMANCE_SOURCE_HASH
 
 EXPOSE 5000
 
-CMD ["sh", "-c", "node dist/scripts/recovery-database-preflight.js && node dist/index.js"]
+CMD ["sh", "scripts/with-backend-control-ownership.sh", "sh", "scripts/start-backend.sh"]

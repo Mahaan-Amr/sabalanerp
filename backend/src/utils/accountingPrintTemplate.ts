@@ -234,31 +234,7 @@ export function renderAccountingContractHtml(data: AccountingContractPrintData):
   const contractDate = contract.contractDate || contract.signedAt || contract.createdAt;
 
   return `
-    <style>
-      @page { size: A4 landscape; margin: 6mm; }
-      * { box-sizing: border-box; }
-      html, body { width: 100%; margin: 0; padding: 0; overflow: hidden; }
-      body { color: #111827; font-size: 8.5px; line-height: 1.35; }
-      .sheet { width: 88%; max-width: 88%; margin: 0 2% 0 10%; overflow: hidden; }
-      .top { display: grid; grid-template-columns: 1.2fr .8fr; gap: 8px; border-bottom: 2px solid #0f766e; padding-bottom: 6px; margin-bottom: 6px; }
-      h1 { margin: 0; font-size: 16px; line-height: 1.4; }
-      h2 { margin: 0 0 4px; font-size: 11px; color: #0f766e; }
-      .subtitle { margin-top: 2px; color: #475569; }
-      .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 8px; text-align: right; }
-      .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-bottom: 6px; }
-      .summary-item { border: 1px solid #cbd5e1; border-radius: 4px; padding: 4px 5px; min-height: 30px; }
-      .summary-item span { display: block; color: #64748b; font-size: 8px; }
-      .summary-item strong { display: block; margin-top: 1px; font-size: 10px; }
-      .section { break-inside: avoid; margin-top: 6px; }
-      table { width: 100%; max-width: 100%; border-collapse: collapse; table-layout: fixed; }
-      th, td { border: 1px solid #cbd5e1; padding: 2px 3px; vertical-align: top; overflow: hidden; overflow-wrap: anywhere; word-break: break-word; white-space: normal; }
-      th { background: #ecfdf5; color: #134e4a; font-weight: 800; }
-      .empty { text-align: center; color: #94a3b8; }
-      .two { display: block; }
-      .two > div { min-width: 0; overflow: hidden; }
-      .two > div + div { margin-top: 6px; }
-      .footer { display: flex; justify-content: space-between; border-top: 1px solid #cbd5e1; margin-top: 8px; padding-top: 4px; color: #64748b; }
-    </style>
+    ${accountingDocumentStyles()}
     <main class="sheet">
       <header class="top">
         <div>
@@ -357,3 +333,32 @@ export function renderAccountingContractHtml(data: AccountingContractPrintData):
     </main>
   `;
 }
+
+/** Shared print presentation for governed accounting and purchasing documents. */
+export const accountingDocumentStyles = () => `
+    <style>
+      @page { size: A4 landscape; margin: 6mm; }
+      * { box-sizing: border-box; }
+      html, body { width: 100%; margin: 0; padding: 0; overflow: hidden; }
+      body { color: #111827; font-size: 8.5px; line-height: 1.35; }
+      .sheet { width: 88%; max-width: 88%; margin: 0 2% 0 10%; overflow: hidden; }
+      .top { display: grid; grid-template-columns: 1.2fr .8fr; gap: 8px; border-bottom: 2px solid #0f766e; padding-bottom: 6px; margin-bottom: 6px; }
+      h1 { margin: 0; font-size: 16px; line-height: 1.4; }
+      h2 { margin: 0 0 4px; font-size: 11px; color: #0f766e; }
+      .subtitle { margin-top: 2px; color: #475569; }
+      .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 8px; text-align: right; }
+      .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-bottom: 6px; }
+      .summary-item { border: 1px solid #cbd5e1; border-radius: 4px; padding: 4px 5px; min-height: 30px; }
+      .summary-item span { display: block; color: #64748b; font-size: 8px; }
+      .summary-item strong { display: block; margin-top: 1px; font-size: 10px; }
+      .section { break-inside: avoid; margin-top: 6px; }
+      table { width: 100%; max-width: 100%; border-collapse: collapse; table-layout: fixed; }
+      th, td { border: 1px solid #cbd5e1; padding: 2px 3px; vertical-align: top; overflow: hidden; overflow-wrap: anywhere; word-break: break-word; white-space: normal; }
+      th { background: #ecfdf5; color: #134e4a; font-weight: 800; }
+      .empty { text-align: center; color: #94a3b8; }
+      .two { display: block; }
+      .two > div { min-width: 0; overflow: hidden; }
+      .two > div + div { margin-top: 6px; }
+      .footer { display: flex; justify-content: space-between; border-top: 1px solid #cbd5e1; margin-top: 8px; padding-top: 4px; color: #64748b; }
+    </style>
+`;

@@ -76,7 +76,7 @@ const main = async () => {
   };
 
   const external = await service.startSession({ waybillId: externalWaybill!.id, actorId: actor.id, workstationId: 'ACCOUNTING-01' });
-  await assert.rejects(service.startSession({ waybillId: externalWaybill!.id, actorId: actor.id, workstationId: 'ACCOUNTING-02' }), /unique|active/i);
+  await assert.rejects(service.startSession({ waybillId: externalWaybill!.id, actorId: actor.id, workstationId: 'ACCOUNTING-02' }), /نوبت فعال/);
   assert.equal(external.method, 'EXTERNAL_OTP_GUARD');
   assert.equal(deliveries.at(-1)?.code.length, 6);
   assert.equal(deliveries.at(-1)?.dispatchNumber, externalWaybill!.number.toString());
@@ -134,16 +134,16 @@ const main = async () => {
   await service.revokeAuthorization({ authorizationId: physicalMatched.authorization.id, actorId: actor.id, reason: 'End production handshake verification fixture' });
 
   const fallback = await service.startSession({ waybillId: internalWaybill.id, actorId: actor.id, workstationId: 'ACCOUNTING-01' });
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
     const result = await service.verifyInternalBiometric({ sessionId: fallback.id, actorId: actor.id, scenario: 'NON_MATCH' });
-    assert.equal(result.fallbackEligible, attempt === 3);
+    assert.equal(result.fallbackEligible, attempt === 2);
   }
   await service.beginInternalFallback({ sessionId: fallback.id, actorId: actor.id });
   await service.verifyOtp({ sessionId: fallback.id, code: deliveries.at(-1)!.code, actorId: actor.id });
   await assert.rejects(service.approveByGuard({ sessionId: fallback.id, guardActorId: actor.id, reauthenticatedAt: now, reason: 'Scanner failed' }), /different actor from Accounting/i);
   const approvals = await Promise.allSettled([
-    service.approveByGuard({ sessionId: fallback.id, guardActorId: `guard-supervisor-a-${suffix}`, reauthenticatedAt: now, reason: 'Three live good-quality nonmatches' }),
-    service.approveByGuard({ sessionId: fallback.id, guardActorId: `guard-supervisor-b-${suffix}`, reauthenticatedAt: now, reason: 'Three live good-quality nonmatches' }),
+    service.approveByGuard({ sessionId: fallback.id, guardActorId: `guard-supervisor-a-${suffix}`, reauthenticatedAt: now, reason: 'Two live good-quality nonmatches' }),
+    service.approveByGuard({ sessionId: fallback.id, guardActorId: `guard-supervisor-b-${suffix}`, reauthenticatedAt: now, reason: 'Two live good-quality nonmatches' }),
   ]);
   assert.equal(approvals.filter((result) => result.status === 'fulfilled').length, 1);
   const fallbackAuthorization = (approvals.find((result) => result.status === 'fulfilled') as PromiseFulfilledResult<any>).value;

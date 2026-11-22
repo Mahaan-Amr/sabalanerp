@@ -1,0 +1,42 @@
+const fs=require('node:fs'),path=require('node:path');
+const {sha256File,decryptRecoveryArchive}=require('./recoveryCrypto.cjs');
+const fail=code=>{throw Object.assign(new Error(code),{code});};
+function fileIdentity(file,uid,max){
+ if(!path.isAbsolute(file)||fs.realpathSync(file)!==file)fail('INDEPENDENT_FILE_ALIAS');
+ const s=fs.lstatSync(file,{bigint:true});
+ if(!s.isFile()||s.uid!==BigInt(uid)||s.nlink!==1n||(s.mode&0o077n)||s.size>BigInt(max))fail('INDEPENDENT_FILE_UNSAFE');
+ return s;
+}
+async function sync(file,directory=false){const fd=await fs.promises.open(file,fs.constants.O_RDONLY|(directory?fs.constants.O_DIRECTORY:0)|fs.constants.O_NOFOLLOW);try{await fd.sync();}finally{await fd.close();}}
+async function main(){
+ const [metadataFile,metadataSha,cipherSha,privateKeyFile,uidText,work]=process.argv.slice(2);
+ const uid=Number(uidText);if(!Number.isInteger(uid)||uid<=0||!/^\/[A-Za-z0-9_./-]+$/.test(work)||fs.realpathSync(work)!==work)fail('INDEPENDENT_SCOPE_INVALID');
+ fileIdentity(metadataFile,uid,1024*1024);
+ if(await sha256File(metadataFile)!==metadataSha)fail('INDEPENDENT_METADATA_CHANGED');
+ const metadata=JSON.parse(fs.readFileSync(metadataFile,'utf8'));
+ if(metadata.format!=='sabalan-private-physical-transfer/v1'||metadata.healthyApplicationPoint!==false||metadata.ciphertextReadBackVerified!==true
+  ||metadata.encryption.cipherSha256!==cipherSha||metadata.component.archiveSha256!==metadata.encryption.sourceSha256)fail('INDEPENDENT_SOURCE_UNPROVEN');
+ const cipher=path.join(path.dirname(metadataFile),'base.sabrec');
+ const before=fileIdentity(cipher,uid,2**31);
+ if(Number(before.size)!==metadata.encryption.cipherBytes||await sha256File(cipher)!==cipherSha)fail('INDEPENDENT_CIPHER_CHANGED');
+ await sync(cipher);await sync(metadataFile);await sync(path.dirname(metadataFile),true);
+ // The transfer created this directory directly beneath checkpoints. Persist
+ // its parent entry as well before certifying remote power-loss durability.
+ await sync(path.dirname(path.dirname(metadataFile)),true);
+ fileIdentity(privateKeyFile,0,65536);
+ const privateKey=fs.readFileSync(privateKeyFile,'utf8');
+ const plain=path.join(work,'base.tar');if(fs.existsSync(plain))fail('INDEPENDENT_DESTINATION_EXISTS');
+ await decryptRecoveryArchive(cipher,plain,privateKey);
+ await sync(plain);await sync(work,true);
+ const plaintextSha256=await sha256File(plain);
+ if(plaintextSha256!==metadata.component.archiveSha256||fs.statSync(plain).size!==metadata.component.archiveBytes)fail('INDEPENDENT_PLAINTEXT_CHANGED');
+ const after=fileIdentity(cipher,uid,2**31);
+ for(const key of ['dev','ino','size','mtimeNs','ctimeNs'])if(before[key]!==after[key])fail('INDEPENDENT_CIPHER_MUTATED');
+ if(await sha256File(cipher)!==cipherSha)fail('INDEPENDENT_CIPHER_CHANGED');
+ const proof={format:'sabalan-independent-production-base-decryption/v1',captureOperation:metadata.component.operationId,
+  cipherSha256:cipherSha,plaintextSha256,plaintextBytes:metadata.component.archiveBytes,remoteDurabilityVerified:true,
+  independentRsaDecryptVerified:true,nativePostgresRestoreVerified:false,healthyApplicationPoint:false,publicOnlineAdmission:false};
+ const target=path.join(work,'independent-decryption-proof.json');await fs.promises.writeFile(target,JSON.stringify(proof,null,2)+'\n',{flag:'wx',mode:0o600});await sync(target);await sync(work,true);
+ console.log(JSON.stringify(proof));
+}
+main().catch(e=>{console.error(JSON.stringify({ok:false,failureClass:e.code||e.name}));process.exitCode=1;});

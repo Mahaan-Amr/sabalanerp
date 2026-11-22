@@ -1,0 +1,36 @@
+# Compatibility with previously deployed images and legacy recovery evidence.
+# The protected controller loads this overlay only for the legacy release graph.
+services:
+  clamav:
+    image: ${DEPLOYMENT_CLAMAV_IMAGE:-sabalanerp-legacy-scanner:unselected}
+    restart: unless-stopped
+    extra_hosts:
+      - "sabalan-clamav-egress:host-gateway"
+    environment:
+      FRESHCLAM_CHECKS: "12"
+    volumes:
+      - clamav_database:/var/lib/clamav
+    healthcheck:
+      test: ["CMD-SHELL", "if command -v sabalan-clamav-health >/dev/null; then sabalan-clamav-health; else clamdscan --ping=1; fi"]
+      interval: 15s
+      timeout: 10s
+      retries: 40
+      start_period: 5m
+    networks:
+      - app_network
+
+  backend:
+    environment:
+      HR_HIRING_ANTIVIRUS_COMMAND: /app/scripts/hr-clamdscan.sh
+      ALLOW_UNSCANNED_HR_FILES: "false"
+    depends_on:
+      clamav:
+        condition: service_healthy
+  deployment:
+    environment:
+      HR_HIRING_ANTIVIRUS_COMMAND: /app/scripts/hr-clamdscan.sh
+      ALLOW_UNSCANNED_HR_FILES: "false"
+    volumes:
+      - clamav_database:/app/recovery-sources/clamav
+volumes:
+  clamav_database:

@@ -1,3 +1,4 @@
+import { startBackgroundJob } from './backgroundJobLifecycle';
 import { DispatchBuyerSmsStatus, PrismaClient } from '@prisma/client';
 import smsService from './smsService';
 import { PhysicalGateExitService } from './physicalGateExit';
@@ -55,7 +56,5 @@ export const startDispatchBuyerSmsDelivery = (prisma: PrismaClient) => {
   const run = () => getRecoveryRuntimeState().mode === 'NORMAL'
     ? deliverPendingDispatchBuyerSms(prisma).catch((error) => console.error('Dispatch buyer SMS worker failed:', error))
     : Promise.resolve();
-  void run();
-  const timer = setInterval(() => void run(), POLL_INTERVAL_MS);
-  timer.unref();
+  return startBackgroundJob({ name: 'startDispatchBuyerSmsDelivery', intervalMs: POLL_INTERVAL_MS, run });
 };

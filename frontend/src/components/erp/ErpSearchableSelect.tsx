@@ -18,6 +18,8 @@ export default function ErpSearchableSelect({ children, value, defaultValue, onC
   value?: string | number | readonly string[];
   defaultValue?: string | number | readonly string[];
   onChange?: (selection: { target: { value: string }; currentTarget: { value: string } }) => void;
+  onSearchChange?: (query: string) => void;
+  loading?: boolean;
   id?: string; disabled?: boolean; required?: boolean; className?: string;
   'aria-describedby'?: string; 'aria-invalid'?: boolean | 'true' | 'false'; 'aria-label'?: string;
 }) {
@@ -27,5 +29,6 @@ export default function ErpSearchableSelect({ children, value, defaultValue, onC
     onChange={(next) => { setLocalValue(next); onChange?.({ target: { value: next }, currentTarget: { value: next } }); }}
     placeholder={props['aria-label'] || options.find((option) => option.value === '')?.label || 'انتخاب گزینه'}
     aria-describedby={props['aria-describedby']} aria-invalid={props['aria-invalid']}
+    onSearchChange={props.onSearchChange} loading={props.loading}
     disabled={disabled} required={required} className={className} searchable noOptionsText="نتیجه‌ای پیدا نشد" />;
 }

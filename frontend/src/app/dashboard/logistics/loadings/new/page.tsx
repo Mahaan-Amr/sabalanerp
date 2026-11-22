@@ -1,4 +1,5 @@
 "use client";
+import { PartnerLoadingDraft } from "@/features/logistics/PartnerLoadingDraft";
 import {
   ErpCheckboxControl,
   ErpField,
@@ -9,7 +10,7 @@ import {
   ErpTextarea,
 } from "@/components/erp";
 import { LogisticsPage } from "@/features/logistics/LogisticsWorkspace";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   FaBuilding,
@@ -40,8 +41,10 @@ import {
   ErpSummaryGrid,
   ErpSection,
   ErpSegmentedControl,
+  ErpSkeleton,
 } from "@/components/erp";
 import { logisticsAPI } from "@/lib/api";
+import { normalizeDigits } from "@/lib/numberFormat";
 import { saveCanonicalLoadingDraft } from "@/features/logistics/canonicalLoadingDraftWorkflow";
 import { dispatchCaseReference } from "@/features/dispatch-case/dispatchCasePresentation";
 import { userFacingError } from "@/features/dispatch/userFacingError";
@@ -119,31 +122,59 @@ const productIdentityParts = (snapshot: any = {}) =>
     snapshot.preparedUnit ? `واحد ${snapshot.preparedUnit}` : "",
   ].filter(Boolean);
 
-const detailNames = (value: any, fallback: string) => {
-  if (!value) return [];
-  const values = Array.isArray(value) ? value : [value];
-  return values
-    .map(
-      (item) =>
-        item?.namePersian ||
-        item?.name ||
-        item?.title ||
-        item?.serviceName ||
-        item?.toolName ||
-        fallback,
-    )
-    .filter(Boolean);
+const asList = (value: any) => Array.isArray(value) ? value : value ? [value] : [];
+
+const detailName = (item: any): string => {
+  if (typeof item === "string") return item.trim();
+  return item?.namePersian || item?.name || item?.title || item?.serviceName || item?.toolName ||
+    item?.subService?.namePersian || item?.subService?.name || "";
 };
 
-const productDetailBadges = (snapshot: any = {}) =>
-  [
-    ...detailNames(snapshot.tools, "ابزار").map((name) => `ابزار: ${name}`),
-    ...detailNames(snapshot.services, "خدمات").map((name) => `خدمات: ${name}`),
-    snapshot.finishing
-      ? `پرداخت: ${snapshot.finishing?.namePersian || snapshot.finishing?.name || snapshot.finishingName || "انتخاب شده"}`
-      : "",
-    snapshot.description ? `توضیح: ${snapshot.description}` : "",
+const namedDetail = (category: string, detail: any) => {
+  const name = detailName(detail);
+  return name ? `${category}: ${name}` : category;
+};
+
+const productDetailBadges = (snapshot: any = {}) => {
+  const saved = snapshot.snapshot || {};
+  const tools = [...asList(snapshot.tools), ...asList(saved.tools), ...asList(saved.meta?.tools), ...asList(saved.selectedTools)];
+  const services = [...asList(snapshot.services), ...asList(saved.services), ...asList(saved.selectedServices), ...asList(saved.appliedSubServices)];
+  const finishings = [snapshot.finishing, snapshot.finishingName, saved.finishing, saved.stoneFinishing, saved.finishingName,
+    ...asList(saved.finishings)].filter(Boolean);
+  const cutNames: Record<string, string> = {
+    longitudinal: "برش طولی", cross: "برش عرضی", vertical: "برش عمودی", calibration: "کالیبراسیون",
+  };
+  const cuts = [...asList(saved.cuttingBreakdown), ...asList(saved.cutDetails), ...asList(snapshot.cuttingBreakdown)];
+  const layer = saved.layerTypeName || saved.meta?.layerInfo?.layerTypeName;
+  const details = [
+    ...tools.map(item => namedDetail("ابزار", item)),
+    ...services.map(item => {
+      const kind = item?.selectedEdges?.length || item?.edges?.length ? "ابزار" : "خدمات";
+      return namedDetail(kind, item);
+    }),
+    ...finishings.map(item => namedDetail("پرداخت", item)),
+    ...cuts.map(item => cutNames[item?.type] || "برش"),
+    layer ? `لایه: ${layer}` : "",
+    saved.isMandatory && Number(saved.mandatoryPercentage) > 0
+      ? `حکمی: ${numberFa(saved.mandatoryPercentage)}٪` : "",
   ].filter(Boolean);
+  return Array.from(new Set(details));
+};
+
+function LoadingProductDetails({ snapshot }: { snapshot: any }) {
+  const details = productDetailBadges(snapshot);
+  if (!details.length && !snapshot?.description) return null;
+  return (
+    <div className="mt-2 space-y-1">
+      {details.length > 0 && (
+        <div aria-label="خدمات ثبت‌شده" className="flex flex-wrap gap-1">
+          {details.map(detail => <ErpBadge key={detail} tone="info">{detail}</ErpBadge>)}
+        </div>
+      )}
+      {snapshot?.description && <p className="text-xs font-normal sds-text-secondary">{snapshot.description}</p>}
+    </div>
+  );
+}
 
 const sourceWithGroup = (source: any, group: any) => ({
   ...source,
@@ -210,18 +241,28 @@ const lineFromLoadingLine = (line: any): DraftLine => {
   };
 };
 
-const normalizeSearch = (value: string) => value.trim().toLowerCase();
+type CustomerLookup =
+  | { status: "loading" }
+  | { status: "error"; message: string }
+  | { status: "ready"; customers: any[] };
+
+const customerLookupError = "دریافت مشتری‌های قابل بارگیری ناموفق بود.";
+const normalizeSearch = (value: string) => normalizeDigits(value).trim().toLowerCase();
 
 export default function NewLoadingPage() {
   const mutationLock = useRef(false);
   const router = useRouter();
   const searchParams = useSearchParams();
   const draftId = searchParams.get("draftId");
+  const [partnerDraftId, setPartnerDraftId] = useState<string | null>(null);
+  const partnerCreateKey = useRef<{ selection: string; key: string } | null>(null);
+  const partnerProjectLock = useRef(false);
 
   const [activeQuantityDriverId, setActiveQuantityDriverId] = useState("");
   const [step, setStep] = useState<WizardStep>("customer");
   const [customerSearch, setCustomerSearch] = useState("");
-  const [customers, setCustomers] = useState<any[]>([]);
+  const [customerLookup, setCustomerLookup] = useState<CustomerLookup>({ status: "loading" });
+  const customerRequest = useRef(0);
   const [selectedCustomer, setSelectedCustomer] = useState<any>(null);
   const [projects, setProjects] = useState<any[]>([]);
   const [draft, setDraft] = useState<any>(null);
@@ -246,6 +287,10 @@ export default function NewLoadingPage() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
+  const selectedPersonalTurn = (draft?.guardQueueTurns || []).find((turn: any) =>
+    turn.driverSource === "PERSONAL_PICKUP" && turn.status === "RESERVED_FOR_LOADING" && selectedDriverIds.includes(turn.id));
+  const personalPickup = Boolean(selectedPersonalTurn) || drivers.some(driver => driver.source === "PERSONAL_PICKUP" && selectedDriverIds.includes(driver.id));
+
   const selectedProject = remaining?.project || draft?.project || projects.find(project => project.id === draft?.projectId);
 
   const selectedSourceIds = useMemo(
@@ -255,9 +300,10 @@ export default function NewLoadingPage() {
   const selectedDrivers = useMemo(
     () =>
       selectedDriverIds
-        .map((id) => drivers.find((driver) => driver.id === id))
+        .map((id) => drivers.find((driver) => driver.id === id) ||
+          (selectedPersonalTurn?.id === id ? { id, source: "PERSONAL_PICKUP", firstName: "راننده شخصی", lastName: "", vehicleType: "سواری" } : null))
         .filter(Boolean),
-    [drivers, selectedDriverIds],
+    [drivers, selectedDriverIds, selectedPersonalTurn],
   );
 
   const contracts = useMemo(() => {
@@ -329,26 +375,31 @@ export default function NewLoadingPage() {
         driver.vehicleType,
         driver.reservedLoading?.loadingNumber,
       ].some((value) =>
-        String(value || "")
-          .toLowerCase()
-          .includes(search),
+        normalizeSearch(String(value || "")).includes(search),
       ),
     );
   }, [drivers, driverSearch, selectedDriverIds]);
 
-  const loadCustomers = async () => {
-    setError("");
+  const loadCustomers = useCallback(async (query = "") => {
+    const request = ++customerRequest.current;
+    setCustomerLookup({ status: "loading" });
+    const search = normalizeDigits(query.trim());
     try {
-      const response = await logisticsAPI.getLoadableCustomers(
-        customerSearch ? { search: customerSearch } : undefined,
+      const { data } = await logisticsAPI.getLoadableCustomers(
+        search ? { search } : undefined,
       );
-      if (response.data.success) setCustomers(response.data.data);
-    } catch (err: any) {
-      setError(
-        userFacingError(err, "دریافت مشتری‌های قابل بارگیری ناموفق بود."),
-      );
+      if (request !== customerRequest.current) return;
+      setCustomerLookup(data.success
+        ? { status: "ready", customers: data.data }
+        : { status: "error", message: customerLookupError });
+    } catch (err) {
+      if (request !== customerRequest.current) return;
+      setCustomerLookup({
+        status: "error",
+        message: userFacingError(err, customerLookupError),
+      });
     }
-  };
+  }, []);
 
   const loadCustomerProjects = async (customer: any) => {
     setError("");
@@ -358,7 +409,7 @@ export default function NewLoadingPage() {
     setRemaining(null);
     setLines([]);
     try {
-      const response = await logisticsAPI.getCustomerProjects(customer.id);
+      const response = await logisticsAPI.getCustomerProjects(customer.id, customer.projectId);
       if (response.data.success) setProjects(response.data.data);
       setStep("project");
     } catch (err: any) {
@@ -422,7 +473,11 @@ export default function NewLoadingPage() {
   };
 
   useEffect(() => {
-    loadCustomers();
+    void loadCustomers();
+    return () => { customerRequest.current++; };
+  }, [loadCustomers]);
+
+  useEffect(() => {
     loadDrivers();
   }, []);
 
@@ -444,6 +499,10 @@ export default function NewLoadingPage() {
         const response = await logisticsAPI.getLoading(draftId);
         if (!response.data.success) return;
         const loadingDraft = response.data.data;
+        if (loadingDraft.source?.sourceKind === "PARTNER_CASE") {
+          setPartnerDraftId(draftId);
+          return;
+        }
         setDraft(loadingDraft);
         setSelectedCustomer({
           id: loadingDraft.customerId,
@@ -487,6 +546,27 @@ export default function NewLoadingPage() {
     };
     loadDraft();
   }, [draftId]);
+
+  const selectPartnerDelivery = async (project: { id: string; owner: { caseId: string; revision: number; integrityHash: string }; deliveryId: string }) => {
+    if (partnerProjectLock.current || selectingProjectId) return;
+    partnerProjectLock.current = true;
+    setSelectingProjectId(project.id);
+    setError("");
+    try {
+      const selection = `${project.id}:${project.owner.revision}`;
+      if (partnerCreateKey.current?.selection !== selection) partnerCreateKey.current = { selection, key: crypto.randomUUID() };
+      const { data } = await logisticsAPI.createLoading({
+        sourceKind: "PARTNER_CASE", expected: project.owner, deliveryId: project.deliveryId,
+        idempotencyKey: partnerCreateKey.current.key, reason: "شروع بارگیری از پروژه مشتری",
+      });
+      router.replace(`/dashboard/logistics/loadings/new?draftId=${encodeURIComponent(data.data.loadingId)}`);
+    } catch (err) {
+      setError(userFacingError(err, "ساخت پیش‌نویس بارگیری ناموفق بود."));
+    } finally {
+      partnerProjectLock.current = false;
+      setSelectingProjectId("");
+    }
+  };
 
   const selectProject = async (projectId: string, forceNew = false) => {
     setError("");
@@ -700,7 +780,31 @@ export default function NewLoadingPage() {
     return false;
   };
 
-  const toggleSelectedDriver = (driver: any) => {
+  const changeTransport = async (mode: "PERSONAL" | "DRIVERS") => {
+    if (!draft?.id || mutationLock.current) return false;
+    mutationLock.current = true;
+    setSaving(true);
+    setError("");
+    try {
+      const response = await logisticsAPI.selectLoadingTransport(draft.id, mode);
+      const refreshed = await logisticsAPI.getLoading(draft.id);
+      if (!response.data.success || !refreshed.data.success) throw new Error("تغییر نوع بارگیری ناموفق بود.");
+      setDraft(refreshed.data.data);
+      setSelectedDriverIds(response.data.data.turn ? [response.data.data.turn.id] : []);
+      setDriverLineInputs({});
+      setLines(current => current.map(line => ({ ...line, quantity: "", khatRas: "", pieceCount: "", plus: "0", minus: "0" })));
+      await loadDrivers(draft.id);
+      return true;
+    } catch (err) {
+      setError(userFacingError(err, "تغییر نوع بارگیری ناموفق بود."));
+      return false;
+    } finally {
+      mutationLock.current = false;
+      setSaving(false);
+    }
+  };
+
+  const toggleSelectedDriver = async (driver: any) => {
     const selected = selectedDriverIds.includes(driver.id);
     if (
       !selected &&
@@ -708,6 +812,10 @@ export default function NewLoadingPage() {
       driver.reservedLoading?.id !== draft?.id
     )
       return;
+    if (personalPickup) {
+      if (await changeTransport("DRIVERS")) setSelectedDriverIds([driver.id]);
+      return;
+    }
     setSelectedDriverIds((current) =>
       selected
         ? current.filter((id) => id !== driver.id)
@@ -858,21 +966,38 @@ export default function NewLoadingPage() {
             value={customerSearch}
             onChange={(event) => setCustomerSearch(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === "Enter") loadCustomers();
+              if (event.key === "Enter" && customerLookup.status !== "loading") {
+                void loadCustomers(customerSearch);
+              }
             }}
           />
         </ErpField>
-        <ErpButton label="جستجو" icon={FaSearch} onClick={loadCustomers} />
+        <ErpButton
+          label="جستجو"
+          icon={FaSearch}
+          disabled={customerLookup.status === "loading"}
+          onClick={() => loadCustomers(customerSearch)}
+        />
       </div>
       <div className="mt-4 flex flex-col gap-2">
-        {customers.map((customer) => (
+        {customerLookup.status === "loading" && (
+          <ErpSkeleton label="در حال دریافت مشتری‌های قابل بارگیری" />
+        )}
+        {customerLookup.status === "error" && (
+          <ErpInlineState
+            kind="error"
+            title={customerLookup.message}
+            action={{ label: "تلاش دوباره", onClick: () => loadCustomers(customerSearch) }}
+          />
+        )}
+        {customerLookup.status === "ready" && customerLookup.customers.map((customer) => (
           <ErpNeumorphicInteractiveCard
-            key={customer.id}
+            key={customer.projectId ?? customer.id}
             type="button"
             onClick={() => loadCustomerProjects(customer)}
-            aria-pressed={selectedCustomer?.id === customer.id}
+            aria-pressed={selectedCustomer?.id === customer.id && selectedCustomer?.projectId === customer.projectId}
             className={`min-w-0 p-4 text-right ${
-              selectedCustomer?.id === customer.id
+              selectedCustomer?.id === customer.id && selectedCustomer?.projectId === customer.projectId
                 ? "border-[var(--sds-accent)] bg-[var(--sds-accent-soft)]"
                 : "border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]"
             }`}
@@ -906,7 +1031,7 @@ export default function NewLoadingPage() {
             </div>
           </ErpNeumorphicInteractiveCard>
         ))}
-        {!customers.length && (
+        {customerLookup.status === "ready" && customerLookup.customers.length === 0 && (
           <ErpEmptyState icon={FaUser} title="مشتری قابل بارگیری پیدا نشد" />
         )}
       </div>
@@ -927,14 +1052,16 @@ export default function NewLoadingPage() {
       )}
       <div className="flex flex-col gap-2">
         {projects.map((project) => (
-          <ErpNeumorphicInteractiveCard key={project.id} onClick={() => selectProject(project.id)} disabled={Boolean(selectingProjectId)} aria-pressed={draft?.projectId === project.id} className="p-4 text-right disabled:opacity-60">
+          <ErpNeumorphicInteractiveCard key={project.id} onClick={() => project.sourceKind === "PARTNER_CASE" ? void selectPartnerDelivery(project) : void selectProject(project.id)} disabled={Boolean(selectingProjectId)} aria-pressed={draft?.projectId === project.id} className="p-4 text-right disabled:opacity-60">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <p className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
                   {project.projectName || project.address}
                 </p>
                 <p className="mt-1 text-xs leading-5 text-[var(--sds-text-secondary)]">
-                  {[project.city, project.address].filter(Boolean).join(" · ")}
+                  {project.sourceKind === "PARTNER_CASE"
+                    ? `قرارداد ${project.contractNumber} · ${new Date(`${project.date}T12:00:00`).toLocaleDateString("fa-IR")}`
+                    : [project.city, project.address].filter(Boolean).join(" · ")}
                 </p>
                 {(project.projectManagerName ||
                   project.projectManagerNumber) && (
@@ -1026,9 +1153,6 @@ export default function NewLoadingPage() {
                           const selected = selectedSourceIds.has(
                             source.contractItemId,
                           );
-                          const details = productDetailBadges(
-                            source.productSnapshot,
-                          );
                           return (
                             <tr
                               key={source.contractItemId}
@@ -1040,24 +1164,13 @@ export default function NewLoadingPage() {
                                 <p className="mt-1 text-xs font-normal leading-6 sds-text-secondary">{productIdentityParts(
                                   source.productSnapshot,
                                 ).join(" · ") || "بدون مشخصات"}</p>
-                                <div className="flex max-w-md flex-wrap gap-1">
-                                  {details.length ? (
-                                    details.slice(0, 5).map((detail) => (
-                                      <ErpBadge key={detail} tone="info">
-                                        {detail}
-                                      </ErpBadge>
-                                    ))
-                                  ) : (
-                                    <span className="text-xs text-[var(--sds-text-muted)]">
-                                      بدون جزئیات افزوده
-                                    </span>
-                                  )}
-                                </div>
+                                <LoadingProductDetails snapshot={source.productSnapshot} />
                               </td>
                               <td className="px-3 py-4 text-center">
                                 <ErpBadge tone="success">
-                                  {numberFa(source.remainingQuantity)}{" "}
-                                  {source.unitLabel}
+                                  <span className="whitespace-nowrap">
+                                    {numberFa(source.remainingQuantity)}{" "}{source.unitLabel}
+                                  </span>
                                 </ErpBadge>
                               </td>
                               <td className="px-3 py-4 text-left">
@@ -1125,6 +1238,7 @@ export default function NewLoadingPage() {
           <>
             <ErpField label="خط راس">
               <ErpInput
+                inputMode="decimal"
                 value={line.khatRas}
                 onChange={(event) =>
                   updateLine(line.key, { khatRas: event.target.value })
@@ -1133,6 +1247,7 @@ export default function NewLoadingPage() {
             </ErpField>
             <ErpField label="تعداد">
               <ErpInput
+                inputMode="numeric"
                 value={line.pieceCount}
                 onChange={(event) =>
                   updateLine(line.key, { pieceCount: event.target.value })
@@ -1141,6 +1256,7 @@ export default function NewLoadingPage() {
             </ErpField>
             <ErpField label="اضافه">
               <ErpInput
+                inputMode="decimal"
                 value={line.plus}
                 onChange={(event) =>
                   updateLine(line.key, { plus: event.target.value })
@@ -1149,6 +1265,7 @@ export default function NewLoadingPage() {
             </ErpField>
             <ErpField label="کسر">
               <ErpInput
+                inputMode="decimal"
                 value={line.minus}
                 onChange={(event) =>
                   updateLine(line.key, { minus: event.target.value })
@@ -1159,6 +1276,7 @@ export default function NewLoadingPage() {
         ) : (
           <ErpField label="مقدار مستقیم">
             <ErpInput
+              inputMode="decimal"
               value={line.quantity}
               onChange={(event) =>
                 updateLine(line.key, { quantity: event.target.value })
@@ -1202,6 +1320,7 @@ export default function NewLoadingPage() {
             {unitLabels[line.source.unit] || "واحد ثبت‌شده"}
           </ErpBadge>
         </div>
+        <LoadingProductDetails snapshot={line.source.productSnapshot} />
         {line.source.unit === "meter" && (
           <div className="mt-3">
             <ErpSegmentedControl<QuantityMode>
@@ -1219,12 +1338,14 @@ export default function NewLoadingPage() {
             <>
               <ErpField label="خط راس">
                 <ErpInput
+                  inputMode="decimal"
                   value={driverLine.khatRas}
                   onChange={(event) => update({ khatRas: event.target.value })}
                 />
               </ErpField>
               <ErpField label="تعداد">
                 <ErpInput
+                  inputMode="numeric"
                   value={driverLine.pieceCount}
                   onChange={(event) =>
                     update({ pieceCount: event.target.value })
@@ -1233,12 +1354,14 @@ export default function NewLoadingPage() {
               </ErpField>
               <ErpField label="اضافه">
                 <ErpInput
+                  inputMode="decimal"
                   value={driverLine.plus}
                   onChange={(event) => update({ plus: event.target.value })}
                 />
               </ErpField>
               <ErpField label="کسر">
                 <ErpInput
+                  inputMode="decimal"
                   value={driverLine.minus}
                   onChange={(event) => update({ minus: event.target.value })}
                 />
@@ -1247,6 +1370,7 @@ export default function NewLoadingPage() {
           ) : (
             <ErpField label="مقدار مستقیم">
               <ErpInput
+                inputMode="decimal"
                 value={driverLine.quantity}
                 onChange={(event) => update({ quantity: event.target.value })}
               />
@@ -1359,8 +1483,11 @@ export default function NewLoadingPage() {
   const renderDriverStep = () => (
     <ErpSection
       title="انتخاب رانندگان آماده بارگیری"
-      description="می‌توانید چند راننده آماده بارگیری انتخاب کنید."
     >
+      <div className="mb-4 flex flex-wrap gap-3">
+        <ErpButton label="راننده شخصی" variant={personalPickup ? "solid" : "outline"} disabled={saving}
+          onClick={() => void changeTransport(personalPickup ? "DRIVERS" : "PERSONAL")} />
+      </div>
       <div className="grid grid-cols-1 items-end gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
         <ErpField label="جستجوی راننده">
         <ErpInput
@@ -1374,12 +1501,12 @@ export default function NewLoadingPage() {
           icon={FaSearch}
           variant="soft"
           onClick={() => {
-            void loadDrivers();
+            void loadDrivers(draft?.id);
           }}
         />
       </div>
       <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
-        {filteredDrivers.map((driver) => {
+        {filteredDrivers.filter(driver => driver.source !== "PERSONAL_PICKUP").map((driver) => {
           const selected = selectedDriverIds.includes(driver.id);
           const reservedForOther =
             driver.queueStatus === "RESERVED" &&
@@ -1390,7 +1517,7 @@ export default function NewLoadingPage() {
               key={driver.id}
               type="button"
               onClick={() => toggleSelectedDriver(driver)}
-              disabled={reservedForOther}
+              disabled={saving || reservedForOther}
               aria-pressed={selected}
               className={`min-w-0 p-4 text-right disabled:cursor-not-allowed disabled:opacity-60 ${
                 selected
@@ -1441,7 +1568,7 @@ export default function NewLoadingPage() {
             </ErpNeumorphicInteractiveCard>
           );
         })}
-        {!filteredDrivers.length && (
+        {!filteredDrivers.some(driver => driver.source !== "PERSONAL_PICKUP") && !personalPickup && (
           <ErpEmptyState
             icon={FaUsers}
             title="راننده آماده بارگیری وجود ندارد"
@@ -1515,6 +1642,7 @@ export default function NewLoadingPage() {
   );
 
   if (loading) return <ErpLoading />;
+  if (draftId && partnerDraftId === draftId) return <PartnerLoadingDraft key={draftId} draftId={draftId} />;
 
   return (
     <LogisticsPage

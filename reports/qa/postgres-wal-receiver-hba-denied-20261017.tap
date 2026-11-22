@@ -1,0 +1,39 @@
+TAP version 13
+# Subtest: native slot-free WAL streaming captures a real committed transaction and retains exact source identity
+not ok 1 - native slot-free WAL streaming captures a real committed transaction and retains exact source identity
+  ---
+  duration_ms: 3769.807
+  location: 'C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\tests\\online-deployment\\postgres-wal-receiver.integration.test.mjs:28:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    receiver exited before streaming: WAL_STREAM_COMPONENT_FAILED
+    
+    + actual - expected
+    
+    + {
+    +   code: 1,
+    +   signal: null
+    + }
+    - undefined
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  actual:
+    code: 1
+    signal: ~
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///C:/Users/mahan/.codex/worktrees/online-deployment/sabalanerp/tests/online-deployment/postgres-wal-receiver.integration.test.mjs:73:16)
+    process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    async Test.run (node:internal/test_runner/test:932:9)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 0
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 3902.2068

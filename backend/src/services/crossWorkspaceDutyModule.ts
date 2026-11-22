@@ -1,3 +1,7 @@
+import { Prisma } from '@prisma/client';
+import { LOADING_CANCELLATION_DUTY_DEFINITIONS, loadingCancellationDutyAdapter } from './crossWorkspaceDutyAdapters/loadingCancellationDutyAdapter';
+import { PURCHASING_INQUIRY_DUTY_DEFINITIONS, purchasingInquiryDutyAdapter, syncPurchasingInquiryDutyDefinitions } from './crossWorkspaceDutyAdapters/purchasingInquiryDutyAdapter';
+import { startBackgroundJob } from './backgroundJobLifecycle';
 import type { PrismaClient } from '@prisma/client';
 import { CONTRACT_DISPATCH_DUTY_DEFINITIONS, contractDispatchDutyAdapter, syncContractDispatchDutyDefinitions } from './crossWorkspaceDutyAdapters/contractDispatchDutyAdapter';
 import { hrWorkItemDutyAdapter } from './crossWorkspaceDutyAdapters/hrWorkItemDutyAdapter';
@@ -38,7 +42,9 @@ import {
 } from './crossWorkspaceDutyAdapters/hrWorkItemDutyLifecycle';
 
 const sourceAdapters = new Map<string, CrossWorkspaceDutySourceAdapter>([
+  [loadingCancellationDutyAdapter.sourceType, loadingCancellationDutyAdapter],
   [contractDispatchDutyAdapter.sourceType, contractDispatchDutyAdapter],
+  [purchasingInquiryDutyAdapter.sourceType, purchasingInquiryDutyAdapter],
   [hrWorkItemDutyAdapter.sourceType, hrWorkItemDutyAdapter],
   [salesContractCorrectionDutyAdapter.sourceType, salesContractCorrectionDutyAdapter],
   [hrHiringFinanceDutyAdapter.sourceType, hrHiringFinanceDutyAdapter],
@@ -59,6 +65,8 @@ const adapterForDuty = async (database: CrossWorkspaceDutyDatabase, dutyId: stri
 
 export const CROSS_WORKSPACE_DUTY_DEFINITIONS = Object.freeze({
   ...CONTRACT_DISPATCH_DUTY_DEFINITIONS,
+  ...LOADING_CANCELLATION_DUTY_DEFINITIONS,
+  ...PURCHASING_INQUIRY_DUTY_DEFINITIONS,
   ...HR_DUTY_DEFINITIONS,
   ...SALES_CONTRACT_CORRECTION_DUTY_DEFINITIONS,
   ...HR_HIRING_FINANCE_DUTY_DEFINITIONS,
@@ -72,12 +80,13 @@ export const synchronizeCrossWorkspaceDutyDefinitions = async (
   database: CrossWorkspaceDutyDatabase,
   actorUserId = 'SYSTEM',
 ) => {
+  const purchasing = await syncPurchasingInquiryDutyDefinitions(database, actorUserId);
   const hr = await syncHrDutyEnvelopeDefinitions(database, actorUserId);
   const salesCorrection = await syncSalesContractCorrectionDutyDefinitions(database, actorUserId);
   const hiringFinance = await syncHrHiringFinanceDutyDefinitions(database, actorUserId);
   const partnerPricing = await syncPartnerPricingDutyDefinitions(database, actorUserId);
   const contractDispatch = await syncContractDispatchDutyDefinitions(database, actorUserId);
-  return [...hr, ...salesCorrection, ...hiringFinance, ...partnerPricing, ...contractDispatch];
+  return [...purchasing, ...hr, ...salesCorrection, ...hiringFinance, ...partnerPricing, ...contractDispatch];
 };
 
 export const synchronizeCrossWorkspaceDutySource = async (
@@ -93,13 +102,20 @@ export const loadCrossWorkspaceDutySourceProjection = (
 /** One read operation only. Source evidence is shared; actor authority is never cached. */
 export const createCrossWorkspaceDutySourceProjectionReader = () => {
   const databases = new WeakMap<object, Map<string, ReturnType<typeof loadCrossWorkspaceDutySourceProjection>>>();
+  const readers = new Map<string, ReturnType<typeof registeredAdapter>['loadInboxProjection']>();
   return (database: CrossWorkspaceDutyDatabase, input: CrossWorkspaceDutySourceProjectionInput) => {
     let projections = databases.get(database);
     if (!projections) { projections = new Map(); databases.set(database, projections); }
     const key = JSON.stringify([input.sourceType, input.sourceId, input.sourceActionCode, input.sourceVersion]);
     let reading = projections.get(key);
     if (!reading) {
-      reading = loadCrossWorkspaceDutySourceProjection(database, input);
+      let reader = readers.get(input.sourceType);
+      if (!reader) {
+        const adapter = registeredAdapter(input.sourceType);
+        reader = adapter.createInboxProjectionReader?.() ?? adapter.loadInboxProjection;
+        readers.set(input.sourceType, reader);
+      }
+      reading = reader(database, input);
       projections.set(key, reading);
     }
     return reading;
@@ -111,9 +127,21 @@ export const respondToCrossWorkspaceDuty = async (
   input: RespondToCrossWorkspaceDutyInput,
 ) => {
   if ('$transaction' in database) {
-    return database.$transaction(async (tx) => (
-      (await adapterForDuty(tx, input.dutyId)).respond(tx, input)
-    ));
+    const adapter = await adapterForDuty(database, input.dutyId);
+    if (adapter === loadingCancellationDutyAdapter) {
+      const { isRetryableDispatchTransactionError } = await import('./dispatchAllocation');
+      for (let attempt = 0; ; attempt += 1) {
+        try {
+          return await database.$transaction(tx => adapter.respond(tx, input), {
+            isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+          });
+        } catch (error) {
+          if (!isRetryableDispatchTransactionError(error)) throw error;
+          if (attempt >= 2) throw new Error('DUTY_RESPONSE_CONFLICT');
+        }
+      }
+    }
+    return database.$transaction(tx => adapter.respond(tx, input));
   }
   return (await adapterForDuty(database, input.dutyId)).respond(database, input);
 };
@@ -198,10 +226,7 @@ export const startCrossWorkspaceDutyDeadlineMaintenance = (prisma: PrismaClient)
       running = false;
     }
   };
-  void run();
-  const timer = setInterval(() => void run(), 60_000);
-  timer.unref?.();
-  return () => clearInterval(timer);
+  return startBackgroundJob({ name: 'startCrossWorkspaceDutyDeadlineMaintenance', intervalMs: 60_000, run });
 };
 
 export type {

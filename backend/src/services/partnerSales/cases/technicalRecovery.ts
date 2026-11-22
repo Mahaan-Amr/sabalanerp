@@ -1,3 +1,5 @@
+import { readContractEditSession } from '../../contractEditSessionRead';
+import { readRecoveryForDisplay } from './recoveryDisplayRead';
 import { Prisma, type PrismaClient, type SalesContractEditSession } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import {
@@ -49,12 +51,15 @@ export function createPrismaPartnerTechnicalRecoveryService(input: {
 export function technicalRecoveryLease(dependencies: PartnerTechnicalRecoveryDependencies) {
   return async function underLease<T>(access: PartnerTechnicalRecoveryAccess, operation: 'READ' | 'CHECKPOINT' | 'SAVE',
     work: (tx: Prisma.TransactionClient, session: SalesContractEditSession, recovery: TechnicalRecoveryRecord | null, now: Date) => Promise<Result<T>>,
+    history: 'FULL' | 'LATEST_DISPLAY' = 'FULL',
   ): Promise<Result<T>> {
     return dependencies.transaction(async tx => {
       // Existing lease row is the serialization point for checkpoint, takeover
       // and heartbeat. The adapter must supply a real owning DB transaction.
       await tx.$queryRaw`SELECT "draftId" FROM sales_contract_edit_sessions WHERE "draftId" = ${access.recoveryId} FOR UPDATE`;
-      const session = await tx.salesContractEditSession.findUnique({ where: { draftId: access.recoveryId } });
+      const session = history === 'LATEST_DISPLAY' && operation === 'READ'
+        ? await readRecoveryForDisplay(tx, access.recoveryId, { kind: 'latest' })
+        : await readContractEditSession(tx, access.recoveryId);
       if (!session || session.ownerUserId !== dependencies.actorId) return { ok: false, error: partnerError('NOT_FOUND') };
       const authorized = await dependencies.authorize(tx, { actorId: dependencies.actorId, recoveryId: access.recoveryId, operation });
       if (!authorized.ok) return { ok: false, error: partnerError(authorized.error.code) };
@@ -126,7 +131,7 @@ export function createPartnerTechnicalRecoveryService(dependencies: PartnerTechn
         ...(catalog && catalog.success ? { retainedCatalog: { ...catalog.data,
           products: catalog.data.products.filter(item => activeIds.has(item.catalogItemId)) } } : {}),
       } };
-      });
+      }, 'LATEST_DISPLAY');
     },
     async checkpoint(input) {
       const parsed = PartnerTechnicalCheckpointSchema.safeParse(input);
@@ -156,11 +161,15 @@ export function createPartnerTechnicalRecoveryService(dependencies: PartnerTechn
           recoveryRevision: revision + 1,
           updatedAt: recovery && technicalDraftContent(recovery.draft) === technicalDraftContent(command.draft)
             ? recovery.updatedAt : now.getTime(), draft: command.draft };
-        const written = await tx.salesContractEditSession.updateMany({ where: {
-          draftId: session.draftId, leaseToken: session.leaseToken, baseRevision: session.baseRevision,
-          recovery: { equals: session.recovery === null ? Prisma.AnyNull : json(session.recovery) },
-        }, data: { recovery: json(next), updatedAt: now } });
-        if (written.count !== 1) return { ok: false, error: partnerError('ROW_STALE') };
+        const expectedJson = session.recovery === null
+          ? Prisma.sql`(recovery IS NULL OR recovery = 'null'::jsonb)`
+          : Prisma.sql`recovery = ${JSON.stringify(session.recovery)}::jsonb`;
+        const written = await tx.$executeRaw`
+          UPDATE sales_contract_edit_sessions SET recovery = ${JSON.stringify(next)}::jsonb, "updatedAt" = ${now}
+          WHERE "draftId" = ${session.draftId} AND "leaseToken" = ${session.leaseToken}
+            AND "baseRevision" = ${session.baseRevision} AND ${expectedJson}
+        `;
+        if (written !== 1) return { ok: false, error: partnerError('ROW_STALE') };
         const receipt = PartnerTechnicalCheckpointReceiptSchema.parse({ schemaVersion: 1, recoveryId: session.draftId,
           recoveryRevision: next.recoveryRevision, inputRevision: command.draft.inputRevision,
           updatedAt: new Date(next.updatedAt).toISOString(), replayed: false });

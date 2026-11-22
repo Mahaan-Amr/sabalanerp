@@ -99,8 +99,23 @@ test("HR work schedule and Persian time selection are RTL, keyboard, mobile, and
   page,
 }) => {
   await loginAsAdmin(page);
+  const schedulePerson = { id: 'work-schedule-qa', firstName: 'برنامه', lastName: 'آزمایشی',
+    nationalCode: '0012345678', employeeNumber: 'WS-QA',
+    hrEmploymentRelationships: [{ id: 'schedule-relationship-qa', status: 'ACTIVE', effectiveFrom: '2026-09-01T00:00:00Z', assignments: [] }],
+    retentionCapabilities: { canArchive: true, canPermanentlyDelete: false } };
+  await page.route('**/api/hr/authorization/me', route => route.fulfill({ json: { data: {
+    actionPermissionCodes: [], effectiveAccess: { features: [{ feature: 'PERSONNEL', permission: 'edit' }] },
+  } } }));
+  await page.route(/\/api\/hr\/personnel(?:\?|$)/, route => route.fulfill({ json: {
+    data: [schedulePerson], meta: { page: 1, total: 1, totalPages: 1 },
+  } }));
+  await page.route('**/api/hr/operational-reference/personnel', route => route.fulfill({ json: { data: { positions: [] } } }));
+  await page.route('**/api/hr/personnel/work-schedule-qa/work-schedule', route => route.fulfill({ json: {
+    data: { workSchedules: [], workScheduleCapabilities: { canEdit: true } },
+  } }));
   await page.goto("/dashboard/hr/personnel");
-  const personnel = page.locator("[data-personnel-id]").first();
+  const personnel = page.locator('[data-personnel-id="work-schedule-qa"]');
+  await expect(personnel).toHaveCount(1);
   await expect(personnel).toBeVisible();
   await personnel.getByRole("button").first().click();
   const profile = page.getByRole("dialog", { name: "پروندهٔ پرسنل" });
@@ -252,7 +267,7 @@ test("User creation exposes canonical non-color permission state and responsive 
   await page.locator('input[name="confirmPassword"]').fill("password123");
   await submit.click();
   await expect(submit).toBeDisabled();
-  expect(releaseCreate).toBeDefined();
+  await expect.poll(() => Boolean(releaseCreate)).toBe(true);
   releaseCreate?.();
   await expect(
     page.getByRole("status").filter({ hasText: "کاربر با موفقیت ایجاد شد" }),

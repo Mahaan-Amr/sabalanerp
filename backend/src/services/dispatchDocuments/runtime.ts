@@ -5,7 +5,8 @@ import { createPrismaDispatchDocumentAccessPolicy } from './prismaAccessPolicy';
 import { installStatementAdjustmentArtifactPreparer } from '../statementAdjustmentRuntime';
 import { createStatementAdjustmentArtifactPreparer } from './adjustmentArtifactPreparer';
 import type { DispatchArtifactPublisher } from './contracts';
-import { createFilesystemDispatchArtifactStorage } from './filesystemStorage';
+import { createFilesystemDispatchArtifactStorage, createScopedVersionedFilesystemDispatchArtifactStorage } from './filesystemStorage';
+import type { VersionedFileRootScope } from '../versionedFilePublication';
 import { createDispatchIntegrityIncidentReporter } from './integrityIncidentReporter';
 import { PrismaDispatchDocumentRepository } from './prismaRepository';
 import { allocationPricingIntegrityVerifier, PrismaDispatchDocumentSourceReader } from './prismaSourceReader';
@@ -17,11 +18,17 @@ export const configureDispatchDocumentsRuntime = (input: {
   templateVersion: string;
   generatorVersion: string;
   storageRoot?: string;
+  filePublication?: VersionedFileRootScope;
 }) => {
-  const storage = createFilesystemDispatchArtifactStorage(input.storageRoot || path.join(process.cwd(), 'storage', 'dispatch-documents'));
+  const root = input.storageRoot || path.join(process.cwd(), 'storage', 'dispatch-documents');
+  const storage = input.filePublication
+    ? createScopedVersionedFilesystemDispatchArtifactStorage(root, input.filePublication)
+    : createFilesystemDispatchArtifactStorage(root);
+  const sourceReader = new PrismaDispatchDocumentSourceReader(input.prisma, input.templateVersion, input.generatorVersion);
   const service = createDispatchDocuments({
     repository: new PrismaDispatchDocumentRepository(input.prisma, allocationPricingIntegrityVerifier, storage),
-    sourceReader: new PrismaDispatchDocumentSourceReader(input.prisma, input.templateVersion, input.generatorVersion),
+    sourceReader,
+    reprintWaybill: artifact => sourceReader.reprintWaybill(artifact),
     publisher: input.publisher,
     storage,
     incidents: createDispatchIntegrityIncidentReporter(input.prisma),
@@ -41,5 +48,7 @@ export const configureDispatchDocumentsRuntime = (input: {
       },
     }),
   });
-  return service;
+  // The invoice command uses the identical private storage owner and locking
+  // protocol when checking retained documents before committing an invoice.
+  return Object.assign(service, { documentStorage: storage });
 };

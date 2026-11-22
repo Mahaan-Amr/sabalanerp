@@ -55,7 +55,7 @@ assert.match(statementHtml, /Yekan Bakh/);
 assert.match(statementHtml, /صورت‌حساب محموله مشتری/);
 assert.match(statementHtml, /WB-1405-0042/);
 assert.match(statementHtml, /SC-10042/);
-assert.match(statementHtml, /row-stable-1/);
+assert.doesNotMatch(statementHtml, /row-stable-1/);
 assert.match(statementHtml, /شامل خدمات متصل/);
 assert.match(statementHtml, /<thead>/);
 assert.match(statementHtml, /display:\s*table-header-group/);
@@ -77,7 +77,41 @@ const waybillHtml = renderDispatchDocumentHtml({
   },
 });
 assert.match(waybillHtml, /بارنامه خروج محموله/);
+assert.doesNotMatch(waybillHtml, /row-stable-1|شناسه ردیف/);
+const englishUnitWaybill = renderDispatchDocumentHtml({ ...common, kind: 'WAYBILL', payload: { allocationRevisionId: 'revision', contracts: [{ contractId: 'contract', contractNumber: '۱۰۰', lines: [{ contractItemId: 'item', productRowId: 'contract-row-123', label: 'سنگ', quantity: '2', unit: 'meter' }] }] } });
+assert.match(englishUnitWaybill, /متر طول/);
+assert.doesNotMatch(englishUnitWaybill, /contract-row-123|>meter</);
 assert.doesNotMatch(waybillHtml, /مبلغ ناخالص|تخفیف تخصیص‌یافته|مبلغ خالص|ریال/);
+const measuredWaybill = renderDispatchDocumentHtml({
+  ...common, kind: 'WAYBILL',
+  print: {
+    loadingNumber: 'L-0042', contacts: [],
+    loadedPieceCounts: { 'contract:recorded': '80' },
+    rows: Object.fromEntries([
+      ['fixed', '1', '750'], ['bulk', '375', ''], ['recorded', '375', ''],
+    ].map(([id, length, count]) => [`contract:${id}`, [{
+      code: '', description: 'سنگ طولی', category: 'محصول',
+      length, width: '۰٫۴', count, linearMeasurement: '', squareMeasurement: '',
+    }]])),
+  },
+  payload: { allocationRevisionId: 'revision', contracts: [{
+    contractId: 'contract', contractNumber: '100',
+    lines: [['fixed', '104'], ['bulk', '76'], ['recorded', '76.2']].map(([productRowId, quantity]) => ({
+      contractItemId: productRowId, productRowId, quantity, label: 'سنگ طولی', unit: 'm',
+    })),
+  }] },
+});
+assert.ok(measuredWaybill.includes('<td>۱</td><td>۰٫۴</td><td>۱۰۴</td><td>۱۰۴</td><td>۴۱٫۶</td>'));
+assert.ok(measuredWaybill.includes('<td>—</td><td>۰٫۴</td><td>—</td><td>۷۶</td><td>۳۰٫۴</td>'));
+assert.ok(measuredWaybill.includes('<td>—</td><td>۰٫۴</td><td>۸۰</td><td>۷۶٫۲</td><td>۳۰٫۴۸</td>'));
+assert.doesNotMatch(measuredWaybill, /<td>(۷۵۰|۳۷۵)<\/td>|مبلغ کل|نرخ - ریال/);
+const reconstructedInput: DispatchDocumentRenderData = { ...common, kind: 'WAYBILL', reconstructionLabel: 'LEGACY_RECONSTRUCTED',
+  payload: { allocationRevisionId: 'revision', contracts: [] } };
+const reconstructed = renderDispatchDocumentHtml(reconstructedInput);
+assert.doesNotMatch(reconstructed, /فایل اصلی بازیابی نشده است|نشان رسمی سبلان/);
+assert.match(renderDispatchDocumentHeaderTemplate(reconstructedInput), /نسخه بازسازی‌شده/);
+assert.match(reconstructed, /<\/table><section class="recipient-signature">امضای تحویل‌گیرنده/);
+assert.doesNotMatch(waybillHtml, /نسخه بازسازی‌شده/);
 
 const adjustmentHtml = renderDispatchDocumentHtml({
   ...common,
@@ -153,7 +187,7 @@ const partnerWaybillHtml = renderDispatchDocumentHtml({
 });
 assert.match(partnerWaybillHtml, /PC-1405-0042/);
 assert.match(partnerWaybillHtml, /تحویل شهریور/);
-assert.match(partnerWaybillHtml, /partner-row-1/);
+assert.doesNotMatch(partnerWaybillHtml, /partner-row-1/);
 assert.doesNotMatch(partnerWaybillHtml,
   /مبلغ|قیمت|ناخالص|تخفیف|خالص|ریال|wholesale|financialApproval|internalRecord|contractItem/i,
   'the Partner customer waybill must remain price-free and must not expose internal wholesale evidence');
@@ -173,5 +207,22 @@ const partnerStatementHtml = renderDispatchDocumentHtml({
 });
 assert.match(partnerStatementHtml, /۷٬۲۵۰٬۰۰۰/);
 assert.match(partnerStatementHtml, /صورت‌حساب محموله مشتری/);
+
+const localizedWaybill = renderDispatchDocumentHtml({
+  ...common,
+  kind: 'WAYBILL',
+  print: { loadingNumber: 'L-0042', contacts: [], rows: {} },
+  payload: { allocationRevisionId: 'revision', contracts: [{
+    contractId: 'contract', contractNumber: '۱۰۰',
+    lines: [
+      { contractItemId: 'item', productRowId: 'internal-product-key', label: 'internal-product-key', quantity: '2', unit: 'unknownUnit' },
+      { contractItemId: 'item-2', productRowId: 'row-2', label: 'سنگ با ضخامت 3cm', quantity: '2', unit: 'physicalPiece' },
+    ],
+  }] },
+});
+assert.match(localizedWaybill, /شرح کالا ثبت نشده/);
+assert.match(localizedWaybill, /واحد نامشخص/);
+assert.match(localizedWaybill, /ضخامت ۳ سانتی‌متر/);
+assert.doesNotMatch(localizedWaybill, /internal-product-key|unknownUnit|physicalPiece|3cm/);
 
 console.log('Dispatch document HTML template tests passed.');

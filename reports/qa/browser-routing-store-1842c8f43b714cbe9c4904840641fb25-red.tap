@@ -1,0 +1,95 @@
+TAP version 13
+# Subtest: persistent multi-release switching and proxy restart retain every old browser build for its full retirement window
+ok 1 - persistent multi-release switching and proxy restart retain every old browser build for its full retirement window
+  ---
+  duration_ms: 78.415098
+  type: 'test'
+  ...
+# Subtest: opening the matching inode without its existing exclusive native lock never grants publication ownership
+ok 2 - opening the matching inode without its existing exclusive native lock never grants publication ownership
+  ---
+  duration_ms: 10.66197
+  type: 'test'
+  ...
+# Subtest: compatible rollback is a new immutable publication and retains current and previously retired browser identities
+not ok 3 - compatible rollback is a new immutable publication and retains current and previously retired browser identities
+  ---
+  duration_ms: 72.177299
+  type: 'test'
+  location: '/app/online-runtime-acceptance/browser-routing-1842c8f43b714cbe9c4904840641fb25/red/tests/online-deployment/browser-routing-store.test.mjs:79:1'
+  failureType: 'testCodeFailure'
+  error: 'Missing expected rejection.'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+  operator: 'rejects'
+  stack: |-
+    async file:///app/online-runtime-acceptance/browser-routing-1842c8f43b714cbe9c4904840641fb25/red/tests/online-deployment/browser-routing-store.test.mjs:97:5
+    async fixture (file:///app/online-runtime-acceptance/browser-routing-1842c8f43b714cbe9c4904840641fb25/red/tests/online-deployment/browser-routing-store.test.mjs:37:8)
+    async TestContext.<anonymous> (file:///app/online-runtime-acceptance/browser-routing-1842c8f43b714cbe9c4904840641fb25/red/tests/online-deployment/browser-routing-store.test.mjs:80:3)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: wrong predecessor, changed build bytes, shortened support, legacy reassignment and omitted retirement refuse before publication
+ok 4 - wrong predecessor, changed build bytes, shortened support, legacy reassignment and omitted retirement refuse before publication
+  ---
+  duration_ms: 67.575359
+  type: 'test'
+  ...
+# Subtest: publication inventory exhaustion refuses before a prepared intent and keeps the existing current registry readable
+not ok 5 - publication inventory exhaustion refuses before a prepared intent and keeps the existing current registry readable
+  ---
+  duration_ms: 9686.093465
+  type: 'test'
+  location: '/app/online-runtime-acceptance/browser-routing-1842c8f43b714cbe9c4904840641fb25/red/tests/online-deployment/browser-routing-store.test.mjs:130:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    The input did not match the regular expression /INVENTORY_CAPACITY/. Input:
+    
+    'Error: BROWSER_ROUTING_INVENTORY_UNPROVEN'
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+  actual:
+  error: 'BROWSER_ROUTING_INVENTORY_UNPROVEN'
+  stack: |-
+    fail (file:///app/online-runtime-acceptance/browser-routing-1842c8f43b714cbe9c4904840641fb25/red/deploy/scripts/browser-routing-store.mjs:7:44)
+    #head (file:///app/online-runtime-acceptance/browser-routing-1842c8f43b714cbe9c4904840641fb25/red/deploy/scripts/browser-routing-store.mjs:122:59)
+    async BrowserRoutingStore.publish (file:///app/online-runtime-acceptance/browser-routing-1842c8f43b714cbe9c4904840641fb25/red/deploy/scripts/browser-routing-store.mjs:176:21)
+    async waitForActual (node:assert:644:5)
+    async Function.rejects (node:assert:767:25)
+    async file:///app/online-runtime-acceptance/browser-routing-1842c8f43b714cbe9c4904840641fb25/red/tests/online-deployment/browser-routing-store.test.mjs:146:5
+    async fixture (file:///app/online-runtime-acceptance/browser-routing-1842c8f43b714cbe9c4904840641fb25/red/tests/online-deployment/browser-routing-store.test.mjs:37:8)
+    async TestContext.<anonymous> (file:///app/online-runtime-acceptance/browser-routing-1842c8f43b714cbe9c4904840641fb25/red/tests/online-deployment/browser-routing-store.test.mjs:131:3)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  operator: 'rejects'
+  stack: |-
+    async file:///app/online-runtime-acceptance/browser-routing-1842c8f43b714cbe9c4904840641fb25/red/tests/online-deployment/browser-routing-store.test.mjs:146:5
+    async fixture (file:///app/online-runtime-acceptance/browser-routing-1842c8f43b714cbe9c4904840641fb25/red/tests/online-deployment/browser-routing-store.test.mjs:37:8)
+    async TestContext.<anonymous> (file:///app/online-runtime-acceptance/browser-routing-1842c8f43b714cbe9c4904840641fb25/red/tests/online-deployment/browser-routing-store.test.mjs:131:3)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: lost publication ownership leaves a prepared intent; current traffic survives and a replacement cannot erase or reuse it
+ok 6 - lost publication ownership leaves a prepared intent; current traffic survives and a replacement cannot erase or reuse it
+  ---
+  duration_ms: 30.569037
+  type: 'test'
+  ...
+# Subtest: missing history and modified immutable bytes fail after a new reader starts instead of selecting an older current build
+ok 7 - missing history and modified immutable bytes fail after a new reader starts instead of selecting an older current build
+  ---
+  duration_ms: 16.480061
+  type: 'test'
+  ...
+1..7
+# tests 7
+# suites 0
+# pass 5
+# fail 2
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 10035.357314

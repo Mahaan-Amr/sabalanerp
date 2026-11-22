@@ -15,6 +15,9 @@ import { FaCheck } from 'react-icons/fa';
 import { departmentsAPI } from '@/lib/api';
 import ErrorModal from '@/components/ErrorModal';
 import SuccessModal from '@/components/SuccessModal';
+import {ModelDraftRecovery} from '@/components/ModelDraftRecovery';
+import {useModelDraftRecovery} from '@/lib/useModelDraftRecovery';
+import {parseDepartmentDraft,emptyDepartmentDraft} from '@/features/departments/departmentDraft';
 
 export default function CreateDepartmentPage() {
   const router = useRouter();
@@ -22,6 +25,7 @@ export default function CreateDepartmentPage() {
   const [error, setError] = useState<string | null>(null);
   const [operationError, setOperationError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [submissionUncertain,setSubmissionUncertain]=useState(false);
   const submitFocusRef = useRef<HTMLElement | null>(null);
 
   const [formData, setFormData] = useState({
@@ -30,6 +34,9 @@ export default function CreateDepartmentPage() {
     description: '',
     isActive: true
   });
+  const draftEmpty=emptyDepartmentDraft(formData);
+  const draftRecovery=useModelDraftRecovery({workflow:'department-create',route:'/dashboard/departments/create',record:'new',baseVersion:'new',
+    model:formData,empty:draftEmpty,active:true,busy:loading||Boolean(success),submissionUncertain,parse:parseDepartmentDraft,restore:setFormData});
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value, type } = e.target;
@@ -57,6 +64,7 @@ export default function CreateDepartmentPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if(submissionUncertain)return;
     submitFocusRef.current = (e.nativeEvent as SubmitEvent).submitter as HTMLElement | null;
 
     if (!validateForm()) {
@@ -74,6 +82,7 @@ export default function CreateDepartmentPage() {
         setSuccess('دپارتمان با موفقیت ایجاد شد');
       }
     } catch (error: any) {
+      if(!error?.response||Number(error.response.status)>=500)setSubmissionUncertain(true);
       console.error('Error creating department:', error);
       setOperationError(error.response?.data?.error || 'خطا در ایجاد دپارتمان');
     } finally {
@@ -89,6 +98,8 @@ export default function CreateDepartmentPage() {
     >
       {error ? <ErpInlineState kind="error" title={error} /> : null}
       {success ? <ErpInlineState kind="success" title={success} /> : null}
+      {submissionUncertain&&<ErpInlineState kind="stale" title="نتیجهٔ ثبت مشخص نیست؛ پیش از تکرار، وضعیت ثبت را بررسی کنید. این فرم را نبندید."/>}
+      <ModelDraftRecovery recovery={draftRecovery} empty={draftEmpty}/>
 
       <form onSubmit={handleSubmit} className="space-y-6">
         <ErpSection title="اطلاعات دپارتمان">
@@ -141,7 +152,7 @@ export default function CreateDepartmentPage() {
               type="submit"
               label={loading ? 'در حال ذخیره...' : 'ایجاد دپارتمان'}
               icon={FaCheck}
-              disabled={loading || Boolean(success)}
+              disabled={loading || submissionUncertain || Boolean(success)}
               tone="primary"
               variant="solid"
             />

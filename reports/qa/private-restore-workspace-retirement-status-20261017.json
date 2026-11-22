@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-17T05:40:52.102642+00:00",
+  "phase": "COMPLETE",
+  "removedContainers": 6,
+  "availableBeforeBytes": 2467180544,
+  "availableAfterBytes": 3761569792,
+  "healthyCheckpointsRetained": 2,
+  "imageArchiveRetained": true,
+  "encryptedPhysicalComponentRetained": true,
+  "postgresRetained": true,
+  "foreignStableServicesUnchanged": true,
+  "diagnosticFileWorkspaceRetired": true
+}

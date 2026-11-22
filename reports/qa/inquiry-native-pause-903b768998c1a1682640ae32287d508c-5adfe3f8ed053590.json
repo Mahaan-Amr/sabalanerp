@@ -1,0 +1,62 @@
+{
+  "actualHydratedNextActions": true,
+  "nestedImportQueriesCompletedDuringClosing": true,
+  "queuedActionCommittedOnce": true,
+  "serverObservedAcquisition": true,
+  "negativeControl": false,
+  "nativePauseProof": {
+    "actualNativeDescriptors": true,
+    "admittedActionCompleted": true,
+    "captureScopeSha256": "b55597a17bbed90376fb71d644d0760d2149204d327d97dc749be50007278e28",
+    "coherentApplicationCapture": false,
+    "format": "sabalan-native-inquiry-pause-probe/v1",
+    "httpEpoch": 14,
+    "productionRecoveryPoint": false,
+    "queuedRowAbsentUnderExclusiveGate": true
+  },
+  "captureResult": {
+    "code": 0,
+    "signal": null,
+    "output": ""
+  },
+  "sourceHashes": {
+    "pause-capture.py": "05e37cb5bd2489f2434cfcbd4eb33b3ee9552712fdedc259eb95fd957f49982e",
+    "launch-capture.py": "9e80b7fd7aa6738a0848beb1a4ad4765243cd6dea5d054b42452f93a9a5da2a2",
+    "online-runtime-owner.py": "5b6cb0eeda9b173e375c7d936a26e44a9621822ebc15d2b57c28afcce443c4d5",
+    "online-runtime-scope.py": "79dae60c026833dfdd737be60bfa1ea2ba605332d5a6fbfec85f0c7cfe611d85",
+    "backend-runtime-owner.py": "7812ebf703fd3c68f0fa7e3d595034a8b27166e16865718934d284ca626d8865",
+    "online-capture-admission.py": "5f9f5229d7c697c7632e7592ccb90b61273f68cc20a9f15b647b62524ff3365a"
+  },
+  "captureId": "ca5cc3560ac207f2adbbfe1df87f42dd618815e472991ea57f27390c79ee1800",
+  "caseDirectory": "/app/online-runtime-acceptance/inquiry-next-903b768998c1a1682640ae32287d508c/pause-5adfe3f8ed053590",
+  "rowNumbers": {
+    "first": "NATIVE-IMPORT-A-5adfe3f8ed053590",
+    "second": "NATIVE-IMPORT-B-5adfe3f8ed053590",
+    "queued": "NATIVE-QUEUED-5adfe3f8ed053590"
+  },
+  "canonicalUnchanged": {
+    "backend": {
+      "id": "a1ea34a8d7d878b906fba7b4fdbe975df13a6b00d63a863eacce34b9827e86ff",
+      "image": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+      "startedAt": "2026-10-15T09:01:40.016187222Z"
+    },
+    "frontend": {
+      "id": "ad23f762dc1b27d2be76c335a3d7a4e20d08832a9a2e055904a4af84a9248c21",
+      "image": "sha256:f0a8954596279ccb01c029de7316022daa109b711a297f716cc9367d4bc9ec53",
+      "startedAt": "2026-10-15T10:11:30.825468888Z"
+    },
+    "postgres": {
+      "id": "e553787e69f44c7bdf7dab94fad43a231f5ba99d988dc783234486a5a844a528",
+      "image": "sha256:3d0f7584ed7d04e27fa050d6683a74746608faf21f202be78460d679cc56461f",
+      "startedAt": "2026-10-12T15:17:49.481269377Z"
+    },
+    "inquiry": {
+      "id": "6d161695e215498048ff24e56e9602ce77871bfb6b390bf1356caecfdf9807d8",
+      "image": "sha256:81eacc768f3c4b82bd0f0a01bef5600ae1321e87cb117bad49ca47dfba79a213",
+      "startedAt": "2026-10-12T15:17:49.463791361Z"
+    }
+  },
+  "coherentApplicationCapture": false,
+  "immutableImagesOverlap": false,
+  "productionAdmission": false
+}

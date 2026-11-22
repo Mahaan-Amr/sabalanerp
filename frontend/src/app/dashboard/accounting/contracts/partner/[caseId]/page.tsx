@@ -3,7 +3,10 @@
 import { formatPartnerMoneyTotal } from '@/features/partner-sales/presentation';
 import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
-import { ErpButton, ErpInlineState, ErpLoading, ErpSheet, ErpSummaryGrid, ErpTextarea } from '@/components/erp';
+import { ErpButton, ErpInlineState, ErpLoading, ErpSection, ErpSheet, ErpSummaryGrid, ErpTextarea } from '@/components/erp';
+import { FaCheckCircle } from 'react-icons/fa';
+import ContractDispatchCreditPanel from '@/features/sales/ContractDispatchCreditPanel';
+import { userFacingError } from '@/features/dispatch/userFacingError';
 import api, { accountingAPI } from '@/lib/api';
 import { downloadBlobResponse } from '@/lib/downloadFile';
 import { defaultCustomPrintSettings, type SalesPdfVariant, type CustomPrintSettings, type CustomPrintPreset } from '@/features/accounting/AccountingCustomPrintSettings';
@@ -11,7 +14,7 @@ import PartnerContractLifecyclePanel from '@/features/accounting/PartnerContract
 import PartnerFinancialVoidPanel from '@/features/accounting/PartnerFinancialVoidPanel';
 import { accountingCorrectionFields } from '@/features/accounting/accountingCorrectionFields';
 import AccountingActionModal from '@/features/accounting/AccountingActionModal';
-import { money, type FinancialInvoiceApprovalPayload } from '@/features/accounting/accountingUi';
+import { money } from '@/features/accounting/accountingUi';
 import { PartnerAccountingDetailView, type PartnerInternalDocument as InternalDocument, type PartnerDetailSection } from '@/features/accounting/PartnerAccountingDetailView';
 
 export default function PartnerInternalAccountingContractPage() {
@@ -22,28 +25,16 @@ export default function PartnerInternalAccountingContractPage() {
   const [flagTarget, setFlagTarget] = useState<InternalDocument['flags'][number]>();
   const [resolutionReason, setResolutionReason] = useState('');
   const [section, setSection] = useState<PartnerDetailSection>('summary');
-  const [invoiceOpen, setInvoiceOpen] = useState(false);
   const openInvoice = async () => {
     if (!document?.actions.canCreateInvoice || pending) return;
     setError(undefined);
     if (document.preparationOnly) {
       if (!document.owner) return;
       setPending(true);
-      try { await api.post('/partner/accounting/enqueue', document.owner); await load(); setSection('financial'); setInvoiceOpen(true); }
+      try { await api.post('/partner/accounting/enqueue', document.owner); await load(); setSection('financial'); }
       catch { setError('ایجاد پیش‌نویس مالی انجام نشد؛ وضعیت قرارداد را تازه‌سازی کنید.'); }
       finally { setPending(false); }
-    } else { setSection('financial'); setInvoiceOpen(true); }
-  };
-  const approveInvoice = async (payload: FinancialInvoiceApprovalPayload) => {
-    if (!document || pending || !document.actions.canReviewInvoice || payload.invoiceId !== document.id) return;
-    setPending(true); setError(undefined);
-    try {
-      await accountingAPI.executeAction({ kind: 'APPROVE_FINANCIAL_INVOICE', ...payload });
-      await load();
-    } catch (failure) {
-      const response = (failure as { response?: { data?: { error?: string; message?: string } } }).response?.data;
-      setError(response?.message || response?.error || 'تأیید مالی ثبت نشد؛ وضعیت سند را بررسی و دوباره تلاش کنید.');
-    } finally { setPending(false); }
+    } else { setSection('financial'); }
   };
   const [receivableOpen, setReceivableOpen] = useState(false);
   const createReceivable = async () => {
@@ -62,6 +53,7 @@ export default function PartnerInternalAccountingContractPage() {
   const [customPrintSettings, setCustomPrintSettings] = useState<CustomPrintSettings>(defaultCustomPrintSettings);
   const applyCustomPreset = (preset: CustomPrintPreset) => setCustomPrintSettings(current => ({ ...current, preset,
     productRowsMode: preset === 'summarized' ? 'summarized' : 'detailed', showPrices: preset !== 'workshop',
+    showCustomerSection: preset !== 'workshop', showDeliverySection: true,
     showPaymentSection: preset !== 'workshop', showTotals: preset !== 'workshop',
     columns: { ...current.columns, rate: preset !== 'workshop', total: preset !== 'workshop' } }));
   const [action, setAction] = useState<'flag' | 'correction'>();
@@ -90,6 +82,16 @@ export default function PartnerInternalAccountingContractPage() {
     } catch { setError('سند داخلی این پرونده در دسترس نیست.'); }
   }, [caseId]);
   useEffect(() => { void load(); }, [load]);
+  const recordPaperSignature = async () => {
+    if (pending || !document?.customerSignature?.canRecordPaperSignature) return;
+    setPending(true); setError(undefined);
+    try {
+      const response = await api.post(`/partner/accounting/${encodeURIComponent(caseId)}/customer-paper-signature`, { revision: document.customerSignature.revision });
+      if (!response.data.success) throw new Error(response.data.error);
+      await load();
+    } catch (failure) { setError(userFacingError(failure, 'ثبت امضای کاغذی مشتری انجام نشد؛ اطلاعات قرارداد را تازه‌سازی کنید.')); }
+    finally { setPending(false); }
+  };
   const pdf = async (print: boolean) => {
     if (!document || pending) return;
     setPending(true); setError(undefined);
@@ -99,7 +101,12 @@ export default function PartnerInternalAccountingContractPage() {
         const { columns, ...sections } = customPrintSettings; Object.assign(params, sections);
         for (const [key, value] of Object.entries(columns)) params[`column_${key}`] = value;
       }
-      if (print) {
+      if (print && (printVariant === 'production' || printVariant === 'workshop')) {
+        const response = await accountingAPI.downloadPartnerInternalPdf(caseId, params);
+        const url = URL.createObjectURL(new Blob([response.data], { type: 'application/pdf' }));
+        window.open(`${url}#page=1&zoom=page-fit`, '_blank', 'noopener,noreferrer');
+        window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+      } else if (print) {
         const response = await accountingAPI.getPartnerInternalPdf(caseId, params);
         const url = response.data?.data?.url;
         if (!response.data?.success || !url) throw new Error('PDF URL missing');
@@ -126,8 +133,12 @@ export default function PartnerInternalAccountingContractPage() {
   if (!document) return <ErpInlineState kind="error" title={error!}
     action={{ label: 'تلاش دوباره', onClick: () => void load() }} />;
   return <>
-    <PartnerAccountingDetailView lifecyclePanel={<PartnerContractLifecyclePanel caseId={caseId} onChanged={load} />} financialVoidPanel={<PartnerFinancialVoidPanel document={document} pending={pending} refresh={load} />} document={document} section={section} onSection={setSection}
-      invoiceOpen={invoiceOpen} onOpenInvoice={openInvoice} onApproveInvoice={approveInvoice}
+    <PartnerAccountingDetailView signaturePanel={document.customerSignature?.showActions && <ErpSection title="امضای مشتری و مجوز ارسال">
+      <ContractDispatchCreditPanel contractId={document.customerSignature.contractId} refreshKey={document.customerSignature.updatedAt} onChanged={() => void load()}>
+        {document.customerSignature.canRecordPaperSignature && <ErpButton label="ثبت امضای کاغذی مشتری" icon={FaCheckCircle} tone="success" disabled={pending || !document.customerSignature.canRecordPaperSignature} onClick={() => void recordPaperSignature()} />}
+      </ContractDispatchCreditPanel>
+    </ErpSection>} lifecyclePanel={<PartnerContractLifecyclePanel caseId={caseId} onChanged={load} />} financialVoidPanel={<PartnerFinancialVoidPanel document={document} pending={pending} refresh={load} />} document={document} section={section} onSection={setSection}
+      onOpenInvoice={openInvoice}
       onCreateReceivable={() => { setError(undefined); setReceivableOpen(true); }}
       printVariant={printVariant} onPrintVariant={setPrintVariant} customPrintSettings={customPrintSettings}
       setCustomPrintSettings={setCustomPrintSettings} applyCustomPreset={applyCustomPreset}

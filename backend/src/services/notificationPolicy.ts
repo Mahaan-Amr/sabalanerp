@@ -33,6 +33,11 @@ export interface NotificationPolicyDraft {
 }
 
 const REGISTERED_NOTIFICATION_EVENTS = {
+  PURCHASING_UPDATED: {
+    type: 'PURCHASING_UPDATED', mandatory: false, titleTemplate: 'پیگیری خرید',
+    messageTemplate: 'یکی از پرونده‌های خرید مرتبط با شما به‌روز شد؛ جزئیات را در فضای خرید بررسی کنید.',
+    priority: 'NORMAL', allowedVariables: [], allowedChannels: ['IN_APP'], allowedRecipientResolvers: ['DIRECT_USER'],
+  },
   CONTRACT_MANAGER_DISPATCH_REQUESTED: {
     type: 'CONTRACT_MANAGER_DISPATCH_REQUESTED', mandatory: true, titleTemplate: 'درخواست تأیید مدیریتی ارسال',
     messageTemplate: 'درخواست ارسال پیش از تسویه قرارداد {{contractNumber}} برای بررسی آماده است.',

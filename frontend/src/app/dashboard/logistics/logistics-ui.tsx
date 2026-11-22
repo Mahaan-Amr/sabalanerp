@@ -1,6 +1,7 @@
 'use client';
 import { ErpBadge } from '@/components/erp';
 import { operationalStatusLabel } from '@/features/dispatch/operationalStatusPresentation';
+import { loadingDriverSnapshots } from './loading-driver-snapshots';
 
 export const statusLabels: Record<string, string> = {
   DRAFT: 'پیش‌نویس',
@@ -30,7 +31,7 @@ export const dateFa = (value?: string | Date | null) => {
 
 export const StatusBadge = ({ status }: { status: string }) => {
   const tone = status === 'FINALIZED' ? 'success' : status === 'CANCELLED' ? 'danger' : 'warning';
-  return <ErpBadge tone={tone}>{statusLabels[status] || operationalStatusLabel(status)}</ErpBadge>;
+  return <ErpBadge tone={tone}><span className="whitespace-nowrap">{statusLabels[status] || operationalStatusLabel(status)}</span></ErpBadge>;
 };
 
 export const driverName = (snapshot: any) => {
@@ -39,7 +40,7 @@ export const driverName = (snapshot: any) => {
 };
 
 export const loadingDriversName = (loading: any) => {
-  const drivers = loading?.drivers || loading?.driverAssignments || [];
+  const drivers = loadingDriverSnapshots(loading);
   if (drivers.length) {
     return drivers
       .map((driver: any) => {

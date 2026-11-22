@@ -1,0 +1,36 @@
+const fs=require('node:fs'),path=require('node:path'),nodeCrypto=require('node:crypto'),{Transform}=require('node:stream'),{pipeline}=require('node:stream/promises');
+const {sha256File}=require('./recoveryCrypto.cjs');
+const fail=code=>{throw Object.assign(new Error(code),{code});};
+const identity=s=>[s.dev,s.ino,s.size,s.mtimeNs,s.ctimeNs].map(String).join(':');
+async function syncFile(file){const fd=await fs.promises.open(file,'r');try{await fd.sync();}finally{await fd.close();}}
+async function main(){
+ const [proofFile,remoteRoot,key,work]=process.argv.slice(2);
+ if(!/^private-images-transfer-[a-f0-9]{32}$/.test(key))fail('IMAGE_TRANSFER_KEY_INVALID');
+ for(const directory of [path.dirname(proofFile),remoteRoot,work])if(!path.isAbsolute(directory)||await fs.promises.realpath(directory)!==directory||!(await fs.promises.lstat(directory)).isDirectory())fail('IMAGE_TRANSFER_DIRECTORY_ALIAS');
+ const proof=JSON.parse(await fs.promises.readFile(proofFile,'utf8'));
+ if(proof.format!=='sabalan-private-image-cipher-set/v1'||proof.healthyApplicationPoint!==false||proof.publicOnlineAdmission!==false||Object.keys(proof.images).sort().join(',')!=='backend,frontend,inquiry')fail('IMAGE_TRANSFER_COMPONENT_UNPROVEN');
+ const destination=path.join(remoteRoot,key);await fs.promises.mkdir(destination,{mode:0o700});
+ if(await fs.promises.realpath(destination)!==destination||(await fs.promises.lstat(destination)).mode&0o077)fail('IMAGE_TRANSFER_REMOTE_DIRECTORY_UNSAFE');
+ const observations={};
+ for(const service of ['backend','frontend','inquiry']){
+  const image=proof.images[service];if(image.service!==service||image.localDecryptVerified!==true||image.independentDecryptVerified!==false||!Number.isSafeInteger(image.cipherBytes)||image.cipherBytes<1024||image.cipherBytes>2**31||!/^[a-f0-9]{64}$/.test(image.cipherSha256))fail('IMAGE_TRANSFER_SELECTION_INVALID');
+  const source=path.join(path.dirname(proofFile),service+'.sabrec'),before=await fs.promises.lstat(source,{bigint:true});
+  if(await fs.promises.realpath(source)!==source||!before.isFile()||before.uid!==0n||before.nlink!==1n||(before.mode&0o077n)||Number(before.size)!==image.cipherBytes||await sha256File(source)!==image.cipherSha256)fail('IMAGE_TRANSFER_CIPHER_CHANGED');
+  let copied=0;
+  const guard=new Transform({transform(chunk,encoding,callback){copied+=chunk.length;if(copied>image.cipherBytes){callback(new Error('IMAGE_TRANSFER_SIZE_EXCEEDED'));return;}
+   fs.promises.statfs(destination).then(s=>{if(s.bavail*s.bsize<1024**3+chunk.length)throw new Error('IMAGE_TRANSFER_REMOTE_CAPACITY_LOST');callback(null,chunk);}).catch(callback);}});
+  const staged=path.join(destination,service+'.sabrec.uploading'),final=path.join(destination,service+'.sabrec');
+  await pipeline(fs.createReadStream(source,{highWaterMark:1024*1024}),guard,fs.createWriteStream(staged,{flags:'wx',mode:0o600}));await syncFile(staged);
+  if(copied!==image.cipherBytes||await sha256File(staged)!==image.cipherSha256||identity(before)!==identity(await fs.promises.lstat(source,{bigint:true})))fail('IMAGE_TRANSFER_READBACK_MISMATCH');
+  if(fs.existsSync(final))fail('IMAGE_TRANSFER_OUTPUT_EXISTS');await fs.promises.rename(staged,final);
+  observations[service]={remoteKey:key+'/'+service+'.sabrec',cipherBytes:copied,cipherSha256:image.cipherSha256,ciphertextRemoteReadbackVerified:true};
+ }
+ const metadata={format:'sabalan-private-image-transfer/v1',encryption:proof,images:observations,backupNativeDurabilityVerified:false,independentDecryptVerified:false,healthyApplicationPoint:false,publicOnlineAdmission:false};
+ const bytes=Buffer.from(JSON.stringify(metadata,null,2)+'\n'),sidecar=path.join(destination,'private-component.json');await fs.promises.writeFile(sidecar,bytes,{flag:'wx',mode:0o600});await syncFile(sidecar);
+ if(!(await fs.promises.readFile(sidecar)).equals(bytes))fail('IMAGE_TRANSFER_METADATA_READBACK_MISMATCH');
+ const result={remoteDirectoryKey:key,images:observations,metadataSha256:nodeCrypto.createHash('sha256').update(bytes).digest('hex'),backupNativeDurabilityVerified:false,independentDecryptVerified:false,healthyApplicationPoint:false,publicOnlineAdmission:false};
+ const local=path.join(work,'transfer-proof.json');await fs.promises.writeFile(local,JSON.stringify(result,null,2)+'\n',{flag:'wx',mode:0o600});await syncFile(local);
+ const fd=await fs.promises.open(work,fs.constants.O_RDONLY|fs.constants.O_DIRECTORY);try{await fd.sync();}finally{await fd.close();}
+ console.log(JSON.stringify(result));
+}
+main().catch(error=>{console.error(JSON.stringify({ok:false,failureClass:error.code||error.name}));process.exitCode=1;});

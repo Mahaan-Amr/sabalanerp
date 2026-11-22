@@ -1,4 +1,6 @@
 "use client";
+import AttendanceRestManager from "@/features/attendance-device/AttendanceRestManager";
+import PersonnelIdentityPanel from "@/features/hr/PersonnelIdentityPanel";
 import { ErpInlineState } from "@/components/erp";
 import {
   ErpInput,
@@ -605,6 +607,7 @@ export default function HrPersonnelPage() {
         { label: "جایگاه فعال", value: foundation.positions.filter((item: any) => item.isActive).length.toLocaleString("fa-IR"), tone: "neutral" },
       ]}
       actions={[
+        { label: "استراحت پرسنل", href: "/dashboard/hr/personnel/attendance-rest", tone: "neutral" },
         {
           label: "بازگشت",
           href: originHref,
@@ -932,6 +935,7 @@ export default function HrPersonnelPage() {
               run={run}
               changeArchiveState={changeArchiveState}
               permanentlyDelete={permanentlyDelete}
+              onIdentitySaved={load}
               canEditPersonnel={canEditPersonnel}
               canAccessVehicleOperations={["ADMIN", "MANAGER"].includes(user?.role || "")}
               canCreatePerformanceConsequence={actionPermissions.includes('CREATE_PERFORMANCE_CONSEQUENCE_HANDOFF')}
@@ -1079,7 +1083,7 @@ function PersonnelCard(props: any) {
         <div className={profileStyles.modalContent}>
           <ErpSegmentedControl value={tab} onChange={selectTab} options={[{value:'overview',label:'نمای کلی'},{value:'employment',label:'روابط و مسئولیت‌ها'},{value:'performance',label:'عملکرد و سوابق'},...(!person.archivedAt ? [{value:'schedule',label:'برنامهٔ کاری'}] : [])]} />
           <div className="mt-5 space-y-5">
-            {tab === 'overview' && <><div className="grid grid-cols-2 gap-4 lg:grid-cols-4"><Info label="کد ملی" value={person.nationalCode || 'ثبت نشده'} /><Info label="شروع رابطه استخدامی" value={dateFa(relationship?.effectiveFrom)} /><Info label="شماره پرسنلی" value={person.employeeNumber || 'ثبت نشده'} /><Info label="حساب سامانه" value={person.user ? person.user.isActive ? 'فعال' : 'غیرفعال' : 'فاقد حساب'} /></div><PersonnelPerformanceHistory personnelId={person.id} allowed={props.canViewPerformance} summary />{person.performanceBadge && <PerformanceBadgeRoadmap badge={person.performanceBadge} />}
+            {tab === 'overview' && <>{open && <PersonnelIdentityPanel personnelId={person.id} canEdit={canEditPersonnel && !person.archivedAt} onSaved={props.onIdentitySaved} />}<div className="grid grid-cols-2 gap-4 lg:grid-cols-4"><Info label="کد ملی" value={person.nationalCode || 'ثبت نشده'} /><Info label="شروع رابطه استخدامی" value={dateFa(relationship?.effectiveFrom)} /><Info label="شماره پرسنلی" value={person.employeeNumber || 'ثبت نشده'} /><Info label="حساب سامانه" value={person.user ? person.user.isActive ? 'فعال' : 'غیرفعال' : 'فاقد حساب'} /></div><PersonnelPerformanceHistory personnelId={person.id} allowed={props.canViewPerformance} summary />{person.performanceBadge && <PerformanceBadgeRoadmap badge={person.performanceBadge} />}
             <div className="flex flex-wrap gap-2">
               {canEvaluatePerformance && relationship?.status === 'ACTIVE' && <ErpButton label="ثبت ارزیابی" variant="soft" href={`/dashboard/hr/personnel/performance?personnelId=${encodeURIComponent(person.id)}`} />}
               {canCreatePerformanceConsequence && relationship && ['ACTIVE', 'SUSPENDED'].includes(relationship.status) && <ErpButton label="ارجاع پیامد عملکرد" variant="outline" href={`/dashboard/hr/personnel/performance/consequence/new?personnelId=${encodeURIComponent(person.id)}&relationshipId=${encodeURIComponent(relationship.id)}`} />}
@@ -1315,6 +1319,7 @@ function PersonnelScheduleEditor({ person, saving, run, onDirtyChange, userId }:
           title={<><span className="block font-semibold">نمایش برنامه کاری</span><span className="mt-1 block text-xs font-normal">برای تغییر برنامه کاری، مجوز مدیریت برنامه کار پرسنل لازم است.</span></>}
         />
         <WorkScheduleEditor value={workScheduleFromApi(schedule)} onChange={() => undefined} readOnly />
+        <AttendanceRestManager personnelId={person.id} />
       </div>
     );
   }
@@ -1328,6 +1333,7 @@ function PersonnelScheduleEditor({ person, saving, run, onDirtyChange, userId }:
         />
       )}
       <WorkScheduleEditor value={value} onChange={setValue} />
+      <AttendanceRestManager personnelId={person.id} />
       <div className="flex justify-end">
         <ErpButton
           label="ذخیره برنامه کاری"

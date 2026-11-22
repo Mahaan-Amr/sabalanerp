@@ -598,21 +598,20 @@ const main = async () => {
         permissionHash: 'permission', status: 'QUEUED', artifactPath: unrelatedArtifactPath,
         artifactHash: 'unrelated-artifact-hash', expiresAt: new Date('2000-01-01Z'),
       } });
-      assert.equal(await cleanupExpiredPerformanceExports(tx, cleanupAt), 0, 'historical exports without verified source lineage must be preserved');
+      await assert.rejects(cleanupExpiredPerformanceExports(tx, cleanupAt), { code: 'PERFORMANCE_CLEANUP_TRANSACTION_REQUIRED' });
       await access(artifactPath);
       await access(failedAttemptPath);
       await access(unrelatedArtifactPath);
       await tx.$executeRawUnsafe('ROLLBACK TO SAVEPOINT held_export');
-      assert.equal(await cleanupExpiredPerformanceExports(tx, cleanupAt), 0, 'releasing a hold cannot manufacture historical lineage');
+      await assert.rejects(cleanupExpiredPerformanceExports(tx, cleanupAt), { code: 'PERFORMANCE_CLEANUP_TRANSACTION_REQUIRED' });
       await access(artifactPath);
       await access(failedAttemptPath);
       const preserved = await tx.performanceExportReceipt.findUniqueOrThrow({ where: { id: exportId } });
       assert.notEqual(preserved.status, 'DELETED');
       assert.equal(preserved.encryptedPayloadId, payloadId);
       assert.equal(await tx.performanceDeletionReceipt.count({ where: { deletedPayloadId: payloadId } }), 0);
-      const attempt = await tx.performanceExportCleanupAttempt.findUniqueOrThrow({ where: { exportId } });
-      assert.equal(attempt.status, 'HELD');
-      assert.equal(attempt.lastFailureCode, 'PERFORMANCE_EXPORT_LINEAGE_UNVERIFIED');
+      const attempt = await tx.performanceExportCleanupAttempt.findUnique({ where: { exportId } });
+      assert.equal(attempt, null, 'external transaction refusal precedes even cleanup-attempt mutation');
       throw new Error('ROLLBACK_EXPORT_CLEANUP_TEST');
     }), /ROLLBACK_EXPORT_CLEANUP_TEST/);
   } finally {

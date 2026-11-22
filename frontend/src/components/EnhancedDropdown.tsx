@@ -29,6 +29,7 @@ interface EnhancedDropdownProps {
   maxHeight?: number;
   noOptionsText?: string;
   loading?: boolean;
+  onSearchChange?: (query: string) => void;
 }
 
 export default function EnhancedDropdown({
@@ -47,13 +48,15 @@ export default function EnhancedDropdown({
   required = false,
   maxHeight = 260,
   noOptionsText = 'گزینه‌ای پیدا نشد',
-  loading = false
+  loading = false,
+  onSearchChange
 }: EnhancedDropdownProps) {
   const overlayPortalContainer = useErpOverlayPortalContainer();
   const presentationScope = useErpPresentationScope();
   const [isOpen, setIsOpen] = useState(false);
   const listboxId = useId();
   const [searchTerm, setSearchTerm] = useState('');
+  useEffect(() => { onSearchChange?.(searchTerm); }, [searchTerm, onSearchChange]);
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const [portalPosition, setPortalPosition] = useState({
     top: 0,

@@ -2,6 +2,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { roundContractPayableTotal, verifyContractMonetaryRounding } from '@sabalanerp/contract-product-graph';
 import { isValidFinanciallyApprovedInvoice } from '../accountingStatus';
+import { slabAccountingQuantity } from './slabAccountingQuantity';
+import { exactQuantityText } from '../exactQuantity';
 import {
   reconcileOptimizerDerivedLongitudinalQuantity,
   type OptimizerDerivedQuantityEvidence,
@@ -53,7 +55,10 @@ const exact = (value: unknown, scale: number, label: string) => {
 };
 
 const money = (value: unknown, label: string) => exact(value, 12, label);
-const quantity = (value: unknown, label: string) => exact(value, 3, label);
+const quantity = (value: unknown, label: string) => {
+  try { return exactQuantityText(value); }
+  catch { throw new ApprovedPricingEvidenceError(`${label} exceeds exact quantity capacity or is invalid`); }
+};
 
 const canonicalize = (value: unknown): unknown => {
   if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
@@ -143,6 +148,15 @@ export const approvedPricingVersionIntegrityPayload = (input: ApprovedPricingVer
 export const approvedPricingVersionIntegrityHash = (input: ApprovedPricingVersionIntegrityInput) =>
   canonicalApprovedPricingHash(approvedPricingVersionIntegrityPayload(input));
 
+/** Invoice obligation is distinct from the product-only shipment pricing total. */
+export const approvedPricingInvoiceObligation = (version: Pick<ApprovedPricingVersionInsert, 'netAmount' | 'currency' | 'sourceEvidence'>): string => {
+  const approval = record(version.sourceEvidence.financialApproval, 'Financial approval evidence');
+  if (approval.payable === undefined) return money(version.netAmount, 'Approved pricing net amount');
+  const payable = record(approval.payable, 'Financial approval payable evidence');
+  if (payable.currency !== version.currency) throw new ApprovedPricingEvidenceError('Approved invoice payable currency conflicts with pricing');
+  return money(payable.amount, 'Approved invoice payable amount');
+};
+
 const productRows = (contractData: unknown) => {
   const data = record(contractData, 'Contract snapshot');
   if (!Array.isArray(data.products) || data.products.length === 0) throw new ApprovedPricingEvidenceError('Contract product snapshots are missing');
@@ -197,7 +211,7 @@ export const productQuantityPolicy = (productType: string, label: string) => {
   return policy;
 };
 
-const pricingCurrencyKind = (currency: string) => {
+export const pricingCurrencyKind = (currency: string) => {
   const normalized = currency.trim().toLowerCase();
   if (['تومان', 'toman', 'ØªÙˆÙ…Ø§Ù†'.toLowerCase()].includes(normalized)) return 'TOMAN';
   if (['ریال', 'rial', 'Ø±ÛŒØ§Ù„'.toLowerCase()].includes(normalized)) return 'RIAL';
@@ -250,7 +264,10 @@ const projectApprovedPricingRows = (input: {
   versionNumber: number;
   normalizedLegacyNonLayerProductRowIds: ReadonlySet<string>;
   quantityEvidenceByRow: ReadonlyMap<string, OptimizerDerivedQuantityEvidence>;
+  graphSchemaVersion: number;
+  roundingPolicy: string;
 }) => {
+  const slabQuantityEvidence: NonNullable<ReturnType<typeof slabAccountingQuantity>>[] = [];
   let selectedEligibleBase = new Prisma.Decimal(0);
   let gross = new Prisma.Decimal(0);
   const rows = input.graphRows.map((graphRow, index) => {
@@ -263,11 +280,20 @@ const projectApprovedPricingRows = (input: {
     const snapshotType = requiredString(snapshot.productType, `Product ${graphRow.productRowId} type`);
     if (snapshotType !== graphRow.productType || item.productType !== graphRow.productType) throw new ApprovedPricingEvidenceError(`Canonical row ${graphRow.productRowId} types conflict`);
     const quantityEvidence = input.quantityEvidenceByRow.get(graphRow.productRowId);
-    const quantityPolicy = quantityEvidence
+    const slabEvidence = graphRow.productType === 'slab' ? slabAccountingQuantity({
+      productRowId: graphRow.productRowId,
+      rawArea: snapshot.squareMeters,
+      canonicalArea: graphRow.requestedAreaSquareMeters,
+      graphSchemaVersion: input.graphSchemaVersion,
+      roundingPolicy: input.roundingPolicy,
+    }) : null;
+    if (slabEvidence) slabQuantityEvidence.push(slabEvidence);
+    const quantityPolicy = quantityEvidence || slabEvidence
       ? null
       : productQuantityPolicy(graphRow.productType, `Product ${graphRow.productRowId}`);
     const contracted = quantityEvidence
       ? { unit: quantityEvidence.unit, quantity: quantityEvidence.sealedQuantity }
+      : slabEvidence ? { unit: slabEvidence.unit, quantity: slabEvidence.sealedQuantity }
       : quantityPolicy!.snapshot(snapshot, `Product ${graphRow.productRowId}`);
     if (!new Prisma.Decimal(contracted.quantity).gt(0)) throw new ApprovedPricingEvidenceError(`Product ${graphRow.productRowId} quantity must be positive`);
     const snapshotItemQuantity = graphRow.productType === 'prepared' ? snapshot.preparedQuantity ?? snapshot.quantity : snapshot.quantity;
@@ -347,7 +373,7 @@ const projectApprovedPricingRows = (input: {
     };
     return { id: randomUUID(), ...rowPayload, integrityHash: approvedPricingRowIntegrityHash(rowPayload) };
   });
-  return { rows, selectedEligibleBase, gross };
+  return { rows, selectedEligibleBase, gross, slabQuantityEvidence };
 };
 
 const validateApprovalEnvelope = (source: ApprovedPricingSource, versionNumber: number) => {
@@ -618,7 +644,7 @@ export const buildApprovedPricingVersion = (
     }
   }
 
-  const { rows, selectedEligibleBase, gross } = projectApprovedPricingRows({
+  const { rows, selectedEligibleBase, gross, slabQuantityEvidence } = projectApprovedPricingRows({
     graphRows: selectedGraphRows,
     itemByRow,
     snapshotByRow,
@@ -628,6 +654,8 @@ export const buildApprovedPricingVersion = (
     versionNumber,
     normalizedLegacyNonLayerProductRowIds: new Set(discountEligibility.normalizedNonLayerProductRowIds),
     quantityEvidenceByRow,
+    graphSchemaVersion: graph.schemaVersion,
+    roundingPolicy: graph.roundingPolicy,
   });
 
   const grossAmount = money(gross, 'Approved pricing gross amount');
@@ -648,26 +676,65 @@ export const buildApprovedPricingVersion = (
     : new Prisma.Decimal(0);
   const discountAmount = money(selectedDiscountValue, 'Approved pricing discount amount');
   const rawNetAmount = money(gross.minus(selectedDiscountValue), 'Approved pricing net amount');
-  // Replay the Contract's sealed policy, never round historical obligations on read.
-  let netAmount = rawNetAmount;
+  // The pricing rows and their totals belong to shipment allocation. Independent
+  // services and whole-contract rounding belong to the invoice obligation, not
+  // to a product row; retain both scopes in the immutable approval evidence.
+  const netAmount = rawNetAmount;
+  let invoiceObligation = netAmount;
+  let payableEvidence: Readonly<Record<string, unknown>> | undefined;
+  let standaloneServiceTotal = new Prisma.Decimal(0);
   if (data.monetaryRounding !== undefined) {
     try {
       const services = Array.isArray(data.serviceRows) ? data.serviceRows : [];
-      const completePayable = completeGraphTotal.plus(services.reduce((sum, row) =>
-        sum.plus(money(record(row, 'Contract service row').totalPrice, 'Contract service amount')), new Prisma.Decimal(0)))
-        .minus(discountValue);
+      const serviceTotal = services.reduce((sum, row) =>
+        sum.plus(money(record(row, 'Contract service row').totalPrice, 'Contract service amount')), new Prisma.Decimal(0));
+      standaloneServiceTotal = serviceTotal;
+      const completePayable = completeGraphTotal.plus(serviceTotal).minus(discountValue);
       const agreed = verifyContractMonetaryRounding(Prisma.Decimal.max(completePayable, 0).toFixed(), currency, data.monetaryRounding);
       if (!new Prisma.Decimal(agreed).eq(String(payment.totalContractAmount))) throw new Error('Contract payment total conflict');
       // Partial invoices retain their precise selected-row obligation. The policy
       // rounds the final Contract total, never individual rows or subsets.
-      if (mode === 'FROM_CONTRACT_TOTAL') {
+      if (mode !== 'FROM_SELECTED_ITEMS') {
         const rounded = roundContractPayableTotal(Prisma.Decimal.max(completePayable, 0).toFixed(), currency);
-        netAmount = money(rounded.roundedAmount, 'Rounded approved pricing net amount');
+        invoiceObligation = money(rounded.roundedAmount, 'Rounded approved invoice amount');
+        payableEvidence = {
+          productGross: grossAmount,
+          productDiscount: discountAmount,
+          productNet: netAmount,
+          serviceAmount: money(serviceTotal, 'Contract service amount'),
+          serviceRows: canonicalize(services),
+          rounding: canonicalize(rounded),
+          amount: invoiceObligation,
+          currency,
+        };
         financialAmountNormalizations.push({ scope: 'contract-payable', ...rounded });
       }
     } catch {
       throw new ApprovedPricingEvidenceError('Contract payable rounding evidence conflicts with financial approval');
     }
+  } else if (mode !== 'FROM_SELECTED_ITEMS' && Array.isArray(data.serviceRows) && data.serviceRows.length > 0) {
+    const services = data.serviceRows;
+    const serviceTotal = services.reduce((sum, row) => {
+      const amount = new Prisma.Decimal(money(record(row, 'Contract service row').totalPrice, 'Contract service amount'));
+      if (amount.lt(0)) throw new ApprovedPricingEvidenceError('Contract service amount cannot be negative');
+      return sum.plus(amount);
+    }, new Prisma.Decimal(0));
+    const completePayable = completeGraphTotal.plus(serviceTotal).minus(discountValue);
+    if (completePayable.lt(0) || !completePayable.eq(money(payment.totalContractAmount, 'Legacy contract payable total'))) {
+      throw new ApprovedPricingEvidenceError('Contract service total conflicts with legacy payable evidence');
+    }
+    standaloneServiceTotal = serviceTotal;
+    invoiceObligation = money(completePayable, 'Approved invoice payable amount');
+    payableEvidence = {
+      productGross: grossAmount,
+      productDiscount: discountAmount,
+      productNet: netAmount,
+      serviceAmount: money(serviceTotal, 'Contract service amount'),
+      serviceRows: canonicalize(services),
+      rounding: null,
+      amount: invoiceObligation,
+      currency,
+    };
   }
   const rowByItem = new Map(rows.map(row => [row.contractItemId, row]));
   for (const invoiceItem of source.leaf.invoiceItems) {
@@ -720,14 +787,14 @@ export const buildApprovedPricingVersion = (
       });
     }
   }
-  const expectedInvoiceAmount = new Prisma.Decimal(netAmount).mul(currencyFactor);
+  const expectedInvoiceAmount = new Prisma.Decimal(invoiceObligation).mul(currencyFactor);
   const leafAmount = new Prisma.Decimal(source.leaf.amount);
   const legacyRawSelectedGross = selectedGraphRows.some(row => row.legacyRawTotalAmountToman != null)
     ? selectedGraphRows.reduce((sum, row) => sum.plus(
         new Prisma.Decimal(row.legacyRawTotalAmountToman ?? row.totalAmountToman!).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP),
       ), new Prisma.Decimal(0))
     : null;
-  const legacyExpectedInvoiceAmount = !discount.enabled && legacyRawSelectedGross
+  const legacyExpectedInvoiceAmount = !discount.enabled && legacyRawSelectedGross && standaloneServiceTotal.isZero()
     ? legacyRawSelectedGross.mul(currencyFactor).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP)
     : null;
   if (!leafAmount.eq(expectedInvoiceAmount) && !legacyExpectedInvoiceAmount?.eq(leafAmount)) {
@@ -780,10 +847,12 @@ export const buildApprovedPricingVersion = (
         }
       : {}),
     ...(quantityNormalizations.length > 0 ? { quantityNormalizations } : {}),
+    ...(slabQuantityEvidence.length > 0 ? { quantityPrecisionEvidence: slabQuantityEvidence } : {}),
     ...(financialAmountNormalizations.length > 0 ? { financialAmountNormalizations } : {}),
     financialApproval: {
       financialRecordId: source.leaf.id,
       mode,
+      ...(payableEvidence ? { payable: payableEvidence } : {}),
       amount: money(source.leaf.amount, 'Approved invoice evidence amount'),
       currency: invoiceCurrency,
       sourceSnapshotHash: canonicalApprovedPricingHash(source.leaf.sourceSnapshot),

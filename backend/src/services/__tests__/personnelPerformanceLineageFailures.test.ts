@@ -30,6 +30,7 @@ const fixture = async () => {
         downloadedAt: null, encryptedPayloadId: null, scopeHash: hash('scope'), artifactHash: hash('artifact') }),
     },
     performanceExportCleanupAttempt: {
+      count: async () => 0,
       upsert: async () => attempt,
       findUnique: async () => attempt,
       update: async ({ data }: any) => { journal.push(data); Object.assign(attempt, data); return attempt; },

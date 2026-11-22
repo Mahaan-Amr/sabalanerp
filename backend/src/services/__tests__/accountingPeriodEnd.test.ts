@@ -12,6 +12,8 @@ import {
 } from '../accountingPeriodEnd';
 import { recordOperationalReconciliation } from '../accountingOperationalReconciliation';
 
+type EvidenceCommand = Parameters<ReturnType<typeof createAccountingPeriodEndApplication>['acceptEvidence']>[0];
+
 const now = new Date('2026-09-21T12:00:00.000Z');
 
 test('operational reconciliation rejects materially future-dated evidence before database access', async () => {
@@ -90,6 +92,22 @@ test('ready-for-use asset evidence capitalizes components while payment alone fa
   assert.equal(rejected.kind, 'EXCEPTION');
   if (rejected.kind === 'EXCEPTION') assert.equal(rejected.code, 'ASSET_NOT_READY_FOR_USE');
   assert.equal(repository.posts.length, 1);
+});
+
+test('asset cost cannot debit and credit the same construction-in-progress account', async () => {
+  const repository = createRepository();
+  const application = createAccountingPeriodEndApplication(repository, { now: () => now });
+  const source = {
+    kind: 'ASSET_COST' as const, sourceId: 'cost-proof-1', sourceVersion: 1,
+    occurredAt: now, assetId: 'asset-1', costKind: 'PURCHASE' as const,
+    amountRials: 100_000n, constructionInProgressAccountId: 'cip', creditAccountId: 'cip',
+    documentIds: ['cost-proof-1'],
+  };
+  const result = await application.acceptEvidence({ bookId: 'book-1', fiscalYearId: 'year-1',
+    periodId: 'period-1', actorId: 'accountant-1',
+    evidence: { ...source, sourceHash: hashPeriodEndEvidence(source) } });
+  assert.equal(result.kind, 'EXCEPTION');
+  assert.equal(repository.posts.length, 0);
 });
 
 test('component depreciation posts the book charge while tax basis remains analytical', () => {
@@ -419,3 +437,46 @@ test('retained financial mapping selection cannot reverse trial balance or legal
     assert.equal(dataset.rows[0].amounts.turnoverCredit, 0n);
   }
 });
+
+for (const kind of ['ASSET_COST', 'ASSET_READY_FOR_USE'] as const) {
+  for (const status of ['SALE', 'LOSS', 'THEFT', 'DISPOSAL']) {
+    test(`${kind} replays its committed result after ${status} without revalidating lifecycle`, async () => {
+      const repository = createRepository();
+      let currentStatus = 'UNDER_CONSTRUCTION';
+      let validations = 0;
+      const application = createAccountingPeriodEndApplication(repository, {
+        now: () => now,
+        validateNewEvidence: async () => {
+          validations += 1;
+          if (currentStatus !== 'UNDER_CONSTRUCTION') throw new Error('asset has exited');
+        },
+      });
+      const cost = { kind: 'ASSET_COST' as const, sourceId: 'proof', sourceVersion: 1,
+        occurredAt: now, assetId: 'asset-1', costKind: 'PURCHASE' as const,
+        amountRials: 100n, constructionInProgressAccountId: 'cip', creditAccountId: 'payable',
+        documentIds: ['proof'] };
+      const ready = { kind: 'ASSET_READY_FOR_USE' as const, sourceId: 'proof', sourceVersion: 1,
+        occurredAt: now, asset: { id: 'asset-1', registerNumber: '1', classPolicyVersionId: 'policy',
+          readyForUseAt: now, costRials: 100n, assetAccountId: 'asset', constructionInProgressAccountId: 'cip',
+          components: [{ id: 'body', titlePersian: 'بدنه', costRials: 100n, usefulLifeMonths: 12, residualValueRials: 0n }],
+          bookMethod: 'STRAIGHT_LINE' as const, taxBasis: { costRials: 100n, method: 'STRAIGHT_LINE' as const } } };
+      const source = kind === 'ASSET_COST' ? cost : ready;
+      const command: EvidenceCommand = { bookId: 'book-1', fiscalYearId: 'year-1', periodId: 'period-1',
+        actorId: 'accountant', evidence: { ...source, sourceHash: hashPeriodEndEvidence(source) } };
+      const committed = await application.acceptEvidence(command);
+      assert.equal(committed.kind, 'POSTED');
+      currentStatus = status;
+      assert.deepEqual(await application.acceptEvidence(command), committed);
+      assert.equal(validations, 1);
+      assert.equal(repository.posts.length, 1);
+      const conflicting = await application.acceptEvidence({ ...command,
+        evidence: { ...command.evidence, sourceHash: 'f'.repeat(64) } });
+      assert.equal(conflicting.kind, 'EXCEPTION');
+      if (conflicting.kind === 'EXCEPTION') assert.equal(conflicting.code, 'SOURCE_CONFLICT');
+      const nextSource = { ...source, sourceVersion: 2 };
+      await assert.rejects(application.acceptEvidence({ ...command,
+        evidence: { ...nextSource, sourceHash: hashPeriodEndEvidence(nextSource) } }), /asset has exited/);
+      assert.equal(repository.posts.length, 1);
+    });
+  }
+}

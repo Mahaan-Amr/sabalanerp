@@ -1,0 +1,15 @@
+{
+  "format": "sabalan-private-coherent-seal/v1",
+  "phase": "SEALED",
+  "productionRecoveryPoint": false,
+  "packageProofSha256": "286fef79c6a7111a80ccf29db144b8dffe111d11fa006479f280345f82c208c2",
+  "independentPublicKeySha256": "455e5a7ba5990866ca6992c0fd177fa0df5b22b5d3e985c41ee306e3a779b8af",
+  "localKeyIsTestAuthority": true,
+  "codecSha256": "b9cd157fa5ac98a2bbe1c41e651d6de134304c005acafbfa2fff2a7161b5d99b",
+  "encryptedBytes": 2499700,
+  "encryptedSha256": "51b7d746dd91b5ed3e5dca1d65f3f1668c2b65e0c163b4108b2f627acb8b1962",
+  "packageSha256": "71ce0ab10d5a5e62bdbb752553a1c8224e171de94e847e0efb835a8da33d0412",
+  "packageBytes": 2498560,
+  "localReadbackVerified": true,
+  "corruptionRejected": true
+}

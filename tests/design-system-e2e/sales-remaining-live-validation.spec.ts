@@ -1,5 +1,6 @@
+import { scopeContractNavigationFixture } from './support/contract-navigation-fixture';
 import { expect, test } from '@playwright/test';
-import { loginAsAdmin } from './support/design-system';
+import { loginAsAdmin, seedContractNavigation } from './support/design-system';
 
 const product = ({
   rowId,
@@ -85,8 +86,9 @@ test('Sales reports a legacy remaining-source incompatibility while the user is 
     isAvailable: true,
     sourceCutId: 'five-meter-cut'
   }];
-  await page.evaluate(({ source, child }) => {
-    localStorage.setItem('contractWizardState', JSON.stringify({
+  const source = product({ rowId: 'live-source-row', stoneName: 'سنگ مادر پنج‌متری', inventory });
+  const child = product({ rowId: 'live-child-row', parentProductRowId: 'live-source-row', stoneName: 'محصول باقی‌مانده' });
+  await seedContractNavigation(page, {
       currentStep: 4,
       wizardData: {
         contractKind: 'standard',
@@ -105,17 +107,10 @@ test('Sales reports a legacy remaining-source incompatibility while the user is 
         discount: null,
         signature: null
       }
-    }));
-  }, {
-    source: product({ rowId: 'live-source-row', stoneName: 'سنگ مادر پنج‌متری', inventory }),
-    child: product({
-      rowId: 'live-child-row',
-      parentProductRowId: 'live-source-row',
-      stoneName: 'محصول باقی‌مانده'
-    })
   });
 
-  await page.goto('/dashboard/sales/contracts/create?returnTo=contract&step=4');
+  await scopeContractNavigationFixture(page);
+  await page.goto('/dashboard/sales/contracts/create?fresh=1&returnTo=contract&step=4');
   const childRow = page.locator('[data-contract-row-id="live-child-row"]');
   await expect(childRow).toBeVisible();
   await childRow.getByRole('button', { name: 'ویرایش', exact: true }).click();

@@ -1,0 +1,17 @@
+{
+  "base": "c0dfe554bba6f133e23c264d9f85b54a3b9f9ae4",
+  "sourceHashes": {
+    "backend/Dockerfile": "c38a5f9820db85fc92ed8a143997d827fdf307f4888935fdecde12949127dc34",
+    "deploy/scripts/online-inquiry-boundary.py": "ee609932e44d9c100b181220e8fe579e454d7de1852b03b913c5124e0d6d12e7",
+    "deploy/scripts/online-backend-boundary.py": "6e1cdb9847a1b46aaa6c4226d1d02c57da679c58fc96921c005d24dfd969a8c9",
+    "deploy/scripts/capture-coherent-components.py": "04cf337a0402010b165d686e9d806636130d703ecd571964a8c1c5a101b287e6",
+    "scripts/run-online-scoped-work-local.mjs": "58eec659156c61f130d20f0a38fa470c21c2fb786093f595ab00272d699b2fb2",
+    "scripts/run-inquiry-fleet-census-local.mjs": "3d80ad90a10ed65ea3f170433155dd02b4ecd56da3941e371ffa3ea5fe51fc57",
+    "tests/online-deployment/inquiry-fleet-capture.fixture.py": "494fe916fa302b0e4a57a3682c8b173c5677fed2517360d516a2a599c1210308",
+    "scripts/verify-online-boundary-image-local.mjs": "b14ee42d661508f33d8df1c0aadf0d9c70f4f8cedcff11f845374fccc71b9abe"
+  },
+  "activeEvidence": "reports/qa/inquiry-fleet-e7d05678c9d6eab38c0a96b0fa9475e1.json",
+  "closedEvidence": "reports/qa/inquiry-fleet-a4265d951e4af64367d22eedae7fc327.json",
+  "packagingEvidence": "reports/qa/backend-boundary-image-4f61eecc50f56e94b1f4e4be80363265.json",
+  "productionAdmission": false
+}

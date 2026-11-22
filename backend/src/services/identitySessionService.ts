@@ -75,14 +75,23 @@ export const createAuthoritativeSession = async (db: Db, userId: string, context
   return { token, session, browserProfile, isNewBrowser: !existingProfile };
 };
 
-export const resolveAuthoritativeSession = async (db: Db, token: string) => {
-  const now = new Date();
+/** Read-only admission for realtime: an idle browser socket is not activity and
+ * must not write session timestamps across a recovery maintenance boundary. */
+export const readAuthoritativeSession = async (db: Db, token: string) => {
   const session = await db.authSession.findUnique({
     where: { tokenHash: digestToken(token) },
     include: { user: true },
   });
+  const now = new Date();
   if (!session || session.revokedAt || session.user.erasedAt || !session.user.isActive
     || session.idleExpiresAt <= now || session.absoluteExpiresAt <= now) return null;
+  return session;
+};
+
+export const resolveAuthoritativeSession = async (db: Db, token: string) => {
+  const session = await readAuthoritativeSession(db, token);
+  if (!session) return null;
+  const now = new Date();
   if (shouldPersistActivity(session.lastActivityAt, now)) {
     const nextIdle = new Date(Math.min(now.getTime() + 12 * 60 * 60 * 1000, session.absoluteExpiresAt.getTime()));
     await db.authSession.update({ where: { id: session.id }, data: { lastActivityAt: now, idleExpiresAt: nextIdle } });

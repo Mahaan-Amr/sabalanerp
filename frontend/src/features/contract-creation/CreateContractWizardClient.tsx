@@ -1,9 +1,15 @@
 'use client';
+
+import { contractNavigationStorage, contractAutosaveStorage } from '@/features/contract-creation/utils/contractNavigationStorage';
+
+import { stairMandatoryDefaults } from '@sabalanerp/contract-product-graph';
 import { useSmsSuccess } from '@/features/sales/useSmsSuccess';
 
 import { OperationMinimumContext, OperationMinimumSummary, contractOperationMinimumState } from './components/product-modal-system/OperationMinimumContext';
 import { evaluateOperationMinimums, operationMinimumMessage } from '@sabalanerp/contract-product-graph';
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import {useUnarchivedDraftGuard} from '@/lib/useUnarchivedDraftGuard';
+import {recoverContractModalIdentity} from './utils/contractModalRecoveryIdentity';
 import { flushSync } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { ContractReactivation, type ContractReactivationTarget } from '@/features/sales/ContractReactivation';
@@ -65,6 +71,7 @@ import { Step8DigitalSignature } from '@/features/contract-creation/components/s
 import type { WizardStep } from '@/features/contract-creation/components/shared/WizardProgressBar';
 import { ContractWizardStage } from '@/features/contract-creation/components/shared/ContractWizardFrame';
 import { ContractCreationDraftPrompt } from '@/features/contract-creation/components/shared/ContractCreationDraftPrompt';
+import { ContractDraftArchives } from '@/features/contract-creation/components/shared/ContractDraftArchives';
 import { consumeContractReturnSelection } from '@/features/contract-creation/utils/contractReturnSelection';
 import { persistContractLocalValue } from '@/features/contract-creation/utils/contractRecoveryJournal';
 
@@ -215,7 +222,6 @@ import {
   resolveLegacyRemainingChildAddOns
 } from '@/features/contract-creation/services/remainingStoneChildAddOnService';
 import {
-  CONTRACT_DRAFT_STORAGE_KEY,
   clampContractDraftStep,
   createContractAutosaveDraft,
   getContractDraftStorageKey,
@@ -951,6 +957,7 @@ export default function CreateContractWizard({
         inputBaseSubtotal: discountInputBaseSubtotal, baseSubtotal: discountBaseSubtotal,
         maxPercent: maxDiscountPercent, hasRange: Boolean(matchingDiscountRange) })
     : contractDiscountSnapshotError(wizardData.discount, discountBaseSubtotal);
+  useUnarchivedDraftGuard('contract-discount-buffer',discountTouched&&Boolean(discountError));
   const deliverableProductEntries = useMemo(
     () => getDeliverableProductEntries(wizardData.products),
     [wizardData.products]
@@ -1771,7 +1778,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     }
 
     const baseMaterialPrice = pricingSquareMeters * pricePerSqm;
-    const defaultMandatoryForPart = part === 'riser' || part === 'landing';
+    const defaultMandatoryForPart = stairMandatoryDefaults(part).enabled;
     const isMandatoryEnabled = draft.useMandatory ?? defaultMandatoryForPart;
     const mandatoryPercentageValue = draft.mandatoryPercentage ?? 20;
     const mandatoryAmount = isMandatoryEnabled && mandatoryPercentageValue > 0
@@ -2006,8 +2013,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     setStateRestored(true);
     setAutosaveHydrated(true);
     if (typeof window !== 'undefined') {
-      localStorage.removeItem(CONTRACT_DRAFT_STORAGE_KEY);
-      localStorage.removeItem('contractWizardState');
+      contractNavigationStorage.removeItem('contractWizardState');
     }
   }, [isContractEditMode, initialWizardData, contractId, initialContractStatus]);
 
@@ -2545,6 +2551,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
   }, [productModal, productCalculations, errors, setErrors]);
 
   const applyContractAutosaveDraft = useCallback((draft: ReturnType<typeof createContractAutosaveDraft>) => {
+    const modalIdentity=recoverContractModalIdentity(draft.productModal||{},draft.wizardData.payment.payments,draft.wizardData.products);
     setCurrentStep(clampContractDraftStep(draft.currentStep, WIZARD_STEPS.length));
     const normalizedWizardData = normalizeWizardFinishingProducts(draft.wizardData);
     setDiscountAmountInput(Math.round(toFiniteNumber(normalizedWizardData.discount?.amount)));
@@ -2590,6 +2597,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     stairSystemV2.setStoneSearchTerm(draft.searches?.stairStoneSearchTerm || '');
 
     const savedProductModal = draft.productModal || {};
+    setIsEditMode(modalIdentity.isEditMode);
+    setEditingProductIndex(modalIdentity.editingProductIndex);
+    paymentHandlers.setEditingPaymentEntryId(modalIdentity.editingPaymentEntryId);
     if (savedProductModal.selectedProduct !== undefined) setSelectedProduct(savedProductModal.selectedProduct as Product | null);
     if (savedProductModal.productConfig) setProductConfig(savedProductModal.productConfig as Partial<ContractProduct>);
     if (savedProductModal.lengthUnit === 'cm' || savedProductModal.lengthUnit === 'm') setLengthUnit(savedProductModal.lengthUnit);
@@ -2659,6 +2669,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     restorationAttempted.current = true;
   }, [
     paymentHandlers,
+    setIsEditMode,setEditingProductIndex,
     remainingStoneModal,
     restorationAttempted,
     setCurrentStep,
@@ -2682,7 +2693,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     stairSystemV2
   ]);
 
-  const recoveryUserId = currentUser?.id || currentUser?.username || null;
+  const recoveryUserId = currentUser?.id || null;
   const freshEntryRequestedRef = useRef(
     !!replacementWizardData || typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('fresh') === '1'
   );
@@ -2739,6 +2750,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     setDiscoveredRecoveryDraftId(freshDraftId);
   }, [recoveryUserId]);
   const editRecovery = useContractEditRecovery({
+    captureDraft: (capturedAt) => buildContractAutosaveDraft(capturedAt),
     correctionExpiresAt,
     scope: recoveryScope,
     contractId: isContractEditMode ? contractId : null,
@@ -2812,9 +2824,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       return;
     }
     if (typeof window !== 'undefined') {
-      localStorage.removeItem(contractDraftStorageKey);
-      localStorage.removeItem(CONTRACT_DRAFT_STORAGE_KEY);
-      localStorage.removeItem('contractWizardState');
+      contractAutosaveStorage.removeItem(contractDraftStorageKey);
+      contractNavigationStorage.removeItem('contractWizardState');
     }
     if (recoveryUserId) {
       createFreshContractDraftId(recoveryUserId);
@@ -2861,20 +2872,17 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       setAutosaveHydrated(true);
       return;
     }
-    const scopedRaw = localStorage.getItem(contractDraftStorageKey);
-    const legacyRaw = localStorage.getItem(CONTRACT_DRAFT_STORAGE_KEY);
-    const draft = parseContractAutosaveDraft(scopedRaw || legacyRaw);
+    const scopedRaw = contractAutosaveStorage.getItem(contractDraftStorageKey);
+    const draft = parseContractAutosaveDraft(scopedRaw);
     if (!draft) {
-      localStorage.removeItem(contractDraftStorageKey);
+      if (scopedRaw) {
+        setGeneralErrorKind('error');
+        setErrors({ general: 'پیش‌نویس ذخیره‌شده با این نسخه قابل بازکردن نیست؛ پیش از ادامه، بازیابی آن را با پشتیبانی بررسی کنید.' });
+        return;
+      }
       setAutosaveHydrated(true);
       return;
     }
-    if (!scopedRaw && legacyRaw) {
-      if (persistContractLocalValue(localStorage, contractDraftStorageKey, legacyRaw)) {
-        localStorage.removeItem(CONTRACT_DRAFT_STORAGE_KEY);
-      }
-    }
-
     if (contractCreationEntryDecision({
       hasRecoverableDraft: true,
       freshRequested
@@ -2891,7 +2899,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     replacementWizardData
   ]);
 
-  const buildContractAutosaveDraft = useCallback(() => {
+  const buildContractAutosaveDraft = useCallback((capturedAt = Date.now()) => {
     if (!isContractEditMode && !hasMeaningfulDraftProgress) {
       return null;
     }
@@ -2919,6 +2927,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         quantityType,
         stairSystemConfig,
         showProductModal,
+        isEditMode,editingProductIndex,editingProductRowId:isEditMode&&editingProductIndex!==null?wizardData.products[editingProductIndex]?.rowId??null:null,
+        editingPaymentEntryId:paymentHandlers.editingPaymentEntryId,
         paymentEntryForm: paymentHandlers.paymentEntryForm,
         showPaymentEntryModal: paymentHandlers.showPaymentEntryModal,
         remainingStone: {
@@ -2947,7 +2957,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         quantityDraft: stairQuantityDraft,
         quantityManuallyEdited: stairQuantityManuallyEdited
       }
-    });
+    }, capturedAt);
   }, [
     currentStep,
     contractDateChanged,
@@ -2969,6 +2979,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     hasQuantityBeenInteracted,
     quantityType,
     stairSystemConfig,
+    isEditMode,editingProductIndex,paymentHandlers.editingPaymentEntryId,
     paymentHandlers.paymentEntryForm,
     paymentHandlers.showPaymentEntryModal,
     remainingStoneModal.partitions,
@@ -2996,24 +3007,26 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
 
   const flushContractAutosaveDraft = useCallback(() => {
     if (typeof window === 'undefined') return;
-    if (isContractEditMode || !autosaveHydrated) return;
+    if (isContractEditMode || !autosaveHydrated || editRecovery.blocked || !recoveryDraftId || !recoveryUserId) return;
     if (recoverableDraftOffer) return;
     if (wizardData.signature?.contractId) {
-      localStorage.removeItem(contractDraftStorageKey);
+      contractAutosaveStorage.removeItem(contractDraftStorageKey);
       return;
     }
 
     const draft = buildContractAutosaveDraft();
     if (!draft) {
-      localStorage.removeItem(contractDraftStorageKey);
       return;
     }
 
-    persistContractLocalValue(localStorage, contractDraftStorageKey, draft);
+    persistContractLocalValue(contractAutosaveStorage, contractDraftStorageKey, draft);
   }, [
     autosaveHydrated,
     buildContractAutosaveDraft,
     contractDraftStorageKey,
+    editRecovery.blocked,
+    recoveryDraftId,
+    recoveryUserId,
     isContractEditMode,
     recoverableDraftOffer,
     wizardData.signature?.contractId
@@ -3086,7 +3099,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     if (returnTo === 'contract' && step && !restorationAttempted.current) {
       // Restore wizard state from localStorage
       (async () => {
-        const savedState = localStorage.getItem('contractWizardState');
+        const savedState = contractNavigationStorage.getItem('contractWizardState');
 
         if (savedState) {
           try {
@@ -3106,7 +3119,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
             restorationAttempted.current = true;
 
             // Clear the saved state after successful restoration
-            localStorage.removeItem('contractWizardState');
+            contractNavigationStorage.removeItem('contractWizardState');
 
             // Refresh data to show newly created entities
             await loadData();
@@ -4392,7 +4405,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
   };
 
   const handleCreateProductFromContractFlow = () => {
-    const persisted = persistContractLocalValue(localStorage, 'contractWizardState', {
+    const persisted = persistContractLocalValue(contractNavigationStorage, 'contractWizardState', {
       currentStep,
       wizardData
     });
@@ -4530,35 +4543,28 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       assertSuccessfulSalesResponse(response);
 
       const statusData = response.data.data;
-      const existingSignature = wizardData.signature;
-      updateWizardData({
-        signature: {
-          ...(existingSignature || {
-            phoneNumber: null,
-            contractId: signatureContractId,
-            confirmationSent: false,
-            confirmationStatus: null,
-            linkExpiresAt: null,
-            otpExpiresAt: null,
-            attemptsUsed: 0,
-            maxAttempts: 5,
-            resendCount: 0,
-            lastSentAt: null,
-            lastOpenedAt: null
-          }),
-          phoneNumber: statusData.phoneNumber || existingSignature?.phoneNumber || null,
-          contractStatus: statusData.contractStatus || existingSignature?.contractStatus || null,
-          commercialFlowVersion: statusData.commercialFlowVersion ?? existingSignature?.commercialFlowVersion,
-          confirmationSent: !!statusData.sessionStatus,
-          confirmationStatus: statusData.sessionStatus,
-          linkExpiresAt: statusData.linkExpiresAt || null,
-          otpExpiresAt: statusData.otpExpiresAt || null,
-          attemptsUsed: statusData.attemptsUsed || 0,
-          maxAttempts: statusData.maxAttempts || 5,
-          resendCount: statusData.resendCount || 0,
-          lastSentAt: statusData.lastSentAt || null,
-          lastOpenedAt: statusData.lastOpenedAt || null
-        }
+      setWizardData(current => {
+        const existingSignature = current.signature;
+        if (!existingSignature || existingSignature.contractId !== signatureContractId) return current;
+        // Status reads must preserve local edits made while the request was in flight.
+        return {
+          ...current,
+          signature: {
+            ...existingSignature,
+            phoneNumber: statusData.phoneNumber || existingSignature.phoneNumber || null,
+            contractStatus: statusData.contractStatus || existingSignature.contractStatus || null,
+            commercialFlowVersion: statusData.commercialFlowVersion ?? existingSignature.commercialFlowVersion,
+            confirmationSent: !!statusData.sessionStatus,
+            confirmationStatus: statusData.sessionStatus,
+            linkExpiresAt: statusData.linkExpiresAt || null,
+            otpExpiresAt: statusData.otpExpiresAt || null,
+            attemptsUsed: statusData.attemptsUsed || 0,
+            maxAttempts: statusData.maxAttempts || 5,
+            resendCount: statusData.resendCount || 0,
+            lastSentAt: statusData.lastSentAt || null,
+            lastOpenedAt: statusData.lastOpenedAt || null
+          }
+        };
       });
       clearSignatureError(errorSource);
     } catch (error: any) {
@@ -5471,7 +5477,6 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           nextAvailableRemainingStones: smartCutPlan.remainingStones,
           previousProduct: previousLongitudinalProduct
         });
-    const missingCuttingRateWarning = shouldCutByGeometry && finalCuttingCostPerMeter <= 0;
     const calculatedCuttingCost = smartCutPlan.enabled ? smartCutPlan.totalCuttingCost : finalCuttingCost;
     const billableCuttingCost = getBillableCuttingCost({
       productType: 'longitudinal',
@@ -5540,8 +5545,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         ? 0
         : longitudinalMaterialPricing.originalTotalPrice,
       // Stone cutting is geometry-driven; pricing can be unavailable while cut still exists.
-      isCut: shouldCutByGeometry,
-      cutType: shouldCutByGeometry ? 'longitudinal' : null,
+      isCut: productConfig.isCut === true,
+      cutType: productConfig.cutType || null,
       // Preserve originalWidth if editing, otherwise use selectedProduct.widthValue
       originalWidth: (isEditMode && productConfig.originalWidth) ? productConfig.originalWidth : selectedProduct.widthValue,
       // Store originalLength when product is first created (when not from remaining stone)
@@ -5550,22 +5555,16 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         ? productConfig.originalLength
         : (lengthUnit === 'm' ? customerFields.length : (customerFields.length / 100)),
       cuttingCost: billableCuttingCost,
-      physicalCuttingCost: calculatedCuttingCost,
+      physicalCuttingCost: productConfig.physicalCuttingCost,
       cuttingCostPerMeter: finalCuttingCostPerMeter,
-      cuttingBreakdown: smartCutPlan.enabled ? smartCutPlan.cuttingBreakdown : undefined,
+      cuttingBreakdown: productConfig.cuttingBreakdown,
       smartCutPlan: (smartCutPlan.enabled || smartCutPlan.derivedQuantity) ? smartCutPlan : null,
       smartCutAllowPhysicalSplitting: !!productConfig.smartCutAllowPhysicalSplitting,
       smartCutDerivedDimension: smartCutPlan.derivedDimension || null,
       smartCutDerivedQuantity: !!smartCutPlan.derivedQuantity,
-      cutDescription:
-        productConfig.cutDescription ||
-        (shouldCutByGeometry
-          ? `برش طولی خودکار (${originalWidth}cm → ${userEnteredWidthInCm.toFixed(2)}cm)${
-              missingCuttingRateWarning ? ' - نرخ برش طولی یافت نشد و هزینه برش صفر شد.' : ''
-            }`
-          : ''),
+      cutDescription: productConfig.cutDescription || '',
       remainingStones: remainingStoneEditState.remainingStones,
-      cutDetails: (isEditMode && productConfig.cutDetails) ? productConfig.cutDetails : [],
+      cutDetails: productConfig.cutDetails || [],
       // Preserve remaining stone usage tracking when editing
       usedRemainingStones: remainingStoneEditState.usedRemainingStones,
       totalUsedRemainingWidth: remainingStoneEditState.totalUsedRemainingWidth,
@@ -6049,7 +6048,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
               setDiscountPercentInput(entry.percentInput);
             }}
             onDiscountPercentChange={value => {
-              const entry = enterContractDiscount('PERCENT', value, discountBaseSubtotal);
+              const entry = enterContractDiscount('PERCENT', value, discountBaseSubtotal, maxDiscountPercent);
               setDiscountTouched(true);
               setErrors(previous => ({ ...previous, discount: '' }));
               setDiscountInputBaseSubtotal(entry.inputBaseSubtotal);
@@ -6418,6 +6417,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
   return (
     <OperationMinimumContext.Provider value={operationMinimumState}>
     <ErpNeumorphicWorkflowLayout
+      context={`مرحله ${visibleCurrentStep.toLocaleString('fa-IR')} از ${visibleWizardSteps.length.toLocaleString('fa-IR')} · ${visibleWizardSteps.find(step => step.id === currentStep)?.title || ''}`}
       title={isContractEditMode
         ? 'ویرایش قرارداد'
         : isCollaborationContract
@@ -6427,6 +6427,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       <ContractReactivation target={reactivationTarget} onClose={() => setReactivationTarget(null)}
         onReactivated={() => window.location.assign(`/dashboard/sales/contracts/${wizardData.signature?.contractId}/edit`)} />
       {smsSuccess.feedback}
+      <ContractDraftArchives userId={recoveryUserId} draftId={recoveryDraftId} />
 
         {editRecoverySuccessMessage && (
           <ErpInlineState
@@ -6454,7 +6455,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
               : editRecovery.blockReason === 'revision-conflict'
                 ? {
                     label: 'بارگذاری آخرین نسخه',
-                    onClick: editRecovery.reloadLatestRevision
+                    onClick: () => void editRecovery.reloadLatestRevision(buildContractAutosaveDraft()),
+                    disabled: editRecovery.reloadPending
                   }
                 : {
                     label: editRecovery.takeoverPending
@@ -6682,7 +6684,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                           .includes(finishingSearchTerm)
                       )
                     : selectableStoneFinishings;
-                  const defaultMandatoryEnabled = stairSystemV2.stairActivePart === 'riser' || stairSystemV2.stairActivePart === 'landing';
+                  const defaultMandatoryEnabled = stairMandatoryDefaults(stairSystemV2.stairActivePart).enabled;
                   const mandatoryEnabled = draft.useMandatory ?? defaultMandatoryEnabled;
                   const supportsMandatory = stairSystemV2.stairActivePart === 'tread' || stairSystemV2.stairActivePart === 'riser' || stairSystemV2.stairActivePart === 'landing';
                   const mandatoryPercentageValue = draft.mandatoryPercentage ?? 20;
@@ -9609,7 +9611,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                   const userWidthCm = draft.widthCm || 0;
                   const baseStoneQuantity = totals.baseStoneQuantity;
 
-                  const defaultMandatoryForPart = stairSystemV2.stairActivePart === 'riser' || stairSystemV2.stairActivePart === 'landing';
+                  const defaultMandatoryForPart = stairMandatoryDefaults(stairSystemV2.stairActivePart).enabled;
                   const isDraftMandatory = draft.useMandatory ?? defaultMandatoryForPart;
                   const mandatoryPercentageValue = draft.mandatoryPercentage ?? 20;
                    const pricing = canonicalProductSavePricing({

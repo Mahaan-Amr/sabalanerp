@@ -1,4 +1,5 @@
-﻿// Stair validation service
+import { stairMandatoryDefaults } from '@sabalanerp/contract-product-graph';
+// Stair validation service
 // Handles all stair system V2 validation logic
 
 import type {
@@ -193,7 +194,7 @@ export const validateDraftRequiredFields = (
   const thicknessError = validateDraftNumericFields(part, draft, 'thickness', draft.thicknessCm ?? null, layerTypes);
   if (thicknessError) errors.thickness = thicknessError;
 
-  const mandatoryDefault = part === 'riser' || part === 'landing';
+  const mandatoryDefault = stairMandatoryDefaults(part).enabled;
   const shouldValidateMandatory = draft.useMandatory ?? mandatoryDefault;
   if (shouldValidateMandatory) {
     const mandatoryError = validateDraftNumericFields(part, draft, 'mandatoryPercentage', draft.mandatoryPercentage ?? 20, layerTypes);

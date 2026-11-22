@@ -1,3 +1,4 @@
+import { readPartnerCustomerSignature } from './customerSignature';
 import { FinancialRecordKind, Prisma } from '@prisma/client';
 import { renderContractHtml, renderContractPdfHeaderTemplate, type ContractCustomPrintOptions, type ContractPrintVariant } from '../../../utils/printTemplate';
 import { randomUUID } from 'node:crypto';
@@ -66,6 +67,7 @@ export async function readPartnerInternalDocument(caseId: string, actorUserId: s
     return {
       financialRecords: caseRecords.map(item => ({ id: item.id, status: item.status, amount: item.amount.toString(),
         currency: item.currency, systemInvoiceNumber: item.systemInvoiceNumber })), voidWorkflows,
+      customerSignature: await readPartnerCustomerSignature(scope.database, caseId, actorUserId),
       commercial: await readPartnerCommercialState(scope.database, caseId), caseState: sale?.state, receivedAmount: received.toFixed(), remainingAmount: remaining.toFixed(),
       id: record.id, owner: sale ? { caseId, revision: sale.headRevision, integrityHash: sale.integrityHash } : undefined, status: record.status, amount: record.amount.toString(),
       currency: record.currency, createdAt: record.createdAt,
@@ -96,7 +98,7 @@ export async function readPartnerInternalDocument(caseId: string, actorUserId: s
       flags: flags.map(flag => ({ id: flag.id, title: flag.title, note: flag.note,
         severity: flag.severity, status: flag.status })),
     };
-  });
+  }, { focusedCaseId: caseId });
 }
 
 /** Resolve the internal financial record under the same Partner read and write
@@ -122,7 +124,7 @@ export async function withPartnerInternalAccountingTarget<T>(caseId: string, act
     if (!(await authority.authorize('ACCOUNTING_WRITE', { kind: 'CASE', id: caseId })).ok) return null;
     if (!await hasSharedOperationAuthority(scope.database, actorUserId, 'accounting', 'accounting_actions_manage')) return null;
     return work(scope.database, { customerContractId: sale.customerContractId, invoiceRecordId: invoice.id });
-  });
+  }, { focusedCaseId: caseId });
 }
 
 /** A fresh allowlisted input to the ordinary Sabalan print template. Never pass
@@ -157,7 +159,7 @@ export function partnerInternalPrintInput(document: NonNullable<Awaited<ReturnTy
       discount: { amount: Number(totals?.discount || 0), inputMode: 'AMOUNT_TOMAN' },
       deliveries: (document.deliveries || []).map(delivery => ({ deliveryDate: delivery.date,
         deliveryAddress: delivery.destination, receiverName: delivery.receiverName, projectManagerName: delivery.projectManagerName,
-        products: delivery.items.map(line => ({ productRowId: line.productRowId, quantity: Number(line.quantity), amount: Number(line.quantity),
+        products: delivery.items.map(line => ({ productRowId: line.productRowId, quantity: line.quantity, amount: line.quantity,
           unit: document.items.find(item => item.productRowId === line.productRowId)?.unit,
           productName: document.items.find(item => item.productRowId === line.productRowId)?.description })) })),
       payment: { payments: (document.paymentPlan?.installments || []).map(item => ({
@@ -173,7 +175,7 @@ export function renderPartnerInternalDocumentHtml(document: NonNullable<Awaited<
   const variant = options.variant || 'accounting';
   const showMoney = !('amountKnown' in document && document.amountKnown === false) && variant !== 'workshop' && options.customPrint?.showPrices !== false && options.customPrint?.showTotals !== false;
   const unpriced = 'amountKnown' in document && document.amountKnown === false;
-  const html = renderContractHtml(input, { ...options, variant, displayInRials: true, reservePdfHeaderSpace: true,
+  const html = renderContractHtml(input, { ...options, variant, displayInRials: true, firstPageHeader: true,
     ...(unpriced ? { unavailableMoneyLabel: 'در انتظار استعلام' } : {}) });
   const escape = (value: string) => value.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
   const grouped = (value: Prisma.Decimal) => {
@@ -189,7 +191,7 @@ export function renderPartnerInternalDocumentHtml(document: NonNullable<Awaited<
     <div>سند داخلی: ${escape(document.partnerContext.internalRecordNumber)}</div>
     ${totals && showMoney ? `<div>جمع اقلام: ${amount(totals.net)} ${currencyLabel} · تخفیف: ${amount(totals.discount)} ${currencyLabel} · مالیات: ${amount(totals.tax)} ${currencyLabel} · هزینه‌های جانبی: ${amount(totals.charges)} ${currencyLabel}</div>` : ''}
     ${showMoney ? `<strong>جمع خرید از سبلان: ${amount(document.amount)} ${currencyLabel} (${grouped(new Prisma.Decimal(document.amount).div(document.currency === 'IRR' ? 10 : 1))} تومان)</strong>` : unpriced && variant !== 'workshop' && options.customPrint?.showPrices !== false && options.customPrint?.showTotals !== false ? '<strong>جمع خرید از سبلان: در انتظار استعلام</strong>' : ''}
-    ${variant !== 'workshop' && options.customPrint?.showPaymentSection !== false && !document.paymentPlan?.installments.length ? '<div>برنامه پرداخت به سبلان هنوز ثبت نشده است.</div>' : ''}
+    ${variant !== 'production' && variant !== 'workshop' && options.customPrint?.showPaymentSection !== false && !document.paymentPlan?.installments.length ? '<div>برنامه پرداخت به سبلان هنوز ثبت نشده است.</div>' : ''}
     ${document.technicalEvidenceAvailable === false ? '<div>جزئیات فنی نسخه قطعی در دسترس نیست.</div>' : ''}
   </section>`;
   return html.replace('<footer class="footer">', internalSection + '<footer class="footer">');

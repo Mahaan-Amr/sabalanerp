@@ -15,7 +15,7 @@ test('generic lease and recovery reads never disclose server-owned Partner techn
   const draftId = `recovery-protected-${randomUUID()}`;
   try {
     const now = new Date();
-    const input = { draftId, contractId: null, userId: draftId, browserSessionId: 'browser-a',
+    const input = { draftId, contractId: null, userId: draftId, purpose: 'PARTNER_TECHNICAL' as const, browserSessionId: 'browser-a',
       schemaVersion: 2, baseRevision: 0, takeover: false, now };
     const lease = await acquireContractEditSession(store, input);
     if (!lease.ok) throw new Error(lease.code);
@@ -66,7 +66,7 @@ test('generic checkpoints cannot forge or replace a protected Partner recovery r
   const draftId = `recovery-protected-write-${randomUUID()}`;
   try {
     const now = new Date();
-    const input = { draftId, contractId: null, userId: draftId, browserSessionId: 'browser-a',
+    const input = { draftId, contractId: null, userId: draftId, purpose: 'PARTNER_TECHNICAL' as const, browserSessionId: 'browser-a',
       schemaVersion: 2, baseRevision: 0, takeover: false, now };
     const lease = await acquireContractEditSession(store, input);
     if (!lease.ok) throw new Error(lease.code);
@@ -92,7 +92,7 @@ test('a protected draft cannot be rebound or reset through generic acquire but n
   const draftId = `recovery-protected-binding-${randomUUID()}`;
   try {
     const now = new Date();
-    const input = { draftId, contractId: null, userId: draftId, browserSessionId: 'browser-a',
+    const input = { draftId, contractId: null, userId: draftId, purpose: 'PARTNER_TECHNICAL' as const, browserSessionId: 'browser-a',
       schemaVersion: 2, baseRevision: 0, takeover: false, now };
     const lease = await acquireContractEditSession(store, input);
     if (!lease.ok) throw new Error(lease.code);
@@ -138,17 +138,17 @@ test('a concurrent protected transition cannot be rebound when an expired generi
     override async compareAndReplace(expected: ContractEditSessionRecord, replacement: ContractEditSessionRecord) {
       if (this.transitionPending) {
         this.transitionPending = false;
-        await super.compareAndReplace(expected, { ...expected, schemaVersion: 3, recovery: envelope, updatedAt: now });
+        await super.compareAndReplace(expected, { ...expected, purpose: 'PARTNER_TECHNICAL', schemaVersion: 3, recovery: envelope, updatedAt: now });
       }
       return super.compareAndReplace(expected, replacement);
     }
   }
   const store = new TransitioningStore(database);
   try {
-    await store.create({ draftId, contractId: null, ownerUserId: draftId, purpose: 'STANDARD', browserSessionId: 'browser-a', leaseToken: 'old-lease',
+    await store.create({ draftId, contractId: null, ownerUserId: draftId, purpose: 'PARTNER_TECHNICAL', browserSessionId: 'browser-a', leaseToken: 'old-lease',
       schemaVersion: 2, baseRevision: 0, recovery: null, createdAt: new Date(now.getTime() - 90_000),
       updatedAt: new Date(now.getTime() - 90_000), takenOverAt: null });
-    const result = await acquireContractEditSession(store, { draftId, contractId: null, userId: draftId,
+    const result = await acquireContractEditSession(store, { draftId, contractId: null, userId: draftId, purpose: 'PARTNER_TECHNICAL',
       browserSessionId: 'browser-b', schemaVersion: 2, baseRevision: 0, takeover: true, now });
     if (result.ok) throw new Error('Lost CAS rebound a protected record');
     assert.equal(result.code, 'revision-conflict');
@@ -171,13 +171,13 @@ test('ordinary discovery cannot purge a protected checkpoint installed after its
   class SavingDuringDiscoveryStore extends PrismaContractEditSessionStore {
     override async listCreationDrafts(ownerUserId: string) {
       const snapshot = await super.listCreationDrafts(ownerUserId);
-      for (const record of snapshot) await super.compareAndReplace(record, { ...record, recovery: envelope });
+      for (const record of snapshot) await super.compareAndReplace(record, { ...record, purpose: 'PARTNER_TECHNICAL', recovery: envelope });
       return snapshot;
     }
   }
   const store = new SavingDuringDiscoveryStore(database);
   try {
-    await store.create({ draftId, contractId: null, ownerUserId: draftId, purpose: 'STANDARD', browserSessionId: 'browser-a', leaseToken: randomUUID(),
+    await store.create({ draftId, contractId: null, ownerUserId: draftId, purpose: 'PARTNER_TECHNICAL', browserSessionId: 'browser-a', leaseToken: randomUUID(),
       schemaVersion: 2, baseRevision: 0, recovery: null, createdAt: now, updatedAt: now, takenOverAt: null });
     assert.equal(await discoverRecoverableContractCreationDraft(store, { userId: draftId, browserSessionId: 'browser-a', now }), null);
     assert.deepEqual((await store.load(draftId))?.recovery, envelope, 'the newly saved protected draft survives stale cleanup');

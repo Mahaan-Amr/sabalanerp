@@ -1,0 +1,11 @@
+# Fixed post-guard storage profile. Never enable before the original protected
+# helper rechecks/copies the stopped old root under both real EX gates.
+services:
+  backend:
+    volumes:
+      - backend_storage_dispatch_documents:/app/storage/dispatch-documents
+  deployment:
+    volumes:
+      - backend_storage_dispatch_documents:/app/storage/dispatch-documents
+volumes:
+  backend_storage_dispatch_documents:

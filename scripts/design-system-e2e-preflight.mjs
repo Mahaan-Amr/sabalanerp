@@ -32,10 +32,11 @@ export const validateRequiredServices = (services) => {
 };
 
 export const inspectLocalComposeProject = (repositoryRoot) => {
+  const canonical = process.env.SABALAN_LOCAL_REPOSITORY_ROOT || repositoryRoot;
   const result = spawnSync(
     'docker',
     ['compose', '-f', 'docker-compose.local.yml', 'ps', '--format', 'json'],
-    { cwd: repositoryRoot, encoding: 'utf8', shell: process.platform === 'win32' }
+    { cwd: canonical, encoding: 'utf8', shell: process.platform === 'win32' }
   );
   if (result.error || result.status !== 0) {
     const detail = result.error?.message || result.stderr.trim() || 'Docker Compose check failed';

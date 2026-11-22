@@ -2,7 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { sha256File } from './recoveryCrypto';
-import { planLocalCheckpointCleanup, planRemoteCheckpointRetention, type LocalCheckpointArtifact } from './deploymentCheckpointPolicy';
+import { hasHealthyIndependentCheckpointDrill, hasHealthyRemoteRecoveryPoint, planLocalCheckpointCleanup, planRemoteCheckpointRetention, type LocalCheckpointArtifact } from './deploymentCheckpointPolicy';
+import { readOnlineCheckpointDirectory, assertOnlineCheckpointDirectoryUnchanged, removeVerifiedOnlineCheckpointDirectory, type OnlineDirectoryEvidence } from './onlineCheckpointDirectory';
 
 export type CheckpointObject = {
   id: string;
@@ -15,6 +16,16 @@ export type CheckpointObject = {
   remotePath?: string;
   active?: boolean;
   incidentOpen?: boolean;
+  restoreVerified?: boolean;
+  sourceMachineUuidSha256?: string;
+  sourceKernelBootIdSha256?: string;
+  releaseId?: string;
+  lastDrill?: unknown;
+  onlineDirectoryEvidence?: OnlineDirectoryEvidence;
+  localVerified?: boolean;
+  manifestReadable?: boolean;
+  manifest?: { packageType?: string };
+  compatibility?: { local?: { compatible?: boolean } };
 };
 
 export interface RemoteCheckpointStore {
@@ -97,7 +108,10 @@ export class FilesystemRemoteCheckpointStore implements RemoteCheckpointStore {
 
   async assertAvailable(requiredBytes: number) {
     await fs.promises.access(this.root, fs.constants.R_OK | fs.constants.W_OK);
-    await this.removeExpiredIncompleteUploads(this.root);
+    // Incomplete remote objects are custody, not age-based garbage. Only the
+    // backup storage owner may retire them after proving the original operation closed.
+    // A successful access/statfs alone does not prove that the remote directory can be read.
+    await this.readRemoteDirectory(this.root);
     const stats = await fs.promises.statfs(this.root);
     const availableBytes = stats.bavail * stats.bsize;
     if (availableBytes < requiredBytes) {
@@ -108,14 +122,15 @@ export class FilesystemRemoteCheckpointStore implements RemoteCheckpointStore {
     return { availableBytes };
   }
 
-  private async removeExpiredIncompleteUploads(directory: string): Promise<void> {
-    const entries = await fs.promises.readdir(directory, { withFileTypes: true });
-    for (const entry of entries) {
-      const absolute = path.join(directory, entry.name);
-      if (entry.isDirectory()) await this.removeExpiredIncompleteUploads(absolute);
-      else if (entry.isFile() && entry.name.endsWith('.uploading')) {
-        const stat = await fs.promises.stat(absolute);
-        if (Date.now() - stat.mtimeMs > 24 * 60 * 60 * 1000) await fs.promises.rm(absolute, { force: true });
+  private async readRemoteDirectory(directory: string) {
+    for (let retry = 0; ; retry += 1) {
+      try {
+        return await fs.promises.readdir(directory, { withFileTypes: true });
+      } catch (error: any) {
+        if (!transientRemoteStorageCodes.has(error?.code) || retry >= 3) throw error;
+        // Restart the complete listing after a transient SSHFS failure. An
+        // unreadable directory must still abort checkpoint preparation.
+        await new Promise(resolve => setTimeout(resolve, Math.min((this.options.retryDelayMs ?? 3_000) * 2 ** retry, 30_000)));
       }
     }
   }
@@ -263,18 +278,25 @@ export const ensureLocalCapacity = async (input: {
   const safelyContained = (candidate: string) => path.resolve(candidate).startsWith(`${resolvedRoot}${path.sep}`);
   if (availableBytes < input.requiredBytes) {
     const reverifiedRemoteIds = new Set<string>();
+    const remoteEvidence = new Map<string, string>();
     for (const artifact of input.artifacts) {
       if (!artifact.remoteVerified || !artifact.remotePath) continue;
       try {
-        const [remoteChecksum, remoteSidecar] = await Promise.all([
+        const [remoteChecksum, remoteBytes, remoteStat] = await Promise.all([
           sha256File(artifact.remotePath),
-          fs.promises.readFile(`${artifact.remotePath}.json`, 'utf8').then((value) => JSON.parse(value)),
+          fs.promises.readFile(`${artifact.remotePath}.json`, 'utf8'),
+          fs.promises.stat(artifact.remotePath),
         ]);
+        const remoteSidecar = JSON.parse(remoteBytes);
         if (remoteChecksum === artifact.checksum
           && remoteSidecar.checksum === artifact.checksum
+          && remoteSidecar.size === artifact.size && remoteStat.size === artifact.size
+          && artifact.releaseId && remoteSidecar.releaseId === artifact.releaseId
           && (remoteSidecar.deploymentId === artifact.id || remoteSidecar.id === artifact.id)
-          && remoteSidecar.remoteVerified === true) {
+          && remoteSidecar.remoteVerified === true && !remoteSidecar.active && !remoteSidecar.incidentOpen
+          && hasHealthyIndependentCheckpointDrill(remoteSidecar)) {
           reverifiedRemoteIds.add(artifact.id);
+          remoteEvidence.set(`${artifact.remotePath}.json`, remoteBytes);
         }
       } catch {
         // A stale flag, missing object, checksum mismatch, or unreadable sidecar
@@ -303,6 +325,9 @@ export const ensureLocalCapacity = async (input: {
       if (!safelyContained(artifact.archivePath) || !safelyContained(artifact.metadataPath)) {
         throw Object.assign(new Error('Local retention candidate escaped its configured recovery root.'), { code: 'DEPLOYMENT_LOCAL_RETENTION_PATH_UNSAFE' });
       }
+      for (const [file, expected] of remoteEvidence) {
+        if (await fs.promises.readFile(file, 'utf8') !== expected) throw new Error('DEPLOYMENT_LOCAL_CAPACITY_RECOVERY_EVIDENCE_CHANGED');
+      }
       await fs.promises.rm(artifact.archivePath, { force: true });
       await fs.promises.rm(artifact.metadataPath, { force: true });
       audit.push({ id, size: artifact.size, checksum: artifact.checksum, reason: 'REMOTE_VERIFIED_RETENTION_PRUNE', result: 'DELETED' });
@@ -320,27 +345,112 @@ export const ensureLocalCapacity = async (input: {
 };
 
 const findMetadataFiles = async (root: string): Promise<string[]> => {
-  const entries = await fs.promises.readdir(root, { withFileTypes: true }).catch(() => []);
+  const entries = await fs.promises.readdir(root, { withFileTypes: true });
   const files: string[] = [];
   for (const entry of entries) {
     const absolute = path.join(root, entry.name);
+    if (entry.isSymbolicLink()) throw new Error('DEPLOYMENT_RETENTION_INVENTORY_UNSAFE');
     if (entry.isDirectory()) files.push(...await findMetadataFiles(absolute));
     else if (entry.isFile() && entry.name.endsWith('.sabrec.json')) files.push(absolute);
   }
   return files;
 };
 
-export const enforceFilesystemRemoteRetention = async (root: string, activeDeploymentId: string) => {
+const appendRetentionAudit = async (root: string, entry: Record<string, unknown>) => {
+  const handle = await fs.promises.open(path.join(root, 'retention-audit.jsonl'), 'a', 0o600);
+  try {
+    await handle.writeFile(`${JSON.stringify({ at: new Date().toISOString(), ...entry })}\n`);
+    await handle.sync();
+  } finally { await handle.close(); }
+};
+
+const hasRetentionEvent = async (root: string, artifact: Pick<CheckpointObject, 'id' | 'checksum'>, event: string) => {
+  let bytes: string;
+  try { bytes = await fs.promises.readFile(path.join(root, 'retention-audit.jsonl'), 'utf8'); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error; }
+  return bytes.split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line))
+    .some(entry => entry.id === artifact.id && entry.checksum === artifact.checksum && entry.event === event);
+};
+
+const checkpointArchivePresent = async (root: string, file: string, artifact: CheckpointObject) => {
+  if (!path.resolve(file).startsWith(`${root}${path.sep}`)) throw new Error('DEPLOYMENT_RETENTION_PATH_UNSAFE');
+  const parent = await fs.promises.realpath(path.dirname(file));
+  if (parent !== root && !parent.startsWith(`${root}${path.sep}`)) throw new Error('DEPLOYMENT_RETENTION_PATH_UNSAFE');
+  try {
+    const stat = await fs.promises.lstat(file);
+    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('DEPLOYMENT_RETENTION_PATH_UNSAFE');
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT'
+      || !await hasRetentionEvent(root, artifact, 'RETENTION_INTENT')) throw error;
+    return false;
+  }
+};
+
+/** Protective input only: absence/unreadable local evidence never means no holds. */
+export const readLocalCheckpointRetentionHolds = async (root: string): Promise<string[]> => {
+  const holds = new Set<string>();
+  for (const file of await findMetadataFiles(root)) {
+    const before = await fs.promises.lstat(file, {bigint:true});
+    if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1n || before.size > 8n*1024n*1024n) throw new Error('DEPLOYMENT_RETENTION_LOCAL_EVIDENCE_INVALID');
+    const raw = await fs.promises.readFile(file), after = await fs.promises.lstat(file,{bigint:true});
+    for (const key of ['dev','ino','size','mtimeNs','ctimeNs'] as const) if (before[key]!==after[key]) throw new Error('DEPLOYMENT_RETENTION_LOCAL_EVIDENCE_CHANGED');
+    const metadata=JSON.parse(raw.toString());if(typeof metadata.id!=='string'||!/^[a-zA-Z0-9_-]{1,160}$/.test(metadata.id))throw new Error('DEPLOYMENT_RETENTION_LOCAL_EVIDENCE_INVALID');
+    if(metadata.active===true||metadata.incidentOpen===true)holds.add(metadata.id);
+  }
+  return [...holds].sort();
+};
+
+export const enforceFilesystemRemoteRetention = async (root: string, activeDeploymentId: string, localRoot?: string,
+  options: { mode?: 'apply' | 'inspect'; protectedCheckpointIds?: string[] } = {}) => {
+  const localHolds = new Set<string>(options.protectedCheckpointIds ?? []);
+  const localEvidence = new Map<string, string>();
+  if (localRoot) {
+    for (const file of await findMetadataFiles(localRoot)) {
+      // Unreadable local evidence could conceal a hold on a remote copy.
+      const bytes = await fs.promises.readFile(file, 'utf8');
+      localEvidence.set(file, bytes);
+      const metadata = JSON.parse(bytes) as CheckpointObject;
+      if (!metadata.id) throw new Error('DEPLOYMENT_RETENTION_LOCAL_EVIDENCE_INVALID');
+      if (metadata.active || metadata.incidentOpen) localHolds.add(metadata.id);
+    }
+  }
   const inventory: Array<CheckpointObject & { releaseId: string; remotePath: string }> = [];
+  const metadataSnapshots = new Map<string, string>();
   for (const metadataPath of await findMetadataFiles(root)) {
     try {
-      const metadata = JSON.parse(await fs.promises.readFile(metadataPath, 'utf8')) as CheckpointObject & { releaseId: string; remotePath: string };
+      const contents = await fs.promises.readFile(metadataPath, 'utf8');
+      const metadata = JSON.parse(contents) as CheckpointObject & { releaseId: string; remotePath: string };
       if (metadata.id && metadata.releaseId && metadata.remotePath && metadata.remoteVerified && Number.isFinite(new Date(metadata.createdAt).getTime())) {
-        inventory.push({ ...metadata, metadataPath, archivePath: metadata.remotePath });
+        // Sidecars keep the production mount locator; the backup owner uses
+        // its own fixed repository root. Never execute an absolute locator.
+        const relative = path.relative(root, metadataPath).slice(0, -5);
+        if (!metadataPath.endsWith('.sabrec.json') || path.basename(metadata.remotePath) !== path.basename(relative)
+          || relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('DEPLOYMENT_RETENTION_PATH_UNSAFE');
+        const archivePath = path.join(root, relative);
+        inventory.push({ ...metadata, metadataPath, remotePath: archivePath, archivePath });
+        metadataSnapshots.set(metadataPath, contents);
       }
     } catch {
       // Unreadable metadata is protected from automatic pruning.
     }
+  }
+  // ONLINE points carry several ciphertexts, immutable image graphs and future
+  // WAL dependencies. Never reinterpret a directory as a legacy archive.
+  for (const entry of await fs.promises.readdir(root, { withFileTypes: true })) {
+    if (!entry.isDirectory() || !/^online-[a-f0-9]{64}$/.test(entry.name)) continue;
+    try {
+      const point = await readOnlineCheckpointDirectory(root, path.join(root, entry.name));
+      const metadata = point.metadata as CheckpointObject & { releaseId: string; remotePath: string };
+      inventory.push({ ...metadata, remotePath: point.directory, archivePath: point.directory,
+        metadataPath: point.metadataPath, onlineDirectoryEvidence: point.evidence });
+      metadataSnapshots.set(point.metadataPath, await fs.promises.readFile(point.metadataPath, 'utf8'));
+    } catch {
+      // Unknown, live-changing, uncertified or damaged material stays protected.
+    }
+  }
+  if (new Set(inventory.map(artifact => artifact.id)).size !== inventory.length) {
+    throw new Error('DEPLOYMENT_RETENTION_DUPLICATE_ID');
   }
   const plan = planRemoteCheckpointRetention(inventory.map((artifact) => ({
     id: artifact.id,
@@ -348,25 +458,284 @@ export const enforceFilesystemRemoteRetention = async (root: string, activeDeplo
     createdAt: new Date(artifact.createdAt),
     size: artifact.size,
     remoteVerified: artifact.remoteVerified,
+    restoreVerified: artifact.restoreVerified === true,
+    checksum: artifact.checksum,
+    sourceMachineUuidSha256: artifact.sourceMachineUuidSha256,
+    sourceKernelBootIdSha256: artifact.sourceKernelBootIdSha256,
+    lastDrill: artifact.lastDrill,
+    onlineDirectoryEvidence: artifact.onlineDirectoryEvidence,
     active: artifact.id === activeDeploymentId || artifact.active === true,
-    incidentOpen: artifact.incidentOpen === true,
+    incidentOpen: artifact.incidentOpen === true || localHolds.has(artifact.id),
   })));
   const audit: Array<Record<string, unknown>> = [];
   const resolvedRoot = path.resolve(root);
-  for (const id of plan.deleteIds) {
+  const realRoot = await fs.promises.realpath(root);
+  const verifyContainedFile = async (file: string) => {
+    const resolved = await fs.promises.realpath(file);
+    const stat = await fs.promises.lstat(file);
+    if (!resolved.startsWith(`${realRoot}${path.sep}`) || !stat.isFile() || stat.isSymbolicLink()) {
+      throw Object.assign(new Error('Checkpoint retention path is unsafe.'), { code: 'DEPLOYMENT_REMOTE_RETENTION_PATH_UNSAFE' });
+    }
+    return stat;
+  };
+  const replacements = inventory.filter(artifact => plan.keepIds.includes(artifact.id)
+    && hasHealthyRemoteRecoveryPoint({ ...artifact, createdAt: new Date(artifact.createdAt), active: !!artifact.active, incidentOpen: !!artifact.incidentOpen }) && artifact.remoteVerified)
+    .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt)).slice(0, 2);
+  const fingerprints = new Map<string, RemoteCheckpointFingerprint>();
+  if (plan.deleteIds.length) {
+    if (replacements.length !== 2 || new Set(replacements.map(point => point.id)).size !== 2) throw new Error('DEPLOYMENT_RETENTION_REPLACEMENTS_MISSING');
+    for (const artifact of replacements) {
+      if (artifact.onlineDirectoryEvidence) {
+        await assertOnlineCheckpointDirectoryUnchanged(artifact.onlineDirectoryEvidence);
+        continue;
+      }
+      const stat = await verifyContainedFile(artifact.remotePath);
+      await verifyContainedFile(artifact.metadataPath);
+      if (stat.size !== artifact.size || await remoteCheckpointChecksum(artifact.remotePath) !== artifact.checksum) {
+        throw Object.assign(new Error('A retained checkpoint failed verification.'), { code: 'DEPLOYMENT_RETENTION_REPLACEMENT_INVALID' });
+      }
+      fingerprints.set(artifact.id, { size: stat.size, mtimeMs: stat.mtimeMs });
+    }
+  }
+  for (const id of options.mode === 'inspect' ? [] : plan.deleteIds) {
+    if (localRoot) {
+      const currentFiles = await findMetadataFiles(localRoot);
+      if (currentFiles.length !== localEvidence.size) throw new Error('DEPLOYMENT_RETENTION_LOCAL_EVIDENCE_CHANGED');
+      for (const file of currentFiles) {
+        if (await fs.promises.readFile(file, 'utf8') !== localEvidence.get(file)) {
+          throw new Error('DEPLOYMENT_RETENTION_LOCAL_EVIDENCE_CHANGED');
+        }
+      }
+    }
     const artifact = inventory.find((candidate) => candidate.id === id);
     if (!artifact) continue;
-    for (const candidate of [artifact.archivePath, artifact.metadataPath]) {
+    const archivePresent = artifact.onlineDirectoryEvidence ? true : await checkpointArchivePresent(realRoot, artifact.archivePath, artifact);
+    for (const candidate of [artifact.metadataPath]) {
       if (!path.resolve(candidate).startsWith(`${resolvedRoot}${path.sep}`)) {
         throw Object.assign(new Error('Remote retention candidate escaped its configured root.'), { code: 'DEPLOYMENT_REMOTE_RETENTION_PATH_UNSAFE' });
       }
+      await verifyContainedFile(candidate);
     }
-    await fs.promises.rm(artifact.archivePath, { force: true });
-    await fs.promises.rm(artifact.metadataPath, { force: true });
-    audit.push({ id, releaseId: artifact.releaseId, checksum: artifact.checksum, size: artifact.size, reason: 'REMOTE_RELEASE_AND_MONTHLY_RETENTION', result: 'DELETED' });
+    const current = JSON.parse(await fs.promises.readFile(artifact.metadataPath, 'utf8'));
+    if (current.active || current.incidentOpen || current.id !== artifact.id || current.checksum !== artifact.checksum) {
+      throw new Error('DEPLOYMENT_RETENTION_EVIDENCE_CHANGED');
+    }
+    for (const replacement of replacements) {
+      if (await fs.promises.readFile(replacement.metadataPath, 'utf8') !== metadataSnapshots.get(replacement.metadataPath)) {
+        throw new Error('DEPLOYMENT_RETENTION_REPLACEMENT_EVIDENCE_CHANGED');
+      }
+      if (replacement.onlineDirectoryEvidence) await assertOnlineCheckpointDirectoryUnchanged(replacement.onlineDirectoryEvidence);
+      else await assertRemoteCheckpointFingerprint(replacement.remotePath, fingerprints.get(replacement.id));
+    }
+    await appendRetentionAudit(root, { id, checksum: artifact.checksum, event: 'RETENTION_INTENT' });
+    if (artifact.onlineDirectoryEvidence) {
+      await removeVerifiedOnlineCheckpointDirectory(artifact.onlineDirectoryEvidence);
+      await appendRetentionAudit(root, { id, checksum: artifact.checksum, event: 'RETENTION_ARCHIVE_REMOVED' });
+      await appendRetentionAudit(root, { id, checksum: artifact.checksum, event: 'RETENTION_COMPLETED' });
+      audit.push({ id, releaseId: artifact.releaseId, checksum: artifact.checksum, size: artifact.size,
+        reason: 'TWO_VERIFIED_COMPLETE_RECOVERY_POINTS', result: 'DELETED' });
+      continue;
+    }
+    if (archivePresent) await fs.promises.unlink(artifact.archivePath);
+    // Persist retirement before removing the sidecar that links this remote point
+    // to its local copy. A crash after sidecar removal must remain recoverable.
+    await appendRetentionAudit(root, { id, checksum: artifact.checksum, event: 'RETENTION_ARCHIVE_REMOVED' });
+    await fs.promises.unlink(artifact.metadataPath);
+    await appendRetentionAudit(root, { id, checksum: artifact.checksum, event: 'RETENTION_COMPLETED' });
+    audit.push({ id, releaseId: artifact.releaseId, checksum: artifact.checksum, size: artifact.size, reason: 'TWO_VERIFIED_COMPLETE_RECOVERY_POINTS', result: 'DELETED' });
   }
-  if (audit.length) {
-    await fs.promises.appendFile(path.join(root, 'retention-audit.jsonl'), `${audit.map((entry) => JSON.stringify({ at: new Date().toISOString(), ...entry })).join('\n')}\n`, { encoding: 'utf8', mode: 0o600 });
+  const retainedPoints = replacements.map(artifact => ({
+    id: artifact.id, checksum: artifact.checksum, size: artifact.size, createdAt: artifact.createdAt,
+    remotePath: artifact.remotePath, fingerprint: fingerprints.get(artifact.id),
+    metadataPath: artifact.metadataPath,
+    metadataSha256: createHash('sha256').update(metadataSnapshots.get(artifact.metadataPath)!).digest('hex'),
+    onlineDirectoryEvidence: artifact.onlineDirectoryEvidence,
+  }));
+  return {
+    plan, audit, retainedPoints,
+    protectionEvidence: inventory.map(artifact => ({
+      id: artifact.id, metadataPath: artifact.metadataPath,
+    })),
+  };
+};
+
+export const enforceLocalCheckpointRetention = async (
+  root: string, remoteRoot: string, activeDeploymentId: string,
+  remoteRetention: Awaited<ReturnType<typeof enforceFilesystemRemoteRetention>>,
+) => {
+  const points = remoteRetention.retainedPoints;
+  if (points.length !== 2 || new Set(points.map(point => point.id)).size !== 2) return { deletedIds: [] };
+  const localRoot = await fs.promises.realpath(root);
+  const independentRoot = await fs.promises.realpath(remoteRoot);
+  const cutoff = Math.min(...points.map(point => Date.parse(point.createdAt)));
+  const candidates: CheckpointObject[] = [];
+  for (const file of await findMetadataFiles(root)) {
+    try {
+      const value = JSON.parse(await fs.promises.readFile(file, 'utf8')) as CheckpointObject;
+      if (value.id && value.id !== activeDeploymentId && !value.active && !value.incidentOpen
+        && !remoteRetention.plan.keepIds.includes(value.id)
+        && value.remoteVerified && value.releaseId && hasHealthyIndependentCheckpointDrill({ ...value, releaseId: value.releaseId })
+        && Date.parse(value.createdAt) < cutoff && !points.some(point => point.id === value.id)) {
+        candidates.push({ ...value, metadataPath: file });
+      }
+    } catch { /* Unreadable evidence is protected. */ }
   }
-  return { plan, audit };
+  if (!candidates.length) return { deletedIds: [] };
+  for (const point of points) {
+    const metadataFile = await fs.promises.realpath(point.metadataPath);
+    if (!metadataFile.startsWith(`${independentRoot}${path.sep}`)
+      || createHash('sha256').update(await fs.promises.readFile(point.metadataPath)).digest('hex') !== point.metadataSha256) {
+      throw new Error('DEPLOYMENT_LOCAL_RETENTION_REPLACEMENT_EVIDENCE_CHANGED');
+    }
+    if (point.onlineDirectoryEvidence) {
+      await assertOnlineCheckpointDirectoryUnchanged(point.onlineDirectoryEvidence);
+      continue;
+    }
+    const remoteFile = await fs.promises.realpath(point.remotePath);
+    const stat = await fs.promises.lstat(point.remotePath);
+    if (!remoteFile.startsWith(`${independentRoot}${path.sep}`) || !stat.isFile() || stat.isSymbolicLink() || stat.size !== point.size) {
+      throw new Error('DEPLOYMENT_LOCAL_RETENTION_REPLACEMENT_INVALID');
+    }
+    if (point.fingerprint) await assertRemoteCheckpointFingerprint(point.remotePath, point.fingerprint);
+    else {
+      if (await remoteCheckpointChecksum(point.remotePath) !== point.checksum) throw new Error('DEPLOYMENT_LOCAL_RETENTION_REPLACEMENT_INVALID');
+      point.fingerprint = { size: stat.size, mtimeMs: stat.mtimeMs };
+    }
+  }
+  const deletedIds: string[] = [];
+  for (const artifact of candidates) {
+    const archivePresent = await checkpointArchivePresent(localRoot, artifact.archivePath, artifact);
+    for (const file of [artifact.metadataPath]) {
+      const realFile = await fs.promises.realpath(file);
+      const stat = await fs.promises.lstat(file);
+      if (!realFile.startsWith(`${localRoot}${path.sep}`) || !stat.isFile() || stat.isSymbolicLink()) {
+        throw new Error('DEPLOYMENT_LOCAL_RETENTION_PATH_UNSAFE');
+      }
+    }
+    const current = JSON.parse(await fs.promises.readFile(artifact.metadataPath, 'utf8'));
+    if (current.active || current.incidentOpen || current.id !== artifact.id || current.checksum !== artifact.checksum) {
+      throw new Error('DEPLOYMENT_LOCAL_RETENTION_EVIDENCE_CHANGED');
+    }
+    const remoteEvidence = remoteRetention.protectionEvidence.find(point => point.id === artifact.id)
+      || (artifact.remotePath && await hasRetentionEvent(independentRoot, artifact, 'RETENTION_ARCHIVE_REMOVED')
+        ? { id: artifact.id, metadataPath: `${artifact.remotePath}.json` } : undefined);
+    if (!remoteEvidence) throw new Error('DEPLOYMENT_LOCAL_RETENTION_REMOTE_EVIDENCE_MISSING');
+    try {
+      const remotePath = await fs.promises.realpath(remoteEvidence.metadataPath);
+      if (!remotePath.startsWith(`${independentRoot}${path.sep}`)
+        || (await fs.promises.lstat(remoteEvidence.metadataPath)).isSymbolicLink()) {
+        throw new Error('DEPLOYMENT_LOCAL_RETENTION_REMOTE_EVIDENCE_UNSAFE');
+      }
+      const remote = JSON.parse(await fs.promises.readFile(remoteEvidence.metadataPath, 'utf8'));
+      if (remote.id !== artifact.id || remote.checksum !== artifact.checksum) {
+        throw new Error('DEPLOYMENT_LOCAL_RETENTION_REMOTE_EVIDENCE_CHANGED');
+      }
+      if (remote.active || remote.incidentOpen) continue;
+    } catch (error) {
+      // Absence is expected only for an archive actually pruned by this operation.
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT'
+        || (!remoteRetention.audit.some(entry => entry.id === artifact.id && entry.result === 'DELETED')
+          && !await hasRetentionEvent(independentRoot, artifact, 'RETENTION_ARCHIVE_REMOVED'))) throw error;
+    }
+    for (const point of points) {
+      if (createHash('sha256').update(await fs.promises.readFile(point.metadataPath)).digest('hex') !== point.metadataSha256) {
+        throw new Error('DEPLOYMENT_LOCAL_RETENTION_REPLACEMENT_EVIDENCE_CHANGED');
+      }
+      if (point.onlineDirectoryEvidence) await assertOnlineCheckpointDirectoryUnchanged(point.onlineDirectoryEvidence);
+      else await assertRemoteCheckpointFingerprint(point.remotePath, point.fingerprint);
+    }
+    await appendRetentionAudit(root, { id: artifact.id, checksum: artifact.checksum, event: 'RETENTION_INTENT' });
+    if (archivePresent) await fs.promises.unlink(artifact.archivePath);
+    await fs.promises.unlink(artifact.metadataPath);
+    await appendRetentionAudit(root, { id: artifact.id, checksum: artifact.checksum, event: 'RETENTION_COMPLETED' });
+    deletedIds.push(artifact.id);
+  }
+  return { deletedIds };
+};
+
+/** Keep the two newest complete local release checkpoints after a verified capture.
+ * Remote retention remains independently governed by its recovery-drill policy.
+ */
+export const enforceTwoNewestLocalCheckpoints = async (
+  root: string, remoteRoot: string, activeDeploymentId: string,
+) => {
+  const localRoot = await fs.promises.realpath(root);
+  const independentRoot = await fs.promises.realpath(remoteRoot);
+  const artifacts: CheckpointObject[] = [];
+  for (const metadataPath of await findMetadataFiles(localRoot)) {
+    const stat = await fs.promises.lstat(metadataPath);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1) throw new Error('DEPLOYMENT_TWO_LOCAL_METADATA_UNSAFE');
+    const artifact = JSON.parse(await fs.promises.readFile(metadataPath, 'utf8')) as CheckpointObject;
+    if (!artifact.id || !/^[a-zA-Z0-9_-]{1,160}$/.test(artifact.id)
+      || !Number.isFinite(Date.parse(artifact.createdAt))
+      || path.resolve(artifact.metadataPath) !== metadataPath
+      || !artifact.archivePath || path.basename(artifact.archivePath) !== `${artifact.id}.sabrec`
+      || artifact.metadataPath !== `${artifact.archivePath}.json`
+      || !path.resolve(artifact.archivePath).startsWith(`${localRoot}${path.sep}`)) {
+      throw new Error('DEPLOYMENT_TWO_LOCAL_METADATA_INVALID');
+    }
+    artifacts.push(artifact);
+  }
+  if (artifacts.length <= 2) return { deletedIds: [], heldIds: [] };
+  artifacts.sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt) || right.id.localeCompare(left.id));
+  if (new Set(artifacts.map(artifact => artifact.id)).size !== artifacts.length) throw new Error('DEPLOYMENT_TWO_LOCAL_DUPLICATE_ID');
+  const keep = artifacts.slice(0, 2);
+  const remoteFingerprints = new Map<string, RemoteCheckpointFingerprint>();
+  for (const artifact of keep) {
+    if (!artifact.localVerified || !artifact.remoteVerified || !artifact.restoreVerified
+      || artifact.manifest?.packageType !== 'COMPLETE'
+      || !artifact.remotePath || path.basename(artifact.remotePath) !== `${artifact.id}.sabrec`
+      || !artifact.checksum || !artifact.size) {
+      throw new Error('DEPLOYMENT_TWO_LOCAL_REPLACEMENT_UNVERIFIED');
+    }
+    const localArchive = await fs.promises.realpath(artifact.archivePath);
+    const remoteArchive = await fs.promises.realpath(artifact.remotePath);
+    const localStat = await fs.promises.lstat(artifact.archivePath);
+    const remoteStat = await fs.promises.lstat(artifact.remotePath);
+    if (!localArchive.startsWith(`${localRoot}${path.sep}`)
+      || !remoteArchive.startsWith(`${independentRoot}${path.sep}`)
+      || !localStat.isFile() || localStat.isSymbolicLink() || localStat.nlink !== 1
+      || !remoteStat.isFile() || remoteStat.isSymbolicLink() || remoteStat.nlink !== 1
+      || localStat.size !== artifact.size || remoteStat.size !== artifact.size
+      || await sha256File(localArchive) !== artifact.checksum
+      || await remoteCheckpointChecksum(remoteArchive) !== artifact.checksum) {
+      throw new Error('DEPLOYMENT_TWO_LOCAL_REPLACEMENT_INVALID');
+    }
+    remoteFingerprints.set(artifact.id, { size: remoteStat.size, mtimeMs: remoteStat.mtimeMs });
+    const remoteSidecarStat = await fs.promises.lstat(`${artifact.remotePath}.json`);
+    if (!remoteSidecarStat.isFile() || remoteSidecarStat.isSymbolicLink() || remoteSidecarStat.nlink !== 1) {
+      throw new Error('DEPLOYMENT_TWO_LOCAL_REMOTE_SIDECAR_INVALID');
+    }
+    const remoteMetadata = JSON.parse(await fs.promises.readFile(`${remoteArchive}.json`, 'utf8')) as CheckpointObject;
+    if (remoteMetadata.id !== artifact.id || remoteMetadata.checksum !== artifact.checksum
+      || remoteMetadata.size !== artifact.size || !remoteMetadata.remoteVerified) {
+      throw new Error('DEPLOYMENT_TWO_LOCAL_REMOTE_SIDECAR_INVALID');
+    }
+  }
+  const deletedIds: string[] = [];
+  const heldIds: string[] = [];
+  for (const artifact of artifacts.slice(2)) {
+    if (artifact.active || artifact.incidentOpen || artifact.id === activeDeploymentId) {
+      heldIds.push(artifact.id);
+      continue;
+    }
+    if (!path.resolve(artifact.archivePath).startsWith(`${localRoot}${path.sep}`)
+      || path.resolve(artifact.metadataPath) !== path.join(localRoot, path.relative(localRoot, artifact.metadataPath))
+      || !(await fs.promises.lstat(artifact.metadataPath)).isFile()) {
+      throw new Error('DEPLOYMENT_TWO_LOCAL_CANDIDATE_UNSAFE');
+    }
+    const archivePresent = await checkpointArchivePresent(localRoot, artifact.archivePath, artifact);
+    const current = JSON.parse(await fs.promises.readFile(artifact.metadataPath, 'utf8')) as CheckpointObject;
+    if (current.id !== artifact.id || current.checksum !== artifact.checksum || current.active || current.incidentOpen) {
+      throw new Error('DEPLOYMENT_TWO_LOCAL_CANDIDATE_CHANGED');
+    }
+    for (const point of keep) await assertRemoteCheckpointFingerprint(point.remotePath!, remoteFingerprints.get(point.id));
+    await appendRetentionAudit(localRoot, { id: artifact.id, checksum: artifact.checksum, event: 'RETENTION_INTENT', reason: 'TWO_NEWEST_LOCAL' });
+    if (archivePresent) await fs.promises.unlink(artifact.archivePath);
+    await appendRetentionAudit(localRoot, { id: artifact.id, checksum: artifact.checksum, event: 'RETENTION_ARCHIVE_REMOVED', reason: 'TWO_NEWEST_LOCAL' });
+    await fs.promises.unlink(artifact.metadataPath);
+    await appendRetentionAudit(localRoot, { id: artifact.id, checksum: artifact.checksum, event: 'RETENTION_COMPLETED', reason: 'TWO_NEWEST_LOCAL' });
+    deletedIds.push(artifact.id);
+  }
+  return { deletedIds, heldIds };
 };

@@ -1,0 +1,132 @@
+{
+  "format": "sabalan-ticket-06-source-handoff/v1",
+  "issue": 414,
+  "baseCommit": "ae056d6036c62499171f0d91691e1287942e75f7",
+  "baselineSha256": "815a2124aa1973a51d027ca05134a5cbf546ff9f7aa5e83893bdd025ea36c6e8",
+  "baselineFilesVerified": 128,
+  "contextFilesConsumed": 127,
+  "state": "comparison-port-and-matrix-ready-not-integrated-runtime",
+  "productionAdmission": false,
+  "nativeExecution": false,
+  "pushAllowed": false,
+  "sourceFiles": [
+    {
+      "path": "tests/online-deployment/migration-users-acceptance.fixture.mjs",
+      "sha256": "288f648fb8f6cb79199537fb7d091e3ed294525b2d52023e8c34f32054081345"
+    },
+    {
+      "path": "tests/online-deployment/migration-users-acceptance.test.mjs",
+      "sha256": "6217446d3d50d102166338a7f494c03fa87612d208732386a15166d6dffb558b"
+    },
+    {
+      "path": "reports/qa/issue-414-migration-users.md",
+      "sha256": "a15dedadf8690d33fe37c0c63ab311d2bc9b3263b93795a47b534aff79a5416d"
+    },
+    {
+      "path": "reports/qa/issue-414-migration-users.review.md",
+      "sha256": "93296c999c9800b1fc65cc9d280b8e08bbd66770ee1c1fdecf88ace8e922cdcf"
+    }
+  ],
+  "unchangedInputFiles": [
+    {
+      "path": "backend/src/services/onlineMigrationPlan.ts",
+      "sha256": "19d698b89c5be7db9736d72907d0dff4f38dc99a8635489e846fd661728c85db"
+    },
+    {
+      "path": "backend/src/services/onlineReleaseExpansion.ts",
+      "sha256": "a2e4b1d064dd8ee14de9c493e6d1fa05988c87bf9c0d154b241b5d714d3a0292"
+    },
+    {
+      "path": "backend/src/services/restoredQaMigrationBaseline.ts",
+      "sha256": "f709023955521ceb33e0923adc6362234c2532f68af0369a645991f1be4f3def"
+    },
+    {
+      "path": "backend/src/services/deploymentRecoveryDataProof.ts",
+      "sha256": "a845000135010c431a41deddd3050a769abcf823c7e00052da8aff76a83f3afc"
+    },
+    {
+      "path": "backend/src/services/identitySessionService.ts",
+      "sha256": "744e9dcd6b944057f8cdf0514b38d55b1d5e96ea709d67919a084ffc8e8a34ec"
+    },
+    {
+      "path": "backend/src/services/systemRecoveryEngine.ts",
+      "sha256": "cb3504f896ceff6f26ee4e8f22810d728b970f99d199d015bfd8ae3b2b147c96"
+    },
+    {
+      "path": "frontend/src/lib/modelDraft.ts",
+      "sha256": "57c4e10d913d9eda3a02b769727461066ab42f776c48e8e1929a1651c83b5f51"
+    },
+    {
+      "path": "frontend/src/lib/useModelDraftRecovery.ts",
+      "sha256": "6af60b34579c4f28e68b60ae19679144fccf2ca23d0cbf223dbeab82c0d5bb70"
+    }
+  ],
+  "preservedOriginals": {
+    "stagedPatchSha256": "0ba0dd832216df0f2c79a9512f758ead080775591e101d7520e16c135de960a4",
+    "trackedPycSha256": "12e9035aa9ea495505a0a64552910a40b7acf344833a139ec9f80a10c7b4cff9",
+    "stashHead": "cd76a5619acefc35b8003ba6f7e5f0590486a361"
+  },
+  "nodeSuite": {
+    "exitCode": 0,
+    "passed": 42,
+    "skipped": 0,
+    "command": "node --max-old-space-size=512 --test tests/online-deployment/migration-users-acceptance.test.mjs tests/online-deployment/restored-qa-migration-baseline.test.mjs tests/online-deployment/online-release-expansion-join.test.mjs tests/online-deployment/protected-online-bootstrap.test.mjs tests/online-deployment/model-draft-preservation.test.mjs tests/online-deployment/model-draft-hook.test.mjs",
+    "localLog": ".scratch/issue-414-node-tests.txt",
+    "logSha256": "b7d9f8c6a120c0debc14de411c30ddee3946af9093124c6035bf005ebf42a244"
+  },
+  "identitySuite": {
+    "exitCode": 0,
+    "passed": 3,
+    "skipped": 0,
+    "command": "node --max-old-space-size=512 backend/node_modules/tsx/dist/cli.mjs --test backend/src/services/__tests__/requestSessionBinding.test.ts backend/src/services/__tests__/identitySecurityPolicy.test.ts backend/src/services/__tests__/featurePermissionPrerequisites.test.ts",
+    "localLog": ".scratch/issue-414-identity-tests.txt",
+    "logSha256": "a52b4f549334d11e825e11cac44ed4b44a5a59ea16f5c62d193f1060da2d6736"
+  },
+  "custodySuite": {
+    "exitCode": 0,
+    "passed": 5,
+    "command": "python -I -B tests/online-deployment/application-native-migration-custody.test.py",
+    "finiteChildrenNaturallyClosed": true
+  },
+  "architecture": {
+    "command": "npm run architecture:check",
+    "exitCode": 0
+  },
+  "backendTypecheck": {
+    "command": "node --max-old-space-size=3072 backend/node_modules/typescript/bin/tsc --noEmit -p backend/tsconfig.json",
+    "exitCode": 1,
+    "state": "unresolved-installed-Prisma-model-and-workspace-declarations",
+    "examples": [
+      "attendanceTerminal absent from installed Prisma types",
+      "partner-sales-contracts declarations unavailable"
+    ],
+    "runtimeSourceSchemaAndTsconfigChanged": false
+  },
+  "integratedRuntime": {
+    "state": "not-run",
+    "nextMilestones": [
+      10,
+      14
+    ],
+    "consumerIssue": 417,
+    "requires": [
+      "persistent coordinator and existing resource lease",
+      "real COMPLETE restored-data observer",
+      "exclusive SQL/browser window",
+      "current source/catalog freshness"
+    ]
+  },
+  "ownedLiveNativeOriginals": [],
+  "historicalNegativeParentsRetained": true,
+  "independentReview": {
+    "implementationCommit": "ec770281",
+    "standardsFindings": 0,
+    "specFindings": 0,
+    "state": "source-ready-not-integrated-runtime"
+  },
+  "commitHookChecks": {
+    "designSystemCheck": "passed",
+    "designSystemFoundationTests": 25,
+    "architectureCheck": "passed"
+  }
+}

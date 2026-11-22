@@ -29,6 +29,7 @@ export type WorkspacePermission = typeof WORKSPACE_PERMISSIONS[keyof typeof WORK
 
 // Available workspaces
 export const WORKSPACES = {
+  PURCHASING: 'purchasing',
   SALES: 'sales',
   CRM: 'crm',
   HR: 'hr',
@@ -172,7 +173,12 @@ export const extractWorkspace = (req: WorkspaceRequest, res: Response, next: Nex
 export const getUserWorkspaces = async (userId: string, userRole: string): Promise<{ workspace: Workspace; permission: WorkspacePermission }[]> => {
   try {
     const access = await getEffectiveUserAccess(prisma, { userId, userRole });
-    return access.workspaces as Array<{ workspace: Workspace; permission: WorkspacePermission }>;
+    const workspaces = access.workspaces as Array<{workspace: Workspace;permission: WorkspacePermission}>;
+    if (!workspaces.some(w => w.workspace === 'purchasing') && workspaces.some(w => ['sales','inventory'].includes(w.workspace))) {
+      const partner = await prisma.partnerProfile.findUnique({where:{userId},select:{id:true}});
+      if (!partner) workspaces.push({workspace:WORKSPACES.PURCHASING,permission:'view'});
+    }
+    return workspaces;
   } catch (error) {
     console.error('Get user workspaces error:', error);
     return [];

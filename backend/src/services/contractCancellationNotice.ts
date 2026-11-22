@@ -1,3 +1,4 @@
+import { startBackgroundJob } from './backgroundJobLifecycle';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import smsService from './smsService';
 import { getRecoveryRuntimeState, withRecoveryBackgroundWrite } from './recoveryRuntime';
@@ -188,8 +189,6 @@ export function startContractCancellationNoticeDelivery(database: PrismaClient) 
     catch (error) { console.error('Contract cancellation notice scan failed', error); }
     finally { running = false; }
   };
-  void run();
-  const timer = setInterval(() => void run(), 15_000);
-  timer.unref();
   console.info('Contract cancellation notice delivery worker started', { intervalMs: 15_000 });
+  return startBackgroundJob({ name: 'startContractCancellationNoticeDelivery', intervalMs: 15_000, run });
 }

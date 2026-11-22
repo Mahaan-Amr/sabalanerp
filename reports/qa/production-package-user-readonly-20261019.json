@@ -1,0 +1,199 @@
+{
+  "container": {
+    "id": "1db351d1944a61357007bc3107ecfdc9d957a90b3f7d04e97e092f7108531756",
+    "image": "sha256:0772bcd13894be05d54c401134a197ff5906b6c5749fad53ed97de1238ddebaa",
+    "configuredUser": "",
+    "startedAt": "2026-10-18T10:33:39.164573086Z",
+    "status": "running",
+    "health": "healthy"
+  },
+  "probe": {
+    "mainProcessCount": 1,
+    "configuredGlobalPaths": [
+      "/root/.node_modules",
+      "/root/.node_libraries",
+      "/usr/local/lib/node"
+    ],
+    "mainProcessUid": "0",
+    "mainNodePath": null,
+    "mainNodeOptionsSha256": null,
+    "effectiveGlobalPaths": [
+      "/root/.node_modules",
+      "/root/.node_libraries",
+      "/usr/local/lib/node"
+    ],
+    "resolutions": {
+      "/app/package.json:@sabalanerp/contract-product-graph": {
+        "file": "/packages/contract-product-graph/dist/index.js",
+        "sha256": "e11b3367896c71be7766aa85972663f338c5ee5c728d7de83fe80630d7d491d7"
+      },
+      "/app/package.json:@sabalanerp/partner-sales-contracts": {
+        "file": "/packages/partner-sales-contracts/dist/index.js",
+        "sha256": "84ce45c53ebddca60c63793454093109996ef8923beee9156b0987c6a69858c4"
+      },
+      "/packages/partner-sales-contracts/package.json:@sabalanerp/contract-product-graph": {
+        "file": "/packages/contract-product-graph/dist/index.js",
+        "sha256": "e11b3367896c71be7766aa85972663f338c5ee5c728d7de83fe80630d7d491d7"
+      },
+      "/packages/partner-sales-contracts/package.json:@sabalanerp/partner-sales-contracts": {
+        "file": "/packages/partner-sales-contracts/dist/index.js",
+        "sha256": "84ce45c53ebddca60c63793454093109996ef8923beee9156b0987c6a69858c4"
+      }
+    },
+    "paths": {
+      "/app/node_modules/@sabalanerp/contract-product-graph": {
+        "uid": 0,
+        "gid": 0,
+        "mode": "777",
+        "link": "../../../packages/contract-product-graph",
+        "file": false,
+        "directory": false,
+        "sha256": null
+      },
+      "/packages/partner-sales-contracts/node_modules/@sabalanerp/contract-product-graph": {
+        "uid": 0,
+        "gid": 0,
+        "mode": "777",
+        "link": "../../../contract-product-graph",
+        "file": false,
+        "directory": false,
+        "sha256": null
+      },
+      "/packages": {
+        "uid": 0,
+        "gid": 0,
+        "mode": "755",
+        "link": null,
+        "file": false,
+        "directory": true,
+        "sha256": null
+      },
+      "/packages/contract-product-graph": {
+        "uid": 0,
+        "gid": 0,
+        "mode": "755",
+        "link": null,
+        "file": false,
+        "directory": true,
+        "sha256": null
+      },
+      "/packages/contract-product-graph/package.json": {
+        "uid": 0,
+        "gid": 0,
+        "mode": "600",
+        "link": null,
+        "file": true,
+        "directory": false,
+        "sha256": "ee97853770d6e187761e3357be1330ae3e4c3fc4b072e811acf2990810f7e86b"
+      },
+      "/packages/contract-product-graph/dist": {
+        "uid": 0,
+        "gid": 0,
+        "mode": "755",
+        "link": null,
+        "file": false,
+        "directory": true,
+        "sha256": null
+      },
+      "/packages/contract-product-graph/dist/index.js": {
+        "uid": 0,
+        "gid": 0,
+        "mode": "644",
+        "link": null,
+        "file": true,
+        "directory": false,
+        "sha256": "e11b3367896c71be7766aa85972663f338c5ee5c728d7de83fe80630d7d491d7"
+      }
+    }
+  },
+  "nonrootProbe": {
+    "mainProcessCount": 1,
+    "configuredGlobalPaths": [
+      "/home/node/.node_modules",
+      "/home/node/.node_libraries",
+      "/usr/local/lib/node"
+    ],
+    "mainProcessUid": "0",
+    "effectiveGlobalPaths": [
+      "/home/node/.node_modules",
+      "/home/node/.node_libraries",
+      "/usr/local/lib/node"
+    ],
+    "resolutions": {
+      "/app/package.json:@sabalanerp/contract-product-graph": {
+        "error": "MODULE_NOT_FOUND"
+      },
+      "/app/package.json:@sabalanerp/partner-sales-contracts": {
+        "file": "/packages/partner-sales-contracts/dist/index.js",
+        "sha256": "84ce45c53ebddca60c63793454093109996ef8923beee9156b0987c6a69858c4"
+      },
+      "/packages/partner-sales-contracts/package.json:@sabalanerp/contract-product-graph": {
+        "error": "MODULE_NOT_FOUND"
+      },
+      "/packages/partner-sales-contracts/package.json:@sabalanerp/partner-sales-contracts": {
+        "file": "/packages/partner-sales-contracts/dist/index.js",
+        "sha256": "84ce45c53ebddca60c63793454093109996ef8923beee9156b0987c6a69858c4"
+      }
+    },
+    "paths": {
+      "/app/node_modules/@sabalanerp/contract-product-graph": {
+        "uid": 0,
+        "gid": 0,
+        "mode": "777",
+        "link": "../../../packages/contract-product-graph",
+        "file": false,
+        "directory": false,
+        "sha256": null
+      },
+      "/packages/partner-sales-contracts/node_modules/@sabalanerp/contract-product-graph": {
+        "uid": 0,
+        "gid": 0,
+        "mode": "777",
+        "link": "../../../contract-product-graph",
+        "file": false,
+        "directory": false,
+        "sha256": null
+      },
+      "/packages": {
+        "uid": 0,
+        "gid": 0,
+        "mode": "755",
+        "link": null,
+        "file": false,
+        "directory": true,
+        "sha256": null
+      },
+      "/packages/contract-product-graph": {
+        "uid": 0,
+        "gid": 0,
+        "mode": "755",
+        "link": null,
+        "file": false,
+        "directory": true,
+        "sha256": null
+      },
+      "/packages/contract-product-graph/package.json": {
+        "error": "EACCES"
+      },
+      "/packages/contract-product-graph/dist": {
+        "uid": 0,
+        "gid": 0,
+        "mode": "755",
+        "link": null,
+        "file": false,
+        "directory": true,
+        "sha256": null
+      },
+      "/packages/contract-product-graph/dist/index.js": {
+        "uid": 0,
+        "gid": 0,
+        "mode": "644",
+        "link": null,
+        "file": true,
+        "directory": false,
+        "sha256": "e11b3367896c71be7766aa85972663f338c5ee5c728d7de83fe80630d7d491d7"
+      }
+    }
+  },
+  "packageWritableChanges": []
+}

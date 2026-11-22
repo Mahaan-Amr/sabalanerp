@@ -8,6 +8,12 @@ export const getContractSubmissionRecovery = (
   isEditMode: boolean,
   code?: unknown
 ): { nextStep: string; uncertainMutation: boolean } => {
+  if (Number(status) === 409 && code === 'SALES_CONTRACT_VERSION_CONFLICT') {
+    return {
+      nextStep: 'پیش‌نویس خود را نگه دارید و پیش از ذخیره، نسخه ثبت‌شده قرارداد را بررسی کنید.',
+      uncertainMutation: false
+    };
+  }
   if (code === 'contract-item-has-downstream-evidence') {
     return {
       nextStep: 'ردیف قبلی را حفظ و اصلاح کنید؛ برای حذف آن، فرایند اصلاح مرتبط را از حسابداری پیگیری کنید.',

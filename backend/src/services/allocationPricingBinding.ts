@@ -89,6 +89,9 @@ export const assertExactStableReservationTransfer = (
 
 const sortedUnique = (values: string[]) => [...new Set(values)].sort((left, right) => left.localeCompare(right));
 
+const normalizeDestinationDigits = (destination: string) =>
+  destination.replace(/[۰-۹]/g, (digit) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(digit)));
+
 const assertEvidence = (expectedContracts: string[], expectedScope: LockedPricingEvidence['scope'],
   expectedCurrency: string, evidence: LockedPricingEvidence[]) => {
   const actualContracts = sortedUnique(evidence.map((entry) => entry.version.contractId));
@@ -100,7 +103,7 @@ const assertEvidence = (expectedContracts: string[], expectedScope: LockedPricin
       throw new AllocationPricingBindingError('PRICING_SCOPE_MISMATCH', `Contract ${entry.version.contractId} pricing currency changed.`);
     }
     if (entry.scope.customerId !== expectedScope.customerId || entry.scope.projectId !== expectedScope.projectId
-      || entry.scope.destination !== expectedScope.destination) {
+      || normalizeDestinationDigits(entry.scope.destination) !== normalizeDestinationDigits(expectedScope.destination)) {
       throw new AllocationPricingBindingError('PRICING_SCOPE_MISMATCH', `Contract ${entry.version.contractId} pricing destination scope changed.`);
     }
     if (entry.readiness.status !== 'READY' || entry.readiness.reasons.length !== 0) {
@@ -152,6 +155,16 @@ export const bindFinalizedAllocationPricing = async (
       'Post-cutover shipment statement finalization is paused; legacy fallback is forbidden.',
     );
   }
+  return { path: 'ATOMIC_WAYBILL_STATEMENT', ...await bindApprovedAllocationPriceEvidence(port, input) };
+};
+
+/** Shared approved-price evidence writer, without issuing documents or changing
+ * the optional shipment-statement cutover. Numbered sales invoices also need
+ * this evidence when finalizing a new loading on the pre-cutover document path. */
+export const bindApprovedAllocationPriceEvidence = async (
+  port: AllocationPricingBindingPort,
+  input: Parameters<typeof bindFinalizedAllocationPricing>[1],
+): Promise<{ pricingVersionIds: string[]; eventIntegrityHashes: string[] }> => {
   if (input.lines.some((line) => !isPositiveCanonicalQuantity(line.quantity))) {
     throw new AllocationPricingBindingError('PRICED_ALLOCATION_INVALID', 'Finalized allocation quantities must be positive.');
   }
@@ -204,5 +217,5 @@ export const bindFinalizedAllocationPricing = async (
     await port.createPricedEvent({ ...payload, integrityHash });
     hashes.push(integrityHash);
   }
-  return { path: 'ATOMIC_WAYBILL_STATEMENT', pricingVersionIds: references.map((item) => item.pricingVersionId), eventIntegrityHashes: hashes };
+  return { pricingVersionIds: references.map((item) => item.pricingVersionId), eventIntegrityHashes: hashes };
 };

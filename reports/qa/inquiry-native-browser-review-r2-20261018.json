@@ -1,0 +1,25 @@
+{
+  "base": "29f9a837",
+  "sourceHashes": {
+    "deploy/docker/inquiry-native.acceptance.Dockerfile": "19a871ce004667f257d1eb4ce500438ed577e3ff233cec9e651cb9a7cbdd270f",
+    "docker-compose.inquiry-native-acceptance.yml": "210fe191ef949449108748a260fda9413407dd3f64199e604c795a59bb387d44",
+    "scripts/prepare-inquiry-native-image-local.mjs": "ed40590385fde9dbc34e2a947fc10b573277f9f50c802993e2f712bcc9e512d3",
+    "scripts/start-inquiry-native-local.mjs": "60e259b1d661e28f055f47bf0378148b75968ca72e72d9a1fa7e6cdce8e1bf8f",
+    "scripts/retire-inquiry-native-local.mjs": "86bc26520fb1232aeaea3d4970061ec1fb50f53dc451658642cc7831fab5ac84",
+    "scripts/lib/private-docker-image-archive.mjs": "eb46c61e52f3d90b5a480fedb30cedcd8a6bad38b2e060dab4bff42f46ac3788",
+    "tests/online-deployment/private-docker-image-archive.test.mjs": "aa364d4bc7f94f454545587f3b4c14c550b42bb23bfb5fd9cdfc30c100666342",
+    "tests/online-deployment/inquiry-native-browser-smoke.mjs": "65e149b7ffa8fce58450ab0675de78407afd05daf9f113cae3f72d4eb9b6cdf3",
+    "tests/online-deployment/inquiry-native-pause.integration.mjs": "5413bcfce29d000434d6d3872ec1dd709dfd7ea0ff9c3ad4f0170765305de692",
+    "tests/online-deployment/inquiry-sqlite-delay.fixture.py": "889ae195f7e73dce1a6be4b91c3e907bb1958c3297157a4d54a05a04af41f17a",
+    "tests/online-deployment/inquiry-pause-capture.fixture.py": "05e37cb5bd2489f2434cfcbd4eb33b3ee9552712fdedc259eb95fd957f49982e",
+    "tests/online-deployment/inquiry-capture-launch.fixture.py": "9e80b7fd7aa6738a0848beb1a4ad4765243cd6dea5d054b42452f93a9a5da2a2",
+    "tests/online-deployment/inquiry-http-observer.fixture.cjs": "fa93b2da34a87367bc5363e16909a8b33a6a3af12aee4cec59e9320e16b2b268",
+    "tests/online-deployment/inquiry-native-revocation.integration.mjs": "48959a5e16283cea11436410894be973c03e3450dea05a4af4149ad95375aabb"
+  },
+  "positiveEvidence": "reports/qa/inquiry-native-pause-903b768998c1a1682640ae32287d508c-5adfe3f8ed053590.json",
+  "priorNegative": "reports/qa/inquiry-native-pause-70a69106aede20ea2ea3e76a71a1f9ab-1060899cabef6dc6.json",
+  "finalNegativePending": true,
+  "diagnosticImageReceipt": "D:/sabalanerp-online-qa/inquiry-native-image-e0962b77de82d690b3fa9f9781b88e6e/image.json",
+  "coherentApplicationCapture": false,
+  "productionAdmission": false
+}

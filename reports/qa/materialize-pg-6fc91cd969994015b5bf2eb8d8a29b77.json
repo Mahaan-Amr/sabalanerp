@@ -1,0 +1,5 @@
+{
+  "sshExitCode": 1,
+  "stdout": "",
+  "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 44, in <module>\nAssertionError: FOREIGN_SERVICES_CHANGED\n"
+}

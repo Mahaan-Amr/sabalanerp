@@ -2,6 +2,14 @@
 
 Sabalan ERP manages stone inventory, sales contracts, and related pricing data for Sabalan Stone. This glossary defines project-specific business terms so the product and code use the same language.
 
+**متراژ دقیق اسلب در حسابداری و ارسال**:
+مساحت نهایی اسلب که با همان مقدار دقیق توافق‌شده در تأیید مالی، رزرو بارگیری و کنترل ماندهٔ ارسال استفاده می‌شود؛ دقت نمایش، تعداد قطعات و مساحت مصرف سنگ مادر مفاهیم مستقلی هستند و مبلغ توافق‌شده با تغییر نمایش متراژ تغییر نمی‌کند.
+_Avoid_: گردکردن متراژ برای عبور از تأیید مالی، بازقیمت‌گذاری قرارداد از روی مقدار نمایشی، یا یکی‌دانستن مساحت نهایی سفارش با مصرف سنگ مادر
+
+**بازقیمت‌گذاری سیستمی ویرایش فروش همکار**:
+دریافت دوبارهٔ همهٔ نرخ‌های سیستمی برش، ابزار، پرداخت سنگ، نوع لایه و خدمات مستقل هنگام ذخیرهٔ تغییر واقعی محصولات یا خدمات در نسخهٔ تازهٔ قرارداد فروش همکار؛ قیمت دستی مشتری و قیمت سنگِ استعلام سبلان مسیر مستقل خود را حفظ می‌کنند. مشاهده، چاپ، بازیابی یا تغییر صرفِ آدرس، تحویل و پرداخت، نرخ‌های ثبت‌شده را تغییر نمی‌دهد و جزء غیرفعال یا بدون نرخ معتبر تا اصلاح انتخاب، مانع ذخیرهٔ تغییر محصولات یا خدمات است.
+_Avoid_: بازنویسی مبلغ نسخه تاریخی، جایگزینی قیمت دستی مشتری با کاتالوگ، تغییر خودکار قیمت سنگ استعلام، استفاده از نرخ قدیمی برای پنهان‌کردن جزء نامعتبر، یکی‌دانستن ابزار و پرداخت هم‌نام، یا تغییر مبلغ هنگام صرف مشاهده قرارداد
+
 **گیرنده تأیید مشتری قرارداد فروش عادی**:
 شماره موبایل مشتری که درخواست مشخص پذیرش دیجیتال قرارداد برای آن ارسال شده و سابقه همان پذیرش به آن مربوط است؛ این شماره با تغییر بعدی اطلاعات تماس مشتری در CRM عوض نمی‌شود.
 _Avoid_: تمام شماره‌های مشتری، شماره فعلی CRM به‌عنوان هویت پذیرش قبلی، یا شماره مدیر پروژه به‌عنوان امضاکننده قطعی
@@ -1817,8 +1825,8 @@ Layer pieces explicitly allocated from parent or paid remainder add no second ma
 _Avoid_: auto-selecting the parent catalog stone, auto-seeding a catalog price, allowing non-positive new-material price, transferring price to a replacement stone, charging only finished output area, double-charging paid remainder, discarding positive new-stone remainder, mixing operation charges into material price, or hiding requested/consumed/paid-remainder quantities
 
 **نرخ نوع لایه پله**:
-Layer type is selected from inventory and carries one inventory-owned calculation unit and active price that sales cannot change. Ordinary Sales has read-only access to the active layer-type contract catalog—stable identity, display name, price, calculation unit, and active status—without receiving inventory-management access. Partner Sales selects the same type and unit but does not show the type rate as zero or claim a separate Sabalan-approved layer quote: before a valid inquiry response it shows `پس از استعلام`; afterward it may show the frozen `نرخ نوع لایه (کاتالوگ)` separately from the approved Sabalan price for the entire Product row and from the Partner's Customer resale price. A genuinely empty active catalog renders the local blocking state `هیچ نوع لایه فعالی ثبت نشده است؛ با مدیر انبار تماس بگیرید`; a network or server failure renders `دریافت انواع لایه ناموفق بود` with local `تلاش مجدد`. Both preserve the layer draft and block its atomic save without creating an anonymous or zero-rate layer. Selecting a layer type copies its current positive inventory price and calculation unit into the contract layer snapshot; amount is the catalog-unit quantity × that snapshotted price. Sales sees the rate as read-only and cannot negotiate or override it. Edit and explicit layer duplication preserve the saved snapshot, while changing layer type replaces both price and unit from the newly selected active inventory item. If that saved catalog item later becomes inactive or unavailable, edit still renders its saved name, unit, and price with `غیرفعال در کاتالوگ فعلی`; unrelated edits preserve and may resave that historical snapshot. The unit and formatted price render as compact plain facts, never editable or disabled form controls.
-_Avoid_: requiring an inventory-management permission merely to configure a sales layer, exposing an unquoted layer rate or inactive or administrative catalog fields to the Partner, presenting the catalog rate as a separately approved Sabalan quote, collapsing empty, forbidden, and failed catalog states into one silent empty list, discarding the draft on catalog failure, creating an anonymous or zero-rate layer, dropping or blocking a saved inactive historical type, silently replacing it with an active type, repricing a historical snapshot merely because the catalog changed, letting sales enter or override the layer-type price or calculation unit, mutating inventory from a contract, transferring a stale rate to a different layer type, losing the saved price on edit, or rendering read-only price/unit as disabled inputs
+Layer type is selected from inventory and carries one inventory-owned calculation unit and active price that sales cannot change. Ordinary Sales has read-only access to the active layer-type contract catalog—stable identity, display name, price, calculation unit, and active status—without receiving inventory-management access. Partner Sales selects the same type and unit but does not show the type rate as zero or claim a separate Sabalan-approved layer quote: before a valid inquiry response it shows `پس از استعلام`; afterward it may show the frozen `نرخ نوع لایه (کاتالوگ)` separately from the approved Sabalan price for the entire Product row and from the Partner's Customer resale price. A genuinely empty active catalog renders the local blocking state `هیچ نوع لایه فعالی ثبت نشده است؛ با مدیر انبار تماس بگیرید`; a network or server failure renders `دریافت انواع لایه ناموفق بود` with local `تلاش مجدد`. Both preserve the layer draft and block its atomic save without creating an anonymous or zero-rate layer. Selecting a layer type copies its current positive inventory price and calculation unit into the contract layer snapshot; amount is the catalog-unit quantity × that snapshotted price. Sales sees the rate as read-only and cannot negotiate or override it. In Ordinary Sales, edit and explicit layer duplication preserve the saved snapshot, while changing layer type replaces both price and unit from the newly selected active inventory item. If that saved catalog item later becomes inactive or unavailable, edit still renders its saved name, unit, and price with `غیرفعال در کاتالوگ فعلی`; Ordinary Sale unrelated edits preserve and may resave that historical snapshot. Partner Sales retains it for viewing and unchanged product/service intent, but a product/service edit follows بازقیمت‌گذاری سیستمی ویرایش فروش همکار and requires active valid current system rates. The unit and formatted price render as compact plain facts, never editable or disabled form controls.
+_Avoid_: requiring an inventory-management permission merely to configure a sales layer, exposing an unquoted layer rate or inactive or administrative catalog fields to the Partner, presenting the catalog rate as a separately approved Sabalan quote, collapsing empty, forbidden, and failed catalog states into one silent empty list, discarding the draft on catalog failure, creating an anonymous or zero-rate layer, dropping a saved inactive historical type during viewing or blocking its Ordinary Sale historical resave, silently replacing it with an active type, repricing a historical snapshot merely because the catalog changed, letting sales enter or override the layer-type price or calculation unit, mutating inventory from a contract, transferring a stale rate to a different layer type, losing the saved price on edit, or rendering read-only price/unit as disabled inputs
 
 **طول منبع لایه پله**:
 The charged and packed length of stone supplying stair layers. Automatically procured new stone uses the catalog standard/source length, while parent or remaining stone uses its exact saved available length and manually selected warehouse stone uses the explicitly entered available length; finished layer-piece lengths remain based on the stair's actual geometry.
@@ -2205,6 +2213,9 @@ _Avoid_: استفاده از یک مبلغ مشترک برای حقیقت تول
 
 **بازذخیره قیمت‌گذاری حکمی**:
 Opening an existing contract for editing and saving it again applies the current حکمی pricing rule to the saved product rows.
+
+**پیش‌فرض حکمی اجزای پله در فروش همکار**:
+فروش همکار از پیش‌فرض فروش سبلان پیروی می‌کند: خیز و پاگرد با حکمی روشن و درصد ۲۰، کف‌پله با حکمی خاموش و درصد آمادهٔ ۲۰. این پیش‌فرض وابسته به تنظیم عمومی حکمی نیست. انتخاب دستی روشن/خاموش و درصد ذخیره‌شدهٔ هر ردیف مقدم است؛ بازکردن یا تغییر جزء پله، انتخاب دستی را بازنویسی نمی‌کند. قرارداد تاریخی در اثر صرف خواندن دوباره قیمت‌گذاری نمی‌شود.
 _Avoid_: silently changing old saved contract pricing without an edit-save action, or preserving an old paid برش charge after a mandatory row has been edited and saved
 
 **تخفیف قرارداد**:
@@ -2320,7 +2331,7 @@ A permission-scoped Sales report for one seller, with ordinary Sales users fixed
 _Avoid_: giving ordinary Sales users a selector for other sellers, or calculating seller performance from contracts outside the viewer's permitted scope
 
 **مسئول فروش قرارداد**:
-The seller commercially responsible for a Sales Contract, distinct from the user who entered it. A contract converted from a potential project defaults to that project's responsible seller; otherwise it defaults to its creator, and manager-authorized reassignment requires an audit reason.
+The seller commercially responsible for a Sales Contract, distinct from the user who entered it. A contract converted from a potential project defaults to that project's responsible seller; otherwise it defaults to its creator, and authorized reassignment records an audit trail without requiring a written reason. A system administrator may assign an ordinary contract across departments; the current responsible seller can access that contract under their existing Sales permissions, while both departments and historical realized credit remain unchanged.
 _Avoid_: treating technical data entry as sales ownership, silently changing ownership, or losing the CRM project owner during conversion
 
 **ثبت‌کننده قرارداد فروش**:
@@ -2448,8 +2459,8 @@ The permission-scoped record collection represented by an Accounting dashboard c
 _Avoid_: linking an operational metric to an unfiltered register, disabling zero-value drilldown, exposing records outside the viewer's authority, or letting a saved destination silently change the represented population
 
 **حذف پیش‌نویس رکورد مالی**:
-An accounting financial record may be physically deleted only while it is still a draft and has not been financially approved, while keeping an audit trail of the deletion. Issued, posted, financially approved, or otherwise submitted records are not deleted; they are voided or corrected through accounting workflows.
-_Avoid_: deleting financially approved accounting records, or keeping undeletable draft clutter when a new draft should be regenerated
+An accounting financial record may be physically deleted only while it is still an unapproved draft, keeping its deletion audit attached to the old identity and assigning a separate identity to any subsequently created draft. Issued, posted, financially approved, or otherwise submitted records are not deleted; they are voided or corrected through accounting workflows.
+_Avoid_: deleting financially approved accounting records, reusing a deleted draft's identity, treating a fresh draft after deletion as correction of an approved invoice, or keeping undeletable draft clutter when a new draft should be regenerated
 
 **Legacy Accounting-Originated Correction Request**:
 A historical correction request created by Accounting before the Seller-originated Cross-Workspace Duty cutover. Existing active rows may finish through their preserved lifecycle, but no new row may be created through the retired Accounting writer; they are explicitly reported as grandfathered rather than assigned inferred Seller or Accounting actors.
@@ -2665,8 +2676,28 @@ An internal accounting print/PDF version of a sales contract. It removes the bra
 Normal money values in this accounting copy show تومان only, while the final جمع کل فاکتور shows both تومان and the ریال equivalent.
 _Avoid_: using the branded customer-facing header in the accounting copy, removing all contract identity metadata from the accounting copy, hiding the sales account/contract creator, hiding the customer/project identity needed for accounting follow-up, removing payment terms from the accounting copy, removing prices from the accounting copy, showing ریال on every dense table row, or hiding ریال from the final invoice total
 
+**فاکتور فروش ارسالی**:
+سند PDF شماره‌دار برای کل یک بارگیری نهایی‌شده با مشخصات همه راننده‌ها، قابل صدور پیش از خروج گارد و شامل مقدار بارگیری‌شده از ردیف‌های یک یا چند قرارداد با مشتری و طرف‌حساب یکسان و پروژه‌های متفاوت؛ در قرارداد همکار، قیمت فروش سبلان به همکار مبناست. شماره‌گذاری عادی و همکار مشترک و پیوسته از ۱ و بدون بازنشانی سالانه است؛ صدور و ابطال با حسابداری و مشاهده و دانلود برای حسابداری و لجستیک است، همه قراردادهای مبدأ باید دارای رکورد مالی معتبر باشند و صدورش ثبت مالی یا هزینه جدید ایجاد نمی‌کند.
+_Avoid_: یکی‌دانستن شماره این خروجی با شماره قرارداد یا شماره رکورد مالی، یا ترکیب مشتریان و طرف‌حساب‌های متفاوت
+
+**تجدید صدور فاکتور فروش ارسالی**:
+دانلود مجدد فاکتور صادرشده شماره آن را حفظ می‌کند؛ اصلاح آن با ابطال نسخه قبلی و صدور فاکتور با شماره جدید انجام می‌شود و پس از خروج، تکمیل گردش اصلاح ارسال پیش‌نیاز آن است. نسخه باطل‌شده با علامت روشن در سابقه قابل مشاهده و دانلود می‌ماند؛ اقلام و مقدارها فقط از بارگیری می‌آیند و مستقلاً در فاکتور تغییر نمی‌کنند.
+_Avoid_: تخصیص شماره تازه به هر دانلود، یا بازنویسی فاکتور قبلی به جای ابطال و صدور جدید
+
+**بازچاپ فاکتور فروش ارسالی**:
+نسخهٔ قابل دانلود یا چاپ با قالب جاری، از مقدارهای بارگیری و اطلاعات زمان صدور همان فاکتور. شماره، تاریخ، وضعیت و مبالغ فاکتور حفظ می‌شوند و اصل صادرشده در سابقه می‌ماند.
+_Avoid_: تغییر مقدار ثبت‌شدهٔ بارگیری یا استفاده از تعداد و متراژ کل قرارداد برای نمایش مقدار این بار
+
+**آمادگی خروج بارگیری دارای فاکتور فروش ارسالی**:
+خروج هر راننده یک بارگیری، علاوه بر مجوزهای معتبر خروج خودش، به تکمیل تأیید حسابداری همه بخش‌های بارگیری و صدور فاکتور معتبر برای کل آن وابسته است. تا آماده‌شدن کل بارگیری و صدور فاکتور، تأیید مستقل بار یک راننده برای خروج او کافی نیست.
+_Avoid_: خروج بخشی از بارگیری پیش از صدور فاکتور کل، یا جایگزین‌کردن مجوزهای گارد با فاکتور فروش
+
+**قرارداد فروش سنگ برای تولید یا خرید**:
+خروجی PDF حسابداری شامل همه محصولات یک قرارداد دارای رکورد مالی معتبر، برای پیگیری تولید یا خرید، بدون برنامه پرداخت.
+_Avoid_: یکی‌دانستن این خروجی با نسخه اصلی مشتری یا برنامه پرداخت قرارداد
+
 **چاپ نمره کارگاه**:
-A production-facing print/PDF version of a sales contract for workshop execution. It removes the branded/legal customer-facing header and all price-bearing information, but keeps a compact plain metadata row with contract number, contract date, print-time status, customer name only, and project/destination context so workshop sheets can be identified without exposing unnecessary customer or financial details. جدول اصلی محصولات remains the first major section and keeps all non-price production/detail rows, including product rows, سنگ مصرفی, ابزار, خدمات, برش, پرداخت سنگ, and row توضیحات, while removing purely financial total/discount rows. Price columns are removed entirely rather than left blank, and their width is redistributed to شرح، طول، عرض، مقدار/تعداد، and متراژ. It keeps برنامه تحویل with only ردیف، اقلام، متراژ/مقدار، تاریخ تحویل، and توضیحات.
+A production-facing print/PDF version of a sales contract for workshop execution. It removes the branded/legal customer-facing header and all price-bearing information, but keeps a compact plain metadata row with contract number, contract date, print-time status, customer name only, and project/destination context so workshop sheets can be identified without exposing unnecessary customer or financial details. جدول اصلی محصولات remains the first major section and keeps all non-price production/detail rows, including product rows, سنگ مصرفی, ابزار, خدمات, برش, پرداخت سنگ, and row توضیحات, while removing purely financial total/discount rows. Price columns are removed entirely rather than left blank, and their width is redistributed to شرح، طول، عرض، مقدار/تعداد، and متراژ. It keeps برنامه تحویل with ردیف، اقلام، متراژ/مقدار، تاریخ تحویل، and توضیحات, excludes برنامه پرداخت, is available only in Accounting, and requires a currently valid financially approved record for the source Contract.
 _Avoid_: exposing prices, full customer identity details, payment terms, legal text, signatures, تحویل‌گیرنده, financial total/discount rows, or blank price columns in the workshop copy, or making the workshop copy hard to identify when printed
 
 **انتخاب نسخه چاپ در حسابداری**:
@@ -2711,7 +2742,8 @@ _Avoid_: mixing multiple customer projects in one بارگیری, even when the 
 
 **جستجوی پروژه در بارگیری**:
 A logistics project lookup matches the project, address, customer identity, company identity, and contact numbers tied to the customer or project.
-In the new-loading project picker, only projects with at least one positive مانده بارگیری group are shown. Existing draft or historical loading records for a project with no current remaining stay accessible through the loading list for edit, cancellation, or history.
+Partner deliveries appear in the same new-loading picker when searched by the name of the final Customer who owns the Contract and Project. The Partner seller name is not a search field for those deliveries.
+In the new-loading project picker, only projects and deliveries with at least one positive مانده بارگیری group are shown. Existing draft or historical loading records for a project with no current remaining stay accessible through the loading list for edit, cancellation, or history.
 _Avoid_: forcing logistics users to know the project name when the operational clue they have is a phone number, showing non-loadable projects in the new-loading flow, or offering projects for a new loading when logistics has no remaining physical cargo to select
 
 **شروع پیش‌نویس بارگیری**:
@@ -2836,13 +2868,17 @@ A one-time گارد gate movement for a driver/vehicle that should be recorded f
 _Avoid_: cluttering the reusable driver/vehicle registry with every one-time supplier, customer, or visitor movement
 
 **خروج با سواری شخصی مشتری**:
-A lightweight outbound sales movement where the customer takes goods with a personal vehicle. It must be tied to the customer or linked بارگیری/project and must record the exact exit time, without requiring a reusable driver/vehicle pair.
-_Avoid_: forcing customer personal vehicles into the reusable logistics driver/vehicle registry, or requiring freight settlement fields for a customer pickup
+A lightweight outbound sales movement where the customer or their representative takes goods with a personal passenger car, identified in loading as «راننده شخصی» independently of داخلی، بیرونی، and متفرقه; a loading is either entirely personal-car pickup or entirely carried by other drivers. Its customer and source contracts come only from the actual selected allocation rows of this loading, excluding other contracts of the same customer or project, without manually entered driver, phone, or plate details; Partner sales retain both the final Customer and Partner identities, and the physical exit has its own exact recorded time.
+_Avoid_: forcing personal passenger cars into the reusable driver/vehicle registry, treating the customer as necessarily the person behind the wheel, manually re-entering customer or contract identity, or requiring freight settlement fields for this pickup
 
 **Canonical Driver and Vehicle Master Data (supersedes ثبت راننده و خودرو)**:
 Internal-driver eligibility is an HR-owned effective period attached to Personnel. The internal driving profile, licence facts, company vehicles, effective plates, and effective driver–vehicle assignments are independently permissioned Vehicle Operations facts. Guard owns independent external-driver and external-vehicle identities and their lifecycle evidence. A driver and a vehicle are combined only at physical Guard admission, where the queue turn freezes the identities and plate that actually arrived.
 The former `SecurityVehiclePair` registry and its queue admissions are historical source evidence only: they remain readable for prior movements, loadings, photos, and audits, but cannot be created, edited, deleted, photographed, admitted, or selected for any new operation. New master records begin in DRAFT, become operational only after explicit readiness-checked activation, and preserve lifecycle and effective-period history. Company vehicles use DRAFT, ACTIVE, OUT_OF_SERVICE, and ARCHIVED; external drivers and vehicles use DRAFT, ACTIVE, RESTRICTED, and ARCHIVED. Permanent deletion is limited to dependency-free unused drafts.
 _Avoid_: granting HR authority over licence/profile fields, granting Vehicle Operations authority over Personnel eligibility, granting Guard authority over internal Personnel facts, reusing a legacy combined pair for a new queue turn or loading, treating a mutable plate as vehicle identity, or exposing another workspace's audit evidence through a broad master-data permission
+
+**سال ساخت خودروی شرکت**:
+The Solar Hijri year in which a company vehicle was manufactured. It is distinct from the vehicle type and manufacturer.
+_Avoid_: مدل as an ambiguous label for the manufacturing year, treating a model name or trim as a manufacturing year
 
 **زمان خروج فروش**:
 The official outbound sales exit time is the گارد-recorded gate time when the vehicle physically leaves. It is separate from the logistics بارگیری finalization time.
@@ -3062,6 +3098,10 @@ _Avoid_: rewriting the visible meaning of historical attendance, dropping old us
 A login identity for accessing Sabalan ERP. Every system user should be linked to an organizational personnel record, while many personnel records may have no system user.
 _Avoid_: using user accounts as the workforce roster, creating login access just to record operational attendance, or keeping user-only people outside the personnel roster
 
+**نام جاری فرد سازمانی**:
+نام و نام خانوادگی فعلی فرد در پرونده پرسنلی و حساب سامانه متصل او؛ اصلاح نام از هر یک از این دو حوزه به همان فرد مربوط است و نام ثبت‌شده در اسناد تاریخی را جایگزین نمی‌کند.
+_Avoid_: نام مستقل و ناسازگار برای حساب و پرسنل متصل، یکی‌دانستن نام با شناسه ورود، یا تشخیص هویت صرفاً بر اساس تشابه نام
+
 **اتصال کاربر به پرسنل**:
 Creating a system user should default to creating or linking the corresponding organizational personnel from the user's name and department, while also allowing admins to attach the user to an existing personnel record. One personnel record may be linked to at most one system user.
 _Avoid_: creating duplicate personnel when a matching same-department person already exists, forcing a login account for existing non-user personnel, or allowing multiple users to represent the same personnel record
@@ -3156,6 +3196,82 @@ _Avoid_: deriving company attendance from the A/B/C shift plan or workspace acce
 An empty attendance population means no personnel are members of فهرست حضور و غیاب گارد for the selected date. Attendance pages and metrics show no people and guide managers to configure the roster instead of falling back to A/B/C guards, all active personnel, or access-bearing users.
 _Avoid_: calculating attendance from an unconfigured population, silently loading another population, or treating an empty roster as a missing shift plan
 
+**اتصال فرد به دستگاه حضور و غیاب**:
+رابطه مشخص میان هویت فرد در دستگاه حضور و غیاب و پرونده پرسنلی او در سبلان برای انتساب ترددهای دستگاه به همان فرد؛ این رابطه با عضویت در فهرست حضور و غیاب گارد تفاوت دارد.
+_Avoid_: تطبیق قطعی صرفاً از روی نام، یکی‌دانستن کد دستگاه با شناسه پرونده پرسنلی، یا عضویت خودکار در فهرست گارد
+
+**خارج‌کردن فرد از ثبت خودکار حضور و غیاب**:
+متوقف‌کردن ثبت خودکار ترددهای فرد از دستگاه، با حفظ سابقه و امکان ثبت دستی طبق شرایط و مجوزهای گارد؛ این اقدام عضویت او در فهرست گارد را تغییر نمی‌دهد و حضور باز او را نمی‌بندد.
+_Avoid_: حذف پرسنل یا سوابق، حذف کاربر دستگاه، خروج خودکار از فهرست گارد، یا ساختن خروج فرضی
+
+**روز تردد پرسنل دستگاه**:
+روز تقویمی به وقت تهران که برای پرسنل غیرگارد، اولین عبور معتبر ثبت‌نشده آن ورود همان روز است؛ ثبت دستی همان روز نیز در ترتیب عبورها معتبر است. حضور باز روز گذشته با خروج نامعلوم برای اصلاح باقی می‌ماند و به‌تنهایی مانع ورود روز جدید یا تحویل شیفت گارد نیست.
+_Avoid_: خروج فرضی ساعت ۲۳:۵۹، حدس ورود صبح از برنامه کاری، انتقال خودکار کارکرد به روز بعد، یا اعمال این قاعده به حضور دستی خود گارد
+
+**وضعیت اولیه بررسی‌شده حضور**:
+اعلام داخل، بیرون یا نامعلوم بودن فرد در زمان بررسی برای آماده‌سازی آغاز ثبت خودکار؛ این اعلام به‌تنهایی وقوع ورود یا خروج، ساعت آن یا مدت حضور را اثبات نمی‌کند.
+_Avoid_: وضعیت زنده حضور، شاهد اسکن دستگاه، ثبت ورود یا خروج، یا محاسبه کارکرد صرفاً از روی وضعیت اولیه
+
+**بازه استراحت پرسنل**:
+بازه مشترک و تاریخ‌اثردار با ساعت شروع و پایان مشخص که برای شخص دارای تخصیص، بخش واقع در ساعات موظفی را از زمان موظفی و کارکرد عادی کنار می‌گذارد، چه شخص در مجموعه باشد چه بیرون. نبودن در این بخش کسری نیست و استراحت دوباره از مجموع حضور کسر نمی‌شود.
+_Avoid_: مدت ثابت استراحت بدون ساعت شروع و پایان، بازه حضور واقعی، مرخصی شخصی، یا تغییر قاعده روزهای گذشته با ویرایش امروز
+
+**تخصیص استراحت به پرسنل**:
+تعیین تاریخ‌اثردار برخورداری یک شخص از بازه مشترک استراحت یا نداشتن استراحت؛ برای شخص بدون استراحت، بازه مشترک معافیت از ساعات موظفی ایجاد نمی‌کند. داشتن پرونده پرسنلی یا عضویت در فهرست گارد به‌تنهایی بیانگر برخورداری از استراحت نیست.
+_Avoid_: تعمیم استراحت به همه پرسنل، ساعت استراحت مستقل برای هر شخص، اتصال کد دستگاه، یا استنتاج استراحت از نبود اسکن
+
+**تخصیص استراحت تعیین‌نشده**:
+وضعیتی که هنوز برخورداری یا نداشتن استراحت برای شخص تعیین نشده است؛ با انتخاب صریح «بدون استراحت» تفاوت دارد. حضور واقعی قابل ثبت است، اما تا تعیین تکلیف، کارکرد خالص و کسری قطعی آن شخص قابل صدور نیست.
+_Avoid_: پیش‌فرض استراحت برای همه، پیش‌فرض بدون استراحت، استنتاج تخصیص از مقدار گزارش قدیمی، یا مسدودکردن ثبت تردد
+
+**گزارش میان‌روزی کارکرد پرسنل**:
+گزارش غیرنهایی روز کاری پایان‌نیافته که بازه‌های کامل و وضعیت حضور باز را مشخص می‌کند؛ ساعات آینده کسری نیستند و برای بستن حضور جاری، خروج فرضی ایجاد نمی‌شود.
+_Avoid_: کسری کل روز پیش از پایان شیفت، جمع نهایی از بازه باز، یا بازگرداندن تأیید نگهبان برای تردد عادی معتبر
+
+**تعارض مرخصی با حضور واقعی**:
+هم‌پوشانی مرخصی تأییدشده و حضور واقعی معتبر که تا اصلاح مجاز مرخصی، نتیجه نهایی مصرف مرخصی و کسریِ بخش متعارض را معلق می‌کند، بدون حذف حضور معلوم یا لغو خودکار مجوز مرخصی.
+_Avoid_: ثبت قطعی هم‌زمان کارکرد و مصرف مرخصی برای یک دقیقه، حذف شاهد حضور، یا اصلاح بی‌سابقه مرخصی از داخل گزارش
+
+**کارکرد مأموریت پرسنل**:
+بخش مأموریت تأییدشده که ساعات موظفی فرد را بیرون از استراحت تخصیص‌یافته پوشش می‌دهد و کارکرد محسوب می‌شود، بدون آنکه حضور فیزیکی داخل مجموعه تلقی شود. هم‌پوشانی آن با حضور یا مأموریت دیگر، کارکرد دوباره ایجاد نمی‌کند.
+_Avoid_: یادداشت نگهبان بدون تأیید مأموریت، حضور فیزیکی فرضی، یا تبدیل خودکار مأموریت خارج ساعات موظفی به اضافه‌کار قابل پرداخت
+
+**مدت مؤثر مرخصی ساعتی پرسنل**:
+بخش مرخصی ساعتی تأییدشده که ساعات موظفی فرد را خارج از بازه استراحت تخصیص‌یافته پوشش می‌دهد؛ این بخش از کسری غیرموجه معاف است و مصرف مرخصی محسوب می‌شود، اما کارکرد انجام‌شده یا حضور فیزیکی نیست. مرخصی ۱۲:۳۰ تا ۱۴:۳۰ با استراحت تخصیص‌یافته ۱۳ تا ۱۴، شصت دقیقه مصرف مؤثر دارد.
+_Avoid_: مصرف دوباره زمان استراحت، تأیید ضمنی درخواست در انتظار بررسی، یکی‌دانستن مرخصی باحقوق و بی‌حقوق، یا تصمیم خودکار کسر حقوق
+
+**کارکرد و کسری ناقص پرسنل**:
+وضعیتی که بخشی از زمان‌های واقعی ورود یا خروج معلوم نیست و مجموع نهایی کارکرد و کسری قابل تعیین نیست؛ بخش‌های معلوم حفظ می‌شوند و بخش نامعلوم تا رسیدگی، مقدار قطعی نمی‌گیرد.
+_Avoid_: ساعت فرضی از برنامه کاری، صفر قطعی، کسری کامل روز از روی ساعت نامعلوم، یا نامعتبر دانستن ثبت دستی صرفاً به دلیل نبود اسکن
+
+**تردد دستگاه تأییدنشده**:
+وضعیت مدل پیشین برای ورود یا خروج عادی دستگاه که هنوز نگهبان آن را تأیید نکرده بود؛ شاهد تأیید یا عدم تأیید تاریخی آن حفظ می‌شود. در مدل جایگزین توافق‌شده، تردد عادی معتبر به تأیید جداگانه نگهبان وابسته نیست.
+_Avoid_: حذف سابقه تأیید، ساخت تأیید انسانی فرضی، یکی‌دانستن تردد عادی با رویداد مبهم، یا مجوز پرداخت اضافه‌کار
+
+**تردد عادی معتبر دستگاه**:
+ورود یا خروج دستگاه با هویت مشخص، زمان معتبر و ترتیب سازگار که بدون تأیید جداگانه نگهبان قابل استفاده در محاسبه حضور است؛ پذیرش سیستمی آن به معنای تأیید شخص نگهبان نیست.
+_Avoid_: حدس جهت اسکن مبهم، چشم‌پوشی از تعارض یا ساعت نامعلوم، حذف امکان اصلاح حسابرسی‌شده، یا تأیید اضافه‌کار قابل پرداخت
+
+**عدم حضور ثبت‌شده نیازمند تعیین تکلیف**:
+روز کاری پایان‌یافته‌ای که برای شخص شاهد حضور یا ثبت دستی معتبر موجود نیست و واقعیت حضور و مجوزهای آن هنوز تعیین تکلیف نشده است. این وضعیت به‌تنهایی غیبت غیرموجه یا کسری قطعی کامل روز نیست.
+_Avoid_: تبدیل قطعی یا خرابی خوانشگر به غیبت اثبات‌شده، کسری فرضی، یا معافیت خودکار بدون مجوز
+
+**کسری زمانی حضور پرسنل**:
+بخش تعیین‌تکلیف‌شده ساعات موظفی فرد که خارج از استراحت تخصیص‌یافته است و با حضور معتبر، مأموریت یا مرخصی تأییدشده پوشش ندارد؛ تأخیر، خروج زودهنگام و خروج میان‌روزِ هم‌پوشان فقط یک بار در آن شمرده می‌شوند. حضور خارج از برنامه خودکار آن را جبران نمی‌کند و این مقدار به‌تنهایی تصمیم کسر حقوق نیست.
+_Avoid_: کسری خارج از ساعات موظفی، دوباره‌شماری تأخیر، تهاتر خودکار با اضافه‌کار، یا کسری قطعی از زمان و برنامه نامعلوم
+
+**تردد دستگاه نیازمند بررسی**:
+شاهد اسکن دستگاه که جهت، انتساب یا سازگاری آن با حضور موجود هنوز روشن نیست و برای تعیین اثر بر حضور به رسیدگی نگهبان نیاز دارد.
+_Avoid_: خروج فرضی، غیبت قطعی، حذف اسکن مبهم، یا تأیید گروهی بدون رفع ابهام
+
+**خروج فراموش‌شده با ساعت نامعلوم**:
+وضعیت حضور قبلی که خروج فرد از مجموعه مشخص شده، اما زمان واقعی آن معلوم نیست و این نامعلومی با دلیل ثبت شده است؛ ثبت ورود واقعی بعدی ممکن است، ولی مدت حضور قبلی تا تعیین تکلیف نامشخص می‌ماند.
+_Avoid_: حضور باز واقعی فرد داخل مجموعه، ساعت خروج حدسی از برنامه کاری، مدت حضور صفر، یا مسدودکردن ورود واقعی بعدی صرفاً به دلیل نامعلوم‌بودن ساعت خروج قبلی
+
+**ورود فراموش‌شده با ساعت نامعلوم**:
+حضوری که داخل‌بودن فرد تأیید شده، اما زمان واقعی ورود او معلوم نیست؛ خروج بعدی با زمان واقعی قابل ثبت است و مدت آن بازه تا تعیین زمان ورود نامعلوم می‌ماند.
+_Avoid_: غیبت قطعی، وضعیت اولیه آماده‌سازی، ساخت ساعت ورود از برنامه کاری، یا محاسبه مدت قطعی از یک بازه ناقص
+
 **ثبت ورود تکراری در حضور و غیاب گارد**:
 When گارد records ورود for a person and that same person already has an entry time for the selected attendance date, the operation should behave as a successful idempotent action and return the existing attendance truth to the operator. The visible daily list should then show the existing حاضر record instead of leaving the person as غایب.
 _Avoid_: showing English duplicate errors to operators, treating a successful earlier ورود as a failed action, or displaying غایب for a person whose same-day ورود already exists
@@ -3165,7 +3281,7 @@ _Avoid_: showing English duplicate errors to operators, treating a successful ea
 _Avoid_: forcing a separate manual-entry mode, blocking forgotten attendance correction, or allowing silent backdated times without a reason
 
 **حضور باز روز قبل**:
-If a person has an older attendance record with ورود and no خروج, گارد must close that previous record with an explicit خروج time and reason before registering a new ورود for a later date. The system should surface this open previous attendance state instead of silently creating a new day entry or auto-filling the old exit.
+If a person has an older attendance record with ورود and no خروج, گارد must resolve whether the person is still inside or has an unrecorded exit before registering a new ورود for a later date. A known exit is recorded with its real time and reason; a confirmed departure with genuinely unknown time is explicitly recorded as خروج فراموش‌شده با ساعت نامعلوم, permitting the next real entry while keeping the earlier duration unknown. The system surfaces the unresolved state instead of silently creating a new day entry or auto-filling the old exit.
 _Avoid_: overwriting yesterday's record with today's action, creating automatic خروج without operator confirmation, or allowing overlapping open attendance records for the same person
 
 **ساعت کاری پرسنل**:
@@ -3300,6 +3416,10 @@ _Avoid_: editing an approved request in place, deleting approved leave or its op
 **Security Leave Consequence**:
 The operational staffing and attendance effect that Security derives automatically from an approved Leave Request. The approved result is shared data, not itself a Cross-Workspace Duty; only a concrete coverage gap creates a structured Security duty to arrange replacement coverage.
 _Avoid_: letting Security own the Leave Request or its HR approval policy, creating a duty for every approved leave, or leaving a real coverage gap without an accountable action
+
+**Repeated Attendance Scan**:
+A second device scan attributed to the same person shortly after an accepted scan in the same attendance day. Its source evidence is retained without recording another entry or exit.
+_Avoid_: treating a repeated scan as another movement or deleting its source evidence
 
 **Attendance Exception**:
 An operational discrepancy or correction concerning recorded presence, such as a missing entry, late arrival, early departure, or absence correction. It is distinct from a Leave Request even when approved leave explains the discrepancy.
@@ -4980,15 +5100,15 @@ The Vehicle Operations driving profile of one HR Personnel identity that is elig
 _Avoid_: duplicating Personnel as a driver, treating eligibility as a vehicle assignment, or allowing Vehicle Operations to redefine HR identity
 
 **Internal Driver Eligibility**:
-The non-overlapping, effective-dated HR authority for an active Personnel identity to drive for Sabalan; suspension or withdrawal closes the current period with a reason, and reinstatement creates a new period.
+The non-overlapping, effective-dated HR authority for an active Personnel identity to drive for Sabalan; suspension or withdrawal closes the current period with automatically recorded action evidence, and reinstatement creates a new period. Suspension prevents driving but does not itself end the driver's vehicle assignment; these HR actions require no manually entered reason.
 _Avoid_: a mutable eligibility flag, overwriting earlier eligibility, granting eligibility through Vehicle Operations, or deleting used periods
 
 **Internal Driver Profile**:
-The single stable Vehicle Operations record for an Internal Driver Identity, holding licence and operational driving details without duplicating Personnel identity. Current readiness is derived from active Personnel, current Internal Driver Eligibility, profile completeness, and licence validity; a used profile remains historical rather than being deleted.
+The single stable Vehicle Operations record for an Internal Driver Identity, established from existing Personnel and holding editable licence and operational driving details without duplicating Personnel identity. Incomplete licence information may be saved as a draft with the missing requirements visible; current readiness is derived from active Personnel and employment, valid HR eligibility, complete and valid licence information, explicit profile activation, and a current assignment to a ready company vehicle, while ending driving activity preserves the Personnel record and all driving history.
 _Avoid_: a second personnel record, a manually asserted ready status, storing HR eligibility on the profile, or deleting a profile referenced by operations
 
 **External Driver Identity**:
-The reusable Guard-managed identity of a non-personnel driver, independent of any vehicle used on a particular visit.
+The reusable identity of a non-personnel driver, independent of any vehicle, shared by Human Resources Vehicle Operations and Guard under the same operation-specific permissions as internal drivers, without an additional external-driver access level.
 _Avoid_: embedding the external driver inside a permanent driver-vehicle pair, creating a new identity for every arrival, or treating an external driver as HR Personnel
 
 **Driver Source Continuity**:
@@ -5004,11 +5124,11 @@ A company vehicle progresses from `DRAFT` to `ACTIVE`, may temporarily become `O
 _Avoid_: queueing incomplete or unavailable vehicles, ending an assignment solely for temporary repair, hard-deleting operational history, or showing archived vehicles in ordinary active lists
 
 **External Vehicle Identity**:
-The reusable Guard-managed identity of a non-company vehicle, independent of the external driver using it on a particular visit.
+The reusable identity of a non-company vehicle, independent of its driver, shared by Human Resources Vehicle Operations and Guard under the same operation-specific permissions as company vehicles, without an additional external-vehicle access level.
 _Avoid_: embedding the external vehicle inside a permanent driver-vehicle pair, creating a duplicate for each driver, or treating it as a company vehicle
 
 **External Driver and Vehicle Lifecycle**:
-A Guard-managed external driver or vehicle progresses from incomplete `DRAFT` to `ACTIVE`, may be temporarily `RESTRICTED` with accountable effective-dated evidence, and may be removed from ordinary use as restorable `ARCHIVED`; only an unused, dependency-free `DRAFT` may be permanently deleted. Queue readiness additionally requires complete, current identity and documents, so expiry makes readiness false without silently changing lifecycle state.
+An external driver or vehicle progresses from incomplete `DRAFT` to `ACTIVE`, may be temporarily `RESTRICTED`, and may be removed from ordinary use as restorable `ARCHIVED`, with automatically recorded actor, time, and change evidence and no manually entered reason; only an unused, dependency-free `DRAFT` may be permanently deleted. Queue readiness additionally requires complete, current identity and documents, so expiry makes readiness false without silently changing lifecycle state.
 _Avoid_: using one active flag for different meanings, hiding restrictions, mutating lifecycle on document expiry, queueing an unready record, or deleting operationally used identities
 
 **Vehicle Plate Registration**:
@@ -5020,8 +5140,56 @@ The explicit relationship that joins independent driver and vehicle identities f
 _Avoid_: a mutable combined driver-vehicle identity, overwriting assignment history, or inferring a historical pairing from current records
 
 **Internal Driver-Vehicle Assignment**:
-The effective-dated Vehicle Operations association between one Internal Driver Profile and one Company Vehicle Identity. At any instant each driver and each vehicle has at most one active assignment; periods cannot overlap on either side, reassignment closes the prior assignment with a reason, and future non-overlapping periods may be scheduled.
+The effective-dated Vehicle Operations association between one Internal Driver Profile and one Company Vehicle Identity. At any instant each driver and each vehicle has at most one active assignment; periods cannot overlap on either side, reassignment closes the prior assignment with automatically recorded action evidence rather than a manually entered reason, and future non-overlapping periods may be scheduled. Transferring an assigned vehicle makes the affected drivers and vehicles explicit before confirmation; selecting the existing driver–vehicle pairing creates no duplicate assignment history.
 _Avoid_: concurrent active assignments for either identity, mutating an assignment into a different pairing, overwriting substitution history, or rejecting valid future scheduling
+
+**External Driver-Vehicle Assignment**:
+The effective-dated association between one External Driver Identity and one External Vehicle Identity, with at most one active assignment on either side and the same transfer, ending, future scheduling, and open-dispatch continuity rules as internal assignments. Admission uses the driver's currently assigned external vehicle; internal-to-external and external-to-company assignments are excluded, and changes preserve automatically recorded action history without a manually entered reason.
+_Avoid_: selecting an unrelated vehicle at admission, overlapping assignments, mixed-source assignments, or replacing independent driver and vehicle identities with a combined record
+
+**External Driver Driving Authorization**:
+The shared operational authority of a non-personnel driver, managed by authorized external-driver managers in Human Resources Vehicle Operations or Guard and shown with licence and biometric evidence in the driver's independent dossier. Suspension immediately blocks subsequent dispatch steps that require driving authorization without creating Personnel or erasing prior operational evidence.
+_Avoid_: requiring a Personnel identity for an external driver, separate conflicting authorization states per workspace, or continuing authorization-dependent dispatch after suspension
+
+**پایان تخصیص خودرو**:
+پایان‌دادن به رابطه تخصیص راننده و خودروی شرکت از زمان اثر مشخص، با حفظ سابقه آن رابطه و هویت مستقل راننده و خودرو؛ این عمل مستقل از تخصیص خودروی جایگزین است و هنگام پایان فعالیت راننده یا بایگانی خودرو نیز با تأیید اثر آن انجام می‌شود.
+_Avoid_: حذف سابقه تخصیص، حذف راننده یا خودرو به‌جای پایان رابطه، یا الزام به انتخاب خودروی جایگزین برای پایان تخصیص
+
+**برنامه تخصیص آینده خودرو**:
+رابطه راننده و خودروی شرکت که زمان شروع آن هنوز نرسیده و پیش از شروع قابل تغییر یا لغو با حفظ سابقه است؛ پس از شروع، تغییر خودرو و پایان تخصیص معنای مستقل دارند. تغییر جاری یا بایگانی، برنامه‌های متعارض آینده را بدون تصمیم صریح کاربر لغو نمی‌کند.
+_Avoid_: حذف سابقه برنامه لغوشده، لغو پنهانی برنامه آینده، یا ویرایش تخصیص شروع‌شده به‌عنوان برنامه آینده
+
+**برنامه تخصیص نیازمند رسیدگی**:
+برنامه‌ای که در موعد شروع یا پایان به‌دلیل عملیات باز یا برقرارنبودن شرایط راننده یا خودرو اجرا نشده است؛ رابطه قبلی خودکار پایان نمی‌یابد و اجرای تغییر پس از رفع مانع، با تأیید کاربر و از لحظه واقعی اقدام انجام می‌شود.
+_Avoid_: انتقال یا پایان خودکار با وجود مانع، اجرای پنهانی برنامه عقب‌افتاده، یا ثبت اجرای دیرهنگام با زمان اثر گذشته
+
+**بازگردانی راننده یا خودروی بایگانی‌شده**:
+بازگشت پرونده موجود به وضعیت پیش‌نویس برای بررسی دوباره شرایط فعال‌سازی، بدون بازکردن خودکار تخصیص‌های پایان‌یافته؛ صلاحیت منابع انسانی و اعتبار گواهینامه راننده مستقل از بازگردانی بررسی می‌شوند.
+_Avoid_: فعال‌سازی خودکار با بازگردانی، ایجاد هویت تکراری، یا احیای خودکار تخصیص قبلی
+
+**اصلاح مشخصات خودروی شرکت**:
+تصحیح مشخصات ثبت‌شده همان خودروی واقعی، از جمله نوع، سازنده، مدل، سال ساخت، کد ناوگان، شماره شاسی و توضیحات، با حفظ سابقه تغییر و بدون الزام ورود دستی دلیل؛ جایگزینی با یک خودروی واقعی دیگر نیازمند هویت جداگانه است و تغییر پلاک معنای مستقلی دارد.
+_Avoid_: تبدیل هویت یک خودروی واقعی به خودروی دیگر، بازنویسی مشخصات ثبت‌شده در ارسال‌های قبلی، یا ادغام اصلاح مشخصات با تغییر پلاک
+
+**پایان فعالیت رانندگی**:
+پایان صلاحیت رانندگی، بایگانی پروفایل راننده و پایان تخصیص جاری او در یک اقدام، همراه لغو صریح برنامه‌های آینده در نتیجه تأییدشده؛ پرونده پرسنل، رابطه استخدامی و همه سوابق باقی می‌مانند و مجوز هر بخش از اقدام مستقل است.
+_Avoid_: حذف پرونده پرسنل، پایان رابطه استخدامی به‌جای نقش رانندگی، بایگانی پروفایل با باقی‌گذاشتن صلاحیت جاری، یا دورزدن مجوز صلاحیت و تخصیص با مجوز بایگانی
+
+**سابقه خودکار اقدامات رانندگی و ناوگان شرکت**:
+سابقه قابل‌پیگیری اقدامات دو بخش رانندگان و خودروهای شرکت و صلاحیت رانندگی پرسنل که اقدام‌کننده، زمان و تغییر انجام‌شده را بدون الزام ورود دستی دلیل نگه می‌دارد.
+_Avoid_: اجبار کاربر به نوشتن دلیل در این دو بخش، حذف سابقه همراه حذف فیلد دلیل، یا تعبیر شرح خودکار اقدام به‌عنوان توضیحی که کاربر ارائه کرده است
+
+**تغییر فوری وضعیت رانندگی و تخصیص**:
+تغییری که از لحظه دقیق ثبت اثر می‌گیرد و امکان چند تغییر مستقل در یک روز را با حفظ ترتیب و سابقه فراهم می‌کند؛ ثبت عادی آن به گذشته برنمی‌گردد و برنامه‌ریزی تخصیص آینده معنای مستقلی دارد.
+_Avoid_: یکسان‌گرفتن روز تقویمی با لحظه تغییر، بازنویسی وضعیت‌های قبلی، یا اعمال تغییر فوری به‌عنوان اصلاح سابقه گذشته
+
+**مانع عملیات باز در تغییر تخصیص**:
+وجود عملیات گارد یا ارسال تعیین‌تکلیف‌نشده برای هر راننده یا خودروی متأثر که تغییر خودرو، پایان تخصیص، پایان فعالیت راننده یا بایگانی خودرو را تا تعیین تکلیف آن متوقف می‌کند؛ این مانع جلوی تعلیق فوری صلاحیت را نمی‌گیرد، ولی پس از تعلیق ادامه مراحل نیازمند صلاحیت مجاز نیست و پرونده خودکار حذف یا لغو نمی‌شود.
+_Avoid_: انتقال خودرو بدون بررسی همه طرف‌های متأثر، تعویق تعلیق صلاحیت به‌دلیل عملیات باز، یا تغییر خودکار سابقه و ترکیب راننده و خودرو در عملیات قبلی
+
+**اصلاح اطلاعات راننده و خودرو در عملیات باز**:
+اصلاح مشخصات معمول خودرو یا اطلاعات گواهینامه در جریان ارسال، با حفظ تصویر ثبت‌شده در عملیات قبلی، مجاز است؛ تغییر پلاک تا تعیین تکلیف عملیات باز متوقف می‌ماند و اصلاح گواهینامه بلافاصله بر آمادگی جاری و امکان ادامه مراحل نیازمند صلاحیت اثر دارد.
+_Avoid_: بازنویسی اطلاعات ارسال قبلی، تغییر پلاک در عملیات باز، یا ادامه مراحل نیازمند صلاحیت پس از مشخص‌شدن نقص یا انقضای گواهینامه
 
 **Guard Driver Queue Turn**:
 One immutable, time-ordered admission of the driver and vehicle physically presented to Guard for loading, retaining their source identities, the applicable internal assignment when relevant, and an admission snapshot. Later identity or assignment edits never rewrite the turn; eligibility is revalidated before loading-area entry and Logistics reservation, and an invalid turn is removed with accountable evidence rather than mutated.
@@ -5032,7 +5200,7 @@ The cross-workspace correlation identity anchored to one Guard Driver Queue Turn
 _Avoid_: creating a second cross-workspace source-of-truth record, using a replaceable waybill number as the journey identity, merging repeat visits, or losing superseded evidence from the case timeline
 
 **Supported Driver-Vehicle Admission Classes**:
-Guard admits either an Internal Driver Identity with the Company Vehicle Identity from its current active assignment, or an External Driver Identity with an External Vehicle Identity combined for that visit. Mixed-source pairings require a separately designed temporary-authorization model and are outside the current dispatch flow.
+Guard admits either an Internal Driver Identity with the Company Vehicle Identity from its current active assignment, or an External Driver Identity with the External Vehicle Identity from its current effective assignment. Mixed-source pairings require a separately designed temporary-authorization model and are outside the current dispatch flow.
 _Avoid_: internal drivers with external vehicles, external drivers with company vehicles, bypassing an active internal assignment, or inventing an implicit mixed-source exception
 
 **Dispatch Evidence Snapshot Chain**:
@@ -5088,12 +5256,16 @@ _Avoid_: logging only successful commands, overwriting audit rows, omitting effe
 The HR-owned act of creating or replacing the encrypted reusable fingerprint template and encrypted Fingerprint Capture Image for an actively eligible Internal Driver Identity; failed or cancelled enrollment leaves the prior valid enrollment unchanged and creates no dispatch fallback authority. Ending eligibility or deactivating the enrollment disables matching without erasing its attached images or accountable transaction history.
 _Avoid_: enrolling an ineligible person, treating an enrollment attempt as waybill confirmation, using driver OTP to bypass enrollment, replacing a valid template after a failed scan, or deleting transaction history when matching is disabled
 
+**External Driver Biometric Enrollment**:
+The protected two-finger enrollment of one independently identified non-personnel driver with active driving authorization and valid licence facts, using the same capture, matching, image-access, and controlled failure workflow as internal drivers under the same operation permissions. Suspension or deactivation disables matching while retaining protected images and accountable history.
+_Avoid_: creating Personnel for a scanner, a separate external-biometric access level, OTP-only ordinary confirmation, or relabelling internal enrollment evidence
+
 **Biometric Enrollment Attempt**:
-The limited-time HR operation that collects two distinct accepted fingers for one Internal Driver Identity before creating an Internal Driver Biometric Enrollment. An accepted first finger remains provisional while the second is retried; expiry or abandonment creates no active enrollment or dispatch confirmation authority.
+The limited-time authorized operation that collects two distinct accepted fingers for one internal or external driver identity before creating its biometric enrollment. An accepted first finger remains provisional while the second is retried; expiry or abandonment creates no active enrollment or dispatch confirmation authority.
 _Avoid_: calling a provisional finger a saved enrollment, combining fingers from different attempts, or treating a successful scanner response as completed enrollment
 
 **Fingerprint Capture Image**:
-The encrypted PNG captured with one enrolled finger and permanently attached to that finger's Internal Driver Biometric Enrollment under its Personnel identity. Authorized HR enrollment operators may view it through an audited, non-cacheable response; it is not the reusable matching template and never belongs to a login User.
+The encrypted PNG captured with one enrolled finger and permanently attached to that driver's biometric enrollment under its Personnel-linked internal identity or independent external identity. Authorized enrollment operators may view it through an audited, non-cacheable response; it is not the reusable matching template and never belongs to a login User.
 _Avoid_: calling the image a template, attaching it to a User account, placing image bytes in logs or JSON evidence, or silently deleting it when an enrollment is deactivated
 
 **Internal Driver Biometric Fallback**:
@@ -5117,8 +5289,8 @@ The three-level authority model in which workspace `view` exposes ordinary redac
 _Avoid_: treating workspace access as unrestricted evidence access, requiring workspace administration for every routine command, or using a feature grant to bypass transaction invariants
 
 **External Driver Waybill Confirmation**:
-The confirmation of one exact Accounting Dispatch Waybill through driver OTP plus a fresh Guard identity approval bound to the same confirmation session. Guard may approve remotely from its workspace, but admission-time identity evidence alone is insufficient and no authorization exists until both factors succeed in the live session.
-_Avoid_: reusing Guard admission as confirmation, accepting OTP alone, requiring Guard's physical presence in Accounting, or combining evidence from different sessions
+The confirmation of one exact Accounting Dispatch Waybill by an External Driver Identity through the same live biometric workflow as an internal driver, using an independent non-personnel biometric enrollment. A qualifying biometric failure permits the same controlled OTP and separate Guard approval fallback, with its mandatory exception reason; admission-time evidence alone grants no confirmation authority.
+_Avoid_: reusing Guard admission as confirmation, accepting OTP without qualifying biometric failure and separate Guard approval, creating Personnel for biometric enrollment, or combining evidence from different sessions
 
 **Dispatch Exit Authorization**:
 The single-use authority created by a successful driver confirmation for one Accounting Dispatch Waybill, valid for 12 hours by default, with lifecycle `ACTIVE` to terminal `CONSUMED`, `EXPIRED`, or `REVOKED`; every reconfirmation creates a new authorization. Accounting or Guard may revoke it for a recorded operational or identity concern without changing a correct waybill, while incorrect waybill facts require voiding and replacement.
@@ -5306,6 +5478,10 @@ _Avoid_: حد مشترک یا عدد پیش‌فرض مثبت برای همه خ
 فاصله مجموع مقدار اجرای یک قلم ابزار یا پرداخت سنگ تا حداقل تعریف‌شده آن؛ ردیف‌های محصول و انتخاب عملیات در زمان کسری حفظ می‌شوند، ولی تکمیل قرارداد به رفع کسری یا کنارگذاشتن آن عملیات وابسته است.
 _Avoid_: جلوگیری از ذخیره هر ردیف محصول، حذف خودکار انتخاب عملیات پس از کاهش مقدار، یا کسری مقدار سنگ
 
+**ادامه اصلاح تأییدشده قرارداد همکار**:
+بازگشت به آخرین مرحله معتبرِ طی‌شده در همان درخواست اصلاح؛ مرور اولیه درخواست تازه از تاریخ قرارداد آغاز می‌شود و ادامه آن، اطلاعات محصول، تحویل و پرداخت را حفظ می‌کند.
+_Avoid_: شروع دوباره مرور اولیه پس از هر وقفه، تأیید خودکار نسخه تازه، یا معتبر دانستن برنامه ناسازگار تحویل و پرداخت
+
 **تطبیق ابزار دریافت قدیمی**:
 ثبت تغییرناپذیرِ اجزای واقعی یک دریافت موجود و سهم هر جزء از مصرف و استرداد قبلی، با حفظ اصل دریافت و اصلاحاتش؛ این کار دریافت، درآمد یا اعتبار مشتری را تکرار نمی‌کند. جای دارایی ابزار و بخش وصول‌شده از اسناد معتبر همان دفتر تطبیق می‌یابد و مصرف ابزارهای تأییدشده پیش از تاریخ تطبیق مجاز نیست.
 _Avoid_: دریافت تازه فرضی، بازنویسی رسید قطعی، حذف تاریخچه، حدس سهم چک یا انتقال همه مبلغ چک دارای وصول جزئی به معین ابزار
@@ -5313,3 +5489,334 @@ _Avoid_: دریافت تازه فرضی، بازنویسی رسید قطعی، �
 **بازگشت چک مشتری از گیرنده**:
 رویداد هماهنگ بازگشت حضانتِ چک خرج‌شده و بازگشایی بدهی یا پیش‌پرداخت همان گیرنده نزد مالک پرداختنی؛ اعتبار و تخصیص‌های مشتری اولیه پابرجا می‌مانند تا عدم پرداخت بانک جداگانه مستند شود.
 _Avoid_: واخواست بانکی، ساخت دوباره بدهی مشتری، دریافت دوباره چک یا حذف سابقه واگذاری قبلی
+
+**ادامه اصلاح تأییدشده قرارداد همکار**:
+بازگشت به آخرین مرحله معتبرِ طی‌شده در همان درخواست اصلاح؛ مرور اولیه درخواست تازه از تاریخ قرارداد آغاز می‌شود و ادامه آن، اطلاعات محصول، تحویل و پرداخت را حفظ می‌کند.
+_Avoid_: شروع دوباره مرور اولیه پس از هر وقفه، تأیید خودکار نسخه تازه، یا معتبر دانستن برنامه ناسازگار تحویل و پرداخت
+
+### دسته‌بندی فعالیت مشتری
+
+**دسته‌بندی فعالیت مشتری**:
+مشخصه‌ای مستقل از نوع حقیقی، حقوقی، دولتی یا همکاری و مستقل از اعتماد اعتباری عادی یا خاص، برای معرفی مشتری به‌عنوان سازنده معتبر، معمار یا هیچ‌کدام در فروش سبلان و فروش همکار؛ هر مشتری تازه دقیقاً یکی از این گزینه‌ها را با انتخاب صریح دارد. این مشخصه صرفاً برای معرفی و نمایش است و اعتبار، قیمت یا دسترسی ایجاد نمی‌کند.
+_Avoid_: نوع شخصیت مشتری، اعتماد اعتباری مشتری، یا انتخاب پیش‌فرض به‌جای اعلام کاربر
+
+**سازنده معتبر در دسته‌بندی فعالیت مشتری**:
+مشتری‌ای که کاربر مجاز او را در دسته سازنده معتبر قرار داده و با برچسب «سازنده» معرفی می‌شود؛ این انتخاب نیازمند تأیید جداگانه مدیر نیست و به معنای اعطای اعتبار مالی نیست.
+_Avoid_: مشتری خاص اعتباری، تضمین پرداخت، یا تأیید مدیریتی ضمنی
+
+**دسته‌بندی فعالیت تعیین‌نشده مشتری**:
+وضعیت مشتری قبلی که هنوز هیچ‌یک از گزینه‌های دسته‌بندی فعالیت برای او انتخاب نشده است؛ تعیین یکی از گزینه‌ها هنگام ویرایش مشخصات او الزامی است.
+_Avoid_: هیچ‌کدام، عادی اعتباری، یا انتساب خودکار دسته بر اساس نبود اطلاعات
+
+**هیچ‌کدام در دسته‌بندی فعالیت مشتری**:
+انتخاب صریح برای مشتری‌ای که در گروه سازنده معتبر یا معمار قرار ندارد، از جمله مالک مصرف‌کننده، فروشگاه یا واسطه؛ این انتخاب معتبر، بدون برچسب فعالیت در فهرست و صفحه مشتری نمایش داده می‌شود.
+_Avoid_: دسته‌بندی تعیین‌نشده، مشتری عادی اعتباری، یا محدودکردن این گروه به مصرف‌کننده نهایی
+
+### خرید سبلان از تأمین‌کننده
+
+**نیاز خرید سبلان**:
+نیاز به تأمین سنگ یا محصول قابل فروش از تأمین‌کننده بیرونی برای سفارش مشخص مشتری یا موجودی انبار؛ علت نیاز مستقل از ایجادکننده درخواست است. دامنه اصلی فضای کاری خرید، این اقلام است.
+_Avoid_: خرید فروشنده همکار از سبلان، یا یکی‌دانستن علت خرید با نقش درخواست‌کننده
+
+**سهم نیاز در خرید سبلان**:
+مقدار مشخص از یک ردیف خرید که به سفارش مشتری یا نیاز انبار منتسب است؛ یک خرید می‌تواند چند نیاز را پوشش دهد و سهم هر نیاز را جداگانه حفظ کند.
+_Avoid_: انتساب مبهم کل خرید به یک قرارداد، یا گم‌شدن سهم انبار در خرید تجمیعی
+
+**درخواست به ابتکار مسئول خرید**:
+درخواست تأمین برای مجموعه که مسئول خرید به تشخیص خود ایجاد می‌کند؛ این عنوان منشأ ایجاد درخواست است و به‌تنهایی علت خرید یا اختیار تأیید آن را تعیین نمی‌کند.
+_Avoid_: خرید شخصی کارکنان، یا مجوز ضمنی قطعی‌کردن خرید صرفاً به دلیل ایجاد درخواست
+
+**سفارش قطعی خرید برای قرارداد مشتری**:
+تعهد خرید از تأمین‌کننده برای تأمین قرارداد مشتری که به ثبت موفق و وجود رکورد مالی معتبر فعلی همان قرارداد وابسته است؛ اعلام نیاز و استعلام قیمت می‌توانند زودتر انجام شوند. ابطال رکورد مالی پس از سفارش قطعی، موضوع را برای تعیین تکلیف باز می‌کند و تعهد خرید را خودکار لغو نمی‌کند.
+_Avoid_: یکی‌دانستن استعلام با تعهد خرید، کفایت سابقه تاریخی رکورد مالی باطل‌شده، یا جایگزین‌کردن شرط ثبت رکورد مالی با شرط تأیید مالی یا تسویه
+
+**حداقل اطلاعات سفارش قطعی خرید**:
+تأمین‌کننده، مشخصات قلم، مقدار و واحد اندازه‌گیری مشخص سفارش؛ تاریخ‌ها اختیاری‌اند و در صورت نامشخص‌بودن قیمت، وضعیت صریح «قیمت در انتظار توافق» جایگزین مبلغ فرضی می‌شود.
+_Avoid_: قیمت صفر به‌جای قیمت نامعلوم، یا تلقی اختیاری‌بودن اطلاعات پاسخ اولیه به‌عنوان مجوز سفارش قطعی با قلم و مقدار نامشخص
+
+**ارسال مستقیم خرید به مقصد مشتری**:
+ارسال کالای خریداری‌شده از تأمین‌کننده به مقصد مشتری بدون عبور فیزیکی از انبار سبلان؛ این مسیر در خریدهای با مقدار زیاد کاربرد دارد.
+_Avoid_: فرض ورود فیزیکی همه خریدها به انبار سبلان، یا فرض تعیین‌شدن مسئول تأیید مقدار و کیفیت صرفاً از روی مسیر ارسال
+
+**تأمین سنگ برای فروشنده همکار**:
+تأمین سنگ توسط کاربران داخلی مجاز برای فروشنده همکاری که در این رابطه مشتری سبلان است؛ درخواست داخلی به همان قرارداد موجود دارای برچسب همکار ارجاع می‌دهد و به ایجاد قرارداد تازه یا صوری نیاز ندارد. خود همکار درخواست خرید بیرونی ایجاد نمی‌کند و وجود قرارداد همکار به‌تنهایی درخواست خرید ایجاد نمی‌کند.
+_Avoid_: درخواست خرید بیرونی توسط خود همکار، ایجاد خودکار درخواست از قرارداد همکار، ساخت قرارداد تکراری برای تأمین، یا یکی‌دانستن همکار با مسئول خرید سبلان
+
+**بررسی تأمین از انبار برای خرید**:
+تعیین مقدار قابل تأمین از موجودی مناسب و کسری نیاز، بدون الزام ثبت دلیل؛ بررسی یا تأیید انبار پیش‌شرط ایجاد درخواست خرید نیست و مسئول خرید می‌تواند مستقیماً درخواست ایجاد کند. وجود متراژ مشابه به‌تنهایی مقدار درخواست خرید را خودکار کاهش نمی‌دهد.
+_Avoid_: مرحله اجباری تأیید انبار برای ایجاد درخواست، الزام نوشتن دلیل برای بررسی موجودی، یا تلقی هر موجودی مشابه به‌عنوان موجودی مناسب و قابل تخصیص
+
+**اختیار مسئول خرید سبلان**:
+اختیار نهایی‌کردن خرید بدون نیاز به تأیید مدیریت، همراه با دسترسی کامل مدیریت برای مشاهده همه درخواست‌ها و اصلاح یا لغو آن‌ها؛ پیش از سفارش قطعی، اصلاح و لغو مستقیم است و پس از آن به ثبت نتیجه واقعی نزد تأمین‌کننده وابسته است. کالای دریافت‌شده و اسناد مالی قبلی با این اختیار حذف یا بازنویسی نمی‌شوند.
+_Avoid_: تأیید مدیریتی اجباری برای هر خرید، یا تلقی دسترسی مدیریت به‌عنوان مجوز حذف تاریخچه
+
+**دسترسی نقش‌ها در خرید سبلان**:
+مدیریت و ادمین به همه بخش‌ها و عملیات خرید، از جمله واگذاری مسئول پیگیری، با حفظ قواعد اصلاح و تاریخچه دسترسی دارند؛ مسئول خرید جزئیات کامل و حسابداری اطلاعات مالی لازم را می‌بینند. فروشنده درخواست‌های مرتبط با قراردادهای خودش و وضعیت تأمین، و انباردار اطلاعات لازم برای دریافت را می‌بینند؛ قیمت خرید برای فروشنده و انباردار به‌صورت پیش‌فرض پنهان است.
+_Avoid_: افشای پیش‌فرض قیمت خرید به فروشنده و انباردار، یا تلقی دسترسی کامل مدیریت و ادمین به‌عنوان امکان دورزدن قواعد مالی و فیزیکی
+
+**قلم خرید سبلان**:
+سنگ یا محصولی که از تأمین‌کننده خریداری می‌شود و می‌تواند محصول نهایی آماده یا سنگ خام و نیمه‌آماده برای تکمیل در سبلان باشد؛ رابطه آن با محصول نهایی سفارش مشتری حفظ می‌شود، اما مقدار این دو لزوماً برابر نیست.
+_Avoid_: فرض آماده‌بودن همه خریدها، یا یکی‌دانستن مقدار سنگ خریداری‌شده با مقدار نهایی سفارش مشتری
+
+**مسیر ارسال خرید سبلان**:
+انتخاب صریح شخص مجاز میان ارسال به انبار سبلان و ارسال مستقیم به مقصد مشتری، متناسب با شرایط همان خرید؛ مقدار زیاد به‌تنهایی قاعده خودکار انتخاب مسیر نیست.
+_Avoid_: تعیین خودکار مسیر صرفاً از روی متراژ، یا فرض تعیین‌شدن نقش انتخاب‌کننده پیش از مشخص‌شدن دسترسی‌ها
+
+**مازاد خرید ناشی از تغییر سفارش مشتری**:
+سنگ اضافه خریداری‌شده در اثر کاهش مقدار یا لغو سفارش مشتری که به انبار سبلان منتقل می‌شود؛ این انتقال، تعهد خرید قبلی یا سابقه انتساب آن به سفارش را حذف نمی‌کند.
+_Avoid_: حذف خودکار سفارش خرید با لغو فروش، یا فرض حضور فیزیکی مازاد در انبار پیش از انتقال واقعی
+
+**تأیید تحویل مستقیم خرید**:
+نتیجه پیگیری مسئول خرید درباره مقدار و کیفیت تحویل در مقصد، با انتخاب اجباری شخص تأییدکننده از اطلاعات مشتری مقصد؛ مسئول خرید نتیجه را ثبت می‌کند و پیش از وصول تأیید، بار ارسال‌شده در انتظار تأیید تحویل باقی می‌ماند.
+_Avoid_: وابستگی ثبت تحویل به عضویت راننده در سیستم، یا تلقی صرف ارسال به‌عنوان تحویل تأییدشده
+
+**تأمین چندبخشی نیاز خرید**:
+تأمین یک نیاز از چند تأمین‌کننده یا طی چند محموله، با حفظ مقدار سفارش‌داده‌شده، تحویل‌شده و باقی‌مانده هر سهم؛ یک محموله می‌تواند سهم مشتری و سهم انبار را هم‌زمان داشته باشد.
+_Avoid_: تکمیل کل نیاز با تحویل جزئی، یا گم‌شدن سهم نیازها در محموله مشترک
+
+**نیاز خرید با مشخصات اولیه**:
+اعلام نیاز برای سنگ یا سورت، از جمله قلم هنوز تعریف‌نشده در کاتالوگ، با مشخصات اولیه و امکان ارائه تصویر؛ مشخصات مورد توافق پیش از سفارش قطعی دقیق می‌شوند.
+_Avoid_: الزام تعریف کامل کاتالوگ برای اعلام نیاز، یا سفارش قطعی بر مبنای مشخصات مبهم
+
+**پاسخ اولیه مسئول خرید**:
+اطلاعات بررسی تأمین شامل قیمت پیشنهادی، مقدار قابل تأمین، تاریخ آماده‌شدن و رسیدن، عدم امکان تأمین یا پیشنهاد سنگ جایگزین؛ درج قیمت، مقدار و تاریخ‌ها در این پاسخ اختیاری است.
+_Avoid_: یکی‌دانستن پاسخ اولیه با سفارش قطعی، یا تلقی مقدار یا تاریخ ثبت‌نشده به‌عنوان صفر یا تعهد قطعی
+
+**مقدار مورد اختلاف در دریافت خرید**:
+مقدار دریافتی که پذیرش آن به علت اختلاف مقدار یا کیفیت هنوز تعیین تکلیف نشده است؛ مقدار رسیده، پذیرفته‌شده و مورد اختلاف جدا نگه داشته می‌شوند و مسئول خرید پیگیری تجاری اختلاف را انجام می‌دهد.
+_Avoid_: بستن کسری یا ایراد کیفیت با تحویل کامل، یا تلقی همه مقدار رسیده به‌عنوان مقدار پذیرفته‌شده
+
+**دریافت خرید در انبار سبلان**:
+ثبت دریافت واقعی کالا و مقدار آن توسط انباردار، با پذیرش کیفیت توسط شخص دارای صلاحیت، از جمله انباردار، و پیگیری تأمین‌کننده توسط مسئول خرید؛ مدیریت نیز به این عملیات دسترسی دارد. این دریافت از تأیید انبار در مرحله ایجاد درخواست مستقل است.
+_Avoid_: الزام تأیید انبار برای ایجاد درخواست، یا یکی‌دانستن ثبت مقدار دریافتی با پذیرش کیفیت
+
+**توافق پرداخت خرید سبلان**:
+شرایط پرداخت توافق‌شده با تأمین‌کننده که در فضای خرید با ورود مبلغ به تومان ثبت می‌شود؛ پرداخت واقعی و تسویه از گردش حسابداری پیگیری می‌شوند و واحد مبلغ در نمایش توافق صریح است.
+_Avoid_: تلقی ثبت خرید به‌عنوان پرداخت، یا ثبت تسویه مستقل و تکراری در فضای خرید
+
+**درخواست تکمیلی خرید**:
+درخواست افزوده برای نیاز موجود که همراه با مقدار نیاز، درخواست‌های باز و مقدار قبلاً سفارش‌داده‌شده بررسی می‌شود؛ مقدار اضافه باید صریحاً به سهم انبار یا نیاز دیگری منتسب شود تا همان نیاز دوباره تأمین نشود.
+_Avoid_: ممنوعیت همه درخواست‌های تکمیلی، یا خرید دوباره برای یک سهم نیاز بدون تعیین تکلیف مقدار قبلی
+
+**تکمیل تأمین خرید**:
+تحویل و پذیرش مقدار موردنیاز قلم خرید که مستقل از وضعیت پرداخت و تسویه تأمین‌کننده و آمادگی محصول نهایی مشتری سنجیده می‌شود؛ یک خرید می‌تواند تأمین کامل و تسویه‌نشده باشد یا پس از تکمیل تأمین، هنوز به آماده‌سازی در سبلان نیاز داشته باشد.
+_Avoid_: تکمیل تأمین صرفاً با ثبت سفارش، وابسته‌کردن وضعیت تحویل به تسویه مالی، یا تلقی تأمین سنگ خام به‌عنوان آمادگی محصول نهایی برای ارسال
+
+**موجودی قابل‌مصرف خرید**:
+بخش پذیرفته‌شده از کالای خریداری‌شده که امکان استفاده در فروش، برش، تولید یا ارسال دارد؛ مقدار رسیده ولی تأییدنشده قابل مشاهده است، اما تا پذیرش کیفیت قابل‌مصرف نیست.
+_Avoid_: یکی‌دانستن مقدار رسیده با مقدار قابل‌مصرف، یا آزادکردن کل محموله با پذیرش بخشی از آن
+
+**پذیرش جایگزین در خرید**:
+تعیین تکلیف سنگ پیشنهادی جایگزین توسط فروشنده مسئول با پیگیری پذیرش مشتری و تغییر لازم قرارداد، یا توسط مسئول خرید یا مدیریت برای نیاز انبار؛ پاسخ خرید به‌تنهایی قرارداد را تغییر نمی‌دهد.
+_Avoid_: جایگزینی خودکار سنگ قرارداد با پیشنهاد خرید، یا تلقی پیشنهاد جایگزین به‌عنوان پذیرش مشتری
+
+**مقدار اندازه‌گیری‌شده خرید**:
+مقدار واقعی اندازه‌گیری‌شده کالا، مستقل از مقدار سفارش و همراه با واحد و مبنای قیمت همان ردیف؛ اختلاف اندازه‌گیری، مقدار توافق قبلی را بدون سابقه بازنویسی نمی‌کند.
+_Avoid_: جایگزینی بی‌سابقه مقدار سفارش با مقدار اندازه‌گیری‌شده، یا تبدیل ضمنی واحدهای ناسازگار
+
+**نهایی‌سازی قیمت خرید**:
+ثبت قیمت توافق‌شده توسط مسئول خرید و تطبیق فاکتور تأمین‌کننده با آن توسط حسابداری؛ اختلاف قیمت برای بررسی مشخص می‌ماند و قیمت قبلی خودکار جایگزین نمی‌شود.
+_Avoid_: تلقی قیمت نامشخص به‌عنوان صفر، یا بازنویسی خودکار توافق با قیمت فاکتور تأمین‌کننده
+
+**سهم محفوظ قرارداد از موجودی خرید**:
+مقدار پذیرفته‌شده خرید برای یک قرارداد که برای همان قرارداد محفوظ است؛ انتقال به قرارداد دیگر یا موجودی آزاد اقدام صریح مسئول مجاز است و مازاد ناشی از کاهش یا لغو سفارش به سهم انبار منتقل می‌شود.
+_Avoid_: مصرف سهم قرارداد برای سفارش دیگر بدون انتقال صریح، یا یکی‌دانستن سهم انبار با انتقال فیزیکی انجام‌شده
+
+**درخواست تغییر یا لغو خرید قطعی**:
+درخواست ایجادکننده نیاز برای تغییر یا لغو پس از سفارش قطعی که نتیجه واقعی آن را مسئول خرید ثبت می‌کند؛ پیش از سفارش قطعی، ایجادکننده می‌تواند درخواست خود را اصلاح کند و مسئول خرید از تغییر مطلع می‌شود.
+_Avoid_: تغییر مستقیم تعهد خرید قطعی توسط درخواست‌کننده، یا حذف سابقه سفارش با ثبت درخواست لغو
+
+**مرجع نیاز خرید قراردادی**:
+ردیف محصول نهایی در قرارداد موجود که نیاز مشتری از آن انتخاب می‌شود؛ قلم خرید و مقدار مصرف لازم برای ساخت آن جدا مشخص می‌شوند و نیاز انبار می‌تواند مستقل وارد شود.
+_Avoid_: ورود مستقل محصول نهایی مشتری بدون ارتباط با ردیف قرارداد، یا یکی‌دانستن مقدار مصرف قلم خرید با مقدار محصول نهایی
+
+**تعیین تکلیف تجاری بار نامناسب**:
+توافق ثبت‌شده توسط مسئول خرید، مدیریت یا ادمین درباره بار مورد اختلاف که مستقل از پذیرش فنی آن است؛ تخفیف به‌تنهایی سنگ نامناسب برای سفارش مشتری را مناسب آن سفارش نمی‌کند.
+_Avoid_: پذیرش خودکار کیفیت به علت تخفیف، یا تلقی توافق تجاری به‌عنوان تغییر خودکار مشخصات قرارداد
+
+**بستن باقی سفارش تأمین‌کننده**:
+ثبت پایان تعهد باقی‌مانده سفارش نزد تأمین‌کننده با حفظ کسری نیاز مشتری؛ بسته‌شدن باقی سفارش، نیاز مشتری را کاهش نمی‌دهد مگر مقدار قرارداد از مسیر مجاز تغییر کند.
+_Avoid_: تکمیل نیاز مشتری با بستن کسری سفارش کارخانه، یا حذف مقدار باقی‌مانده بدون ثبت نتیجه
+
+**مسئول پیگیری درخواست خرید**:
+شخص مشخص پاسخ‌گوی پیگیری هر درخواست خرید که مدیریت یا ادمین می‌تواند آن را با حفظ سابقه واگذاری تغییر دهد؛ تعداد مسئولان خرید قواعد تأمین و تعهد خرید را تغییر نمی‌دهد.
+_Avoid_: درخواست بدون مسئول پیگیری مشخص، یا انتقال مسئولیت بدون حفظ سابقه
+
+**واحد خرید سبلان**:
+واحد مقدار یا مبنای قیمت قلم خرید که می‌تواند مترمربع، متر طول، عدد، تن، کیلوگرم یا واحد دیگری با عنوان متنی واردشده توسط کاربر باشد؛ انتخاب «سایر» با نام مشخص واحد همراه است.
+_Avoid_: محدودکردن خرید به واحدهای فروش، یا تلقی عنوان واحد دلخواه به‌عنوان ضریب تبدیل خودکار
+
+**تبدیل واحد در خرید سبلان**:
+رابطه صریح ثبت‌شده همراه با مقادیر مبنا هنگام تفاوت واحد سفارش، دریافت یا قیمت؛ عنوان واحد دلخواه رابطه تبدیل ایجاد نمی‌کند و تبدیل تن به مترمربع ضریب ثابت عمومی ندارد.
+_Avoid_: تبدیل حدسی از روی نام واحد، یا استفاده از یک ضریب عمومی برای همه سنگ‌ها و خریدها
+
+**تأمین‌کننده اولیه خرید**:
+شخص یا مجموعه قابل شناسایی با نام و راه ارتباطی برای شروع خرید، با تکمیل اطلاعات مالی هنگام نیاز حسابداری؛ هویت موجود مشتری یا تأمین‌کننده به‌جای ایجاد طرف‌حساب تکراری استفاده می‌شود.
+_Avoid_: الزام تکمیل همه اطلاعات مالی برای ثبت اولیه، یا ساخت هویت تازه برای شخص موجود صرفاً به علت نقش تأمین‌کننده
+
+**هزینه جانبی خرید**:
+هزینه مستقل از قیمت سنگ با دریافت‌کننده مشخص، از جمله هزینه حمل؛ هزینه متعلق به باربری یا شخص دیگر به بدهی کارخانه افزوده نمی‌شود.
+_Avoid_: یک مبلغ خالص مبهم برای همه اجزا، یا یکی‌دانستن دریافت‌کننده هزینه حمل با تأمین‌کننده سنگ
+
+**سند سفارش قطعی خرید**:
+خلاصه شماره‌دار و قابل چاپ سفارش قطعی، شامل مشخصات، مقدار و شرایط ثبت‌شده توافق و اطلاعات لازم خرید برای کارخانه، بدون قیمت فروش و اطلاعات مالی قرارداد مشتری؛ برای ارسال مستقیم، نام گیرنده، تماس و نشانی مقصد درج می‌شود. توافق تلفنی می‌تواند مرجع یا توضیح داشته باشد و پیوست برای همه خریدها اجباری نیست.
+_Avoid_: افشای قیمت فروش مشتری در سند کارخانه، شماره تازه برای هر چاپ مجدد، یا تلقی نبود پیوست به‌عنوان نبود توافق ثبت‌شده
+
+**ثبت خرید انجام‌شده**:
+ثبت خرید واقعی انجام‌شده خارج از سیستم با تفکیک تاریخ واقعی خرید از زمان ثبت سیستمی، بدون ساخت سابقه درخواست یا تأیید انجام‌نشده؛ خرید فاقد رکورد مالی معتبر قرارداد در زمان انجام نیز به‌عنوان واقعیت ثبت می‌شود، اما مغایرت آن برای مدیریت، ادمین و حسابداری مشخص می‌ماند و خرید عادی مجاز تلقی نمی‌شود.
+_Avoid_: ثبت تاریخ سیستمی به‌عنوان تاریخ واقعی خرید قبلی، ساخت تأییدهای صوری، پنهان‌کردن خرید فاقد شرایط در مسیر عادی، یا تلقی ثبت واقعیت به‌عنوان مجوز سفارش جدید یا ثبت خودکار بدهی
+
+**اتصال خرید به سوابق قبلی**:
+پیوند خرید انجام‌شده به دریافت انبار، فاکتور یا پرداخت موجود برای همان خرید، با تکمیل اطلاعات خرید ثبت‌نشده؛ اثر موجودی، بدهی یا پرداخت قبلی دوباره ایجاد نمی‌شود و مراحل فاقد سابقه از مسیر عادی مربوط انجام می‌شوند.
+_Avoid_: ایجاد دریافت یا بدهی و پرداخت تکراری برای تکمیل پرونده خرید، یا تلقی صرف اتصال به سند قبلی به‌عنوان مجوز تغییر آن سند
+
+**درخواست اولیه خرید**:
+اعلام نیاز با مشخصات اولیه سنگ و علت نیاز و، برای خرید قراردادی، ردیف قرارداد موجود؛ مقدار در این مرحله می‌تواند نامشخص باشد و عکس و توضیحات اختیاری‌اند، اما مقدار پیش از سفارش قطعی مشخص می‌شود.
+_Avoid_: الزام مقدار قطعی برای اعلام اولیه نیاز، یا درخواست قراردادی بدون ارتباط با ردیف قرارداد
+
+**پیش‌پرداخت تأمین‌کننده در خرید**:
+مبلغ مشخص درخواستی مسئول خرید به تومان برای پرداخت واقعی از مسیر حسابداری پیش از تحویل یا فاکتور نهایی، از جمله علی‌الحساب هنگام نامشخص‌بودن قیمت کل؛ تا تطبیق با اسناد نهایی، پیش‌پرداخت مستقل باقی می‌ماند.
+_Avoid_: تلقی پیش‌پرداخت به‌عنوان تحویل کالا، تسویه قطعی خرید، یا بدهی نهایی تأمین‌کننده
+
+**برگشت خرید پس از پذیرش**:
+گردش مرتبط با خرید و محموله اصلی برای کالایی که پس از پذیرش عیب آن مشخص شده است، با حفظ پذیرش قبلی و بررسی دوباره نیاز تأمین مشتری در صورت رزرو آن کالا؛ تعویض کالا و بازپرداخت وجه نتایج مستقل‌اند.
+_Avoid_: حذف پذیرش قبلی، یا تلقی برگشت کالا به‌عنوان دریافت خودکار کالای جایگزین یا وجه
+
+**اعلان پیگیری خرید**:
+اطلاع‌رسانی داخل سیستم به افراد مرتبط درباره رویدادهای خرید، همراه با پیوند مستقیم پرونده؛ موعد اختیاری است و درخواست بدون موعد صرفاً به علت خالی‌بودن تاریخ دیرکرده نیست. پیامک در دامنه فعلی خرید نیست.
+_Avoid_: اعلان همگانی برای همه رویدادها، یا دیرکرد فرضی برای درخواست فاقد موعد
+
+**رد قطعی مقدار بررسی‌نشده خرید**:
+ثبت نامناسب‌بودن مقدار مشخصی از بار دریافت‌شده و هنوز پذیرفته‌نشده، همراه با علت و حفظ سابقه رسید؛ این مقدار از بررسی‌نشده جدا می‌شود و قابل مصرف نیست، اما رد کیفیت به‌تنهایی برگشت فیزیکی نیست.
+_Avoid_: یکی‌دانستن رد قطعی با بررسی‌نشده، حذف مقدار ردشده از سابقه دریافت، یا برگشت خودکار کالا
+
+**برگشت واقعی بار ردشده خرید**:
+ثبت مقدار ردشده‌ای که واقعاً به تأمین‌کننده بازگردانده شده، مرتبط با رسید اصلی و محدود به مقدار ردشده و هنوز برگشت‌نخورده؛ این اقدام دریافت وجه یا کالای جایگزین ایجاد نمی‌کند.
+_Avoid_: ثبت دوباره برگشت یک مقدار، یا تلقی تصمیم به برگشت به‌عنوان خروج واقعی کالا
+
+**پرونده تعویض بار ردشده خرید**:
+توافق جایگزینی مقدار مشخصی از کالای ردشده با حفظ ارتباط با رسید و سفارش اصلی و بدون ایجاد سفارش خرید یا بدهی تکراری؛ برگشت واقعی و دریافت و پذیرش کیفیت جایگزین مستقل پیگیری می‌شوند.
+_Avoid_: افزایش موجودی قابل مصرف با صرف توافق تعویض، یا ایجاد چند تعویض برای یک مقدار ردشده
+
+**رسید بار جایگزین خرید**:
+دریافت مرتبط با پرونده تعویض که می‌تواند جزئی باشد و پذیرش کیفیت مستقل دارد؛ مقدار پذیرفته‌شده جایگزین در تأمین نیاز اصلی حساب می‌شود، اما مقدار سفارش اصلی و دریافت تاریخی بار ردشده بازنویسی نمی‌شوند.
+_Avoid_: دریافت جایگزین بدون پرونده تعویض، پذیرش خودکار کیفیت، یا دوباره‌شماری مقدار جایگزین به‌عنوان سفارش خرید جدید
+
+**استعلام تأمین‌کنندگان خرید**:
+پرونده‌ای برای دریافت پیشنهادهای چند تأمین‌کننده و مقایسه قیمت، مقدار قابل‌تأمین و زمان تحویل آن‌ها که می‌تواند مبتنی بر نیاز خرید یا مستقل از آن باشد؛ هر پرونده می‌تواند چند قلم داشته باشد و ثبت آن به‌تنهایی درخواست یا تعهد خرید ایجاد نمی‌کند.
+_Avoid_: یکی‌دانستن استعلام با درخواست خرید یا سفارش قطعی، ثبت پاسخ بدون انتساب به تأمین‌کننده مشخص، یا اشتباه‌گرفتن آن با استعلام قیمت فروش همکار از سبلان
+
+**استعلام مبتنی بر نیاز خرید**:
+استعلامی با مبدأ مشخص نیاز انبار یا مشتری، از جمله نیاز مشتری پیش از ثبت قرارداد، که پیشنهادهای ثبت‌شده و مقایسه‌شده آن می‌توانند مبنای اقدام خرید برای همان نیاز قرار بگیرند؛ درخواست مربوط به مشتری به قرارداد و ردیف واقعی نیاز دارد.
+_Avoid_: خرید بدون حفظ ارتباط با نیاز مبدأ، یا تلقی ثبت استعلام به‌عنوان سفارش قطعی
+
+**استعلام قیمت مستقل خرید**:
+ثبت و مقایسه پیشنهادهای تأمین‌کنندگان برای کالاهای انتخاب‌شده از کاتالوگ، بدون وجود نیاز انبار یا قرارداد مشتری، که همه کاربران داخلی مجاز به درخواست خرید می‌توانند آن را ایجاد کنند؛ ایجاد آن به‌تنهایی نیاز خرید صوری، تعهد خرید یا مجوز مشاهده قیمت ایجاد نمی‌کند.
+_Avoid_: ثبت استعلام مستقل به نام نیاز انبار، الزام قرارداد برای بررسی قیمت، یکی‌دانستن قیمت فروش کالا با پیشنهاد خرید تأمین‌کننده، یا اعطای دسترسی عمومی به قیمت‌های خرید صرفاً به دلیل ایجاد استعلام
+
+**پیگیری شخصی استعلام خرید توسط فروشنده داخلی**:
+استعلامی که فروشنده داخلی سبلان برای نیاز مجاز یا بررسی بازار خود پیگیری می‌کند و پیشنهادهای تأمین‌کنندگان همان استعلام را ثبت و مقایسه می‌کند؛ این اختیار به‌تنهایی دسترسی عمومی به قیمت‌های سایر استعلام‌ها یا اختیار سفارش قطعی نمی‌دهد. فروشنده همکار استعلام خرید را مستقیماً انجام نمی‌دهد و نیاز او از طریق فروشنده داخلی سبلان پیگیری می‌شود.
+_Avoid_: وابسته‌کردن پیگیری شخصی فروشنده داخلی به مسئول خرید، استعلام مستقیم خرید توسط فروشنده همکار، یا تلقی انتخاب پیشنهاد به‌عنوان سفارش قطعی
+
+**مشخصات استعلام مستقل خرید**:
+مشخصات پایه کالای کاتالوگ همراه با جزئیات متغیر اختیاری که استعلام عمومی یک کالا را از استعلام برای ابعاد یا فرآوری مشخص متمایز می‌کنند.
+_Avoid_: یکسان‌دانستن پیشنهاد عمومی با پیشنهاد دارای مشخصات دقیق، یا الزام تمام جزئیات سفارش برای بررسی اولیه قیمت
+
+**گروه نمایش اقلام خرید**:
+گردآوری ظاهری اقلام هم‌کد و هم‌نام زیر یک عنوان مشترک با حفظ زیرردیف‌های دارای مشخصات متفاوت؛ تجمیع مقدار در همان مبدأ فقط با تطابق کامل مشخصات خرید و اقدام صریح کاربر انجام می‌شود.
+_Avoid_: ادغام خودکار مقدارها صرفاً به دلیل یکسان‌بودن کد یا نام، گم‌شدن هویت و سهم ردیف‌های مبدأ، یا ساخت استعلام مشترک از چند قرارداد و نیاز انبار
+
+**خلاصه استعلام خرید در کاتالوگ**:
+خلاصه آخرین استعلام خرید کالا با مشخصات همان پیشنهاد، تأمین‌کننده، تاریخ، وضعیت اعتبار و تعداد پیشنهادهای معتبر که نمایش مبلغ آن تابع مجوز مشاهده قیمت است؛ قیمت مربوط به ابعاد یا فرآوری خاص، نرخ تمام حالت‌های کالا نیست و قیمت فروش کالا نیز پیشنهاد خرید محسوب نمی‌شود.
+_Avoid_: معرفی قیمت فروش به‌عنوان نرخ خرید، یا نمایش نرخ بدون شرایط و وضعیت اعتبار مربوط
+
+**تأیید انطباق قیمت عمومی خرید**:
+ثبت تأیید تأمین‌کننده توسط مسئول خرید برای قابل‌اجرا بودن پیشنهاد عمومی روی مشخصات دقیق یک نیاز؛ تا پیش از این تأیید، پیشنهاد عمومیِ مرتبط، قیمت تأییدشده آن مشخصات محسوب نمی‌شود.
+_Avoid_: تعمیم خودکار نرخ عمومی به ابعاد و فرآوری خاص، یا الزام استعلام تازه وقتی اجرای همان شرایط برای مشخصات دقیق تأیید شده است
+
+**پیشنهاد استعلام معتبر برای نیاز تازه**:
+نمایش خودکار پیشنهادهای معتبر و منطبق قبلی هنگام ثبت نیاز خرید تازه، همراه با انتخاب صریح مسئول خرید و بررسی شرایط مقدار و مقصد؛ این نمایش به‌تنهایی درخواست یا سفارش خرید ایجاد نمی‌کند.
+_Avoid_: سفارش خودکار بر اساس پیشنهاد نمایشی، یا الزام جست‌وجوی دستی برای یافتن پیشنهادهای منطبق موجود
+
+
+**پیشنهاد منتخب استعلام خرید**:
+پیشنهاد مشخص یک تأمین‌کننده برای یک قلم که همراه سایر پیشنهادهای منتخب، مبنای ایجاد درخواست خرید و انتقال اطلاعات تأمین قرار می‌گیرد؛ انتخاب آن به‌تنهایی تعهد خرید از تأمین‌کننده نیست.
+_Avoid_: یکی‌دانستن انتخاب پیشنهاد با سفارش قطعی
+
+**استفاده مجدد از استعلام معتبر خرید**:
+استفاده از استعلام قیمت معتبر موجود برای خرید تازه بدون الزام به ایجاد پرونده استعلام جدید؛ تازه‌بودن خرید به‌تنهایی اعتبار استعلام موجود را از بین نمی‌برد.
+_Avoid_: الزام استعلام تازه برای هر خرید با وجود استعلام معتبر، یا معتبر فرض‌کردن هر پیشنهاد تاریخی
+
+**گزینه پیشنهاد تأمین‌کننده خرید**:
+پیشنهاد مستقل یک تأمین‌کننده برای یک قلم با مشخصات سنگ، قیمت، شرایط پرداخت و زمان تأمین خودش؛ یک تأمین‌کننده می‌تواند برای همان قلم چند گزینه متفاوت ارائه کند.
+_Avoid_: یکی‌دانستن گزینه نقدی و چکی، یا ترکیب قیمت یک گزینه با موعد و مشخصات گزینه دیگر
+
+**اعتبار پیشنهاد تأمین‌کننده خرید**:
+قابل‌استفاده‌بودن پیشنهاد طبق مهلت اعلام‌شده یا وضعیت اعتباری مشخص‌شده توسط مسئول خرید؛ تاریخ اعتبار اختیاری است و نبود تاریخ به‌تنهایی موجب انقضا با یک مدت ثابت عمومی نمی‌شود.
+_Avoid_: مهلت ثابت فرضی برای همه پیشنهادها، یا یکی‌دانستن نداشتن تاریخ با تأیید خودکار اعتبار
+
+**مقدار محدود پیشنهاد خرید**:
+مقدار مشخص و محدود قابل سفارش تحت یک پیشنهاد که سفارش قطعی از مانده آن کم می‌کند؛ ثبت استعلام یا انتخاب پیشنهاد، رزرو کالا نزد تأمین‌کننده نیست.
+_Avoid_: کم‌کردن ظرفیت صرفاً با انتخاب پیشنهاد، یا یکی‌دانستن مقدار محدود با ظرفیت تقریبی تأمین
+
+**مقایسه پیشنهادهای خرید**:
+بررسی کنارهم نرخ سنگ، مقدار قابل‌تأمین، زمان آماده‌شدن و رسیدن به مقصد، هزینه‌های جانبی و شرایط پرداخت؛ اطلاعات ناقص با وضعیت مشخص باقی می‌مانند و هزینه نامعلوم صفر فرض نمی‌شود.
+_Avoid_: مقایسه نرخ واحد بدون توجه به هزینه و شرایط مربوط، یا محاسبه مدت از زمان استعلام وقتی مبنای وعده سفارش قطعی است
+
+**انتخاب ترکیبی پیشنهادهای خرید**:
+انتخاب مقدار مشخص از چند پیشنهاد برای تأمین یک نیاز، با نمایش جمع انتخاب و کسری باقی‌مانده؛ ارزان‌ترین یا سریع‌ترین گزینه می‌تواند برجسته شود و تصمیم انتخاب با مسئول خرید است.
+_Avoid_: الزام خرید کل نیاز از یک کارخانه، انتخاب نهایی خودکار، یا تلقی انتخاب به‌عنوان تعهد یا رزرو قطعی
+
+**تغییر پیشنهاد تأمین‌کننده خرید**:
+اعلام تازه قیمت یا شرایط که به‌عنوان جایگزین مشخص پیشنهاد قبلی یا گزینه‌ای مستقل ثبت می‌شود؛ تغییر پیشنهاد، درخواست خریدِ مبتنی بر نسخه قبلی یا سفارش قطعی را خودکار بازنویسی نمی‌کند.
+_Avoid_: حذف سابقه نرخ قبلی، فرض اعتبار یا بی‌اعتباری خودکار نسخه قبلی بدون تعیین رابطه، یا اعمال نرخ تازه به سفارش قطعی گذشته
+
+**بازانتخاب پیشنهاد پیش از سفارش قطعی خرید**:
+تصمیم صریح مسئول خرید پس از تغییر پیشنهاد منتخب، شامل انتخاب پیشنهاد تازه یا ثبت تأیید تأمین‌کننده برای اجرای شرایط قبلی؛ تغییر شرایط باید پیش از تعهد تازه روشن شود.
+_Avoid_: انتقال خودکار نرخ تازه به درخواست موجود، یا ادامه سفارش بدون تعیین تکلیف تغییر پیشنهاد
+
+**دامنه استفاده مجدد از پیشنهاد خرید**:
+امکان استفاده از پیشنهاد معتبر برای مشتری دیگر یا نیاز انبار با انطباق مشخصات سنگ، واحد و شرایط پیشنهاد؛ هزینه حمل و موعد رسیدن برای مقصد تازه جدا بررسی می‌شوند و حداقل یا محدوده مقدار فقط در صورت اعلام تأمین‌کننده محدودکننده است.
+_Avoid_: الزام استعلام تازه صرفاً به دلیل تغییر مشتری، انتقال بی‌بررسی هزینه و موعد مقصد قبلی، یا ساختن حداقل مقدار فرضی
+
+**تبدیل انتخاب استعلام به درخواست خرید**:
+انتقال تمام یا بخشی از مقادیر منتخب به درخواست همان نیاز، با حفظ سهم پیشنهادهای چند تأمین‌کننده و مقدار منتقل‌شده و باقی‌مانده؛ درخواست مربوط به سفارش مشتری به قرارداد و ردیف واقعی آن متصل می‌شود و سفارش قطعی هر تأمین‌کننده مستقل است.
+_Avoid_: ایجاد نیاز تکراری برای سهم منتقل‌شده، تبدیل انتخاب به رزرو نزد کارخانه، یا ساختن قرارداد صوری برای استعلام مشتری احتمالی
+
+**انتخاب ردیف‌های قرارداد برای خرید**:
+انتخاب یک یا چند ردیف از یک قرارداد مشخص توسط فروشنده مسئول آن برای ثبت درخواست خرید، با حفظ ارتباط و مشخصات هر ردیف قرارداد.
+_Avoid_: الزام ثبت جداگانه دستی مشخصات هر ردیف، یا گم‌شدن ارتباط اقلام درخواست با قرارداد و ردیف‌های مبدأ
+
+**ورود فروشنده به خرید از قرارداد**:
+شروع پیگیری خرید از یک یا چند ردیف قرارداد تحت مسئولیت فروشنده، با انتقال هویت و مشخصات همان ردیف‌ها؛ اقلام دارای پیشنهاد معتبر و منتخب می‌توانند به درخواست تبدیل شوند و اقلام نیازمند استعلام مستقل پیگیری می‌شوند.
+_Avoid_: درخواست خرید پیش از استعلام، ورود دوباره مشخصات موجود، معطل‌کردن اقلام آماده تا پاسخ همه اقلام، یا دسترسی فروشنده به قراردادهای نامرتبط
+
+### Purchasing simplified entry and preserved Request evidence (approved 2026-11-01)
+
+The regular Purchasing path has no separate Request creation form. Starting a real need creates its RFQ case/rows; the buyer compares offers and uses one explicit continuation to save the selection and create the auditable Request atomically. The existing Order review remains a separate firm commitment and enforces current financial readiness. Requests, their numbers, links and history remain available under records. Independent catalog RFQs remain observations without invented needs or automatic Requests/Orders. See ADR-0141.
+
+### Purchasing quotation presentation (approved 2026-11-01)
+
+Purchasing catalog categories reuse the exact Sales catalog family and route-eligibility functions (including longitudinal items eligible for stairs). Inquiry headings and lists identify the stones and actual origin; the immutable document number is secondary tracking information. Existing case titles derive from linked rows without rewriting evidence. Internal UUID/CUID values are not rendered as human labels or fallbacks. Quantity and toman fields use canonical exact-text grouping; identifiers retain their leading zeros and are not quantity-formatted. New-offer validity is explicitly distinct from selecting an older offer to supersede. Supplementary inquiry details expose attachments and readable event history with one disclosure.
+
+### Purchasing entry controls (approved 2026-11-01)
+
+The action/page are labeled استعلام جدید because both real needs and independent market inquiries start by gathering quotes. Entry fields share one responsive row (type, optional need origin, buyer). Contract discovery and selection are one server-searchable control: sellers see their responsible contracts; authorized buyers/management/admins see all eligible contracts, with lookup scoping enforced server-side. The selected contract remains available while searching other results. Offer payment variants use an optional cash/cheque/mixed/other dropdown while existing recorded strings remain unchanged. Purchase quantity and any raw-to-final conversion are visible directly; conversion confirmation and exact arithmetic remain mandatory where already required.
+
+### Purchasing supplier quantity entry (approved 2026-11-01)
+
+The owner removed the approximate-versus-limited capacity selector from the new-offer form. The user enters only the optional مقدار قابل تأمین. New UI commands omit capacity and use the existing server default (estimate); no hard supplier limit is inferred from the entered amount. Existing limited offers, commitments, remaining quantities and audit evidence retain their stored behavior; this UI removal does not rewrite prior supplier obligations.
+
+**پیشنهاد خرید تازه و مبنای روز کاری (تصمیم ۱۴۰۵/۰۸/۱۲)**:
+فرم ثبت پیشنهاد جدید، انتخاب جداگانهٔ نوع روز ندارد؛ مدت تا آماده‌شدن و رسیدن با برچسب صریح «روز کاری» و `dayKind=working` ثبت می‌شود. مبنای شروع مدت (سفارش قطعی یا تاریخ پیشنهاد) مستقل است. اسناد و پیشنهادهای قبلی با نوع روز تقویمی یا نامشخص، معنای ثبت‌شدهٔ خود را حفظ می‌کنند.
+
+**بازگشت در سلسله‌مراتب استعلام خرید (تصمیم ۱۴۰۵/۰۸/۱۲)**:
+فهرست استعلام‌ها، پروندهٔ استعلام و قلم استعلام مسیرهای قابل‌بازیابی جداگانه دارند. ورود به قلم در تاریخچه ثبت می‌شود؛ بازگشت/جلو رفتن مرورگر، بازگشت موبایل و دکمهٔ داخل صفحه همان سلسله‌مراتب را طی می‌کنند. در ورود مستقیم به پرونده یا قلم، والدهای لازم در تاریخچهٔ همین ورود آماده می‌شوند؛ بازدیدهای قدیمی کاربر بازنویسی نمی‌شوند. نوسازی صفحه، قلم فعلی را حفظ می‌کند. مجوز مشاهده، داده و سوابق تجاری تغییر نمی‌کنند.
+
+### Purchasing form simplification and readable saved inquiries (approved 2026-11-03)
+
+The Purchasing UI no longer mounts manual draft-save/recovery controls or offers a previous-inquiry specification-copy selector. Existing saved purchasing documents/evidence and any historical draft storage are not deleted. In-flight/uncertain command replay protection remains. Catalog identity owns base dimensions; the single optional extra-requirements text automatically chooses specific scope when nonblank and general scope otherwise. The new-offer form always submits valid=true, while old invalid/superseded/expired evidence and expiry checks retain their meaning. Working-day lead times remain the new-offer default. Inquiry specification summaries use labeled canonical fields rather than one dense sentence; missing freight is explicitly excluded from a known material subtotal. The sidebar and dashboard link «استعلام‌های ثبت‌شده» open the existing authorized inquiry register, including past records through existing search and status filters.
+
+### Purchasing register clarity and dashboard panels (approved 2026-11-03)
+
+A user-entered inquiry title is the primary displayed case title and is searchable; stone names remain secondary context. Default generated titles still derive the actual stones and origin. New cases record whether their title was explicitly supplied; legacy titles are read without rewriting stored evidence. Dashboard open work and authorized Sales contracts are alternative canonical segmented panels. Dashboard/register metrics share the same counted populations, permission checks and navigable destination filters. Saved inquiry actions distinguish «مشاهده استعلام» from starting a new independent inquiry for the same catalog items. Starting a repeat inquiry opens a fresh editable form with blank quantity/prices and no inherited offers, allocations or commitments; legacy/raw rows without a usable catalog identity require explicit catalog selection. Case badges and proposal counts describe recorded/valid proposals per line instead of generic follow-up wording. The Request/Order financial gate and existing evidence remain unchanged.

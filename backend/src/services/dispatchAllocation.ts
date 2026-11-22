@@ -1,3 +1,7 @@
+import { personalPickupDisplayContext } from './personalLoadingPickup';
+import { requirePickupVerification } from './dispatchPickupVerification';
+import { LOADING_CANCELLATION_DUTY } from './crossWorkspaceDutyAdapters/loadingCancellationDutyCode';
+import { exactQuantityText, ExactQuantityDecimal } from './exactQuantity';
 import { assertPartnerCommercialDispatchEligible } from './partnerSales/fulfillment/commercialSettlement';
 import { createHash } from 'node:crypto';
 import { assertOrdinaryContractsDispatchEligible } from './ordinaryContractDispatchEligibility';
@@ -17,10 +21,12 @@ import {
 } from './shipmentQuantityProjectionStore';
 import { assertCanonicalDispatchCommandAllowed } from './dispatchCutover';
 import { isPostCutoverFinalization } from './dispatchDocuments/featureGate';
+import { loadShipmentStatementRuntimeStateUnderLock } from './dispatchDocuments/runtimeState';
+import { assessBoundAllocationPricingFreshness } from './allocationPricingReadModel';
 import type { createDispatchDocuments } from './dispatchDocuments/service';
-import { AllocationPricingBindingError, assertExactStableReservationTransfer, bindFinalizedAllocationPricing } from './allocationPricingBinding';
+import { AllocationPricingBindingError, assertExactStableReservationTransfer, bindFinalizedAllocationPricing, bindApprovedAllocationPriceEvidence } from './allocationPricingBinding';
 import { createPrismaAllocationPricingBindingPort } from './allocationPricingPrismaAdapter';
-import { canonicalHash, canonicalJson, RevisionRefSchema, IdSchema, partnerError,
+import { canonicalHash, canonicalJson, RevisionRefSchema, IdSchema, FulfillmentViewSchema, partnerError,
   type Result, type RevisionRef } from '@sabalanerp/partner-sales-contracts';
 import { createPartnerFulfillmentAdapter } from './partnerSales/fulfillment/adapter';
 import { createPrismaPartnerFulfillmentRepository } from './partnerSales/fulfillment/prismaRepository';
@@ -39,6 +45,11 @@ import { allocatePricedRevision, pricedAllocationIntegrityHash,
   type LockedPartnerApprovedPricingVersion, type PartnerPricedRevisionLine } from './pricedAllocationLedger';
 import { readPartnerShipmentQuantityProjection } from './partnerSales/fulfillment/quantityStore';
 import { ordinaryAllocationLine } from './allocationSource';
+
+import { getEffectiveUserAccess } from './effectiveAccessService';
+import { resolveNarrowFeatureAccess } from './narrowFeatureAccess';
+import { voidDispatchBundleInTransaction } from './dispatchDocuments/prismaRepository';
+import { voidSalesInvoiceInTransaction } from './salesDispatchInvoice/lifecycle';
 
 type Database = PrismaClient;
 type Tx = Prisma.TransactionClient;
@@ -67,13 +78,13 @@ const requiredDispatchDocumentsCommands = () => {
 export class DispatchAllocationValidationError extends Error {}
 export class DispatchAllocationConflictError extends Error {}
 
-const stableValue = (value: unknown): unknown => {
-  if (Array.isArray(value)) return value.map(stableValue);
-  if (value instanceof Prisma.Decimal) return value.toFixed(3);
+const stableValue = (value: unknown, field = ''): unknown => {
+  if (Array.isArray(value)) return value.map(entry => stableValue(entry));
+  if (value instanceof Prisma.Decimal) return field.toLowerCase().includes('quantity') ? exactQuantityText(value) : value.toFixed(3);
   if (value && typeof value === 'object' && !(value instanceof Date)) {
     return Object.fromEntries(Object.entries(value as Record<string, unknown>)
       .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, entry]) => [key, stableValue(entry)]));
+      .map(([key, entry]) => [key, stableValue(entry, key)]));
   }
   return value instanceof Date ? value.toISOString() : value;
 };
@@ -85,11 +96,12 @@ const required = (value: unknown, name: string) => {
   return result;
 };
 const quantity = (value: unknown) => {
-  const result = new Prisma.Decimal(String(value));
-  if (!result.isFinite() || !result.gt(0) || result.decimalPlaces() > 3) {
-    throw new DispatchAllocationValidationError('Allocation quantities must be positive fixed-point values with at most three decimals.');
+  const result = new ExactQuantityDecimal(String(value));
+  if (!result.isFinite() || !result.gt(0) || result.decimalPlaces() > 30) {
+    throw new DispatchAllocationValidationError('Allocation quantities must be positive fixed-point values within exact storage capacity.');
   }
-  return result.toDecimalPlaces(3);
+  exactQuantityText(result);
+  return result;
 };
 const json = (value: unknown) => stableValue(value) as Prisma.InputJsonValue;
 
@@ -141,7 +153,7 @@ export const isRetryableDispatchTransactionError = (error: unknown) => error ins
   && (error.code === 'P2034'
     || (error.code === 'P2010' && ['40001', '40P01'].includes(String(error.meta?.code || ''))));
 
-type PartnerLoadingRead = { loadingId: string; loadingNumber: string; status: string; source: PartnerLoadingSource;
+type PartnerLoadingRead = { contractNumber: string; personalTurnId: string | null; loadingId: string; loadingNumber: string; status: string; source: PartnerLoadingSource;
   allocations: Extract<Awaited<ReturnType<typeof readPartnerAllocationDrafts>>, { ok: true }>['value'] };
 const partnerFailure = (code: Parameters<typeof partnerError>[0]): Result<never> => ({ ok: false, error: partnerError(code) });
 
@@ -157,6 +169,49 @@ export const withLogisticsLoadingReadScope = <T>(prisma: Database, input: Partne
     const access: Prisma.LogisticsLoadingWhereInput = { OR: [{ sourceKind: 'SALES_CONTRACT' },
       { sourceKind: 'PARTNER_CASE', partnerCaseId: { in: allowed } }] };
     return read({ database: tx, where: (where = {}) => ({ AND: [access, where] }) });
+  });
+
+export const findLoadablePartnerDeliveries = (db: Database, input: PartnerLoadingActor & { customerIds: string[] }) =>
+  readPartnerSnapshot(db, async tx => {
+    const sales = await tx.partnerSaleCase.findMany({ where: {
+      state: 'COMMITTED', customerId: { in: input.customerIds },
+      customerContract: { is: { isInactive: false, status: { notIn: ['CANCELLED', 'EXPIRED'] } } },
+    }, select: { id: true, customerId: true, profileId: true, headRevision: true, integrityHash: true,
+      customerContract: { select: { contractNumber: true } }, head: { select: { internalProjection: true } } } });
+    const results: { id: string; customerId: string; sourceKind: 'PARTNER_CASE'; owner: RevisionRef;
+      deliveryId: string; projectName: string; address: string; date: string; contractNumber: string; remainingCount: number }[] = [];
+    for (const sale of sales) {
+      if (!sale.customerContract || !(await authorizePartnerLoading(tx, input, sale.id, 'READ')).ok) continue;
+      const view = FulfillmentViewSchema.safeParse((sale.head.internalProjection as Prisma.JsonObject | null)?.fulfillment);
+      if (!view.success || view.data.owner.caseId !== sale.id || view.data.owner.revision !== sale.headRevision
+        || view.data.owner.integrityHash !== sale.integrityHash) continue;
+      if (!(await authorizePartnerTechnicalRollout(tx, sale.profileId, 'COMMITTED_FULFILLMENT')).ok
+        || await partnerPredecessorIsFrozen(tx, sale.id, sale.headRevision)) continue;
+      const projection = await readPartnerShipmentQuantityProjection(tx, sale.id);
+      const balanceByRow = new Map(projection.rows.map(row => [row.productRowId, row]));
+      const used = await tx.logisticsAllocationRevisionLine.groupBy({
+        by: ['partnerDeliveryId', 'productRowId'],
+        where: { sourceKind: 'PARTNER_CASE', partnerCaseId: sale.id, revision: {
+          candidate: { status: { in: [AccountingDispatchCandidateStatus.PENDING, AccountingDispatchCandidateStatus.ACCEPTED] } },
+        } },
+        _sum: { quantity: true },
+      });
+      const usedByRow = new Map(used.map(row => [JSON.stringify([row.partnerDeliveryId, row.productRowId]), row._sum.quantity]));
+      for (const delivery of view.data.deliveries) {
+        const remainingCount = delivery.items.filter(item => {
+          const balance = balanceByRow.get(item.productRowId);
+          return balance?.health === 'CURRENT' && balance.quantities
+            && new ExactQuantityDecimal(balance.quantities.availableToLoad).gt(0)
+            && new ExactQuantityDecimal(item.quantity).gt(usedByRow.get(JSON.stringify([delivery.deliveryId, item.productRowId])) ?? 0);
+        }).length;
+        if (remainingCount) results.push({
+          id: `partner:${sale.id}:${delivery.deliveryId}`, customerId: sale.customerId, sourceKind: 'PARTNER_CASE',
+          owner: view.data.owner, deliveryId: delivery.deliveryId, projectName: delivery.destination, address: delivery.destination,
+          date: delivery.date, contractNumber: sale.customerContract.contractNumber, remainingCount,
+        });
+      }
+    }
+    return results;
   });
 
 /** Creates the existing Logistics loading aggregate, owned by one canonical
@@ -211,7 +266,10 @@ export const readPartnerCaseLoading = (prisma: Database, input: PartnerLoadingAc
 }): Promise<Result<PartnerLoadingRead>> => serializable(prisma, async tx => {
   if (!validLoadingActor(input) || !IdSchema.safeParse(input.loadingId).success) return partnerFailure('INVALID_PAYLOAD');
   await lockPartnerOperationsControl(tx);
-  const loading = await tx.logisticsLoading.findUnique({ where: { id: input.loadingId } });
+  const loading = await tx.logisticsLoading.findUnique({ where: { id: input.loadingId }, include: {
+    partnerCase: { select: { customerContract: { select: { contractNumber: true } } } },
+    guardQueueTurns: { where: { driverSource: 'PERSONAL_PICKUP', status: 'RESERVED_FOR_LOADING' }, select: { id: true } },
+  } });
   if (!loading || loading.sourceKind !== 'PARTNER_CASE' || !loading.partnerCaseId) return partnerFailure('NOT_FOUND');
   const authorized = await authorizePartnerLoading(tx, input, loading.partnerCaseId, 'READ');
   if (!authorized.ok) return authorized;
@@ -226,7 +284,8 @@ export const readPartnerCaseLoading = (prisma: Database, input: PartnerLoadingAc
   const allocations = await readPartnerAllocationDrafts(tx, input, loading.id, source.value);
   if (!allocations.ok) return allocations;
   return { ok: true, value: { loadingId: loading.id, loadingNumber: loading.loadingNumber, status: loading.status,
-    source: source.value, allocations: allocations.value } };
+    contractNumber: loading.partnerCase?.customerContract?.contractNumber ?? '',
+    personalTurnId: loading.guardQueueTurns[0]?.id ?? null, source: source.value, allocations: allocations.value } };
 });
 
 const bindRevisionPricing = async (tx: Tx, input: {
@@ -245,7 +304,14 @@ const bindRevisionPricing = async (tx: Tx, input: {
   }>;
 }) => {
   try {
-    return await bindFinalizedAllocationPricing(createPrismaAllocationPricingBindingPort(tx), input);
+    const port = createPrismaAllocationPricingBindingPort(tx);
+    const binding = await bindFinalizedAllocationPricing(port, input);
+    if (binding.path === 'LEGACY_WAYBILL_ONLY') {
+      // Preserve the old document path/cutover, but freeze authoritative prices
+      // before sealing this new revision so its sales invoice can be issued.
+      return { ...binding, ...await bindApprovedAllocationPriceEvidence(port, input) };
+    }
+    return binding;
   } catch (error) {
     if (error instanceof AllocationPricingBindingError) throw new DispatchAllocationConflictError(error.message);
     throw error;
@@ -294,7 +360,7 @@ const persistFinalizedAllocationRevision = async (tx: Tx, input: {
       const lineSnapshot = stableValue({ revisionId: revision.id, sourceKind: line.sourceKind,
         owner: { caseId: line.partnerCaseId, revision: line.partnerCaseRevision, integrityHash: line.partnerIntegrityHash },
         deliveryId: line.partnerDeliveryId, lineageId: line.partnerLineageId, productRowId: line.productRowId,
-        quantity: line.quantity.toFixed(3), unit: line.unit, snapshot: line.snapshot });
+        quantity: exactQuantityText(line.quantity), unit: line.unit, snapshot: line.snapshot });
       const revisionLine = await tx.logisticsAllocationRevisionLine.create({ data: { revisionId: revision.id,
         sourceKind: 'PARTNER_CASE', sourceContractId: null, sourceContractItemId: null, productId: null,
         partnerCaseId: line.partnerCaseId, partnerCaseRevision: line.partnerCaseRevision,
@@ -303,12 +369,12 @@ const persistFinalizedAllocationRevision = async (tx: Tx, input: {
         quantity: line.quantity, unit: line.unit, snapshot: json(line.snapshot), integrityHash: digest(lineSnapshot) } });
       partnerPricedLines.push({ sourceKind: 'PARTNER_CASE', caseId: line.partnerCaseId,
         internalRecordId: String(input.revisionData.partnerInternalRecordId), allocationRevisionLineId: revisionLine.id,
-        productRowId: line.productRowId, quantity: line.quantity.toFixed(3), unit: line.unit });
+        productRowId: line.productRowId, quantity: exactQuantityText(line.quantity), unit: line.unit });
       const evidence = { id: revisionLine.id, sourceKind: 'PARTNER_CASE' as const, contractId: null, contractItemId: null,
         partnerCaseId: line.partnerCaseId, partnerLineageId: line.partnerLineageId,
         partnerCaseRevision: line.partnerCaseRevision, partnerIntegrityHash: line.partnerIntegrityHash,
         productRowId: line.productRowId, unit: line.unit, kind: 'ALLOCATION_FINALIZED' as const,
-        quantity: line.quantity.toFixed(3), effectiveAt: input.finalizedAt.toISOString(), recordedAt: input.finalizedAt.toISOString(),
+        quantity: exactQuantityText(line.quantity), effectiveAt: input.finalizedAt.toISOString(), recordedAt: input.finalizedAt.toISOString(),
         sourceType: 'PARTNER_LOGISTICS_ALLOCATION_REVISION', sourceId: revisionLine.id, sourceVersion: 1,
         integrityHash: '', metadata: { loadingId: input.revisionData.loadingId, revisionId: revision.id,
           deliveryId: line.partnerDeliveryId } };
@@ -323,7 +389,7 @@ const persistFinalizedAllocationRevision = async (tx: Tx, input: {
     }
     const lineSnapshot = stableValue({ revisionId: revision.id, contractId: line.sourceContractId,
       contractItemId: line.sourceContractItemId, productRowId: line.productRowId, productId: line.productId,
-      quantity: line.quantity.toFixed(3), unit: line.unit, snapshot: line.snapshot });
+      quantity: exactQuantityText(line.quantity), unit: line.unit, snapshot: line.snapshot });
     const revisionLine = await tx.logisticsAllocationRevisionLine.create({ data: {
       revisionId: revision.id, sourceContractId: line.sourceContractId, sourceContractItemId: line.sourceContractItemId,
       productRowId: line.productRowId, productId: line.productId, quantity: line.quantity, unit: line.unit,
@@ -331,10 +397,10 @@ const persistFinalizedAllocationRevision = async (tx: Tx, input: {
     } });
     pricedLines.push({ allocationRevisionLineId: revisionLine.id, contractId: line.sourceContractId,
       contractItemId: line.sourceContractItemId, productRowId: line.productRowId,
-      quantity: line.quantity.toFixed(3), unit: line.unit });
+      quantity: exactQuantityText(line.quantity), unit: line.unit });
     const evidence = { id: revisionLine.id, contractId: line.sourceContractId, contractItemId: line.sourceContractItemId,
       productRowId: line.productRowId, unit: line.unit, kind: 'ALLOCATION_FINALIZED' as const,
-      quantity: line.quantity.toFixed(3), effectiveAt: input.finalizedAt.toISOString(), recordedAt: input.finalizedAt.toISOString(),
+      quantity: exactQuantityText(line.quantity), effectiveAt: input.finalizedAt.toISOString(), recordedAt: input.finalizedAt.toISOString(),
       sourceType: 'LOGISTICS_ALLOCATION_REVISION', sourceId: revisionLine.id, sourceVersion: 1, integrityHash: '',
       metadata: { loadingId: input.revisionData.loadingId, revisionId: revision.id,
         loadingLineId: input.loadingLines.get(line.sourceContractItemId) || null } };
@@ -364,7 +430,7 @@ const persistFinalizedAllocationRevision = async (tx: Tx, input: {
       const payload = { sourceKind: 'PARTNER_CASE' as const, caseId: row.pricingReference.caseId,
         internalRecordId: row.pricingReference.internalRecordId,
         allocationRevisionLineId: row.allocationRevisionLineId, productRowId: row.allocationRevisionLine.productRowId,
-        quantity: row.quantity.toFixed(3), unit: row.allocationRevisionLine.unit,
+        quantity: exactQuantityText(row.quantity), unit: row.allocationRevisionLine.unit,
         pricingVersionId: row.pricingReference.financialApprovalEvidenceId, pricingRowId: row.approvalEvidenceId,
         grossAmount: row.grossAmount.toFixed(12), discountAmount: row.discountAmount.toFixed(12),
         netAmount: row.netAmount.toFixed(12), consumesFinalRemainder: row.consumesFinalRemainder,
@@ -403,7 +469,7 @@ const persistFinalizedAllocationRevision = async (tx: Tx, input: {
       finalizedAt: input.finalizedAt, actorId: input.actorId, scope: input.scope,
       expectedCurrency: input.expectedCurrency, lines: pricedLines });
   }
-  if (pricingBinding.path === 'ATOMIC_WAYBILL_STATEMENT') {
+  if (pricingBinding.eventIntegrityHashes.length > 0) {
     const events = await tx.dispatchPricedAllocationEvent.findMany({ where: { allocationRevisionId: revision.id },
       orderBy: [{ recordedAt: 'asc' }, { id: 'asc' }] });
     for (const event of events) await appendAudit(tx, { aggregateType: 'PRICED_ALLOCATION_EVENT', aggregateId: event.id,
@@ -518,6 +584,14 @@ export type CanonicalAllocationLineInput = {
   sourceContractItemId: string;
   quantity: string | number;
   unit?: string;
+  pieceCount?: string | number | null;
+};
+
+const loadedPieceEvidence = (line: CanonicalAllocationLineInput) => {
+  const value = String(line.pieceCount ?? '').trim();
+  if (!/^\d+(?:\.0+)?$/.test(value)) return {};
+  const count = new ExactQuantityDecimal(value);
+  return count.gt(0) ? { loadedPieceCount: count.toFixed() } : {};
 };
 
 export const saveCanonicalAllocationDraft = async (prisma: Database, input: {
@@ -565,7 +639,7 @@ export const saveCanonicalAllocationDraft = async (prisma: Database, input: {
       sourceContractId: item.contractId, sourceContractItemId: item.id, productRowId: item.productRowId,
       productId: item.productId, quantity: quantity(line.quantity), unit: required(line.unit || 'count', 'unit'),
       snapshot: json({ contractNumber: item.contract.contractNumber, contractItemId: item.id, productRowId: item.productRowId,
-        productId: item.productId, productName: item.product.namePersian || item.product.name }),
+        productId: item.productId, productName: item.product.namePersian || item.product.name, ...loadedPieceEvidence(line) }),
     };
   });
   }
@@ -654,7 +728,7 @@ const finalizePartnerLoadingAllocations = async (tx: Tx, input: {
           line.partnerDeliveryId !== source.deliveryId || line.partnerLineageId !== canonical?.lineageId ||
           line.sourceContractId !== null || line.sourceContractItemId !== null || line.productId !== null ||
           line.unit !== canonical.unit || line.quantity.lte(0)) throw new DispatchAllocationConflictError('شواهد ردیف تخصیص با تحویل انتخابی همخوان نیست.');
-      requested.set(line.productRowId, (requested.get(line.productRowId) || new Prisma.Decimal(0)).add(line.quantity));
+      requested.set(line.productRowId, (requested.get(line.productRowId) || new ExactQuantityDecimal(0)).add(line.quantity));
     }
   }
   const projection = await readPartnerShipmentQuantityProjection(tx, source.owner.caseId);
@@ -672,7 +746,7 @@ const finalizePartnerLoadingAllocations = async (tx: Tx, input: {
   },
     _sum: { quantity: true } });
   for (const prior of priorDeliveryRows) {
-    const proposed = requested.get(prior.productRowId) || new Prisma.Decimal(0);
+    const proposed = requested.get(prior.productRowId) || new ExactQuantityDecimal(0);
     const selected = byRow.get(prior.productRowId);
     if (!selected || proposed.add(prior._sum.quantity || 0).gt(selected.plannedQuantity)) {
       throw new DispatchAllocationConflictError('مقدار نهایی این تحویل از برنامه مصوب بیشتر است.');
@@ -686,6 +760,7 @@ const finalizePartnerLoadingAllocations = async (tx: Tx, input: {
       queueTurnId: draft.queueTurnId }, _max: { revisionNumber: true } });
     const revisionNumber = (prior._max.revisionNumber || 0) + 1;
     const snapshot = stableValue({ schemaVersion: 1, sourceKind: 'PARTNER_CASE',
+      ...(draft.queueTurn.driverSource === 'PERSONAL_PICKUP' ? { personalPickup: await personalPickupDisplayContext(tx, draft.lines) } : {}),
       loading: { id: loading.id, number: loading.loadingNumber,
         customer: { id: source.recipient.customerId, name: source.recipient.displayName },
         destination: source.recipient.destination, deliveryId: source.deliveryId, plannedDate: source.plannedDate },
@@ -694,7 +769,7 @@ const finalizePartnerLoadingAllocations = async (tx: Tx, input: {
       revisionNumber, finalizedAt: now,
       notification: { confirmationPhone: source.recipient.phone, source: 'PARTNER_VERIFIED_CUSTOMER_OUTPUT', capturedAt: now },
       lines: draft.lines.map(line => ({ productRowId: line.productRowId,
-        lineageId: line.partnerLineageId, quantity: line.quantity.toFixed(3), unit: line.unit,
+        lineageId: line.partnerLineageId, quantity: exactQuantityText(line.quantity), unit: line.unit,
         snapshot: line.snapshot })) });
     const rows: PartnerFinalizedAllocationRow[] = draft.lines.map(line => ({ sourceKind: 'PARTNER_CASE',
       sourceContractId: null, sourceContractItemId: null, productId: null,
@@ -825,13 +900,13 @@ export const finalizeCanonicalLoadingAllocations = async (prisma: Database, inpu
     const projection = await readShipmentQuantityProjection(tx as unknown as PrismaClient, { contractId });
     for (const row of projection.rows) {
       if (row.health !== 'CURRENT' || !row.quantities) throw new DispatchAllocationConflictError(`Shipment row ${row.contractItemId} is not current.`);
-      available.set(row.contractItemId, { amount: new Prisma.Decimal(row.quantities.availableToLoad), unit: row.unit });
+      available.set(row.contractItemId, { amount: new ExactQuantityDecimal(row.quantities.availableToLoad), unit: row.unit });
     }
   }
   const requested = new Map<string, { amount: Prisma.Decimal; unit: string }>();
   for (const line of refreshedDrafts.flatMap((draft) => draft.lines)) {
     const current = requested.get(line.sourceContractItemId);
-    requested.set(line.sourceContractItemId, { amount: (current?.amount || new Prisma.Decimal(0)).add(line.quantity), unit: line.unit });
+    requested.set(line.sourceContractItemId, { amount: (current?.amount || new ExactQuantityDecimal(0)).add(line.quantity), unit: line.unit });
   }
   for (const [itemId, total] of requested) {
     const balance = available.get(itemId);
@@ -847,7 +922,9 @@ export const finalizeCanonicalLoadingAllocations = async (prisma: Database, inpu
     const confirmationPhone = await resolveRevisionConfirmationPhone(tx, draft.lines.map((line) => line.sourceContractId));
     const prior = await tx.logisticsAllocationRevision.aggregate({ where: { loadingId: loading.id, queueTurnId: draft.queueTurnId }, _max: { revisionNumber: true } });
     const revisionNumber = (prior._max.revisionNumber || 0) + 1;
-    const snapshot = stableValue({ schemaVersion: 1, loading: { id: loading.id, number: loading.loadingNumber,
+    const snapshot = stableValue({ schemaVersion: 1,
+      ...(draft.queueTurn.driverSource === 'PERSONAL_PICKUP' ? { personalPickup: await personalPickupDisplayContext(tx, draft.lines) } : {}),
+      loading: { id: loading.id, number: loading.loadingNumber,
       customer: { id: loading.customer.id, name: `${loading.customer.firstName} ${loading.customer.lastName}`.trim(), companyName: loading.customer.companyName },
       project: { id: loading.project.id, name: loading.project.projectName, address: loading.project.address } },
       queueTurn: { id: draft.queueTurn.id, driverSource: draft.queueTurn.driverSource,
@@ -856,7 +933,7 @@ export const finalizeCanonicalLoadingAllocations = async (prisma: Database, inpu
       notification: { ...confirmationPhone, capturedAt: now },
       lines: draft.lines.map((line) => ({ contractId: line.sourceContractId,
         contractItemId: line.sourceContractItemId, productRowId: line.productRowId, productId: line.productId,
-        quantity: line.quantity.toFixed(3), unit: line.unit, snapshot: line.snapshot })) });
+        quantity: exactQuantityText(line.quantity), unit: line.unit, snapshot: line.snapshot })) });
     const loadingLines = new Map(loading.lines.map((line) => [line.sourceContractItemId, line.id]));
     await persistFinalizedAllocationRevision(tx, {
       revisionData: { batchId: batch.id, loadingId: loading.id, queueTurnId: draft.queueTurnId, revisionNumber,
@@ -960,15 +1037,15 @@ export const createSuccessorAllocationRevision = async (prisma: Database, input:
     return { sourceContractId: item.contractId, sourceContractItemId: item.id, productRowId: item.productRowId,
       productId: item.productId, quantity: quantity(line.quantity), unit: required(line.unit || 'count', 'unit'),
       snapshot: json({ contractNumber: item.contract.contractNumber, contractItemId: item.id, productRowId: item.productRowId,
-        productId: item.productId, productName: item.product.namePersian || item.product.name }) };
+        productId: item.productId, productName: item.product.namePersian || item.product.name, ...loadedPieceEvidence(line) }) };
   });
   if (stalePricingTransfer) {
     try {
       assertExactStableReservationTransfer(
         predecessorLines.map((line) => ({ contractId: line.sourceContractId, contractItemId: line.sourceContractItemId,
-          productRowId: line.productRowId, quantity: line.quantity.toFixed(3), unit: line.unit })),
+          productRowId: line.productRowId, quantity: exactQuantityText(line.quantity), unit: line.unit })),
         rows.map((line) => ({ contractId: line.sourceContractId, contractItemId: line.sourceContractItemId,
-          productRowId: line.productRowId, quantity: line.quantity.toFixed(3), unit: line.unit })),
+          productRowId: line.productRowId, quantity: exactQuantityText(line.quantity), unit: line.unit })),
       );
     } catch (error) {
       if (error instanceof AllocationPricingBindingError) throw new DispatchAllocationConflictError(error.message);
@@ -983,12 +1060,12 @@ export const createSuccessorAllocationRevision = async (prisma: Database, input:
       if (row.health !== 'CURRENT' || !row.quantities) throw new DispatchAllocationConflictError(`Shipment row ${row.contractItemId} is not current.`);
       const transferred = stalePricingTransfer
         ? predecessorLines.filter((line) => line.sourceContractItemId === row.contractItemId)
-          .reduce((sum, line) => sum.add(line.quantity), new Prisma.Decimal(0))
-        : new Prisma.Decimal(0);
-      projections.set(row.contractItemId, { amount: new Prisma.Decimal(row.quantities.availableToLoad).add(transferred), unit: row.unit });
+          .reduce((sum, line) => sum.add(line.quantity), new ExactQuantityDecimal(0))
+        : new ExactQuantityDecimal(0);
+      projections.set(row.contractItemId, { amount: new ExactQuantityDecimal(row.quantities.availableToLoad).add(transferred), unit: row.unit });
     }
   }
-  for (const row of rows) requested.set(row.sourceContractItemId, (requested.get(row.sourceContractItemId) || new Prisma.Decimal(0)).add(row.quantity));
+  for (const row of rows) requested.set(row.sourceContractItemId, (requested.get(row.sourceContractItemId) || new ExactQuantityDecimal(0)).add(row.quantity));
   for (const [itemId, amount] of requested) {
     const projection = projections.get(itemId);
     const row = rows.find((candidate) => candidate.sourceContractItemId === itemId)!;
@@ -1002,6 +1079,7 @@ export const createSuccessorAllocationRevision = async (prisma: Database, input:
     finalizedAt: now, finalizedBy: input.actorId } });
   const revisionNumber = predecessor.revisionNumber + 1;
   const snapshot = stableValue({ schemaVersion: 1, predecessorRevisionId: predecessor.id,
+    ...(refreshedQueueTurn.driverSource === 'PERSONAL_PICKUP' ? { personalPickup: await personalPickupDisplayContext(tx, rows) } : {}),
     loading: { id: predecessor.loading.id, number: predecessor.loading.loadingNumber,
       customer: { id: predecessor.loading.customer.id, name: `${predecessor.loading.customer.firstName} ${predecessor.loading.customer.lastName}`.trim(), companyName: predecessor.loading.customer.companyName },
       project: { id: predecessor.loading.project.id, name: predecessor.loading.project.projectName, address: predecessor.loading.project.address } },
@@ -1011,7 +1089,7 @@ export const createSuccessorAllocationRevision = async (prisma: Database, input:
     notification: { ...confirmationPhone, capturedAt: now },
     lines: rows.map((line) => ({ contractId: line.sourceContractId,
       contractItemId: line.sourceContractItemId, productRowId: line.productRowId, productId: line.productId,
-      quantity: line.quantity.toFixed(3), unit: line.unit, snapshot: line.snapshot })) });
+      quantity: exactQuantityText(line.quantity), unit: line.unit, snapshot: line.snapshot })) });
   const loadingLines = new Map(predecessor.loading.lines.map((line) => [line.sourceContractItemId, line.id]));
   await persistFinalizedAllocationRevision(tx, {
     revisionData: { batchId: batch.id, loadingId: predecessor.loadingId, queueTurnId: predecessor.queueTurnId,
@@ -1029,7 +1107,7 @@ export const createSuccessorAllocationRevision = async (prisma: Database, input:
       for (const line of predecessorLines) {
         const release = { id: `${revision.id}:${line.id}`, contractId: line.sourceContractId,
           contractItemId: line.sourceContractItemId, productRowId: line.productRowId, unit: line.unit,
-          kind: 'ALLOCATION_RELEASED' as const, quantity: line.quantity.toFixed(3), effectiveAt: now.toISOString(),
+          kind: 'ALLOCATION_RELEASED' as const, quantity: exactQuantityText(line.quantity), effectiveAt: now.toISOString(),
           recordedAt: now.toISOString(), sourceType: 'STALE_ALLOCATION_SUCCESSOR', sourceId: `${revision.id}:${line.id}`,
           sourceVersion: 1, integrityHash: '', metadata: { predecessorRevisionId: predecessor.id, successorRevisionId: revision.id } };
         release.integrityHash = shipmentQuantityEvidenceIntegrityHash(release);
@@ -1070,6 +1148,275 @@ const issueWaybill = async (tx: Tx, candidate: any, actorId: string, replacesWay
   return waybill;
 };
 
+export class LoadingCancellationAccountingAccessError extends Error {}
+
+export async function loadingCancellationAccountingAuthority(db: Tx, actorId: string) {
+  const actor = await db.user.findUnique({ where: { id: actorId },
+    select: { role: true, isActive: true, partnerProfile: { select: { id: true } } } });
+  if (!actor?.isActive || actor.partnerProfile) return null;
+  const workspace = 'accounting';
+  const feature = 'accounting_dispatch_candidates_manage';
+  const [access, grant] = await Promise.all([
+    getEffectiveUserAccess(db, { userId: actorId, userRole: actor.role }),
+    resolveNarrowFeatureAccess(db, { userId: actorId, role: actor.role, workspace, feature, requiredPermission: 'edit' }),
+  ]);
+  const workspacePermission = access.workspaces.find(item => item.workspace === workspace)?.permission;
+  if (!workspacePermission || !['edit', 'admin'].includes(workspacePermission) || !grant.allowed) return null;
+  return { actorRole: actor.role, workspace, workspacePermission, feature, featurePermission: grant.permissionLevel };
+}
+
+export async function readLegacyLoadingRecovery(tx: Tx, loadingId: string, cutoverAt: Date | null) {
+  const loading = await tx.logisticsLoading.findUnique({
+    where: { id: loadingId },
+    select: {
+      status: true, sourceKind: true,
+      salesDispatchInvoices: { orderBy: { number: 'desc' }, select: { id: true, number: true, voidedAt: true } },
+      canonicalAllocationRevisions: { take: 2, include: {
+        physicalExit: { select: { id: true } }, manualOutageExit: { select: { id: true } },
+        queueTurn: { include: { physicalExit: { select: { id: true } }, manualOutageExit: { select: { id: true } } } },
+        lines: { select: { sourceKind: true, sourceContractId: true, sourceContractItemId: true, productId: true } },
+        candidate: { select: { id: true, status: true, waybills: { orderBy: { number: 'desc' }, select: {
+          id: true, number: true, status: true, voidedAt: true, replacesWaybillId: true,
+          physicalExit: { select: { id: true } }, manualOutageExit: { select: { id: true } },
+          exitAuthorizations: { where: { status: { in: ['ACTIVE', 'CONSUMED'] } }, select: { id: true } },
+        } } } },
+      } },
+    },
+  });
+  if (!loading || loading.status !== 'FINALIZED' || loading.sourceKind !== 'SALES_CONTRACT' ||
+      loading.canonicalAllocationRevisions.length !== 1 || loading.salesDispatchInvoices.some(invoice => !invoice.voidedAt)) return null;
+  const [revision] = loading.canonicalAllocationRevisions;
+  const candidate = revision.candidate;
+  const invoice = loading.salesDispatchInvoices[0];
+  if (!invoice || !revision.sealedAt || revision.sourceKind !== 'SALES_CONTRACT' ||
+      (cutoverAt && isPostCutoverFinalization(revision.finalizedAt, cutoverAt)) ||
+      revision.physicalExit || revision.manualOutageExit || revision.queueTurn.physicalExit || revision.queueTurn.manualOutageExit ||
+      revision.queueTurn.status !== 'LOADING_FINALIZED' || revision.queueTurn.loadingId !== loadingId ||
+      candidate?.status !== 'ACCEPTED' || candidate.waybills.some(waybill =>
+        waybill.status !== 'VOIDED' || !waybill.voidedAt || waybill.physicalExit || waybill.manualOutageExit ||
+        waybill.exitAuthorizations.length)) return null;
+  const [waybill] = candidate.waybills;
+  if (!waybill || candidate.waybills.some(item => item.replacesWaybillId === waybill.id)) return null;
+  const cancellation = await tx.accountingDispatchCommand.findFirst({ where: {
+    candidateId: candidate.id, action: `VOID_WAYBILL_AND_INVOICE:${waybill.id}:${invoice.id}`,
+  }, select: { id: true } });
+  const pending = await tx.crossWorkspaceDuty.findFirst({ where: {
+    sourceActionCode: LOADING_CANCELLATION_DUTY, sourceId: loadingId, status: 'OPEN',
+  }, select: { id: true } });
+  return cancellation && !pending ? { revision, candidate, waybill, invoice } : null;
+}
+
+export const recoverLegacyLoadingWaybill = (prisma: Database, input: {
+  loadingId: string; waybillId: string; invoiceId: string; reason: string; actorId: string;
+}) => serializable(prisma, async tx => {
+  const reason = typeof input.reason === 'string' ? input.reason.trim() : '';
+  if (reason.length < 3 || reason.length > 2000) {
+    throw new DispatchAllocationValidationError('دلیل صدور مجدد باید بین ۳ و ۲۰۰۰ نویسه باشد.');
+  }
+  await tx.$queryRaw`SELECT id FROM users WHERE id=${input.actorId} FOR UPDATE`;
+  await tx.$queryRaw`SELECT revision FROM effective_authorization_state WHERE id=1 FOR UPDATE`;
+  if (!await loadingCancellationAccountingAuthority(tx, input.actorId)) {
+    throw new LoadingCancellationAccountingAccessError('مجوز مدیریت اسناد ارسال برای صدور مجدد لازم است.');
+  }
+  await assertCanonicalDispatchCommandAllowed(tx);
+  await lockKeys(tx, [`LOGISTICS_LOADING:${input.loadingId}`, `SALES_INVOICE:${input.loadingId}`]);
+  const gate = await loadShipmentStatementRuntimeStateUnderLock(tx);
+  const control = await tx.shipmentStatementOperationsControl.findUnique({
+    where: { id: 'customer-shipment-statements' }, select: { id: true },
+  });
+  const target = gate && control && await readLegacyLoadingRecovery(tx, input.loadingId, gate.cutoverAt);
+  if (!target || target.waybill.id !== input.waybillId || target.invoice.id !== input.invoiceId) {
+    throw new DispatchAllocationConflictError('وضعیت اسناد بارگیری تغییر کرده یا صدور مجدد مجاز نیست. اسناد را به‌روزرسانی کنید.');
+  }
+  const { candidate, revision, waybill, invoice } = target;
+  await lockKeys(tx, [`ACCOUNTING_DISPATCH_CANDIDATE:${candidate.id}`,
+    `ACCOUNTING_DISPATCH_WAYBILL:${waybill.id}`, `GUARD_QUEUE:${revision.queueTurnId}`,
+    `LOGISTICS_ALLOCATION_REVISION:${revision.id}`]);
+  await lockQueueTurns(tx, [revision.queueTurnId]);
+  const contractIds = [...new Set(revision.lines.map(line => ordinaryAllocationLine(line).sourceContractId))];
+  await lockPricingContracts(tx, contractIds);
+  await assertOrdinaryContractsDispatchEligible(tx, contractIds, DispatchAllocationConflictError);
+  if (!await isGuardQueueTurnCurrentlyReady(tx, revision.queueTurn) ||
+      (await assessBoundAllocationPricingFreshness(tx, revision.id)).status !== 'CURRENT') {
+    throw new DispatchAllocationConflictError('آمادگی راننده و خودرو یا شواهد قیمت بارگیری نیاز به بررسی دارد.');
+  }
+  const replacement = await issueWaybill(tx, { ...candidate, allocationRevision: revision }, input.actorId, waybill.id);
+  await appendAudit(tx, { aggregateType: 'ACCOUNTING_DISPATCH_WAYBILL', aggregateId: replacement.id,
+    eventType: 'WAYBILL_REISSUED_AFTER_VOID', actorId: input.actorId,
+    payload: { reason, loadingId: input.loadingId, voidedWaybillId: waybill.id, voidedInvoiceId: invoice.id } });
+  return replacement.id;
+});
+
+type FinalizedLoadingCancellation = {
+  loadingId: string; reason: string; actorId: string; expectedDocumentIds?: string[];
+};
+
+export const cancelFinalizedOrdinaryLoading = (prisma: Database, input: FinalizedLoadingCancellation) =>
+  serializable(prisma, tx => cancelFinalizedOrdinaryLoadingInTransaction(tx, input));
+
+export const cancelFinalizedOrdinaryLoadingInTransaction = async (tx: Tx, input: FinalizedLoadingCancellation) => {
+  const reason = required(input.reason, 'reason');
+  if (input.expectedDocumentIds?.length) {
+    await tx.$queryRaw`SELECT id FROM users WHERE id=${input.actorId} FOR UPDATE`;
+    await tx.$queryRaw`SELECT revision FROM effective_authorization_state WHERE id=1 FOR UPDATE`;
+  }
+  await assertCanonicalDispatchCommandAllowed(tx);
+  await lockKeys(tx, [`LOGISTICS_LOADING:${input.loadingId}`, `SALES_INVOICE:${input.loadingId}`]);
+  const pending = await tx.crossWorkspaceDuty.findFirst({
+    where: { sourceActionCode: LOADING_CANCELLATION_DUTY, sourceId: input.loadingId, status: 'OPEN' },
+    select: { id: true },
+  });
+  if (pending) throw new DispatchAllocationConflictError('درخواست لغو این بارگیری در انتظار تصمیم حسابداری است.');
+  const loading = await tx.logisticsLoading.findUnique({
+    where: { id: input.loadingId },
+    include: {
+      salesDispatchInvoices: { where: { voidedAt: null }, select: { id: true, number: true, loadingId: true } },
+      guardQueueTurns: { include: { physicalExit: true, manualOutageExit: true } },
+      canonicalAllocationRevisions: { include: {
+        lines: true, physicalExit: true, manualOutageExit: true,
+        candidate: { include: { waybills: { include: {
+          physicalExit: true, manualOutageExit: true,
+          exitAuthorizations: { where: { status: { in: ['ACTIVE', 'CONSUMED'] } }, select: { id: true, status: true } },
+        } } } },
+      } },
+    },
+  });
+  if (!loading || loading.sourceKind !== 'SALES_CONTRACT') {
+    throw new DispatchAllocationConflictError('بارگیری فروش عادی پیدا نشد.');
+  }
+  const revisions = loading.canonicalAllocationRevisions;
+  if (!revisions.length) throw new DispatchAllocationConflictError('تخصیص نهایی این بارگیری در گردش کار جدید ثبت نشده است.');
+  if (loading.status === 'CANCELLED') {
+    const cancellation = await tx.dispatchLifecycleAudit.findFirst({
+      where: { aggregateType: 'LOGISTICS_LOADING', aggregateId: loading.id, eventType: 'FINALIZED_LOADING_CANCELLED' },
+    });
+    if (cancellation) return loading.id;
+  }
+  const alreadyCancelled = loading.status === 'CANCELLED' && Boolean(loading.finalizedAt && loading.cancelledAt);
+  if (loading.status !== 'FINALIZED' && !alreadyCancelled) {
+    throw new DispatchAllocationConflictError('بارگیری در وضعیت قابل لغو نیست.');
+  }
+
+  const waybills = revisions.flatMap(revision => revision.candidate?.waybills ?? []);
+  const turnIds = [...new Set(revisions.map(revision => revision.queueTurnId))];
+  // Closed draft-only personal selections retain their loading history but are not finalized carriers.
+  const turns = loading.guardQueueTurns.filter(turn => !(turn.driverSource === 'PERSONAL_PICKUP'
+    && turn.status === 'CLOSED_WITHOUT_LOADING' && !turnIds.includes(turn.id)));
+  await lockKeys(tx, [
+    ...turnIds.map(id => `GUARD_QUEUE:${id}`),
+    ...revisions.map(revision => `LOGISTICS_ALLOCATION_REVISION:${revision.id}`),
+    ...revisions.flatMap(revision => revision.candidate ? [`ACCOUNTING_DISPATCH_CANDIDATE:${revision.candidate.id}`] : []),
+    ...waybills.map(waybill => `ACCOUNTING_DISPATCH_WAYBILL:${waybill.id}`),
+  ]);
+  if (turns.length !== turnIds.length || turns.some(turn => !turnIds.includes(turn.id) ||
+    turn.status !== 'LOADING_FINALIZED' || turn.physicalExit || turn.manualOutageExit) ||
+    revisions.some(revision => revision.physicalExit || revision.manualOutageExit) ||
+    waybills.some(waybill => waybill.status === 'EXIT_RECORDED' || waybill.physicalExit || waybill.manualOutageExit ||
+      waybill.exitAuthorizations.some(authorization => authorization.status === 'CONSUMED'))) {
+    throw new DispatchAllocationConflictError('لغو فقط پیش از ثبت خروج و برای نوبت‌های نهایی‌شدهٔ همین بارگیری ممکن است.');
+  }
+  const issuedWaybills = waybills.filter(waybill => waybill.status === 'ISSUED');
+  const activeInvoices = loading.salesDispatchInvoices;
+  const documentIds = [...issuedWaybills.map(doc => doc.id), ...activeInvoices.map(doc => doc.id)].sort();
+  if (input.expectedDocumentIds && JSON.stringify([...input.expectedDocumentIds].sort()) !== JSON.stringify(documentIds)) {
+    throw new DispatchAllocationConflictError('اسناد بارگیری تغییر کرده‌اند. صفحه را به‌روز کنید و دوباره تأیید کنید.');
+  }
+  const authority = documentIds.length && input.expectedDocumentIds
+    ? await loadingCancellationAccountingAuthority(tx, input.actorId) : null;
+  if (documentIds.length && !input.expectedDocumentIds) {
+    throw new DispatchAllocationConflictError('برای لغو، اسناد فعال را بررسی و ابطال آن‌ها را تأیید کنید.');
+  }
+  if (documentIds.length && reason.length < 3) throw new DispatchAllocationConflictError('دلیل ابطال اسناد حداقل سه نویسه است.');
+  if (documentIds.length && !authority) {
+    throw new LoadingCancellationAccountingAccessError('برای ابطال اسناد فعال، دسترسی ویرایش حسابداری و مجوز مدیریت اسناد ارسال لازم است.');
+  }
+  if (waybills.some(waybill => waybill.status === 'VOIDED' && waybill.exitAuthorizations.length > 0)) {
+    throw new DispatchAllocationConflictError('مجوز خروج یکی از بارنامه‌های ابطال‌شده هنوز تعیین تکلیف نشده است.');
+  }
+
+  // A successor already settled its predecessor. A returned or rejected candidate already released its own lines.
+  const superseded = new Set(revisions.flatMap(revision => revision.predecessorRevisionId ? [revision.predecessorRevisionId] : []));
+  const current = revisions.filter(revision => !superseded.has(revision.id));
+  if (current.length !== turnIds.length || new Set(current.map(revision => revision.queueTurnId)).size !== turnIds.length ||
+    current.some(revision => !revision.sealedAt || !revision.lines.length || !revision.candidate ||
+      !['PENDING', 'ACCEPTED', 'RETURNED', 'REJECTED', 'STALE_REQUIRES_SUCCESSOR'].includes(revision.candidate.status))) {
+    throw new DispatchAllocationConflictError('سوابق تخصیص این بارگیری کامل یا قابل لغو نیست.');
+  }
+
+  const lines = current.flatMap(revision => revision.lines.map(ordinaryAllocationLine));
+  const itemIds = lines.map(line => line.sourceContractItemId);
+  await lockKeys(tx, itemIds.flatMap(id => [
+    `SHIPMENT_CONTRACT_ITEM:${id}`, `SHIPMENT_EVIDENCE_HEAD:${id}`, `SHIPMENT_PROJECTION:${id}`,
+  ]));
+  await lockShipmentTruth(tx, itemIds);
+  const at = new Date();
+  if (authority) {
+    const correlationId = `cancel-loading:${loading.id}`;
+    for (const waybill of issuedWaybills) {
+      const idempotencyKey = correlationId;
+      await voidDispatchBundleInTransaction(tx, waybill, {
+        waybillId: waybill.id, actorId: input.actorId, reason, at, authority,
+        correlationId, idempotencyKey, intentFingerprint: digest({ command: 'VOID', waybillId: waybill.id, reason, authority }),
+      });
+    }
+    for (const invoice of activeInvoices) {
+      await voidSalesInvoiceInTransaction(tx, invoice, { actorId: input.actorId, reason, at });
+    }
+  }
+  for (const revision of current) {
+    const candidate = revision.candidate!;
+    if (!['REJECTED', 'RETURNED'].includes(candidate.status)) {
+      for (const row of revision.lines) {
+        const line = ordinaryAllocationLine(row);
+        const evidence = {
+          id: row.id, contractId: line.sourceContractId, contractItemId: line.sourceContractItemId,
+          productRowId: line.productRowId, unit: line.unit, kind: 'ALLOCATION_RELEASED' as const,
+          quantity: exactQuantityText(line.quantity), effectiveAt: at.toISOString(), recordedAt: at.toISOString(),
+          sourceType: 'FINALIZED_LOADING_CANCELLATION', sourceId: row.id, sourceVersion: 1,
+          integrityHash: '', metadata: { loadingId: loading.id, revisionId: revision.id, revisionLineId: row.id },
+        };
+        evidence.integrityHash = shipmentQuantityEvidenceIntegrityHash(evidence);
+        await tx.shipmentQuantityEvidence.create({ data: {
+          contractId: evidence.contractId, contractItemId: evidence.contractItemId, productRowId: evidence.productRowId,
+          unit: evidence.unit, kind: evidence.kind, quantity: line.quantity, effectiveAt: at, recordedAt: at,
+          sourceType: evidence.sourceType, sourceId: evidence.sourceId, sourceVersion: 1,
+          integrityHash: evidence.integrityHash, metadata: json(evidence.metadata),
+        } });
+      }
+      await tx.accountingDispatchCandidate.update({ where: { id: candidate.id }, data: {
+        status: 'WITHDRAWN', dispositionAt: at, dispositionBy: input.actorId, dispositionReason: reason,
+      } });
+      await tx.accountingDispatchWorkItem.updateMany({ where: { candidateId: candidate.id, status: 'OPEN' },
+        data: { status: 'COMPLETED', completedAt: at } });
+      await appendAudit(tx, { aggregateType: 'ACCOUNTING_DISPATCH_CANDIDATE', aggregateId: candidate.id,
+        eventType: 'CANDIDATE_WITHDRAWN', payload: { loadingId: loading.id, reason, previousStatus: candidate.status },
+        actorId: input.actorId, recordedAt: at });
+    }
+  }
+  for (const turn of turns) {
+    await tx.guardDriverQueueTurn.update({ where: { id: turn.id }, data: {
+      ...(turn.driverSource === 'PERSONAL_PICKUP'
+        ? { status: 'CLOSED_WITHOUT_LOADING' as const, closedAt: at, closedBy: input.actorId, closureReason: reason }
+        : { status: 'AVAILABLE_FOR_LOADING' as const, loadingId: null, availableAt: at, availableBy: input.actorId }),
+      reservedAt: null, reservedBy: null, finalizedAt: null, finalizedBy: null,
+    } });
+    await appendQueueEvent(tx, {
+      turnId: turn.id, eventType: 'FINALIZED_LOADING_CANCELLED', fromStatus: 'LOADING_FINALIZED', toStatus: turn.driverSource === 'PERSONAL_PICKUP' ? 'CLOSED_WITHOUT_LOADING' : 'AVAILABLE_FOR_LOADING',
+      actorId: input.actorId, reason, payload: { loadingId: loading.id },
+    });
+  }
+  if (!alreadyCancelled) {
+    await tx.logisticsLoading.update({ where: { id: loading.id }, data: {
+      status: 'CANCELLED', cancelledAt: at, cancelledBy: input.actorId, cancellationReason: reason,
+    } });
+  }
+  await refreshProjectionContracts(tx, lines.map(line => line.sourceContractId));
+  await appendAudit(tx, { aggregateType: 'LOGISTICS_LOADING', aggregateId: loading.id,
+    eventType: 'FINALIZED_LOADING_CANCELLED', payload: { reason, alreadyCancelled, documentIds, queueTurnIds: turnIds, revisionIds: current.map(revision => revision.id) },
+    actorId: input.actorId, recordedAt: at });
+  return loading.id;
+};
+
 const publicCandidateResult = (candidate: any, waybill?: any) => ({
   candidateId: candidate.id, status: candidate.status,
   waybill: waybill ? { id: waybill.id, number: waybill.number.toString(), status: waybill.status } : null,
@@ -1096,10 +1443,11 @@ export const decideAccountingDispatchCandidate = async (prisma: Database, input:
     return previous.result;
   }
   const candidate = await tx.accountingDispatchCandidate.findUnique({
-    where: { id: input.candidateId }, include: { allocationRevision: { include: { lines: true } }, workItem: true, waybills: true },
+    where: { id: input.candidateId }, include: { allocationRevision: { include: { lines: true, queueTurn: { select: { driverSource: true } } } }, workItem: true, waybills: true },
   });
   if (!candidate) throw new DispatchAllocationValidationError('Accounting dispatch candidate was not found.');
   if (candidate.status !== AccountingDispatchCandidateStatus.PENDING) throw new DispatchAllocationConflictError('Only a pending candidate can be decided.');
+  if (input.action === 'ACCEPT') await requirePickupVerification(tx, candidate.id, candidate.allocationRevision.queueTurn.driverSource, DispatchAllocationConflictError);
   if (input.action === 'ACCEPT') await assertOrdinaryContractsDispatchEligible(tx,
     candidate.allocationRevision.lines.map(line => line.sourceContractId), DispatchAllocationConflictError);
   const reason = input.action === 'ACCEPT' ? null : required(input.reason, 'reason');
@@ -1122,7 +1470,7 @@ export const decideAccountingDispatchCandidate = async (prisma: Database, input:
       const evidence = {
         id: `${candidate.id}:${line.id}`, ...source,
         productRowId: line.productRowId, unit: line.unit, kind: 'ALLOCATION_RELEASED' as const,
-        quantity: line.quantity.toFixed(3), effectiveAt: now.toISOString(), recordedAt: now.toISOString(),
+        quantity: exactQuantityText(line.quantity), effectiveAt: now.toISOString(), recordedAt: now.toISOString(),
         sourceType: 'ACCOUNTING_CANDIDATE_DISPOSITION', sourceId: `${candidate.id}:${line.id}`, sourceVersion: 1,
         integrityHash: '', metadata: { revisionId: candidate.allocationRevisionId, candidateId: candidate.id, revisionLineId: line.id },
       };
@@ -1148,7 +1496,7 @@ export const decideAccountingDispatchCandidate = async (prisma: Database, input:
 };
 
 export const voidAccountingDispatchWaybill = async (prisma: Database, input: {
-  waybillId: string; reason: string; idempotencyKey: string; actorId: string; effectiveAuthority: unknown;
+  waybillId: string; reason: string; idempotencyKey: string; actorId: string; effectiveAuthority: unknown; expectedInvoiceId?: string | null;
 }) => {
   if (await waybillRequiresAtomicDocuments(prisma, input.waybillId)) {
     return requiredDispatchDocumentsCommands().voidWaybill({ ...input, authority: input.effectiveAuthority });
@@ -1158,7 +1506,9 @@ export const voidAccountingDispatchWaybill = async (prisma: Database, input: {
   const initial = await tx.accountingDispatchWaybill.findUnique({ where: { id: input.waybillId } });
   if (!initial) throw new DispatchAllocationValidationError('Dispatch waybill was not found.');
   await lockKeys(tx, [`ACCOUNTING_DISPATCH_CANDIDATE:${initial.candidateId}`, `ACCOUNTING_DISPATCH_WAYBILL:${input.waybillId}`]);
-  const action = `VOID_WAYBILL:${input.waybillId}`;
+  const action = input.expectedInvoiceId === undefined
+    ? `VOID_WAYBILL:${input.waybillId}`
+    : `VOID_WAYBILL_AND_INVOICE:${input.waybillId}:${input.expectedInvoiceId ?? ''}`;
   const previous = await tx.accountingDispatchCommand.findUnique({ where: {
     candidateId_idempotencyKey: { candidateId: initial.candidateId, idempotencyKey },
   } });
@@ -1169,6 +1519,14 @@ export const voidAccountingDispatchWaybill = async (prisma: Database, input: {
   const waybill = await tx.accountingDispatchWaybill.findUniqueOrThrow({ where: { id: input.waybillId } });
   if (waybill.status !== AccountingDispatchWaybillStatus.ISSUED) throw new DispatchAllocationConflictError('Only an issued waybill can be voided.');
   const reason = required(input.reason, 'reason');
+  if (input.expectedInvoiceId !== undefined) {
+    const candidate = await tx.accountingDispatchCandidate.findUniqueOrThrow({
+      where: { id: waybill.candidateId }, select: { allocationRevision: { select: { loadingId: true } } },
+    });
+    const { voidSalesInvoiceInTransaction } = await import('./salesDispatchInvoice/service');
+    await voidSalesInvoiceInTransaction(tx, { actorId: input.actorId, workspace: 'accounting' },
+      candidate.allocationRevision.loadingId, input.expectedInvoiceId, reason, true);
+  }
   const now = new Date();
   await revokeActiveExitAuthorization(tx, { waybillId: waybill.id, actorId: input.actorId,
     reason: `Waybill voided: ${reason}`, eventType: 'REVOKED_FOR_WAYBILL_VOID', at: now, effectiveAuthority: input.effectiveAuthority });

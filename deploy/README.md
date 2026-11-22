@@ -22,16 +22,10 @@ This script:
 - Fetches latest code from `origin/main` and fast-forwards the working tree
 - Initializes and updates Git submodules
 - Builds images
-- Starts Postgres and the private ClamAV service
-- Runs `prisma migrate deploy`
-- Starts full stack (`nginx`, `frontend`, `backend`, `inquiry`, `postgres`, `clamav`)
-- Verifies that the backend can stream and scan a clean HR document
+- Starts PostgreSQL and runs the protected migrations
+- Starts and verifies the five production services (`nginx`, `frontend`, `backend`, `inquiry`, `postgres`)
 
-ClamAV definitions are persisted in a Docker volume and refreshed automatically. No ClamAV package or public port is required on the Ubuntu host. On a new server, the first deployment can take several minutes while ClamAV initializes. If antivirus verification fails, inspect the private service with:
-
-```bash
-docker compose --env-file deploy/.env.prod -f docker-compose.prod.yml logs clamav backend
-```
+File uploads do not invoke a malware scanner. See the [protected update runbook](../docs/operations/protected-maintenance-next-update.md) for the first transition from a release that used ClamAV.
 
 ## 3) Issue TLS certificate (Let's Encrypt)
 ```bash
@@ -96,11 +90,7 @@ sh deploy/scripts/reset-crm-customers.sh --env-file deploy/.env.prod --apply --c
 The apply step creates a `pg_dump` backup under `backups/` before deleting data.
 
 ## Rollback
-1. Keep prior release image tags.
-2. Update `docker-compose.prod.yml` to previous tags (or previous commit).
-3. Run:
-```bash
-docker compose --env-file deploy/.env.prod -f docker-compose.prod.yml up -d
-```
 
-DB rollback policy: forward-fix by default. Only run down-migrations if explicitly prepared and tested.
+Use the journaled procedure in [the zero-data-loss runbook](../docs/operations/zero-data-loss-deployment.md), preserving its ownership lease, verified local/independent checkpoint, immutable complete release set and final health gates. Manual tag changes and direct Compose restarts are not a production rollback procedure.
+
+The [online-deployment admission record](../docs/operations/online-deployment.md) tracks the approved redesign in Issue #405. Its initial foundations do not enable online switching. After an eventual online switch, rollback must retain new committed data rather than restore an older database.

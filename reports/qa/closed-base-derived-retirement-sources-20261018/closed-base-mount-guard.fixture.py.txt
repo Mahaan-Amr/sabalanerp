@@ -1,0 +1,31 @@
+import pathlib,os,json,hashlib,types,ctypes,subprocess,sys,shutil
+P=pathlib.Path;control=P(sys.argv[1]);guard_bytes=(control/'mount_guard.py').read_bytes()
+assert hashlib.sha256(guard_bytes).hexdigest()=='165101a51ecc00db4b12ff65a5b2fe55f7037b4407ccdde5e799afa7bda54cd7'
+guard=types.ModuleType('frozen_guard');exec(compile(guard_bytes,str(control/'mount_guard.py'),'exec'),guard.__dict__)
+namespace_before=os.readlink('/proc/self/ns/mnt');guard.isolate_mount_namespace();assert os.readlink('/proc/self/ns/mnt')!=namespace_before
+scratch=control.parent/'scratch';scratch.mkdir(mode=0o700);work=scratch/'work';work.mkdir(mode=0o700);phase=work/'cleanup';phase.mkdir(mode=0o700);(phase/'mount_guard.py').write_bytes(guard_bytes);os.chmod(phase/'mount_guard.py',0o400)
+targets=[]
+for name in ['native-production-base-ebbdac10f1914036827d94e7069d8c01','native-production-base-98b8b8d122ff42b990376b69eba155f9']:
+ parent=work/name;parent.mkdir(mode=0o700);pg=parent/'pgdata';pg.mkdir(mode=0o700);os.chown(pg,70,70)
+ nested=pg/'nested';nested.mkdir(mode=0o700);os.chown(nested,70,70)
+ file=pg/'owned-dummy';file.write_bytes(b'OWNED DISPOSABLE DATA');os.chown(file,70,70)
+ tar=parent/'restore-input.tar';tar.write_bytes(b'OWNED DUPLICATE FIXTURE');os.chown(tar,70,70)
+ for target in [pg,tar]:
+  s=target.lstat();a=parent.stat();targets.append({'path':str(target),'identity':[s.st_dev,s.st_ino,s.st_uid,s.st_size,s.st_mtime_ns,s.st_ctime_ns],'parentIdentity':[a.st_dev,a.st_ino]})
+(phase/'cleanup-plan.json').write_text(json.dumps({'work':str(work),'targets':targets}));os.chmod(phase/'cleanup-plan.json',0o400)
+source=scratch/'bind-source';source.mkdir(mode=0o700);sentinel=source/'retained';sentinel.write_bytes(b'RETAIN THE SAME-DEVICE FOREIGN SENTINEL')
+destination=P(targets[0]['path'])/'nested';assert source.stat().st_dev==destination.stat().st_dev
+libc=ctypes.CDLL(None,use_errno=True);libc.mount.argtypes=[ctypes.c_char_p,ctypes.c_char_p,ctypes.c_char_p,ctypes.c_ulong,ctypes.c_void_p];libc.mount.restype=ctypes.c_int;libc.umount2.argtypes=[ctypes.c_char_p,ctypes.c_int];libc.umount2.restype=ctypes.c_int
+assert libc.mount(os.fsencode(source),os.fsencode(destination),None,1<<12,None)==0
+try:
+ result=subprocess.run(['python3','-I','-B',str(control/'cleanup.py'),str(phase)],capture_output=True,text=True,pass_fds=(9,8))
+ assert result.returncode!=0 and 'HOST_MOUNT_WITHIN_WORKSPACE' in result.stderr,(result.returncode,result.stdout,result.stderr)
+ assert sentinel.read_bytes()==(destination/'retained').read_bytes()==b'RETAIN THE SAME-DEVICE FOREIGN SENTINEL'
+ assert all(P(item['path']).exists() for item in targets)
+finally:assert libc.umount2(os.fsencode(destination),0)==0
+guard.assert_no_nested_mounts(work)
+result=subprocess.run(['python3','-I','-B',str(control/'cleanup.py'),str(phase)],capture_output=True,text=True,pass_fds=(9,8))
+assert result.returncode==0,(result.returncode,result.stdout,result.stderr)
+assert all(not P(item['path']).exists() for item in targets)
+assert sentinel.read_bytes()==b'RETAIN THE SAME-DEVICE FOREIGN SENTINEL'
+print(json.dumps({'privateNamespaceVerified':True,'realSameDeviceBindRefused':True,'sentinelPreserved':True,'exactOwnedFixtureCopiesRemovedAfterUnmount':True,'productionDataUsed':False,'publicOnlineAdmission':False}))

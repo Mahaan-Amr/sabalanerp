@@ -12,15 +12,18 @@ const prisma = new PrismaClient();
 const rollback = Symbol('allocation-pricing-port-rollback');
 
 const run = async () => {
+  const database = new URL(process.env.DATABASE_URL ?? '');
+  assert(['127.0.0.1', 'localhost'].includes(database.hostname) && database.port === '55432' && database.pathname === '/sabalanerp', 'Only the existing sabalanerp-local database is allowed');
   const beforeVersions = await prisma.contractApprovedPricingVersion.count();
   const beforeReadiness = await prisma.contractPricingReadinessResult.count();
   const beforeEvents = await prisma.dispatchPricedAllocationEvent.count();
   try {
     await prisma.$transaction(async tx => {
-      const [candidate] = await tx.$queryRaw<Array<{
+      type Candidate = {
         itemId: string; productRowId: string; contractId: string; financialRecordId: string; createdBy: string; currency: string;
         revisionId: string; revisionLineId: string; lineQuantity: Prisma.Decimal; lineUnit: string;
-      }>>(Prisma.sql`
+      };
+      let [candidate] = await tx.$queryRaw<Candidate[]>(Prisma.sql`
         SELECT ci."id" AS "itemId", ci."productRowId", ci."contractId",
           afr."id" AS "financialRecordId", afr."createdBy", sc."currency",
           arl."revisionId", arl."id" AS "revisionLineId", arl."quantity" AS "lineQuantity", arl."unit" AS "lineUnit"
@@ -37,7 +40,35 @@ const run = async () => {
         ORDER BY ci."createdAt", ci."id"
         LIMIT 1
       `);
-      assert(candidate, 'sabalanerp-local needs one unsealed financial record with a stable contract row');
+      if (!candidate) {
+        // Create the missing allocation evidence only inside this rollback-only
+        // transaction; never alter or delete an existing allocation or contract.
+        const [source] = await tx.$queryRaw<Array<Omit<Candidate, 'revisionId' | 'revisionLineId' | 'lineQuantity' | 'lineUnit'> & { productId: string }>>(Prisma.sql`
+          SELECT ci."id" AS "itemId", ci."productRowId", ci."contractId",
+            ci."productId", afr."id" AS "financialRecordId", afr."createdBy", sc."currency"
+          FROM "contract_items" ci
+          JOIN "sales_contracts" sc ON sc."id" = ci."contractId"
+          JOIN "accounting_financial_records" afr ON afr."contractId" = ci."contractId"
+          LEFT JOIN "contract_approved_pricing_versions" pv
+            ON pv."contractId" = ci."contractId" OR pv."sourceFinancialRecordId" = afr."id"
+          WHERE ci."productRowId" IS NOT NULL AND pv."id" IS NULL
+          ORDER BY ci."createdAt", ci."id" LIMIT 1
+        `);
+        const template = await tx.logisticsAllocationRevision.findFirst({ orderBy: { finalizedAt: 'asc' } });
+        assert(source && template, 'sabalanerp-local requires an unsealed contract and an allocation revision template');
+        const last = await tx.logisticsAllocationRevision.aggregate({ where: { loadingId: template.loadingId, queueTurnId: template.queueTurnId }, _max: { revisionNumber: true } });
+        const revision = await tx.logisticsAllocationRevision.create({ data: {
+          batchId: template.batchId, loadingId: template.loadingId, queueTurnId: template.queueTurnId,
+          revisionNumber: (last._max.revisionNumber ?? 0) + 1, snapshot: {},
+          integrityHash: randomUUID().replace(/-/g, '').padEnd(64, '0'), finalizedBy: source.createdBy,
+        } });
+        const line = await tx.logisticsAllocationRevisionLine.create({ data: {
+          revisionId: revision.id, sourceContractId: source.contractId, sourceContractItemId: source.itemId,
+          productRowId: source.productRowId, productId: source.productId, quantity: '1', unit: 'meter', snapshot: {},
+          integrityHash: randomUUID().replace(/-/g, '').padEnd(64, '0'),
+        } });
+        candidate = { ...source, revisionId: revision.id, revisionLineId: line.id, lineQuantity: line.quantity, lineUnit: line.unit };
+      }
 
       const repository = new PrismaApprovedPricingRepository(tx);
       await repository.withContractLock(candidate.contractId, async () => {

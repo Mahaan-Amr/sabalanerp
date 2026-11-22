@@ -55,10 +55,28 @@ test('contract query canonicalization preserves unknown parameters and removes i
     search: '',
     status: 'ALL',
     sourceStatus: 'ALL',
+    sourceKind: 'ALL',
     dateFrom: '',
     dateTo: '',
     page: 1,
   });
+});
+
+test('contract origin is independent, persists in the URL and resets pagination', () => {
+  const original = new URLSearchParams('view=reviewable&sourceStatus=ELIGIBLE&search=test&page=4');
+  const internal = patchContractsQuery(original, { sourceKind: 'SALES_CONTRACT' });
+  assert.equal(internal.state.sourceKind, 'SALES_CONTRACT');
+  assert.equal(internal.state.page, 1);
+  assert.equal(internal.state.view, 'reviewable');
+  assert.equal(internal.state.sourceStatus, 'ELIGIBLE');
+  assert.equal(internal.state.search, 'test');
+  const partner = patchContractsQuery(internal.params, { sourceKind: 'PARTNER_INTERNAL_RECORD' });
+  assert.equal(canonicalizeContractsQuery(partner.params).state.sourceKind, 'PARTNER_INTERNAL_RECORD');
+  const all = patchContractsQuery(partner.params, { sourceKind: 'ALL' });
+  assert.equal(all.state.sourceKind, 'ALL');
+  assert.equal(all.params.has('sourceKind'), false);
+  assert.equal(canonicalizeContractsQuery(new URLSearchParams('sourceKind=invalid')).state.sourceKind, 'ALL');
+  assert.equal(canonicalizeContractsQuery(new URLSearchParams('sourceKind=invalid')).params.has('sourceKind'), false);
 });
 
 test('contract lifecycle views are canonical and reset pagination when changed', () => {

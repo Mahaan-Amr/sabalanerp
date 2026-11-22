@@ -10,7 +10,7 @@ export const mandatoryReleaseDeploymentGateNames = [
   'postgres-query-and-isolated-write', 'migration-history', 'shipment-statement-runtime-state',
   'contract-financial-evidence', 'inquiry-sqlite-integrity', 'backend-readiness', 'frontend-health',
   'inquiry-health', 'nginx-health', 'contracts-storage', 'hr-storage', 'accounting-storage',
-  'support-storage', 'performance-export-storage', 'uploads-storage', 'database-file-references',
+  'dispatch-storage', 'support-storage', 'performance-export-storage', 'uploads-storage', 'database-file-references',
   'checkpoint-manifest', 'database-connection-capacity',
 ] as const;
 
@@ -24,6 +24,39 @@ export function completeReleaseDeploymentGateReport(report: unknown) {
   return gates.every(gate => gate?.passed === true && typeof gate.name === 'string')
     && new Set(gates.map(gate => gate!.name)).size === mandatoryReleaseDeploymentGateNames.length
     && mandatoryReleaseDeploymentGateNames.every(name => gates.some(gate => gate!.name === name));
+}
+
+/** Earlier qualification gates allow private readiness startup only. They do
+ * not assert that the later protected deployment passed its production gates. */
+export function completeProtectedPrivateQualificationPrerequisite(value:unknown,expected:{releaseId:string;manifestSha256:string;qualificationCheckpointSha256:string;qualificationReports:Record<string,string>}){
+  const row=value as Record<string,any>;
+  return !!row&&typeof row==='object'&&!Array.isArray(row)
+    &&Object.keys(row).length===6&&['format','releaseId','manifestSha256','qualificationCheckpointSha256','publicTrafficQualified','qualificationReports'].every(key=>Object.prototype.hasOwnProperty.call(row,key))
+    &&row.format==='sabalan-protected-private-qualification-prerequisite/v1'&&row.publicTrafficQualified===false
+    &&row.releaseId===expected.releaseId&&row.manifestSha256===expected.manifestSha256
+    &&row.qualificationCheckpointSha256===expected.qualificationCheckpointSha256
+    &&/^[a-f0-9]{64}$/.test(row.qualificationCheckpointSha256)
+    &&row.qualificationReports&&typeof row.qualificationReports==='object'&&!Array.isArray(row.qualificationReports)
+    &&Object.keys(row.qualificationReports).length===5&&Object.keys(expected.qualificationReports).length===5
+    &&['compatible-migrations','coherent-independent-restore','browser-24-hours','single-worker-and-completion','current-domain']
+      .every(scope=>Object.prototype.hasOwnProperty.call(row.qualificationReports,scope)&&/^[a-f0-9]{64}$/.test(row.qualificationReports[scope])
+        &&row.qualificationReports[scope]===expected.qualificationReports[scope]);
+}
+
+/** ONLINE readiness is a separate stage from publication. All five typed
+ * proofs are still validated by the evidence reader; this cannot stand in
+ * for the original controller's later eighteen production gate results. */
+export function completeOnlinePrivateQualificationPrerequisite(value:unknown,expected:{releaseId:string;manifestSha256:string;checkpointSha256:string;captureId:string;qualificationReports:Record<string,string>}){
+  const row=value as Record<string,any>;
+  if(!row||typeof row!=='object'||Array.isArray(row)||Object.keys(row).sort().join(',')!==
+    ['format','releaseId','manifestSha256','checkpointSha256','captureId','publicTrafficQualified','qualificationReports'].sort().join(','))return false;
+  if(row.format!=='sabalan-online-private-qualification-prerequisite/v1'||row.publicTrafficQualified!==false
+    ||row.checkpointSha256!==expected.checkpointSha256||row.captureId!==expected.captureId
+    ||!/^[a-f0-9]{64}$/.test(row.checkpointSha256)||!/^[a-f0-9]{64}$/.test(row.captureId))return false;
+  return completeProtectedPrivateQualificationPrerequisite({format:'sabalan-protected-private-qualification-prerequisite/v1',
+    releaseId:row.releaseId,manifestSha256:row.manifestSha256,qualificationCheckpointSha256:row.checkpointSha256,
+    publicTrafficQualified:row.publicTrafficQualified,qualificationReports:row.qualificationReports},
+    {...expected,qualificationCheckpointSha256:expected.checkpointSha256});
 }
 
 export const runMandatoryDeploymentGates = async (

@@ -8,6 +8,12 @@
       "reason": "Throwaway local-only routes support design decisions and remain disabled in ordinary production builds."
     },
     {
+      "pattern": "frontend/src/app/dashboard/purchasing/**/page.tsx",
+      "status": "migrated",
+      "acceptanceStatus": "pending",
+      "reason": "Purchasing composes canonical ERP lists, workspace presentation, HR metric cards, and centered focused modals; local behavioral and visual acceptance recorded in purchasing verification."
+    },
+    {
       "pattern": "frontend/src/app/dashboard/*/duties/**/page.tsx",
       "status": "migrated",
       "acceptanceStatus": "accepted",

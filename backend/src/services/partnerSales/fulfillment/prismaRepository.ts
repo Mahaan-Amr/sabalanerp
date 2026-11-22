@@ -1,3 +1,4 @@
+import { exactQuantityText } from '../../exactQuantity';
 import { partnerCommercialDispatchEligible } from './commercialSettlement';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { parseCanonicalProductGraph } from '@sabalanerp/contract-product-graph';
@@ -32,7 +33,7 @@ function decodeLineage(row: { id: string; caseId: string; caseRevision: number; 
   return { lineageId: row.id, sourceKind: 'PARTNER_CASE', caseId: row.caseId,
     createdFrom: { caseId: row.caseId, revision: row.caseRevision, integrityHash: row.integrityHash },
     internalRecordId: row.internalRecordId, productRowId: row.productRowId,
-    quantity: row.quantity.toFixed(3), unit: row.unit,
+    quantity: exactQuantityText(row.quantity), unit: row.unit,
     recipient: recipient as PartnerPhysicalLineage['recipient'], deliveryIds: row.deliveryIds as string[] };
 }
 

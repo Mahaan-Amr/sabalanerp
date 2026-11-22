@@ -1,3 +1,4 @@
+import { readContractEditSession } from '../../contractEditSessionRead';
 import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { canonicalHash, InquiryIdentitySchema, PartnerTechnicalSaveSchema, PartnerTechnicalSavedReadSchema,
@@ -102,8 +103,8 @@ export function createPartnerTechnicalSaveService(dependencies: PartnerTechnical
         const previous = snapshots.at(-1) ?? null;
         const evidence = await dependencies.resolveEvidence(tx, { actorId: dependencies.actorId, recoveryId: session.draftId,
           draft: command.draft, previous });
-        if (!evidence.ok) return { ok: false, error: partnerError(evidence.error.code) };
-        const services = await resolvePartnerTechnicalServices(tx, command.draft);
+        if (!evidence.ok) return evidence;
+        const services = await resolvePartnerTechnicalServices(tx, command.draft, previous);
         if (!services.ok) return services;
         const compiled = compileOrReuseTechnicalSavedGraph(command.draft, evidence.value.context, previous);
         if (!compiled.ok) return compiled;
@@ -159,7 +160,7 @@ export function createPartnerTechnicalSaveService(dependencies: PartnerTechnical
           graph, context: evidence.value.context, identities, ...(services.value.length ? { serviceRows: services.value } : {}) });
         const stillAuthorized = await dependencies.authorize(tx, { actorId: dependencies.actorId, recoveryId: session.draftId, operation: 'SAVE' });
         if (!stillAuthorized.ok) return { ok: false, error: partnerError(stillAuthorized.error.code) };
-        const current = await tx.salesContractEditSession.findUnique({ where: { draftId: session.draftId } });
+        const current = await readContractEditSession(tx, session.draftId);
         const [commitClock] = await tx.$queryRaw<{ now: Date }[]>`SELECT clock_timestamp() AS now`;
         if (!current || current.id !== session.id || current.ownerUserId !== dependencies.actorId ||
             current.browserSessionId !== command.browserSessionId || current.leaseToken !== command.leaseToken ||
@@ -171,12 +172,16 @@ export function createPartnerTechnicalSaveService(dependencies: PartnerTechnical
         }
         const next = { ...recovery, kind: PARTNER_TECHNICAL_RECOVERY_KIND, version: 1, recoveryRevision: savedRevision,
           updatedAt, draft: command.draft, validatedSnapshots: [...history, snapshot] };
-        const written = await tx.salesContractEditSession.updateMany({ where: { draftId: session.draftId,
-          leaseToken: session.leaseToken, baseRevision: session.baseRevision,
-          recovery: { equals: session.recovery === null ? Prisma.AnyNull : json(session.recovery) },
-          id: session.id, contractId: session.contractId,
-        }, data: { recovery: json(next), updatedAt: commitClock.now } });
-        if (written.count !== 1) return { ok: false, error: partnerError('ROW_STALE') };
+        const expectedJson = session.recovery === null
+          ? Prisma.sql`(recovery IS NULL OR recovery = 'null'::jsonb)`
+          : Prisma.sql`recovery = ${JSON.stringify(session.recovery)}::jsonb`;
+        const written = await tx.$executeRaw`
+          UPDATE sales_contract_edit_sessions SET recovery = ${JSON.stringify(next)}::jsonb, "updatedAt" = ${commitClock.now}
+          WHERE "draftId" = ${session.draftId} AND "leaseToken" = ${session.leaseToken}
+            AND "baseRevision" = ${session.baseRevision} AND id = ${session.id}
+            AND "contractId" IS NOT DISTINCT FROM ${session.contractId} AND ${expectedJson}
+        `;
+        if (written !== 1) return { ok: false, error: partnerError('ROW_STALE') };
         const receipt = { ...view.data, replayed: false };
         await tx.partnerCommandOutcome.create({ data: { id: randomUUID(), ...identity, payloadHash,
           outcome: json({ version: 1, sessionId: session.id, recoveryRevision: savedRevision }), recordedAt: commitClock.now } });

@@ -1,0 +1,6 @@
+{
+  "exitCode": 0,
+  "signal": null,
+  "stdout": "IDENTITY {\"result\":{\"type\":\"object\",\"value\":{\"pid\":62661,\"argv\":[\"/usr/local/bin/node\",\"/app/online-runtime-acceptance/request-database-9dab4485e22eb6843d4332e26fe4ac31/worker.cjs\",\"/app/online-runtime-acceptance/request-database-9dab4485e22eb6843d4332e26fe4ac31/configuration-0.json\"],\"resources\":[\"PipeWrap\",\"PipeWrap\",\"TCPServerWrap\",\"Timeout\"]}}}\nOWNED_EOF_TIMER_SELECTED\nPAUSED_OWNED_EOF_CALLBACK {\"url\":\"\",\"location\":{\"scriptId\":\"78\",\"lineNumber\":130,\"columnNumber\":86},\"functionName\":\"\"}\nORIGINAL_OWNER_SCOPE {\"result\":{\"type\":\"object\",\"value\":{\"run\":\"function\",\"resolveStopped\":\"function\",\"stopping\":false,\"exclusive\":true}}}\nORIGINAL_STOP_PATH_INVOKED\n",
+  "stderr": ""
+}

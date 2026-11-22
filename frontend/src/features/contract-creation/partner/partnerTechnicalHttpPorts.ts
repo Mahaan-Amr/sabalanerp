@@ -7,7 +7,7 @@ import {
   PartnerTechnicalSavedReadSchema, PartnerTechnicalSavedViewSchema,
   PartnerTechnicalPolicyPublishSchema, PartnerTechnicalPolicyReceiptSchema,
   PartnerTechnicalPolicyViewSchema, IdSchema,
-  partnerError, type PartnerErrorCode, type Result,
+  partnerError, PartnerErrorSchema, type PartnerErrorCode, type Result,
   type PartnerTechnicalCatalogPort, type PartnerTechnicalLeasePort, type PartnerTechnicalRecoveryPort,
   type PartnerTechnicalSavePort,
   type PartnerTechnicalPolicyPort,
@@ -42,6 +42,11 @@ function businessFailure(error: unknown): Result<never> | null {
   if (response.status === 404) return { ok: false, error: partnerError('NOT_FOUND') };
   const code = (response.data as { code?: unknown }).code;
   if (typeof code !== 'string') return null;
+  if (code === 'CATALOG_COMPONENT_UNAVAILABLE') {
+    const row = response.data as { error?: unknown; component?: unknown };
+    const parsed = PartnerErrorSchema.safeParse({ code, status: response.status, message: row.error, component: row.component });
+    return parsed.success ? { ok: false, error: parsed.data } : corrupt();
+  }
   try {
     const canonical = partnerError(code as PartnerErrorCode);
     return canonical.status === response.status ? { ok: false, error: canonical } : null;

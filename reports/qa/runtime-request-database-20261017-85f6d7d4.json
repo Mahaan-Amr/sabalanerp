@@ -1,0 +1,600 @@
+{
+  "crossContainerRequestDatabasePassed": true,
+  "privateEvidenceRetained": "/app/online-runtime-acceptance/request-database-617f1e0cbe3b9b8fa9d960b585f6d7d4",
+  "slots": [
+    {
+      "id": "7f4d8f79c29c6d80045ea490e8ddcab156416c072c286467cac1c6ce298ba5e2",
+      "image": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+      "startedAt": "2026-10-17T07:44:55.295105599Z"
+    },
+    {
+      "id": "22028215b016d4100b783373a7599125ca4c2ce036ecae6a0316d1616db97dff",
+      "image": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+      "startedAt": "2026-10-17T07:44:55.714206079Z"
+    }
+  ],
+  "committedRows": [
+    {
+      "id": "background",
+      "runtime_id": "772d493951ffd3c8ba256a0498c10f0210930bcabf5d2b30c73295891fca24e5",
+      "amount": "123456789.12345678",
+      "quantity": "0.00000001"
+    },
+    {
+      "id": "early-response",
+      "runtime_id": "e294e64cc65f98280c20795a6c76be618207480ff3b3a90cc267c9880ae3dbde",
+      "amount": "123456789.12345678",
+      "quantity": "0.00000001"
+    },
+    {
+      "id": "fresh-response",
+      "runtime_id": "772d493951ffd3c8ba256a0498c10f0210930bcabf5d2b30c73295891fca24e5",
+      "amount": "123456789.12345678",
+      "quantity": "0.00000001"
+    },
+    {
+      "id": "lost-response",
+      "runtime_id": "e294e64cc65f98280c20795a6c76be618207480ff3b3a90cc267c9880ae3dbde",
+      "amount": "123456789.12345678",
+      "quantity": "0.00000001"
+    }
+  ],
+  "databaseName": "sabalanerp_concurrency_3c131632f69e798d",
+  "namespaces": [
+    "pid:[4026532920]",
+    "pid:[4026532996]"
+  ],
+  "final": [
+    {
+      "scope": {
+        "runtimeId": "e294e64cc65f98280c20795a6c76be618207480ff3b3a90cc267c9880ae3dbde",
+        "image": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+        "registrySha256": "13d079190d98b2c946316507be635124419ff403c8b4b925de3a6084ab98cb04",
+        "generation": 1,
+        "gate": {
+          "device": "2096",
+          "inode": "614590",
+          "ownerUid": 0
+        },
+        "postgresApplicationName": "sabalan-e294e64cc65f98280c20795a6c76be618207480ff3b3a90c"
+      },
+      "birth": {
+        "bootId": "f413b3a9-8cd1-4993-9eea-956bc0a511f3",
+        "pid": 113,
+        "pidNamespace": "pid:[4026532920]",
+        "startTicks": "20636542"
+      },
+      "epoch": 1,
+      "phase": "QUIESCENT",
+      "scopeSha256": "03d51d13c83d762d2032a2f6b596f1df5a7cd9286c71fbaed1844eabd9a63a92",
+      "claimSha256": "baed6f7bf083b25d2b747b451f90c85dbf19aea8dfe3018ad1ed9cf80bca9523",
+      "stateSha256": "11fb59944163bf20fb7bf3b96f632c8471ae20e3841f189031254028996cd3a2",
+      "namespaceIdentity": {
+        "device": "2096",
+        "inode": "614591"
+      }
+    },
+    {
+      "scope": {
+        "runtimeId": "772d493951ffd3c8ba256a0498c10f0210930bcabf5d2b30c73295891fca24e5",
+        "image": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+        "registrySha256": "4fb2e8cee4b512709bfc10d76fe7b2f2713601c1f9edf3ff30517b1f8db8864b",
+        "generation": 1,
+        "gate": {
+          "device": "2096",
+          "inode": "614590",
+          "ownerUid": 0
+        },
+        "postgresApplicationName": "sabalan-772d493951ffd3c8ba256a0498c10f0210930bcabf5d2b30"
+      },
+      "birth": {
+        "bootId": "f413b3a9-8cd1-4993-9eea-956bc0a511f3",
+        "pid": 101,
+        "pidNamespace": "pid:[4026532996]",
+        "startTicks": "20636588"
+      },
+      "epoch": 2,
+      "phase": "QUIESCENT",
+      "scopeSha256": "88c24456acb1fc33145eea96a4d35fa95fd5028a3a5181076ee01374b409944c",
+      "claimSha256": "4af2d1ee85179ef0710eecb4c7e35483da11f2876ffd7266289d1895091d6d0b",
+      "stateSha256": "bbec05dad20cddbfea18aca8f13fcf374df0607268759eabf09787c075a742f4",
+      "namespaceIdentity": {
+        "device": "2096",
+        "inode": "614595"
+      }
+    }
+  ],
+  "originals": {
+    "backend": {
+      "id": "a1ea34a8d7d878b906fba7b4fdbe975df13a6b00d63a863eacce34b9827e86ff",
+      "image": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+      "startedAt": "2026-10-15T09:01:40.016187222Z"
+    },
+    "frontend": {
+      "id": "ad23f762dc1b27d2be76c335a3d7a4e20d08832a9a2e055904a4af84a9248c21",
+      "image": "sha256:f0a8954596279ccb01c029de7316022daa109b711a297f716cc9367d4bc9ec53",
+      "startedAt": "2026-10-15T10:11:30.825468888Z"
+    },
+    "inquiry": {
+      "id": "6d161695e215498048ff24e56e9602ce77871bfb6b390bf1356caecfdf9807d8",
+      "image": "sha256:81eacc768f3c4b82bd0f0a01bef5600ae1321e87cb117bad49ca47dfba79a213",
+      "startedAt": "2026-10-12T15:17:49.463791361Z"
+    },
+    "postgres": {
+      "id": "e553787e69f44c7bdf7dab94fad43a231f5ba99d988dc783234486a5a844a528",
+      "image": "sha256:3d0f7584ed7d04e27fa050d6683a74746608faf21f202be78460d679cc56461f",
+      "startedAt": "2026-10-12T15:17:49.481269377Z"
+    }
+  },
+  "sourceSha256": {
+    "kernelWriteAdmission.js": "36a26bd2ac91b30ebaf58262969dce8bd1aee22cca2d39eeb69ee193e0048da4",
+    "runtimeBoundaryJournal.js": "7839d785824d84072c75191027e9be5c143f711900c2be2539c10d4aa61fcd45",
+    "runtimeTaskAdmission.js": "1b4f1d66189a16ffc7f417f90d63f86b4b0cf4d7cdee5f258a07db8784162f48",
+    "httpRequestLifecycle.js": "3106e1c7cc8ce185f75a71ce7650bf7df1eb907bc6831a57da0e1212a920c5ff",
+    "runtimeWorkBoundary.js": "2279f3a6253c5e81df25e793926e872bf1678633821eb39a059fd027b76da45a",
+    "runtimeDatabaseBoundary.js": "e14a4ffced53f8546d107e5df2d1c3cb6a87c9a7c941aa79e3548c602dc0245c",
+    "worker.cjs": "e9aa229d0d12298e8b11bdea9aae228100b3e7d5f5f090965c6be75062369793"
+  },
+  "evidence": [
+    [
+      {
+        "ready": true,
+        "snapshot": {
+          "scope": {
+            "runtimeId": "e294e64cc65f98280c20795a6c76be618207480ff3b3a90cc267c9880ae3dbde",
+            "image": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+            "registrySha256": "13d079190d98b2c946316507be635124419ff403c8b4b925de3a6084ab98cb04",
+            "generation": 1,
+            "gate": {
+              "device": "2096",
+              "inode": "614590",
+              "ownerUid": 0
+            },
+            "postgresApplicationName": "sabalan-e294e64cc65f98280c20795a6c76be618207480ff3b3a90c"
+          },
+          "birth": {
+            "bootId": "f413b3a9-8cd1-4993-9eea-956bc0a511f3",
+            "pid": 113,
+            "pidNamespace": "pid:[4026532920]",
+            "startTicks": "20636542"
+          },
+          "epoch": 0,
+          "phase": "QUIESCENT",
+          "scopeSha256": "03d51d13c83d762d2032a2f6b596f1df5a7cd9286c71fbaed1844eabd9a63a92",
+          "claimSha256": "baed6f7bf083b25d2b747b451f90c85dbf19aea8dfe3018ad1ed9cf80bca9523",
+          "stateSha256": "4bdf1ed3d0da18ae55409bdb3fae9ab96f4e512619f515a94201e7680e2da0af",
+          "namespaceIdentity": {
+            "device": "2096",
+            "inode": "614591"
+          }
+        }
+      },
+      {
+        "id": 1,
+        "ok": true,
+        "value": {
+          "handlers": 1,
+          "snapshot": {
+            "scope": {
+              "runtimeId": "e294e64cc65f98280c20795a6c76be618207480ff3b3a90cc267c9880ae3dbde",
+              "image": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+              "registrySha256": "13d079190d98b2c946316507be635124419ff403c8b4b925de3a6084ab98cb04",
+              "generation": 1,
+              "gate": {
+                "device": "2096",
+                "inode": "614590",
+                "ownerUid": 0
+              },
+              "postgresApplicationName": "sabalan-e294e64cc65f98280c20795a6c76be618207480ff3b3a90c"
+            },
+            "birth": {
+              "bootId": "f413b3a9-8cd1-4993-9eea-956bc0a511f3",
+              "pid": 113,
+              "pidNamespace": "pid:[4026532920]",
+              "startTicks": "20636542"
+            },
+            "epoch": 1,
+            "phase": "ACTIVE",
+            "scopeSha256": "03d51d13c83d762d2032a2f6b596f1df5a7cd9286c71fbaed1844eabd9a63a92",
+            "claimSha256": "baed6f7bf083b25d2b747b451f90c85dbf19aea8dfe3018ad1ed9cf80bca9523",
+            "stateSha256": "fe05af24fb2cd2df998664a9a191fe7dc6dcedf9b4205d91b06d379bfb7b9eb6",
+            "namespaceIdentity": {
+              "device": "2096",
+              "inode": "614591"
+            }
+          }
+        }
+      },
+      {
+        "id": 2,
+        "ok": true,
+        "value": {
+          "handlers": 2,
+          "snapshot": {
+            "scope": {
+              "runtimeId": "e294e64cc65f98280c20795a6c76be618207480ff3b3a90cc267c9880ae3dbde",
+              "image": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+              "registrySha256": "13d079190d98b2c946316507be635124419ff403c8b4b925de3a6084ab98cb04",
+              "generation": 1,
+              "gate": {
+                "device": "2096",
+                "inode": "614590",
+                "ownerUid": 0
+              },
+              "postgresApplicationName": "sabalan-e294e64cc65f98280c20795a6c76be618207480ff3b3a90c"
+            },
+            "birth": {
+              "bootId": "f413b3a9-8cd1-4993-9eea-956bc0a511f3",
+              "pid": 113,
+              "pidNamespace": "pid:[4026532920]",
+              "startTicks": "20636542"
+            },
+            "epoch": 1,
+            "phase": "ACTIVE",
+            "scopeSha256": "03d51d13c83d762d2032a2f6b596f1df5a7cd9286c71fbaed1844eabd9a63a92",
+            "claimSha256": "baed6f7bf083b25d2b747b451f90c85dbf19aea8dfe3018ad1ed9cf80bca9523",
+            "stateSha256": "fe05af24fb2cd2df998664a9a191fe7dc6dcedf9b4205d91b06d379bfb7b9eb6",
+            "namespaceIdentity": {
+              "device": "2096",
+              "inode": "614591"
+            }
+          }
+        }
+      },
+      {
+        "id": 3,
+        "ok": true,
+        "value": {
+          "committed": true
+        }
+      },
+      {
+        "id": 4,
+        "ok": false,
+        "code": "HTTP_REQUEST_DRAIN_TIMEOUT"
+      },
+      {
+        "id": 5,
+        "ok": true,
+        "value": {
+          "scope": {
+            "runtimeId": "e294e64cc65f98280c20795a6c76be618207480ff3b3a90cc267c9880ae3dbde",
+            "image": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+            "registrySha256": "13d079190d98b2c946316507be635124419ff403c8b4b925de3a6084ab98cb04",
+            "generation": 1,
+            "gate": {
+              "device": "2096",
+              "inode": "614590",
+              "ownerUid": 0
+            },
+            "postgresApplicationName": "sabalan-e294e64cc65f98280c20795a6c76be618207480ff3b3a90c"
+          },
+          "birth": {
+            "bootId": "f413b3a9-8cd1-4993-9eea-956bc0a511f3",
+            "pid": 113,
+            "pidNamespace": "pid:[4026532920]",
+            "startTicks": "20636542"
+          },
+          "epoch": 1,
+          "phase": "ACTIVE",
+          "scopeSha256": "03d51d13c83d762d2032a2f6b596f1df5a7cd9286c71fbaed1844eabd9a63a92",
+          "claimSha256": "baed6f7bf083b25d2b747b451f90c85dbf19aea8dfe3018ad1ed9cf80bca9523",
+          "stateSha256": "fe05af24fb2cd2df998664a9a191fe7dc6dcedf9b4205d91b06d379bfb7b9eb6",
+          "namespaceIdentity": {
+            "device": "2096",
+            "inode": "614591"
+          }
+        }
+      },
+      {
+        "id": 6,
+        "ok": true,
+        "value": {
+          "status": 503,
+          "handlerEntered": false
+        }
+      },
+      {
+        "id": 7,
+        "ok": true,
+        "value": {
+          "committed": true
+        }
+      },
+      {
+        "id": 8,
+        "ok": true,
+        "value": {}
+      },
+      {
+        "id": 9,
+        "ok": true,
+        "value": {
+          "scope": {
+            "runtimeId": "e294e64cc65f98280c20795a6c76be618207480ff3b3a90cc267c9880ae3dbde",
+            "image": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+            "registrySha256": "13d079190d98b2c946316507be635124419ff403c8b4b925de3a6084ab98cb04",
+            "generation": 1,
+            "gate": {
+              "device": "2096",
+              "inode": "614590",
+              "ownerUid": 0
+            },
+            "postgresApplicationName": "sabalan-e294e64cc65f98280c20795a6c76be618207480ff3b3a90c"
+          },
+          "birth": {
+            "bootId": "f413b3a9-8cd1-4993-9eea-956bc0a511f3",
+            "pid": 113,
+            "pidNamespace": "pid:[4026532920]",
+            "startTicks": "20636542"
+          },
+          "epoch": 1,
+          "phase": "QUIESCENT",
+          "scopeSha256": "03d51d13c83d762d2032a2f6b596f1df5a7cd9286c71fbaed1844eabd9a63a92",
+          "claimSha256": "baed6f7bf083b25d2b747b451f90c85dbf19aea8dfe3018ad1ed9cf80bca9523",
+          "stateSha256": "11fb59944163bf20fb7bf3b96f632c8471ae20e3841f189031254028996cd3a2",
+          "namespaceIdentity": {
+            "device": "2096",
+            "inode": "614591"
+          }
+        }
+      },
+      {
+        "id": 10,
+        "ok": true,
+        "value": {
+          "stopped": true,
+          "handlers": 2
+        }
+      }
+    ],
+    [
+      {
+        "ready": true,
+        "snapshot": {
+          "scope": {
+            "runtimeId": "772d493951ffd3c8ba256a0498c10f0210930bcabf5d2b30c73295891fca24e5",
+            "image": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+            "registrySha256": "4fb2e8cee4b512709bfc10d76fe7b2f2713601c1f9edf3ff30517b1f8db8864b",
+            "generation": 1,
+            "gate": {
+              "device": "2096",
+              "inode": "614590",
+              "ownerUid": 0
+            },
+            "postgresApplicationName": "sabalan-772d493951ffd3c8ba256a0498c10f0210930bcabf5d2b30"
+          },
+          "birth": {
+            "bootId": "f413b3a9-8cd1-4993-9eea-956bc0a511f3",
+            "pid": 101,
+            "pidNamespace": "pid:[4026532996]",
+            "startTicks": "20636588"
+          },
+          "epoch": 0,
+          "phase": "QUIESCENT",
+          "scopeSha256": "88c24456acb1fc33145eea96a4d35fa95fd5028a3a5181076ee01374b409944c",
+          "claimSha256": "4af2d1ee85179ef0710eecb4c7e35483da11f2876ffd7266289d1895091d6d0b",
+          "stateSha256": "0e174f575aef94ea81aa26eb351b2b8ce1897e9d5902578d57927eee70f453b1",
+          "namespaceIdentity": {
+            "device": "2096",
+            "inode": "614595"
+          }
+        }
+      },
+      {
+        "id": 1,
+        "ok": true,
+        "value": {
+          "acquired": false
+        }
+      },
+      {
+        "id": 2,
+        "ok": true,
+        "value": {
+          "handlers": 0,
+          "snapshot": {
+            "scope": {
+              "runtimeId": "772d493951ffd3c8ba256a0498c10f0210930bcabf5d2b30c73295891fca24e5",
+              "image": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+              "registrySha256": "4fb2e8cee4b512709bfc10d76fe7b2f2713601c1f9edf3ff30517b1f8db8864b",
+              "generation": 1,
+              "gate": {
+                "device": "2096",
+                "inode": "614590",
+                "ownerUid": 0
+              },
+              "postgresApplicationName": "sabalan-772d493951ffd3c8ba256a0498c10f0210930bcabf5d2b30"
+            },
+            "birth": {
+              "bootId": "f413b3a9-8cd1-4993-9eea-956bc0a511f3",
+              "pid": 101,
+              "pidNamespace": "pid:[4026532996]",
+              "startTicks": "20636588"
+            },
+            "epoch": 1,
+            "phase": "ACTIVE",
+            "scopeSha256": "88c24456acb1fc33145eea96a4d35fa95fd5028a3a5181076ee01374b409944c",
+            "claimSha256": "4af2d1ee85179ef0710eecb4c7e35483da11f2876ffd7266289d1895091d6d0b",
+            "stateSha256": "4db00ba2bbb81b6b75705666721d1a3c36bc515d1865b7a13bc08090062e7932",
+            "namespaceIdentity": {
+              "device": "2096",
+              "inode": "614595"
+            }
+          }
+        }
+      },
+      {
+        "id": 3,
+        "ok": true,
+        "value": {
+          "acquired": false
+        }
+      },
+      {
+        "id": 4,
+        "ok": true,
+        "value": {
+          "committed": true
+        }
+      },
+      {
+        "id": 5,
+        "ok": true,
+        "value": {
+          "scope": {
+            "runtimeId": "772d493951ffd3c8ba256a0498c10f0210930bcabf5d2b30c73295891fca24e5",
+            "image": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+            "registrySha256": "4fb2e8cee4b512709bfc10d76fe7b2f2713601c1f9edf3ff30517b1f8db8864b",
+            "generation": 1,
+            "gate": {
+              "device": "2096",
+              "inode": "614590",
+              "ownerUid": 0
+            },
+            "postgresApplicationName": "sabalan-772d493951ffd3c8ba256a0498c10f0210930bcabf5d2b30"
+          },
+          "birth": {
+            "bootId": "f413b3a9-8cd1-4993-9eea-956bc0a511f3",
+            "pid": 101,
+            "pidNamespace": "pid:[4026532996]",
+            "startTicks": "20636588"
+          },
+          "epoch": 1,
+          "phase": "QUIESCENT",
+          "scopeSha256": "88c24456acb1fc33145eea96a4d35fa95fd5028a3a5181076ee01374b409944c",
+          "claimSha256": "4af2d1ee85179ef0710eecb4c7e35483da11f2876ffd7266289d1895091d6d0b",
+          "stateSha256": "be90b9e4c6ca88707a8808ba1c81bf72662e49b43cf244c1b76d0758cdcd7e0d",
+          "namespaceIdentity": {
+            "device": "2096",
+            "inode": "614595"
+          }
+        }
+      },
+      {
+        "id": 6,
+        "ok": true,
+        "value": {
+          "acquired": false
+        }
+      },
+      {
+        "id": 7,
+        "ok": true,
+        "value": {
+          "acquired": false
+        }
+      },
+      {
+        "id": 8,
+        "ok": true,
+        "value": {
+          "acquired": true
+        }
+      },
+      {
+        "id": 9,
+        "ok": true,
+        "value": {
+          "status": 503,
+          "handlerEntered": false
+        }
+      },
+      {
+        "id": 10,
+        "ok": true,
+        "value": {}
+      },
+      {
+        "id": 11,
+        "ok": true,
+        "value": {
+          "handlers": 1,
+          "snapshot": {
+            "scope": {
+              "runtimeId": "772d493951ffd3c8ba256a0498c10f0210930bcabf5d2b30c73295891fca24e5",
+              "image": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+              "registrySha256": "4fb2e8cee4b512709bfc10d76fe7b2f2713601c1f9edf3ff30517b1f8db8864b",
+              "generation": 1,
+              "gate": {
+                "device": "2096",
+                "inode": "614590",
+                "ownerUid": 0
+              },
+              "postgresApplicationName": "sabalan-772d493951ffd3c8ba256a0498c10f0210930bcabf5d2b30"
+            },
+            "birth": {
+              "bootId": "f413b3a9-8cd1-4993-9eea-956bc0a511f3",
+              "pid": 101,
+              "pidNamespace": "pid:[4026532996]",
+              "startTicks": "20636588"
+            },
+            "epoch": 2,
+            "phase": "ACTIVE",
+            "scopeSha256": "88c24456acb1fc33145eea96a4d35fa95fd5028a3a5181076ee01374b409944c",
+            "claimSha256": "4af2d1ee85179ef0710eecb4c7e35483da11f2876ffd7266289d1895091d6d0b",
+            "stateSha256": "cc04c258681b4f4a05dc3475eedda36e1eb7ab5e53b75359e4b9428955479b1f",
+            "namespaceIdentity": {
+              "device": "2096",
+              "inode": "614595"
+            }
+          }
+        }
+      },
+      {
+        "id": 12,
+        "ok": true,
+        "value": {
+          "committed": true
+        }
+      },
+      {
+        "id": 13,
+        "ok": true,
+        "value": {}
+      },
+      {
+        "id": 14,
+        "ok": true,
+        "value": {
+          "scope": {
+            "runtimeId": "772d493951ffd3c8ba256a0498c10f0210930bcabf5d2b30c73295891fca24e5",
+            "image": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+            "registrySha256": "4fb2e8cee4b512709bfc10d76fe7b2f2713601c1f9edf3ff30517b1f8db8864b",
+            "generation": 1,
+            "gate": {
+              "device": "2096",
+              "inode": "614590",
+              "ownerUid": 0
+            },
+            "postgresApplicationName": "sabalan-772d493951ffd3c8ba256a0498c10f0210930bcabf5d2b30"
+          },
+          "birth": {
+            "bootId": "f413b3a9-8cd1-4993-9eea-956bc0a511f3",
+            "pid": 101,
+            "pidNamespace": "pid:[4026532996]",
+            "startTicks": "20636588"
+          },
+          "epoch": 2,
+          "phase": "QUIESCENT",
+          "scopeSha256": "88c24456acb1fc33145eea96a4d35fa95fd5028a3a5181076ee01374b409944c",
+          "claimSha256": "4af2d1ee85179ef0710eecb4c7e35483da11f2876ffd7266289d1895091d6d0b",
+          "stateSha256": "bbec05dad20cddbfea18aca8f13fcf374df0607268759eabf09787c075a742f4",
+          "namespaceIdentity": {
+            "device": "2096",
+            "inode": "614595"
+          }
+        }
+      },
+      {
+        "id": 15,
+        "ok": true,
+        "value": {
+          "stopped": true,
+          "handlers": 1
+        }
+      }
+    ]
+  ],
+  "temporaryDatabaseDroppedWithoutForce": true
+}

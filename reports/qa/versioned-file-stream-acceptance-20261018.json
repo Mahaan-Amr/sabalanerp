@@ -1,0 +1,22 @@
+{
+  "freeze": "reports/qa/versioned-file-stream-review-r2-20261018.json",
+  "freezeSha256": "adefa7a9728d88aaf988215040483c8d6eca8e1cfb92ab9dc2313597b2cdb926",
+  "reports": {
+    "versioned-file-stream-b4d7b7e8e9cd0903835fff632627ca4b.json": "015cc7ba56c781a458b5abb96c298084669e304345bb24996684a7d5a9b20b48",
+    "versioned-file-stream-b4d7b7e8e9cd0903835fff632627ca4b.core.json": "44591126bec9031df5cc1116b3ed4d79fba13e46a432edb4bc7c649fbf764ea0",
+    "versioned-file-stream-buffer-identity-20261018.json": "e3a62d71abfc5c7868fb6d069b230988a2f4a6987592b352c8e765e99bc73481",
+    "versioned-file-publication-3ba393a3e207e2b26c5153c5c289dfe0.json": "57c427c4b71c81eb25da1b4977155f08bdb67432d96ff2e1b2c49726722f1848",
+    "runtime-shared-file-work-dafe04f847750f5e26176f9dda7156e1.json": "793e96e2da660a90ac63da894358148770b0333ff75d62a5c3b0a6b2c54d8e9c",
+    "file-publication-f55e66826252db2273ea7b7d88a44530.json": "5e099f7a4f0d0c3ce4f0a52691470173f1ea28d0185b370bfaacc283c8899bd6",
+    "file-publication-f55e66826252db2273ea7b7d88a44530.tap": "69e8173c5b60dd3524570c1a191f6fff5a9900588fdc880722d9726da0f81539",
+    "versioned-file-stream-7aeddb98864559fe3fba6d0dccf54b43.failed.json": "9a02d8325f32fcff82a537e9a0ec617e115b37b03eeeb21a580c8c3260e4ff1b",
+    "versioned-file-stream-eb967e79455128259b6e92df1f1e96e9.failed.json": "aacc287ef0f9669f4cd2c78002075e4180e6ab65160894405fef74ce99f83f52"
+  },
+  "standardsReview": "PASS",
+  "specReview": "PASS",
+  "reviewScope": "Unchanged r2 source and final evidence; prior Buffer/HTTP nonstream identity verified separately",
+  "architectureCheck": "PASS",
+  "focusedStrictTypecheck": "PASS",
+  "productionAdmission": false,
+  "wholeProgramComplete": false
+}

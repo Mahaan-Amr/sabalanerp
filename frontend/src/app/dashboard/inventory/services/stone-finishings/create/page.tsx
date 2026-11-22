@@ -8,6 +8,7 @@ import { InventoryMasterDataForm, InventoryMasterDataPage } from '@/features/inv
 const CreateStoneFinishingPage: React.FC = () => {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const [submissionUncertain,setSubmissionUncertain]=useState(false);
   const [formData, setFormData] = useState({
     code: '',
     namePersian: '',
@@ -23,6 +24,7 @@ const CreateStoneFinishingPage: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if(submissionUncertain)return;
     setLoading(true);
     setErrors({});
 
@@ -45,6 +47,7 @@ const CreateStoneFinishingPage: React.FC = () => {
         setErrors({ general: 'خطا در ایجاد فرآوری سنگ' });
       }
     } catch (error: any) {
+      if(!error?.response||Number(error.response.status)>=500)setSubmissionUncertain(true);
       console.error('Error creating stone finishing:', error);
       if (error.response?.data?.details) {
         const newErrors: Record<string, string> = {};
@@ -72,6 +75,8 @@ const CreateStoneFinishingPage: React.FC = () => {
         values={formData}
         errors={errors}
         pending={loading}
+        submissionUncertain={submissionUncertain}
+        draftScope={{route:'/dashboard/inventory/services/stone-finishings/create',record:'new',baseVersion:'new'}}
         submitLabel="ایجاد فرآوری سنگ"
         onChange={(patch) => setFormData((previous) => ({ ...previous, ...patch }))}
         onSubmit={handleSubmit}

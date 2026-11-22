@@ -1,0 +1,41 @@
+# Permanent opt-in application slots in the EXISTING sabalanerp-local project.
+# No database, canonical service override, source mount, host ingress or second
+# stack. The original controller verifies measured immutable image config IDs
+# and preserves the six existing service identities before/after every action.
+name: sabalanerp-local
+x-immutable-browser-slot: &immutable-browser-slot
+  profiles: [application-browser-acceptance]
+  pull_policy: never
+  read_only: true
+  tmpfs: [/tmp]
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  mem_limit: 512m
+  cpus: 1
+  stop_grace_period: 1m
+  healthcheck:
+    test: [CMD, node, -e, "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+    interval: 5s
+    timeout: 5s
+    retries: 20
+services:
+  frontend-retained:
+    <<: *immutable-browser-slot
+    image: ${ONLINE_BROWSER_OLD_IMAGE:?Set the measured retained immutable image config ID}
+    environment:
+      NODE_ENV: production
+      NEXT_DIST_DIR: .next-online-runtime
+      SABALAN_BROWSER_BUILD_ID: ${ONLINE_BROWSER_OLD_BUILD_ID:?Set the exact retained compiled browser identity}
+      NEXT_PUBLIC_API_URL: /api
+      NEXT_PUBLIC_SOCKET_URL: ""
+      BACKEND_API_ORIGIN: ""
+  frontend-candidate:
+    <<: *immutable-browser-slot
+    image: ${ONLINE_BROWSER_NEW_IMAGE:?Set the measured candidate immutable image config ID}
+    environment:
+      NODE_ENV: production
+      NEXT_DIST_DIR: .next-online-runtime
+      SABALAN_BROWSER_BUILD_ID: ${ONLINE_BROWSER_NEW_BUILD_ID:?Set the exact candidate compiled browser identity}
+      NEXT_PUBLIC_API_URL: /api
+      NEXT_PUBLIC_SOCKET_URL: ""
+      BACKEND_API_ORIGIN: ""

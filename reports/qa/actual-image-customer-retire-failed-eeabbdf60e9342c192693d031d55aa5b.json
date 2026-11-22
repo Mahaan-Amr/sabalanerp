@@ -1,0 +1,6 @@
+{
+  "sshExitCode": 0,
+  "remoteEnvelopeSha256": "64fbcc625b11622ef685beed6128cd2b920ed74c3ccc1e1e2060cea30f9b6c41",
+  "stdout": "{\"phase\": \"CLOSED_FAILED_DERIVED_RETIRED\", \"originalOperation\": \"actual-image-customer-dd67e319494eb352c7fd8729eb5b3fa8\", \"componentPassed\": false, \"backendExitCode\": 1, \"stopClientExitCode\": 137, \"retirement\": {\"exactDerivedPathsRetired\": true, \"logicalBytesRetired\": 772656485, \"entriesRetired\": 4959, \"processReferenceCensuses\": [{\"processes\": 184, \"tasks\": 519, \"fds\": 114670, \"mapsBytes\": 1870051}, {\"processes\": 185, \"tasks\": 498, \"fds\": 113985, \"mapsBytes\": 1800158}], \"sourceBaseAndImagesRetained\": true, \"physicalPrivacyErasureCertified\": false}, \"failedClosureSha256\": \"525e73eb0fd83998c8f8c9f263b28b1dc578cb9c613f715589f189c69ef030eb\", \"originalEvidenceRetained\": true, \"productionAdmission\": false, \"healthyRecoveryPoint\": false}\n",
+  "stderr": ""
+}

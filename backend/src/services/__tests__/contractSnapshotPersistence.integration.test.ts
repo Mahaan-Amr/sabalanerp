@@ -42,6 +42,9 @@ const run = async () => {
   const source = candidates.find(candidate => {
     const data = candidate.contractData;
     if (!data || typeof data !== 'object' || Array.isArray(data)) return false;
+    // This snapshot test does not create persisted Delivery rows. Avoid legacy
+    // zero-quantity optimizer rows which require those independent witnesses.
+    if (candidate.items.some(item => item.quantity.lte(0))) return false;
     const plan = buildLegacyContractMigrationPlan({
       id: candidate.id,
       totalAmount: candidate.totalAmount,

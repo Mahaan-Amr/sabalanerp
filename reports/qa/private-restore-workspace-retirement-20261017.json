@@ -1,0 +1,555 @@
+{
+  "phase": "EXACT_TERMINAL_WORKSPACE_RETIREMENT",
+  "retainedPoints": [
+    {
+      "path": "/srv/sabalanerp-recovery/checkpoints/20261014T054528Z-cce0fa8da6b3-release/deploy-20261014T054528Z-cce0fa8da6b3-release.sabrec",
+      "sha256": "747b3ab6a43afd2d4e083806c0b169f2b303837885d9aa9b870f510c7f15f93f",
+      "metadataSha256": "53f74b8d5ac5e6c64c1e2d1efd95953752ff87ba69be13e584fd8f0d8e2d273d"
+    },
+    {
+      "path": "/srv/sabalanerp-recovery/checkpoints/20261013T071324Z-129b1f970e1a-release/deploy-20261013T071324Z-129b1f970e1a-release.sabrec",
+      "sha256": "c5480bbedc7e82648ba6faed0d68a9b1c2e0e38abea92578ceb3e22bd9be8c5e",
+      "metadataSha256": "7f8b868f8351e77cdad84b3e63643d4fb8b828a9d1d47419d012aa209598ac77"
+    }
+  ],
+  "retainedImageArchive": "/srv/sabalanerp-recovery/checkpoints/images/6db61fe859b1274c0ba8b0253fd5f6c7bc96f6e3f46b3f868fde4fe44289e89f.docker.tar.gz",
+  "retainedEncryptedPhysicalComponent": "/root/sabalan-recovery-private/physical-replay-r4-20261015/base.sabrec",
+  "targets": [
+    {
+      "path": "/srv/sabalanerp-drill/20261014-independent/uploads",
+      "files": 162,
+      "bytes": 733292446
+    },
+    {
+      "path": "/srv/sabalanerp-drill/20261014-independent/storage",
+      "files": 1426,
+      "bytes": 214975073
+    },
+    {
+      "path": "/root/sabalan-recovery-private/physical-base-components/physical-base-r2-20261015/base.tar",
+      "files": 1,
+      "bytes": 335492096
+    }
+  ],
+  "containers": [
+    {
+      "id": "22b4f2e81096fd1522715317c5c672fdd9a0860eaa4422334e1ec801e62ff43c",
+      "name": "inquiry-startup-r24-20261015",
+      "state": {
+        "Status": "exited",
+        "Running": false,
+        "Paused": false,
+        "Restarting": false,
+        "OOMKilled": false,
+        "Dead": false,
+        "Pid": 0,
+        "ExitCode": 0,
+        "Error": "",
+        "StartedAt": "2026-10-15T09:01:29.755065879Z",
+        "FinishedAt": "2026-10-15T09:01:31.999276986Z"
+      },
+      "mounts": [
+        {
+          "Type": "bind",
+          "Source": "/srv/sabalanerp-drill/20261014-independent/inquiry",
+          "Destination": "/data",
+          "Mode": "ro",
+          "RW": false,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/srv/sabalanerp-drill/20261014-independent/code-r22-20261015/inquiry-admission",
+          "Destination": "/app/inquiry-admission",
+          "Mode": "ro",
+          "RW": false,
+          "Propagation": "rprivate"
+        }
+      ],
+      "logSha256": "1e54818112279d415053c87f4e9789b0d62ca75c7f933f9af7bab4ce18dc0124"
+    },
+    {
+      "id": "6a11a371253d36ef8e5a533494b7e4cc8d6a298ff811db29be9851c5c266adbe",
+      "name": "inquiry-r24-20261015",
+      "state": {
+        "Status": "exited",
+        "Running": false,
+        "Paused": false,
+        "Restarting": false,
+        "OOMKilled": false,
+        "Dead": false,
+        "Pid": 0,
+        "ExitCode": 0,
+        "Error": "",
+        "StartedAt": "2026-10-15T08:37:08.358527478Z",
+        "FinishedAt": "2026-10-15T09:01:23.990917776Z"
+      },
+      "mounts": [
+        {
+          "Type": "bind",
+          "Source": "/srv/sabalanerp-drill/20261014-independent/inquiry",
+          "Destination": "/app/recovery-sources/inquiry",
+          "Mode": "rw",
+          "RW": true,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/srv/sabalanerp-drill/20261014-independent/evidence",
+          "Destination": "/drill",
+          "Mode": "rw",
+          "RW": true,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/root/sabalan-recovery-private/remote-recovery-private.pem",
+          "Destination": "/run/secrets/recovery-private.pem",
+          "Mode": "ro",
+          "RW": false,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/srv/sabalanerp-drill/20261014-independent/code-r22-20261015/dist",
+          "Destination": "/app/dist",
+          "Mode": "ro",
+          "RW": false,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/srv/sabalanerp-drill/20261014-independent/storage",
+          "Destination": "/app/storage",
+          "Mode": "rw",
+          "RW": true,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/srv/sabalanerp-drill/20261014-independent/uploads",
+          "Destination": "/app/uploads",
+          "Mode": "rw",
+          "RW": true,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/srv/sabalanerp-drill/20261014-independent/code-r22-20261015/scripts/with-backend-control-ownership.sh",
+          "Destination": "/app/scripts/with-backend-control-ownership.sh",
+          "Mode": "ro",
+          "RW": false,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/srv/sabalanerp-drill/20261014-independent/code-r22-20261015/prisma",
+          "Destination": "/app/prisma",
+          "Mode": "ro",
+          "RW": false,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/srv/sabalanerp-drill/20261014-independent/coordination",
+          "Destination": "/app/recovery-coordination",
+          "Mode": "rw",
+          "RW": true,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/srv/sabalanerp-recovery/checkpoints",
+          "Destination": "/checkpoints",
+          "Mode": "ro",
+          "RW": false,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/srv/sabalanerp-drill/20261014-independent/code-r22-20261015/inquiry-admission",
+          "Destination": "/app/inquiry-admission",
+          "Mode": "ro",
+          "RW": false,
+          "Propagation": "rprivate"
+        }
+      ],
+      "logSha256": "1642987cee00442da339820234a39edd3f6432446cc5f344034c4dceb75ada8d"
+    },
+    {
+      "id": "b313119ba27da4bac8fe46daf6e7c8b0c56209ee306692e929ea609a30dbfc64",
+      "name": "inquiry-startup-r22-20261015",
+      "state": {
+        "Status": "exited",
+        "Running": false,
+        "Paused": false,
+        "Restarting": false,
+        "OOMKilled": false,
+        "Dead": false,
+        "Pid": 0,
+        "ExitCode": 0,
+        "Error": "",
+        "StartedAt": "2026-10-15T08:31:52.948978596Z",
+        "FinishedAt": "2026-10-15T08:31:54.253655975Z"
+      },
+      "mounts": [
+        {
+          "Type": "bind",
+          "Source": "/srv/sabalanerp-drill/20261014-independent/code-r22-20261015/inquiry-admission",
+          "Destination": "/app/inquiry-admission",
+          "Mode": "ro",
+          "RW": false,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/srv/sabalanerp-drill/20261014-independent/inquiry",
+          "Destination": "/data",
+          "Mode": "ro",
+          "RW": false,
+          "Propagation": "rprivate"
+        }
+      ],
+      "logSha256": "01b7c822d74c4d39fe73a9e3a59b0f3df006d84bd9c01dafe2087edf908c6d8a"
+    },
+    {
+      "id": "b6ac6410beb15fdb1964debc51966e4fc84d5ecf8a4b080a66a9907ea2cafbb2",
+      "name": "inquiry-r22-20261015",
+      "state": {
+        "Status": "exited",
+        "Running": false,
+        "Paused": false,
+        "Restarting": false,
+        "OOMKilled": false,
+        "Dead": false,
+        "Pid": 0,
+        "ExitCode": 0,
+        "Error": "",
+        "StartedAt": "2026-10-15T08:07:13.23230145Z",
+        "FinishedAt": "2026-10-15T08:31:48.756590801Z"
+      },
+      "mounts": [
+        {
+          "Type": "bind",
+          "Source": "/root/sabalan-recovery-private/remote-recovery-private.pem",
+          "Destination": "/run/secrets/recovery-private.pem",
+          "Mode": "ro",
+          "RW": false,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/srv/sabalanerp-drill/20261014-independent/code-r22-20261015/scripts/with-backend-control-ownership.sh",
+          "Destination": "/app/scripts/with-backend-control-ownership.sh",
+          "Mode": "ro",
+          "RW": false,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/srv/sabalanerp-drill/20261014-independent/code-r22-20261015/prisma",
+          "Destination": "/app/prisma",
+          "Mode": "ro",
+          "RW": false,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/srv/sabalanerp-drill/20261014-independent/inquiry",
+          "Destination": "/app/recovery-sources/inquiry",
+          "Mode": "rw",
+          "RW": true,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/srv/sabalanerp-recovery/checkpoints",
+          "Destination": "/checkpoints",
+          "Mode": "ro",
+          "RW": false,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/srv/sabalanerp-drill/20261014-independent/coordination",
+          "Destination": "/app/recovery-coordination",
+          "Mode": "rw",
+          "RW": true,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/srv/sabalanerp-drill/20261014-independent/code-r22-20261015/inquiry-admission",
+          "Destination": "/app/inquiry-admission",
+          "Mode": "ro",
+          "RW": false,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/srv/sabalanerp-drill/20261014-independent/code-r22-20261015/dist",
+          "Destination": "/app/dist",
+          "Mode": "ro",
+          "RW": false,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/srv/sabalanerp-drill/20261014-independent/uploads",
+          "Destination": "/app/uploads",
+          "Mode": "rw",
+          "RW": true,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/srv/sabalanerp-drill/20261014-independent/evidence",
+          "Destination": "/drill",
+          "Mode": "rw",
+          "RW": true,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/srv/sabalanerp-drill/20261014-independent/storage",
+          "Destination": "/app/storage",
+          "Mode": "rw",
+          "RW": true,
+          "Propagation": "rprivate"
+        }
+      ],
+      "logSha256": "a6b1381983d1c27ced1789c54b33474632fed72553fadc444a7a7fc1533d9325"
+    },
+    {
+      "id": "98e2672f6392fbf1231c68b1bdb10a6be5441d135f9f732a8cde32a793f942e4",
+      "name": "restore-previous",
+      "state": {
+        "Status": "exited",
+        "Running": false,
+        "Paused": false,
+        "Restarting": false,
+        "OOMKilled": false,
+        "Dead": false,
+        "Pid": 0,
+        "ExitCode": 0,
+        "Error": "",
+        "StartedAt": "2026-10-14T13:07:53.544108172Z",
+        "FinishedAt": "2026-10-14T13:32:50.696619622Z"
+      },
+      "mounts": [
+        {
+          "Type": "bind",
+          "Source": "/srv/sabalanerp-drill/20261014-independent/code/prisma",
+          "Destination": "/app/prisma",
+          "Mode": "ro",
+          "RW": false,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/srv/sabalanerp-drill/20261014-independent/inquiry",
+          "Destination": "/app/recovery-sources/inquiry",
+          "Mode": "rw",
+          "RW": true,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/srv/sabalanerp-drill/20261014-independent/evidence",
+          "Destination": "/drill",
+          "Mode": "rw",
+          "RW": true,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/srv/sabalanerp-recovery/checkpoints",
+          "Destination": "/checkpoints",
+          "Mode": "ro",
+          "RW": false,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/srv/sabalanerp-drill/20261014-independent/storage",
+          "Destination": "/app/storage",
+          "Mode": "rw",
+          "RW": true,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/srv/sabalanerp-drill/20261014-independent/coordination",
+          "Destination": "/app/recovery-coordination",
+          "Mode": "rw",
+          "RW": true,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/root/sabalan-recovery-private/remote-recovery-private.pem",
+          "Destination": "/run/secrets/recovery-private.pem",
+          "Mode": "ro",
+          "RW": false,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/srv/sabalanerp-drill/20261014-independent/code/dist",
+          "Destination": "/app/dist",
+          "Mode": "ro",
+          "RW": false,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/srv/sabalanerp-drill/20261014-independent/uploads",
+          "Destination": "/app/uploads",
+          "Mode": "rw",
+          "RW": true,
+          "Propagation": "rprivate"
+        }
+      ],
+      "logSha256": "9e9b55d0bfccb2f7c04db5534626f1adafd42c55b988b50598b3304e70df3d18"
+    },
+    {
+      "id": "1376521f20e065cec2ff4adb026f8030ffb0e23ca6c0f3b49d57552ee32118e5",
+      "name": "restore-latest",
+      "state": {
+        "Status": "exited",
+        "Running": false,
+        "Paused": false,
+        "Restarting": false,
+        "OOMKilled": false,
+        "Dead": false,
+        "Pid": 0,
+        "ExitCode": 0,
+        "Error": "",
+        "StartedAt": "2026-10-14T12:24:40.017298218Z",
+        "FinishedAt": "2026-10-14T12:57:54.345242763Z"
+      },
+      "mounts": [
+        {
+          "Type": "bind",
+          "Source": "/srv/sabalanerp-drill/20261014-independent/storage",
+          "Destination": "/app/storage",
+          "Mode": "rw",
+          "RW": true,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/srv/sabalanerp-drill/20261014-independent/coordination",
+          "Destination": "/app/recovery-coordination",
+          "Mode": "rw",
+          "RW": true,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/srv/sabalanerp-drill/20261014-independent/code/dist",
+          "Destination": "/app/dist",
+          "Mode": "ro",
+          "RW": false,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/srv/sabalanerp-drill/20261014-independent/uploads",
+          "Destination": "/app/uploads",
+          "Mode": "rw",
+          "RW": true,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/srv/sabalanerp-drill/20261014-independent/inquiry",
+          "Destination": "/app/recovery-sources/inquiry",
+          "Mode": "rw",
+          "RW": true,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/srv/sabalanerp-recovery/checkpoints",
+          "Destination": "/checkpoints",
+          "Mode": "ro",
+          "RW": false,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/root/sabalan-recovery-private/remote-recovery-private.pem",
+          "Destination": "/run/secrets/recovery-private.pem",
+          "Mode": "ro",
+          "RW": false,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/srv/sabalanerp-drill/20261014-independent/code/prisma",
+          "Destination": "/app/prisma",
+          "Mode": "ro",
+          "RW": false,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/srv/sabalanerp-drill/20261014-independent/evidence",
+          "Destination": "/drill",
+          "Mode": "rw",
+          "RW": true,
+          "Propagation": "rprivate"
+        }
+      ],
+      "logSha256": "dc8b1e0a4a12ba1dfc14978ff30753ede9558e588fe68e1c10ab1c8c599ee794"
+    }
+  ],
+  "foreignBaseline": {
+    "845a64ce42f4bc2ece43e3d72c9d1cdd5a029d871795f84fe90f44d3a256de50": {
+      "name": "/fintech-lab-historical-1",
+      "startedAt": "2026-10-15T12:12:52.174032391Z"
+    },
+    "01621c4a7aba9f62f8b8ccbd5cbe5f4c52c3e971072117a0e22406e2578b2064": {
+      "name": "/fintech-lab-dashboard-1",
+      "startedAt": "2026-10-15T11:07:46.817538072Z"
+    },
+    "5aa0c3e4d8c66982ab960dea644c3041631521a49efbd8cc9f5160e82596a4b1": {
+      "name": "/fintech-lab-research-1",
+      "startedAt": "2026-10-15T10:04:50.716298627Z"
+    },
+    "7ff578d8609710eb50a413fc54095f08e4fae8aceea8e7d58517d6621a2cf4c2": {
+      "name": "/fintech-lab-maintenance-1",
+      "startedAt": "2026-10-14T09:54:58.616061597Z"
+    },
+    "307de7f4d2fd1f0664484b606f6a3c218a38f1f2e897e0471f407dbd4a369ad3": {
+      "name": "/fintech-lab-hypotheses-1",
+      "startedAt": "2026-10-07T12:29:26.303030956Z"
+    },
+    "237721bd06c3b2a1c460c7eeda0e946b72c1132e01493f3745358e718dbb15ab": {
+      "name": "/fintech-lab-edge-1",
+      "startedAt": "2026-10-06T06:58:23.656747893Z"
+    },
+    "f4cd79a0c17beb13b60cb2906e0766c4de8cd8f871f283f64c8ee9e0e0738bbc": {
+      "name": "/fintech-lab-profit-1",
+      "startedAt": "2026-10-06T06:15:29.919292259Z"
+    },
+    "d3ebc61179259aff418b8fdee977a8d58b973b400913a1f397c928643dff63c5": {
+      "name": "/fintech-lab-learning-1",
+      "startedAt": "2026-10-05T06:19:47.761673449Z"
+    },
+    "72d3186a209a316fb10f6b79b8db3f4f04d36a0a813034ef6935c99535f3a45e": {
+      "name": "/fintech-lab-multiasset-1",
+      "startedAt": "2026-10-05T06:19:47.642155868Z"
+    },
+    "b27a98607a597784f98f8cdaac5fc95a0c95fe09403bb0b70c3f71ba43bb25b6": {
+      "name": "/fintech-lab-collector-1",
+      "startedAt": "2026-10-05T06:19:47.780546151Z"
+    },
+    "0294f936de55e2a71a2255a58cecf5c06000cc00ad952b332ef08cf0466b9183": {
+      "name": "/fintech-lab-adaptive-1",
+      "startedAt": "2026-10-05T06:24:55.566277419Z"
+    }
+  },
+  "runningPostgresRetained": "1330c530d388bafae86368805e1e6af5118da892f00724bc5d361b694ff0ebb6"
+}

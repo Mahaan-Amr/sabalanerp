@@ -1,0 +1,6 @@
+{
+  "sshExitCode": 1,
+  "remoteEnvelopeSha256": "0fd553d7969667aa9192a22c53a3207c2b858a77565634616c16397405b5bbb5",
+  "stdout": "",
+  "stderr": "FATAL ERROR: Network error: Software caused connection abort\n"
+}

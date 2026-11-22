@@ -29,6 +29,17 @@ test('excessive user input is preserved and rejected instead of clamped', () => 
   }
 });
 
+test('an exact percentage cap remains valid when conversion rounds above the whole-toman cap', () => {
+  const baseSubtotal = 87_596_923;
+  const entry = enterContractDiscount('PERCENT', 4.5, baseSubtotal, 4.5);
+  assert.equal(entry.percentInput, 4.5);
+  assert.equal(entry.amount, 3_941_861);
+  assert.equal(contractDiscountInputError({ ...entry, baseSubtotal, maxPercent: 4.5, hasRange: true }), null);
+  const excessive = enterContractDiscount('PERCENT', 4.51, baseSubtotal, 4.5);
+  assert.equal(excessive.percentInput, 4.51);
+  assert.match(contractDiscountInputError({ ...excessive, baseSubtotal, maxPercent: 4.5, hasRange: true }) || '', /سقف مجاز/);
+});
+
 test('historical valid discounts do not adopt a changed range, but fresh input requires a range', () => {
   assert.equal(contractDiscountSnapshotError(discount, oldBase), null);
   const entry = enterContractDiscount('AMOUNT_TOMAN', 100, newBase);

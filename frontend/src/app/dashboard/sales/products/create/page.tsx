@@ -1,4 +1,6 @@
 'use client';
+
+import { contractNavigationStorage } from '@/features/contract-creation/utils/contractNavigationStorage';
 import { WizardProgressBar } from '@/features/contract-creation/components/shared/WizardProgressBar';
 import { ErpCard, ErpCheckbox, ErpField as SalesAuthoringField, ErpFieldView, ErpInput, ErpPressable, ErpSelect } from '@/components/erp';
 import React, { useState, useEffect, useRef } from 'react';
@@ -899,7 +901,7 @@ export default function CreateStoneProductWizard() {
   };
 
   const returnToContract = () => {
-    const savedState = localStorage.getItem('contractWizardState');
+    const savedState = contractNavigationStorage.getItem('contractWizardState');
     if (savedState) {
       const { currentStep: contractStep } = JSON.parse(savedState);
       router.push(`/dashboard/sales/contracts/create?returnTo=contract&step=${contractStep}`);

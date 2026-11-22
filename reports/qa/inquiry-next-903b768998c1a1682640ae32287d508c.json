@@ -1,0 +1,19 @@
+{
+  "format": "sabalan-private-native-inquiry-next/v1",
+  "directory": "/app/online-runtime-acceptance/inquiry-next-903b768998c1a1682640ae32287d508c",
+  "coordination": "/app/online-runtime-acceptance/inquiry-next-903b768998c1a1682640ae32287d508c/coordination",
+  "operation": "903b768998c1a1682640ae32287d508c",
+  "runtimeId": "4b53200841dc02a1bad06ec18747ab55d0a45589a4c782a088d1a26328c87b64",
+  "scopeFile": "/run/sabalan-online/4b53200841dc02a1bad06ec18747ab55d0a45589a4c782a088d1a26328c87b64.json",
+  "scopeSha256": "bf44923abee8da01c2dc7d9a7ffbd8b6fd19e023c0789617469d779ad4a37216",
+  "image": "sha256:0a3fa6cb6312ecc01765308bc95ff7eb6fddac22e44630c945d587836c63d6c1",
+  "databaseUrl": "file:/app/online-runtime-acceptance/inquiry-next-903b768998c1a1682640ae32287d508c/inquiry.db?connection_limit=2&pool_timeout=5",
+  "imageIndex": "sha256:0a3fa6cb6312ecc01765308bc95ff7eb6fddac22e44630c945d587836c63d6c1",
+  "imageReceipt": "D:\\sabalanerp-online-qa\\inquiry-native-image-e0962b77de82d690b3fa9f9781b88e6e\\image.json",
+  "serviceFile": "D:\\sabalanerp-online-qa\\inquiry-native-image-e0962b77de82d690b3fa9f9781b88e6e\\native-service-903b768998c1a1682640ae32287d508c.json",
+  "candidate": "ed0eae3445504b38c335a40c9c3cc4cc239d5d6ddcaf2e3780a0e523dd865bd7",
+  "url": "http://127.0.0.1:3102",
+  "negativeControl": false,
+  "productionAdmission": false,
+  "browserAcceptance": false
+}

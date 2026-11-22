@@ -5,7 +5,7 @@ import ContractCustomerPostedAccount from '@/features/accounting/ContractCustome
 import AccountingCustomerCategoryBadge from '@/features/accounting/AccountingCustomerCategoryBadge';
 import { contractLifecycleLabel, contractLifecycleFilterOptions } from '@/features/sales/contractLifecyclePresentation';
 import { ErpInput, ErpSearchableSelect } from "@/components/erp";
-import { useCallback, useEffect, useState, use } from "react";
+import { useCallback, useEffect, useState, useRef, use } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   FaBalanceScale,
@@ -28,6 +28,7 @@ import {
   ErpLoading,
   ErpPage,
   ErpSection,
+  ErpSheet,
   ErpSegmentedControl,
   ErpSummaryGrid,
   ErpTwoColumn,
@@ -38,7 +39,11 @@ import { operationalStatusLabel } from "@/features/dispatch/operationalStatusPre
 import { userFacingError } from "@/features/dispatch/userFacingError";
 import AccountingCustomPrintSettings, { defaultCustomPrintSettings, salesPdfVariantLabels, type SalesPdfVariant, type CustomPrintPreset, type CustomProductRowsMode, type CustomPrintSettings } from '@/features/accounting/AccountingCustomPrintSettings';
 import AccountingContractPrintActions, { accountingContractTabs } from "@/features/accounting/AccountingContractPrintActions";
+import { accountingReviewReturn, financialRecordReviewHref } from "@/features/accounting/financialRecordReviewHref";
 import AccountingActionModal from "@/features/accounting/AccountingActionModal";
+import { InvoiceDraftEditor } from "@/features/accounting/InvoiceDraftEditor";
+import { invoiceDraftApprovalCommand, type InvoiceDraftApprovalIdentity } from "@/features/accounting/invoiceDraftApproval";
+import { workspaceHistoryPosition } from "@/lib/workspaceBackNavigation";
 import AccountingVoidWorkflowPanel, {
   type AccountingVoidWorkflowView,
 } from "@/features/accounting/AccountingVoidWorkflowPanel";
@@ -51,8 +56,6 @@ import {
 import {
   CompactQueueItem,
   accountingActionAvailability,
-  FinancialInvoiceApprovalForm,
-  FinancialInvoiceApprovalPayload,
   StatusBadge,
   contractStatusLabels,
   dateFa,
@@ -106,6 +109,8 @@ export default function AccountingContractDetailPage(props: {
       ? (searchParams.get("focus") as "receivable" | "check")
       : null;
   const focusedRecordId = (searchParams.get("recordId") || "").trim();
+  const requestedReturn = searchParams.get("returnTo") || "";
+  const backHref = accountingReviewReturn(requestedReturn, "/dashboard/accounting/contracts");
   const [data, setData] = useState<any>(null);
   const [detailSection, setDetailSection] = useState<
     "summary" | "items" | "financial" | "collections" | "compliance"
@@ -118,6 +123,88 @@ export default function AccountingContractDetailPage(props: {
   } | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
+  const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
+  const [draftDirty, setDraftDirty] = useState(false);
+  const [pendingDraftAction, setPendingDraftAction] = useState<(() => void) | null>(null);
+  const draftDirtyRef = useRef(false);
+  const approvalIdentityRef = useRef<InvoiceDraftApprovalIdentity | null>(null);
+  const draftHistoryPosition = useRef<number | undefined>(undefined);
+  const replayingDraftAction = useRef(false);
+  const onDraftDirtyChange = useCallback((dirty: boolean) => {
+    if (dirty && !draftDirtyRef.current) {
+      draftHistoryPosition.current = workspaceHistoryPosition(history.state);
+    }
+    draftDirtyRef.current = dirty;
+    setDraftDirty(dirty);
+  }, []);
+
+  useEffect(() => {
+    const warn = (event: BeforeUnloadEvent) => {
+      if (!draftDirtyRef.current) return;
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    const guard = (event: MouseEvent) => {
+      if (!draftDirtyRef.current || replayingDraftAction.current || !(event.target instanceof Element)) return;
+      const action = event.target.closest('a[href], button');
+      if (!(action instanceof HTMLElement) || action.closest('[data-invoice-draft-editor]')) return;
+      if (action.closest('[role=dialog]')?.querySelector('[data-draft-exit-dialog]')) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      setPendingDraftAction(() => () => { if (action.isConnected) action.click(); });
+    };
+    // Navigation API can cancel same-document Back/Forward without modifying the history stack.
+    const navigation = (window as Window & { navigation?: EventTarget & { traverseTo: (key: string) => unknown } }).navigation;
+    let pendingHistoryDistance: number | undefined;
+    const guardTraversal = (raw: Event) => {
+      const event = raw as Event & { navigationType?: string; destination?: { key?: string } };
+      const key = event.destination?.key;
+      if (pendingHistoryDistance !== undefined || !draftDirtyRef.current || event.navigationType !== 'traverse' || !event.cancelable || !key) return;
+      event.preventDefault();
+      setPendingDraftAction(() => () => { void navigation?.traverseTo(key); });
+    };
+    navigation?.addEventListener('navigate', guardTraversal);
+    const guardCommittedTraversal = (event: PopStateEvent) => {
+      const origin = draftHistoryPosition.current;
+      const destination = workspaceHistoryPosition(event.state);
+      if (pendingHistoryDistance !== undefined && destination === origin) {
+        const distance = pendingHistoryDistance;
+        pendingHistoryDistance = undefined;
+        event.stopImmediatePropagation();
+        setPendingDraftAction(() => () => history.go(distance));
+        return;
+      }
+      if (!draftDirtyRef.current || origin === undefined || destination === undefined || destination === origin) return;
+      const distance = destination - origin;
+      // Return to the existing entry before Next processes the traversal.
+      // Adding an entry here would erase the user's forward history.
+      event.stopImmediatePropagation();
+      pendingHistoryDistance = distance;
+      history.go(-distance);
+    };
+    window.addEventListener('popstate', guardCommittedTraversal, true);
+    window.addEventListener('beforeunload', warn);
+    document.addEventListener('click', guard, true);
+    return () => {
+      navigation?.removeEventListener('navigate', guardTraversal);
+      window.removeEventListener('popstate', guardCommittedTraversal, true);
+      window.removeEventListener('beforeunload', warn);
+      document.removeEventListener('click', guard, true);
+    };
+  }, []);
+
+  const discardDraftAndContinue = () => {
+    const action = pendingDraftAction;
+    setPendingDraftAction(null);
+    draftDirtyRef.current = false;
+    setDraftDirty(false);
+    setEditingDraftId(null);
+    if (action) {
+      replayingDraftAction.current = true;
+      action();
+      replayingDraftAction.current = false;
+    }
+  };
   const [pdfActionLoading, setPdfActionLoading] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [reviewActionUrl, setReviewActionUrl] = useState<string | null>(null);
@@ -243,12 +330,18 @@ export default function AccountingContractDetailPage(props: {
       const response = (error as any)?.response?.data;
       setActionError(userFacingError(error, "اقدام حسابداری انجام نشد"));
       const exactReviewUrl = financialEvidenceReviewFromConflict(response);
-      if (exactReviewUrl) await loadDetail();
+      if (exactReviewUrl && !draftDirtyRef.current) await loadDetail();
       setReviewActionUrl(exactReviewUrl);
       return false;
     } finally {
       setActionLoading(false);
     }
+  };
+
+  const approveInvoiceDraft = (invoiceId: string, details: { systemInvoiceNumber: string; systemInvoiceDate: string; sepidarAmount: string }) => {
+    const { identity, command } = invoiceDraftApprovalCommand(approvalIdentityRef.current, invoiceId, details);
+    approvalIdentityRef.current = identity;
+    return execute(command);
   };
 
   const submitLifecycle = async (values: Record<string, string | number>) => {
@@ -312,18 +405,6 @@ export default function AccountingContractDetailPage(props: {
     } finally {
       setActionLoading(false);
     }
-  };
-
-  const approveFinancialInvoice = (
-    payload: FinancialInvoiceApprovalPayload,
-  ) => {
-    execute({
-      kind: "APPROVE_FINANCIAL_INVOICE",
-      invoiceId: payload.invoiceId,
-      systemInvoiceNumber: payload.systemInvoiceNumber,
-      systemInvoiceDate: payload.systemInvoiceDate,
-      sepidarAmount: payload.sepidarAmount,
-    });
   };
 
   const deleteDraftRecord = async (values: Record<string, string | number>) => {
@@ -530,6 +611,8 @@ export default function AccountingContractDetailPage(props: {
       if (preset === "workshop") {
         return {
           ...next,
+          showCustomerSection: false,
+          showDeliverySection: true,
           showPrices: false,
           showPaymentSection: false,
           showTotals: false,
@@ -586,6 +669,13 @@ export default function AccountingContractDetailPage(props: {
         variant: salesPdfVariant,
         ...buildCustomPrintParams(),
       };
+      if (tryPrint && (salesPdfVariant === 'production' || salesPdfVariant === 'workshop')) {
+        const response = await accountingAPI.downloadSalesContractPdf(params.contractId, pdfParams);
+        const url = URL.createObjectURL(new Blob([response.data], { type: 'application/pdf' }));
+        openPdfUrl(url, true);
+        window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+        return;
+      }
       if (!tryPrint) {
         const response = await accountingAPI.downloadSalesContractPdf(
           params.contractId,
@@ -622,7 +712,7 @@ export default function AccountingContractDetailPage(props: {
       <ErpPage
         eyebrow="حسابداری"
         title="قرارداد یافت نشد"
-        backHref="/dashboard/accounting/contracts"
+        backHref={backHref}
       >
         <ErpSection>این قرارداد در رجیستر حسابداری پیدا نشد.</ErpSection>
       </ErpPage>
@@ -658,7 +748,7 @@ export default function AccountingContractDetailPage(props: {
         <span>{contract.customer?.displayName}</span>
         <AccountingCustomerCategoryBadge contract={contract} />
       </span>}
-      backHref="/dashboard/accounting/contracts"
+      backHref={backHref}
       actions={[
         {
           label: "به‌روزرسانی",
@@ -697,6 +787,15 @@ export default function AccountingContractDetailPage(props: {
         },
       ]}
     >
+      <ErpSheet open={Boolean(pendingDraftAction) && draftDirty} onClose={() => setPendingDraftAction(null)} title="تغییرات ذخیره‌نشده" presentation="modal">
+        <div data-draft-exit-dialog className="space-y-4">
+          <p>تغییرات این پیش‌نویس ذخیره نشده است. می‌خواهید بدون ذخیره خارج شوید؟</p>
+          <div className="flex flex-wrap gap-2">
+            <ErpButton label="بازگشت به ویرایش" onClick={() => setPendingDraftAction(null)} />
+            <ErpButton label="خروج بدون ذخیره" tone="danger" onClick={discardDraftAndContinue} />
+          </div>
+        </div>
+      </ErpSheet>
       {actionError &&
         !deleteTarget &&
         !voidTarget &&
@@ -867,6 +966,7 @@ export default function AccountingContractDetailPage(props: {
           <AccountingContractPrintActions value={salesPdfVariant}
             options={Object.entries(salesPdfVariantLabels).map(([value, label]) => ({ value, label }))}
             onChange={value => setSalesPdfVariant(value as SalesPdfVariant)} pending={Boolean(pdfActionLoading)}
+            blockedReason={['production', 'workshop'].includes(salesPdfVariant) && !(data.financialRecords || []).some((record: any) => ['ISSUED', 'POSTED'].includes(record.status) && record.financiallyApprovedAt) ? 'این خروجی به رکورد مالی تأییدشده و معتبر نیاز دارد.' : undefined}
             onDownload={() => void openSalesContractPdf(false)} onPrint={() => void openSalesContractPdf(true)} />
           {salesPdfVariant === "custom" && <AccountingCustomPrintSettings customPrintSettings={customPrintSettings}
             setCustomPrintSettings={setCustomPrintSettings} applyCustomPreset={applyCustomPreset} />}
@@ -1127,11 +1227,8 @@ export default function AccountingContractDetailPage(props: {
                                   {actionError}
                                 </div>
                               )}
-                              <FinancialInvoiceApprovalForm
-                                invoice={replacementRecord}
-                                busy={actionLoading}
-                                onApprove={approveFinancialInvoice}
-                              />
+                              <ErpButton label="بررسی و تأیید مالی" href={financialRecordReviewHref(replacementRecord.id,
+                                `/dashboard/accounting/contracts/${encodeURIComponent(params.contractId)}?section=financial`)} />
                             </div>
                           )}
                       </div>
@@ -1197,8 +1294,17 @@ export default function AccountingContractDetailPage(props: {
                           amount={money(record.amount, record.currency)}
                           status={<StatusBadge status={record.status} />}
                           footer={
-                            canActFinancially && record.kind === "INVOICE_CANDIDATE" ? (
+                            record.kind === "INVOICE_CANDIDATE" && (canActFinancially || canUseAccountingAction("SAVE_INVOICE_DRAFT")) ? (
                               <div className="space-y-3">
+                                {record.status === "DRAFT" && (canUseAccountingAction("SAVE_INVOICE_DRAFT") || (canActFinancially && canExecuteAccountingAction("APPROVE_FINANCIAL_INVOICE"))) && (
+                                  editingDraftId === record.id ? <div data-invoice-draft-editor><InvoiceDraftEditor record={record}
+                                    canSave={canExecuteAccountingAction("SAVE_INVOICE_DRAFT")}
+                                    canApprove={canActFinancially && canExecuteAccountingAction("APPROVE_FINANCIAL_INVOICE")}
+                                    busy={actionLoading}
+                                    onSave={details => execute({ kind: "SAVE_INVOICE_DRAFT", invoiceId: record.id, ...details })}
+                                    onApprove={details => approveInvoiceDraft(record.id, details)} onDirtyChange={onDraftDirtyChange} /></div>
+                                    : <ErpButton label="ادامه تکمیل" onClick={() => setEditingDraftId(record.id)} />
+                                )}
                                 {(contract.accounting.openCorrections > 0 ||
                                   contract.accounting.openBlockerFlags > 0) &&
                                 !["ISSUED", "POSTED", "VOIDED"].includes(
@@ -1209,14 +1315,11 @@ export default function AccountingContractDetailPage(props: {
                                     مسدودکننده باز را بررسی و ببندید؛ سپس تایید
                                     مالی انجام می‌شود.
                                   </div>
-                                ) : (
-                                  <FinancialInvoiceApprovalForm
-                                    invoice={record}
-                                    busy={actionLoading}
-                                    onApprove={approveFinancialInvoice}
-                                  />
-                                )}
-                                {record.status === "DRAFT" && (
+                                ) : canActFinancially ? (
+                                  <ErpButton label="بررسی رکورد مالی" href={financialRecordReviewHref(record.id,
+                                    `/dashboard/accounting/contracts/${encodeURIComponent(params.contractId)}?section=financial`)} />
+                                ) : null}
+                                {canActFinancially && record.status === "DRAFT" && (
                                   <div className="flex justify-end">
                                     <ErpButton
                                       label="حذف پیش‌نویس"
@@ -1228,7 +1331,7 @@ export default function AccountingContractDetailPage(props: {
                                     />
                                   </div>
                                 )}
-                                {["ISSUED", "POSTED"].includes(record.status) &&
+                                {canActFinancially && ["ISSUED", "POSTED"].includes(record.status) &&
                                   !(data.voidWorkflows || []).some(
                                     (workflow: AccountingVoidWorkflowView) =>
                                       workflow.sourceRecordId === record.id &&

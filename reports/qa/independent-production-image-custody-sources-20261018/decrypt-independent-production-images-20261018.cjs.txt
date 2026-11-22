@@ -1,0 +1,28 @@
+const fs=require('node:fs'),path=require('node:path');
+const {sha256File,decryptRecoveryArchive}=require('./recoveryCrypto.cjs');
+const fail=code=>{throw Object.assign(new Error(code),{code});};
+const identity=s=>[s.dev,s.ino,s.size,s.mtimeNs,s.ctimeNs].map(String).join(':');
+function safe(file,max){const s=fs.lstatSync(file,{bigint:true});if(!path.isAbsolute(file)||fs.realpathSync(file)!==file||!s.isFile()||s.uid!==0n||s.nlink!==1n||(s.mode&0o077n)||s.size<1n||s.size>BigInt(max))fail('INDEPENDENT_IMAGE_FILE_UNSAFE');return s;}
+async function sync(file,directory=false){const fd=await fs.promises.open(file,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW|(directory?fs.constants.O_DIRECTORY:0));try{await fd.sync();}finally{await fd.close();}}
+async function main(){
+ const [metadataFile,metadataSha,keyFile,work]=process.argv.slice(2);safe(metadataFile,1024*1024);
+ if(await sha256File(metadataFile)!==metadataSha)fail('INDEPENDENT_IMAGE_METADATA_CHANGED');
+ const metadata=JSON.parse(fs.readFileSync(metadataFile,'utf8'));
+ if(metadata.format!=='sabalan-private-image-transfer/v1'||metadata.healthyApplicationPoint!==false||metadata.publicOnlineAdmission!==false||Object.keys(metadata.images).sort().join(',')!=='backend,frontend,inquiry')fail('INDEPENDENT_IMAGE_COMPONENT_UNPROVEN');
+ for(const dir of [path.dirname(metadataFile),work]){const s=fs.lstatSync(dir);if(fs.realpathSync(dir)!==dir||!s.isDirectory()||s.uid!==0||(s.mode&0o077))fail('INDEPENDENT_IMAGE_ROOT_UNSAFE');}
+ safe(keyFile,65536);const key=fs.readFileSync(keyFile,'utf8'),images={};
+ const total=Object.values(metadata.encryption.images).reduce((a,v)=>a+v.sourceBytes,0),space=fs.statfsSync(work);
+ if(!Number.isSafeInteger(total)||total<1||space.bavail*space.bsize<total+1024**3)fail('INDEPENDENT_IMAGE_CAPACITY_INSUFFICIENT');
+ for(const service of ['backend','frontend','inquiry']){
+  const expected=metadata.encryption.images[service],record=metadata.images[service],cipher=path.join(path.dirname(metadataFile),service+'.sabrec');
+  if(expected.service!==service||record.cipherSha256!==expected.cipherSha256||record.cipherBytes!==expected.cipherBytes||!Number.isSafeInteger(expected.sourceBytes)||expected.sourceBytes<1024||expected.sourceBytes>2**31||!/^[a-f0-9]{64}$/.test(expected.sourceSha256))fail('INDEPENDENT_IMAGE_SELECTION_INVALID');
+  const before=safe(cipher,2**31);if(Number(before.size)!==expected.cipherBytes||await sha256File(cipher)!==expected.cipherSha256)fail('INDEPENDENT_IMAGE_CIPHER_CHANGED');
+  const plain=path.join(work,service+'.docker.tar.gz');if(fs.existsSync(plain))fail('INDEPENDENT_IMAGE_OUTPUT_EXISTS');
+  await decryptRecoveryArchive(cipher,plain,key);await sync(plain);await sync(work,true);
+  const after=safe(plain,2**31);if(Number(after.size)!==expected.sourceBytes||await sha256File(plain)!==expected.sourceSha256||identity(before)!==identity(safe(cipher,2**31))||await sha256File(cipher)!==expected.cipherSha256)fail('INDEPENDENT_IMAGE_READBACK_FAILED');
+  images[service]={sourceImageId:expected.sourceImageId,plaintextSha256:expected.sourceSha256,plaintextBytes:expected.sourceBytes,cipherSha256:expected.cipherSha256,independentRsaDecryptVerified:true,verifiedRawArchive:expected.verifiedRawArchive,expandedLayerIdentityVerified:false,dockerImportVerified:false};
+ }
+ const proof={format:'sabalan-independent-production-image-decryption/v1',images,independentDecryptVerified:true,healthyApplicationPoint:false,publicOnlineAdmission:false};
+ const output=path.join(work,'independent-image-decryption-proof.json');await fs.promises.writeFile(output,JSON.stringify(proof,null,2)+'\n',{flag:'wx',mode:0o400});await sync(output);await sync(work,true);console.log(JSON.stringify(proof));
+}
+main().catch(error=>{console.error(JSON.stringify({ok:false,failureClass:error.code||error.name}));process.exitCode=1;});

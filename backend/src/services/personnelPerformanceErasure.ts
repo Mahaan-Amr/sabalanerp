@@ -90,6 +90,9 @@ export const decidePerformanceErasureProgress = (input: {
     return 'COPY_REVIEW_REQUIRED';
   }
   if (!input.liveErased) return 'READY';
-  if (input.copies.some(({ status }) => status === 'PRESENT' || status === 'RECOVERABLE')) return 'LIVE_ERASED_BACKUP_PENDING';
+  if (input.copies.length !== requiredPerformanceCopyLocations.length || requiredPerformanceCopyLocations.some(location => {
+    const copies = input.copies.filter(copy => copy.location === location);
+    return copies.length !== 1 || !['VERIFIED_ABSENT', 'ERASED'].includes(copies[0].status);
+  })) return 'LIVE_ERASED_BACKUP_PENDING';
   return 'COMPLETED';
 };

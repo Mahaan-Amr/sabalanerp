@@ -15,7 +15,7 @@ test('shared contract step views expose the same date, customer, and project voc
     dateControl={<input value="1405/06/24" readOnly />}
     numberNotice="شماره پس از ثبت نهایی تخصیص داده می‌شود."
   />);
-  assert.match(dateHtml, /کاربر ایجادکننده/);
+  assert.match(dateHtml, /ثبت‌کننده/);
   assert.match(dateHtml, /تاریخ قرارداد/);
   assert.match(dateHtml, /شماره پس از ثبت نهایی تخصیص داده می‌شود/);
   assert.match(dateHtml, /<label for="([^"]+)"[\s\S]*<input[^>]+id="\1"/);

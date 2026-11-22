@@ -1,0 +1,32 @@
+HISTORICAL PREFLIGHT — superseded by local-native-recovery-macos-20261118.txt.
+The two-destination request below was a proposed prerequisite, not a Mac requirement; see the completed local-only incident evidence.
+
+Local backend native-owner recovery preflight — 2026-11-18
+
+Status: recovery not executed; full real-backend browser acceptance remains incomplete.
+
+Observed existing target
+Compose project sabalanerp-local. Existing backend is restarting with exit 75 and RUNTIME_NATIVE_AUTHORITY_UNPROVEN. Frontend, Inquiry, PostgreSQL and Redis are healthy. No second stack, database container or replacement backend service was started.
+Original ACTIVE record SHA256: bf714032489da8a47d2a0b741ed4236bcdd09d2aedbac193c836b4d5ae7dcd0a
+Original boot: a4a9f385-52d1-431e-b60c-15d152248b53
+Current Docker VM boot: b11f2794-d50a-40b9-beb5-26e49d60e672
+The runtime record remains ACTIVE; it has not been renamed, deleted, rewritten as QUIESCENT or admitted through an older incident exception.
+PostgreSQL system identifier and sabalanerp database OID agree with the original ACTIVE record. Fresh observations found zero sabalan-rt tagged sessions and zero prepared transactions. These observations prove current database quiet, not graceful completion of the old guardian or its external effects.
+The environment is development / sandbox with no configured external provider credentials among the inspected keys. No secret values are printed in this report.
+
+Gate behavior verified
+Calling local_reboot_policy with this exact ACTIVE SHA fails with RUNTIME_NATIVE_AUTHORITY_UNPROVEN. Existing local incident policies are pinned to different Windows incidents and must not be repurposed or have their old proofs forged. The six tests in tests/online-deployment/local-native-reboot-20261117.test.py pass.
+A narrow reviewed current-incident abandonment protocol is required; it must retain original ACTIVE evidence and distinguish abandonment from native reaping/completion. Production admission remains excluded.
+
+Storage prerequisite
+The previous incident runbook reports/qa/local-native-reboot-436-runbook.md explicitly applies to its pinned November 12 incident. It requires two verified checkpoint copies on distinct filesystems before replacement/recovery publication. Those Windows controllers cannot be run on this Mac. Equivalent independent checkpoint protection is the proposed safety prerequisite for a new Mac incident path, not permission to modify the old Windows allowlist.
+Only the internal Data filesystem is presently mounted as an available user checkpoint destination. No external disk is mounted under /Volumes. The user has been asked to supply an independent external filesystem or explicitly authorized independent backup host. Two folders or a disk-image file on the same internal filesystem are not being substituted as independent copies.
+No checkpoint, host proof, abandonment receipt, container replacement or new owner was published.
+
+Additional acceptance blockers
+Host TCP 5000 is held by ControlCenter / AirPlay. An HTTP readiness request to 127.0.0.1:5000 returns AirTunes 403, not a Sabalan readiness response. Any later local port adjustment must remain loopback-only and must not disable AirPlay or change production ingress.
+The current local sales_contracts database has no contractNumber 100999. Earlier browser acceptance used synthetic data with the affected technical identifier and must not be presented as full live-backend acceptance of the real contract. A real unmocked test needs an isolated approved copy or faithful local import after guarded runtime recovery.
+
+Preservation
+All work in this preflight was observational except writing local evidence/report files. Existing source edits, containers, volumes, original native state and historical checkpoints remain intact. No production connection, publication, restart, migration, financial approval, lock removal or gate bypass occurred in this preflight turn.
+Private diagnostic inventory is retained under /tmp/sabalan-local-native-recovery-20261118 with restricted permissions; the public report contains no credentials.

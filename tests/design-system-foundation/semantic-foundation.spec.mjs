@@ -580,9 +580,8 @@ test('the application shell preserves shared behavior through canonical accessib
 test('HR retention dialogs use the centered responsive overlay presentation', () => {
   assert.match(sharedModuleSource, /presentation\?: 'sheet' \| 'modal'/);
   assert.match(sharedModuleSource, /!m-0 flex items-center justify-center p-3 sm:p-4/);
-  // The fixed overlay already owns viewport bounds and padding. Its child must
-  // fit that available height even when document zoom changes CSS viewport units.
-  assert.match(sharedModuleSource, /max-h-full/);
+  // Centered dialogs fit the measured visible viewport even at document zoom.
+  assert.match(sharedModuleSource, /maxHeight: 'calc\(var\(--erp-overlay-viewport-height, 100dvh\) - 1\.5rem\)'/);
   assert.match(sharedModuleSource, /bg-\[var\(--sds-surface-overlay\)\] backdrop-blur-sm/);
   for (const source of hrRetentionDialogSources) {
     assert.match(source, /<ErpSheet/);

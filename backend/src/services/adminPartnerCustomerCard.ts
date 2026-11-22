@@ -1,3 +1,4 @@
+import { customerActivityCategorySchema, recordCustomerActivityCategory } from './customerActivityCategory';
 import { requireManagedCrmOperation } from './crmOperationAuthority';
 import { createAuditedPartnerAuthorization } from './partnerSales/authorization/audited';
 import { createHash, randomUUID } from 'node:crypto';
@@ -22,6 +23,7 @@ const card = z.object({
   expectedRevision: z.number().int().positive().optional(), expectedCardVersion: z.string().optional(),
   firstName: z.string().trim().min(1).optional(), lastName: z.string().trim().min(1).optional(),
   customerType: z.enum(['Individual', 'Company', 'Government']).optional(), status: z.enum(['Active', 'Inactive', 'Prospect', 'Lead']).optional(),
+  activityCategory: customerActivityCategorySchema.optional(),
   nationalCode: text, companyName: text, industry: text, brandName: text, brandNameDescription: text,
   homeAddress: text, homeNumber: text, workAddress: text, workNumber: text,
   projectManagerName: text, projectManagerNumber: mobile, referrerFirstName: text, referrerLastName: text, referrerPhoneNumber: mobile,
@@ -44,6 +46,7 @@ export async function updateAdminPartnerCustomerCard(database: PrismaClient, act
   }
   const parsed = card.safeParse(raw);
   if (!parsed.success) throw new CustomerManagementError(400, 'INVALID_CUSTOMER_CARD', parsed.error.issues[0]?.message || 'اطلاعات کارت مشتری نامعتبر است.');
+  if (operation === 'EDIT' && !parsed.data.activityCategory) throw new CustomerManagementError(400, 'INVALID_CUSTOMER_CARD', 'دسته‌بندی فعالیت مشتری الزامی است.');
   return database.$transaction(async tx => {
     await tx.$queryRaw`SELECT id FROM users WHERE id = ${actorId} FOR UPDATE`;
     const actor = await tx.user.findUnique({ where: { id: actorId }, select: { role: true, isActive: true } });
@@ -132,6 +135,7 @@ export async function updateAdminPartnerCustomerCard(database: PrismaClient, act
       ...(operation === 'LOCK' ? { isLocked: !customer.isLocked } : {}),
       partnerRevision: { increment: 1 }, updatedBy: actorId,
     } });
+    if (operation === 'EDIT' && patch.activityCategory) await recordCustomerActivityCategory(tx, customerId, actorId, customer.activityCategory, patch.activityCategory);
     await appendAuthorizationDecision(tx, { domain: 'CRM', actorId, action: `ADMIN_CUSTOMER_CARD_${operation}`,
       rootKind: 'CUSTOMER', rootId: customerId, purpose: 'CRM', channel: 'API', allowed: true, isAdmin: actor.role === 'ADMIN',
       code: 'UPDATED', scope: 'CUSTOMER_CARD', reason: mode === 'owner' ? 'مدیریت کارت مشتری توسط فروشنده همکار مالک' : 'مدیریت کارت مشتری همکار توسط Admin', correlationId: randomUUID(),

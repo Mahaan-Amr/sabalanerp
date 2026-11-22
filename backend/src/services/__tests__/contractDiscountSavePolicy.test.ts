@@ -30,6 +30,16 @@ test('explicit new amount/percent on current base permits save', () => {
   value.discount.percent = Number((10 * 100 / 950).toFixed(12));
   assertContractDiscountReadyForSave(value, [{ ...rows[0], baseAmountToman: '950' }, rows[1]]);
 });
+test('whole-toman amount at a fractional percentage cap is accepted without exceeding the cap', () => {
+  const value = data();
+  value.discount.baseSubtotal = 87_596_923;
+  value.discount.amount = 3_941_861;
+  value.discount.percent = Number((3_941_861 * 100 / 87_596_923).toFixed(12));
+  value.discount.maxDiscountPercent = 4.5;
+  const canonical = [{ ...rows[0], baseAmountToman: '87596923' }, rows[1]];
+  assertContractDiscountReadyForSave(value, canonical);
+  rejects({ ...value, discount: { ...value.discount, amount: 3_941_862 } }, canonical);
+});
 test('legacy percent evidence preserves exact saved interpretation', () => {
   const value = data() as any;
   delete value.discount.inputMode;

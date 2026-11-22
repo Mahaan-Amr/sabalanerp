@@ -1,4 +1,5 @@
 'use client';
+import { ContractRenewal } from '@/features/sales/ContractRenewal';
 import { useSmsSuccess } from '@/features/sales/useSmsSuccess';
 import { PartnerContractCancellation } from './PartnerContractCancellation';
 import { usePartnerCaseRefresh } from './usePartnerCaseRefresh';
@@ -27,6 +28,7 @@ export function PartnerSalesContractWorkspace({ view, canDownload, canPrint, onD
   const [error, setError] = useState<ReturnType<typeof partnerSalesActionFeedback>>();
   const actionFlight = useRef(false);
   const [pending, setPending] = useState(false);
+  const [renewalOpen, setRenewalOpen] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [finalizeOpen, setFinalizeOpen] = useState(false);
@@ -77,6 +79,7 @@ export function PartnerSalesContractWorkspace({ view, canDownload, canPrint, onD
       actions={{
         canDownload, canPrint, onDownload, onPrint, pending,
         decisionActions: row?.commercial ? [
+          ...(actions?.canRenew ? [{ label: 'تمدید مهلت', tone: 'warning' as const, onClick: () => setRenewalOpen(true) }] : []),
           ...(actions?.canApproveSales ? [{ label: 'تایید', tone: 'success' as const,
             onClick: () => void run(() => decidePartnerCommercial(currentView.owner.caseId, row.commercial!.revision, 'APPROVE_SALES')) }] : []),
           ...(actions?.canCancel && row.commercial.status !== 'FINAL' ? [{ label: 'رد', tone: 'danger' as const,
@@ -103,6 +106,9 @@ export function PartnerSalesContractWorkspace({ view, canDownload, canPrint, onD
         onRequestVoid: () => { if (!pending) void run(() => requestPartnerCorrection(currentView, 'VOID')); },
         onFinalize: () => { if (!pending) { setLossAccepted(false); setFinalizeOpen(true); } },
       }} />
+    <ContractRenewal contractId={renewalOpen ? row?.customerContractId ?? currentView.owner.caseId : null}
+      partnerCaseId={currentView.owner.caseId} onClose={() => setRenewalOpen(false)}
+      onRenewed={async () => { await load(true); router.refresh(); }} />
     <ErpSheet open={finalizeOpen} onClose={() => { if (!pending) setFinalizeOpen(false); }}
       title="تأیید و نهایی‌سازی قرارداد" presentation="modal" pending={pending}
       footer={<ErpButton label="تأیید و نهایی‌سازی قرارداد" tone="success"

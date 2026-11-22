@@ -1,0 +1,41 @@
+import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import { createRequire } from 'node:module';
+import { writeFileSync } from 'node:fs';
+import { customerFinanceFixture } from 'C:/Users/mahan/.codex/worktrees/online-deployment/sabalanerp/backend/src/services/__tests__/customerFinanceFixture';
+import { readCustomerWorkspace, recordCustomerAccountOperation, recordCustomerWorkspaceTreasury } from 'C:/Users/mahan/.codex/worktrees/online-deployment/sabalanerp/backend/src/services/accountingCustomerWorkspace';
+const require = createRequire('C:/Users/mahan/.codex/worktrees/online-deployment/sabalanerp/backend/package.json');
+const { PrismaClient: OldClient, Prisma: OldPrisma } = require('C:/Users/mahan/.codex/worktrees/online-deployment/sabalanerp/backend/node_modules/.prisma/production-425-overlap-20261018');
+async function main() {
+  const source = process.env.ACCOUNTING_LEDGER_TEST_DATABASE_URL; assert.ok(source);
+  const f = await customerFinanceFixture(source); let old;
+  try {
+    const [{name}] = await f.db.$queryRaw<Array<{name:string}>>`SELECT current_database() AS name`;
+    assert.match(name, /^sabalanerp_concurrency_[a-f0-9]{16}$/);
+    const oldUrl = new URL(source); oldUrl.pathname = '/' + name;
+    old = new OldClient({ datasources: { db: { url: oldUrl.toString() } } });
+    const id = await f.customer();
+    await recordCustomerAccountOperation(f.db, id, { ...f.common, kind: 'DEBIT', amountRials: 100n, idempotencyKey: randomUUID() });
+    await recordCustomerAccountOperation(f.db, id, { ...f.common, kind: 'CREDIT', amountRials: 100n, idempotencyKey: randomUUID() });
+    const before = await readCustomerWorkspace(f.db, { id, asOf: new Date(), userId: f.actor.id });
+    const credit = before.openItems.find(row => row.kind === 'CREDIT')!, debt = before.openItems.find(row => row.kind === 'RECEIVABLE')!;
+    const allocation = await recordCustomerWorkspaceTreasury(f.db, id, { ...f.common, kind: 'ALLOCATION', amountRials: 0n, creditItemId: credit.id,
+      allocations: [{ openItemId: debt.id, amountRials: 100n }], idempotencyKey: randomUUID() });
+    const current = await f.db.accountingSettlementAllocation.findUniqueOrThrow({ where: { id: allocation.id }, include: { lines: true } });
+    assert.equal(current.treasuryTransactionId, null); assert.equal(current.creditItemId, credit.id); assert.equal(current.lines.length, 1); assert.equal(current.lines[0].amountRials.toString(), '100');
+    assert.equal((await old.accountingSettlementAllocation.findUniqueOrThrow({ where: { id: allocation.id }, select: { id: true } })).id, allocation.id);
+    let actualError: any;
+    try { await old.accountingSettlementAllocation.findUniqueOrThrow({ where: { id: allocation.id } }); } catch (error) { actualError = error; }
+    assert.ok(actualError, 'The exact old generated model must reject the incompatible null, otherwise revise the compatibility finding');
+    assert.equal(actualError.code, 'P2032'); assert.equal(actualError.meta.field, 'treasuryTransactionId');
+    const after = await readCustomerWorkspace(f.db, { id, asOf: new Date(), userId: f.actor.id }); assert.equal(after.netBalanceRials, 0n);
+    const report = { format: 'sabalan-old-reader-credit-overlap-diagnostic/v1', pass: true, oldSourceCommit: 'a2c75f1027a069e91837ff433e1c91cdc7746798',
+      oldSchemaSha256: '28c06abece82c71d2cfa1ffd28ede8b08a90303c4fdbcaec4dbad78b5a8f18ad', oldClientVersion: OldPrisma.prismaVersion.client,
+      currentMigrationCount: 434, actualOldReaderCompatible: false, actualError: { code: actualError.code, meta: actualError.meta },
+      actualOldIdOnlyReadPassed: true, currentReadPassed: true, exactAllocationRials: '100', currentCustomerBalanceRials: '0',
+      productionAdmission: false, scope: 'Exact old production Prisma model regenerated with the installed client against real current-domain writes in an isolated existing-local-service database; not the production image/runtime or a populated 425-to-434 migration' };
+    writeFileSync('C:/Users/mahan/.codex/worktrees/online-deployment/sabalanerp/reports/qa/production-old-reader-credit-overlap-20261018.json', JSON.stringify(report, null, 2)+'\n', { flag: 'wx' });
+    console.log(JSON.stringify(report));
+  } finally { if (old) await old.$disconnect(); await f.close(); }
+}
+void main().catch(error => { console.error(error); process.exitCode = 1; });

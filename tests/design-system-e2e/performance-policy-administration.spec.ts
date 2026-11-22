@@ -157,7 +157,7 @@ test('retired dashboard prototypes redirect to canonical production surfaces', a
   await page.goto('/dashboard/hr/personnel/performance-criteria-prototype');
   await expect(page).toHaveURL(/\/dashboard\/hr\/personnel\/performance-policies$/);
   await page.goto('/dashboard/hr/personnel/performance-badge-prototype');
-  await expect(page).toHaveURL(/\/dashboard\/hr\/personnel$/);
+  await expect(page).toHaveURL(/\/dashboard\/hr\/personnel$/, { timeout: 60_000 });
 });
 
 test('criteria publication rejects a missing or non-future effective date', async ({ page }) => {

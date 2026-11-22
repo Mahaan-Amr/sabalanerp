@@ -43,7 +43,7 @@ test('read-only managerial card shows empty sections without mutation buttons in
 test('exact contact capability opens a canonical editor and failed save preserves input and pending state', async ({ page }) => {
   const card = { ...fixture(), crmCapabilities: { ...fixture().crmCapabilities, contacts_create: true } };
   await page.route('**/api/crm/customers/partner-crm-fixture', route => route.fulfill({ json: { success: true, data: card } }));
-  let release: () => void = () => {};
+  let release: (() => void) | undefined;
   await page.route('**/api/crm/customers/partner-crm-fixture/crm-actions', async route => {
     const body = route.request().postDataJSON(); expect(body.resource).toBe('contacts'); expect(body.expectedCrmVersion).toBe('fixture-crm');
     await new Promise<void>(resolve => { release = resolve; });
@@ -56,7 +56,9 @@ test('exact contact capability opens a canonical editor and failed save preserve
   await dialog.getByRole('textbox', { name: 'نام خانوادگی', exact: true }).fill('آزمون');
   await dialog.getByRole('button', { name: 'ذخیره', exact: true }).click();
   await expect(dialog).toHaveAttribute('aria-busy', 'true'); await page.keyboard.press('Escape'); await expect(dialog).toBeVisible();
-  await expect(dialog.getByRole('button', { name: 'انصراف' })).toBeDisabled(); release();
+  await expect(dialog.getByRole('button', { name: 'انصراف' })).toBeDisabled();
+  await expect.poll(() => Boolean(release)).toBe(true);
+  release?.();
   await expect(dialog).toContainText('اطلاعات همزمان تغییر کرده است');
   await expect(dialog.getByRole('textbox', { name: 'نام', exact: true })).toHaveValue('نام محفوظ');
 });
@@ -106,11 +108,13 @@ test('real owning Partner creates a Contact and saves the shared full Customer f
     await page.getByRole('link', { name: 'ویرایش', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'ویرایش مشتری', exact: true })).toBeVisible();
     await page.getByRole('textbox', { name: 'نام', exact: true }).fill('نام اصلاح‌شده محلی');
+    await page.getByRole('combobox', { name: 'دسته‌بندی فعالیت مشتری' }).selectOption('ARCHITECT');
     const saved = page.waitForResponse(response => response.url().includes('/full-card') && response.request().method() === 'PUT');
     await page.getByRole('button', { name: 'ذخیره تغییرات', exact: true }).first().click();
     expect((await saved).ok()).toBeTruthy();
     await expect(page).toHaveURL(new RegExp(`/dashboard/sales/partner-customers/${seeded.customerId}$`));
     await expect(page.getByRole('heading', { name: 'نام اصلاح‌شده محلی مشتری همکار', exact: true })).toBeVisible();
+    await expect(page.getByText('معمار', { exact: true })).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath('partner-customer-owner-detail.png'), fullPage: true });
   } finally { await seeded.cleanup(); }
 });

@@ -33,6 +33,9 @@ const run = async () => {
     take: 100,
   });
   const source = candidates.find(candidate => {
+    // Legacy zero-sentinel rows require persisted delivery evidence; this
+    // creation fixture does not copy deliveries into the new contract.
+    if (candidate.items.some(item => item.quantity.lte(0))) return false;
     const data = candidate.contractData;
     if (!data || typeof data !== 'object' || Array.isArray(data) ||
       !Object.prototype.hasOwnProperty.call(data, 'discount') || (data as any).discount !== null) return false;
@@ -130,9 +133,18 @@ const run = async () => {
     'ordinary stair V2 parents must persist explicit non-layer discount eligibility',
   );
 
+  const stairPlan = buildLegacyContractMigrationPlan({ id: createdFromStairParent.id,
+    totalAmount: createdFromStairParent.totalAmount, contractData: createdFromStairParent.contractData }, 1);
+  assert(stairPlan.ok);
+  const stairProducts = (createdFromStairParent.contractData as any).products as any[];
+  const stairBase = contractDiscountEligibleBase(new Map(stairProducts.map(product => [product.rowId, product])),
+    projectCanonicalProductGraph(stairPlan.graph, 'accounting').products);
+  assert(stairBase.gt(20), 'fixture needs a positive eligible base and a nonzero cap');
   const createdFromPositiveDiscountStair = await createFromSource(
     'stair-v2-parent-positive-discount',
-    { enabled: true, percent: 5, amount: 1 },
+    { enabled: true, inputMode: 'AMOUNT_TOMAN', amount: 1,
+      percent: Number(new Prisma.Decimal(100).div(stairBase).toFixed(12)),
+      baseSubtotal: Number(stairBase.toString()), maxDiscountPercent: 5 },
     'stair-v2-parent-omitted',
   );
   const positiveDiscountStairParent =

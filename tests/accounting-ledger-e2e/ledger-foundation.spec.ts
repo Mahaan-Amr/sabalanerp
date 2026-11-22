@@ -57,11 +57,12 @@ test('حسابدار سند متوازن با شاهد واقعی ثبت می‌
   await page.goto('/dashboard/accounting/ledger');
   await expect(page.getByRole('heading', { name: 'دفترکل و کدینگ' })).toBeVisible();
   await page.getByLabel('شرح سند').fill('ثبت آزمایشی سرمایه');
-  const dates = page.locator('input[type="date"]');
-  await dates.nth(0).fill('2026-09-21');
-  const accountSelects = page.getByLabel(/حساب آرتیکل/);
-  await accountSelects.nth(0).selectOption('cash');
-  await accountSelects.nth(1).selectOption('capital');
+  await page.getByRole('button', { name: 'تاریخ سند', exact: true }).click();
+  await page.getByRole('dialog', { name: 'انتخاب تاریخ شمسی' }).getByRole('button', { name: 'امروز' }).click();
+  await page.getByRole('combobox', { name: 'حساب آرتیکل ۱' }).click();
+  await page.getByRole('option', { name: '101001 · صندوق' }).click();
+  await page.getByRole('combobox', { name: 'حساب آرتیکل ۲' }).click();
+  await page.getByRole('option', { name: '301001 · سرمایه' }).click();
   await page.getByLabel('بدهکار ریال').nth(0).fill('1000');
   await page.getByLabel('بستانکار ریال').nth(1).fill('1000');
   await page.getByLabel('مبلغ خام پیش از گردکردن').nth(0).fill('1000.00');
@@ -126,7 +127,7 @@ test('صفحه فارسی و راست‌به‌چپ در عرض باریک و ب
   await expect(page.locator('html')).toHaveAttribute('lang', /fa/i);
   expect(await page.evaluate(() => getComputedStyle(document.body).direction)).toBe('rtl');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true);
-  const firstControl = page.getByLabel('سال مالی');
+  const firstControl = page.getByRole('combobox', { name: 'سال مالی' });
   await firstControl.focus();
   await expect(firstControl).toBeFocused();
   const unnamedControls = await page.locator('button, input, select, textarea').evaluateAll((controls) => controls.filter((control) => {

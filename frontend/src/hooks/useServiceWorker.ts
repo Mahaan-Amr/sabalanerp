@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { registerApplicationServiceWorker } from '@/lib/serviceWorkerRegistration';
 
 interface ServiceWorkerState {
   isSupported: boolean;
@@ -13,7 +14,7 @@ export function useServiceWorker() {
   const [state, setState] = useState<ServiceWorkerState>({
     isSupported: false,
     isRegistered: false,
-    isOnline: navigator.onLine,
+    isOnline: typeof navigator === 'undefined' ? true : navigator.onLine,
     registration: null,
   });
 
@@ -29,9 +30,7 @@ export function useServiceWorker() {
     // Register service worker
     const registerServiceWorker = async () => {
       try {
-        const registration = await navigator.serviceWorker.register('/sw.js', {
-          scope: '/',
-        });
+        const registration = await registerApplicationServiceWorker();
 
         console.log('Service Worker registered successfully:', registration);
 

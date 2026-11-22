@@ -1,3 +1,5 @@
+import { biometricAttemptEventLabel } from "../biometric/dispatchConfirmationPresentation";
+
 type PresentedField = { label: string; value: string };
 
 const persianDigits = (value: string | number) =>
@@ -32,10 +34,43 @@ const statusLabels: Record<string, string> = {
 
 const eventLabels: Record<string, string> = {
   ADMITTED: "ورود راننده ثبت شد",
+  PERSONAL_PICKUP_SELECTED: "راننده شخصی برای بارگیری انتخاب شد",
   MADE_AVAILABLE_FOR_LOADING: "راننده برای بارگیری آماده شد",
   RESERVED_FOR_LOADING: "بارگیری برای راننده رزرو شد",
   RESERVATION_RELEASED: "رزرو بارگیری آزاد شد",
   LOADING_FINALIZED: "بارگیری نهایی شد",
+  FINALIZED_LOADING_CANCELLED: "بارگیری نهایی‌شده پیش از خروج لغو شد",
+  CANDIDATE_WITHDRAWN: "درخواست صدور اسناد خروج پس گرفته شد",
+  ACCEPT: "حسابداری درخواست صدور اسناد خروج را پذیرفت",
+  REJECT: "حسابداری درخواست صدور اسناد خروج را رد کرد",
+  RETURN: "حسابداری درخواست صدور اسناد خروج را برای اصلاح برگرداند",
+  CANDIDATE_RETURNED: "درخواست صدور اسناد خروج برای اصلاح بازگردانده شد",
+  CANDIDATE_ACCEPTED_FOR_ISSUANCE: "درخواست صدور اسناد خروج تأیید شد",
+  VOID_WAYBILL: "حواله خروج باطل شد",
+  REPLACE_WAYBILL: "حواله خروج جایگزین شد",
+  WAYBILL_REPLACED: "حواله خروج جایگزین شد",
+  DOCUMENT_BUNDLE_REPLACED: "مجموعه اسناد خروج جایگزین شد",
+  DOCUMENT_BUNDLE_VOIDED: "مجموعه اسناد خروج باطل شد",
+  PRIMARY_BUNDLE_ISSUED: "مجموعه اسناد خروج صادر شد",
+  PRICED_ALLOCATION_RECORDED: "قیمت‌گذاری بار تخصیص‌یافته ثبت شد",
+  PRICING_EVIDENCE_CONFLICT: "مغایرت در مستندات قیمت‌گذاری ثبت شد",
+  PRICING_STALE_REQUIRES_SUCCESSOR: "قیمت‌گذاری دیگر معتبر نیست و باید جایگزین شود",
+  RESERVATION_RELEASED_FOR_DEPARTURE: "رزرو بارگیری برای خروج راننده آزاد شد",
+  RESERVATION_RELEASED_FOR_VOID: "رزرو بارگیری به علت ابطال نوبت آزاد شد",
+  RETURNED_TO_GATE_WAITING: "راننده به صف انتظار گارد برگشت",
+  CLOSED_WITHOUT_LOADING: "نوبت راننده بدون بارگیری بسته شد",
+  VOIDED: "نوبت راننده باطل شد",
+  REVOKED_FOR_WAYBILL_VOID: "مجوز خروج به علت ابطال حواله لغو شد",
+  REVOKED_FOR_WAYBILL_REPLACEMENT: "مجوز خروج به علت جایگزینی حواله لغو شد",
+  MANUAL_EXIT_PENDING_APPROVALS: "خروج ثبت‌شده روی برگه دستی در انتظار تأیید است",
+  MANUAL_EXIT_SPOILED: "برگه ثبت دستی خروج باطل شد",
+  MANUAL_EXIT_CONFLICT: "در ثبت دستی خروج مغایرت شناسایی شد",
+  CORRECTION_DRAFT_CREATED: "پیش‌نویس اصلاح پرونده ارسال ایجاد شد",
+  CORRECTION_POSTED: "اصلاح پرونده ارسال نهایی شد",
+  PAPER_EXIT_REGISTERED_PENDING_APPROVALS: "خروج با برگه دستی ثبت شد و در انتظار تأیید است",
+  PAPER_EXIT_SPOILED: "برگه ثبت دستی خروج باطل شد",
+  INTERNAL_BIOMETRIC_FALLBACK: "تأیید راننده داخلی با روش جایگزین ثبت شد",
+  EXTERNAL_BIOMETRIC_FALLBACK: "تأیید راننده بیرونی با روش جایگزین ثبت شد",
   PHYSICAL_EXIT_RECORDED: "خروج فیزیکی از مجموعه ثبت شد",
   MANUAL_OUTAGE_EXIT_REGISTERED: "خروج زمان قطعی سامانه ثبت شد",
   ALLOCATION_FINALIZED: "تخصیص بار نهایی شد",
@@ -79,9 +114,23 @@ export const dispatchRecoveryLabel = (recovery?: string | null) =>
     RETRY_AT_GUARD: "بررسی را در ایستگاه گارد دوباره انجام دهید",
   })[recovery || ""] || "برای ادامه، وضعیت پرونده را دوباره بررسی کنید";
 
-export const dispatchEventLabel = (eventType?: string | null) => {
+export const dispatchEventLabel = (eventType?: string | null, detail?: Record<string, any>) => {
+  if (detail?.method === "PERSONAL_PICKUP_ACCOUNTING") {
+    if (eventType === "CONFIRMATION_STARTED") return "درخواست مجوز خروج راننده شخصی ثبت شد";
+    if (eventType === "CONFIRMATION_CONFIRMED") return "مجوز خروج راننده شخصی صادر شد";
+  }
+  if (eventType === "BIOMETRIC_ATTEMPT_RECORDED") {
+    const result = detail?.result ?? detail;
+    if (result?.match || result?.captureQuality || result?.liveness || result?.errorCategory)
+      return biometricAttemptEventLabel(result);
+  }
   if (!eventType) return "رویداد ثبت‌شده";
   if (eventLabels[eventType]) return eventLabels[eventType];
+  const [command, , invoiceId] = eventType.split(":", 3);
+  if (command === "VOID_WAYBILL_AND_INVOICE")
+    return invoiceId ? "حواله خروج و فاکتور فروش باطل شدند" : eventLabels.VOID_WAYBILL;
+  if (command === "VOID_WAYBILL" || command === "REPLACE_WAYBILL")
+    return eventLabels[command];
   if (eventType.startsWith("CANDIDATE_"))
     return `پرونده اسناد خروج ${dispatchStatusLabel(eventType.slice("CANDIDATE_".length))}`;
   if (eventType.startsWith("CONFIRMATION_"))
@@ -117,6 +166,8 @@ const valueLabel = (value: unknown): string => {
   if (typeof value === "number") return persianDigits(value);
   if (typeof value === "string") {
     const methodLabels: Record<string, string> = {
+      EXTERNAL_BIOMETRIC: "اثر انگشت راننده بیرونی",
+      EXTERNAL_FALLBACK: "روش جایگزین راننده بیرونی",
       INTERNAL_BIOMETRIC: "اثر انگشت راننده داخلی",
       EXTERNAL_OTP_GUARD: "رمز یک‌بارمصرف با تأیید گارد",
       INTERNAL_FALLBACK: "روش جایگزین راننده داخلی",

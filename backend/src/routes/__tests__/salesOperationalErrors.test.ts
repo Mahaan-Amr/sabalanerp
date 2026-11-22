@@ -3,6 +3,13 @@ import test from 'node:test';
 import { ensureSalesErrorTracking, knownContractUpdateBusinessFailure, knownCustomerCreditFailure, knownProductCatalogApplyError, salesBusinessErrorMessage, unexpectedSalesErrorResponse } from '../../utils/salesOperationalError';
 import { CustomerCreditError } from '../../services/specialCustomerCreditPolicy';
 
+test('a new seller-credit promise with a past date returns an actionable validation failure', () => {
+  assert.deepEqual(knownContractUpdateBusinessFailure('تاریخ وعده پرداخت باید امروز یا آینده باشد.'), {
+    status: 400, body: { success: false, code: 'SALES_CONTRACT_CREDIT_PROMISE_DATE_INVALID',
+      error: 'تاریخ وعده پرداخت اعتباری باید امروز یا آینده باشد؛ تاریخ ردیف پرداخت اعتباری را اصلاح و دوباره ذخیره کنید.' },
+  });
+});
+
 test('customer credit validation preserves its actionable cause and status on Sales writes', () => {
   assert.deepEqual(knownCustomerCreditFailure(new CustomerCreditError(400, 'تاریخ وعده پرداخت باید امروز یا آینده باشد.')), {
     status: 400, body: { success: false, code: 'CUSTOMER_CREDIT_VALIDATION', error: 'تاریخ وعده پرداخت باید امروز یا آینده باشد.' },
@@ -99,4 +106,13 @@ test('a signed contract edit requires Accounting correction instead of an unexpe
     'Existing accounting financial record requires an approved formal correction',
   )?.body.code, 'SALES_CONTRACT_FORMAL_CORRECTION_REQUIRED');
   assert.equal(knownContractUpdateBusinessFailure('database unavailable'), null);
+});
+
+
+test('a concurrent contract change returns a conflict without instructing a blind save retry', () => {
+  const response = knownContractUpdateBusinessFailure('Contract changed concurrently; reload before saving');
+  assert.equal(response?.status, 409);
+  assert.equal(response?.body.code, 'SALES_CONTRACT_VERSION_CONFLICT');
+  assert.match(response!.body.error, /نسخه.*تغییر/);
+  assert.match(response!.body.error, /پیش‌نویس/);
 });

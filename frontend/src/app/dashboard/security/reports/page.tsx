@@ -7,7 +7,7 @@ import { FaClock, FaFilePdf, FaFilter, FaRedo, FaSearch, FaUsers } from 'react-i
 import PersianCalendarComponent from '@/components/PersianCalendar';
 import { ErpButton, ErpEmptyState, ErpInlineState, ErpSection, ErpSegmentedControl, ErpShiftTimeline, ErpSkeleton, ErpStatus, ErpWorkspacePage } from '@/components/erp';
 import { ErpCheckboxControl, ErpInput, ErpPressable, ErpSelect } from '@/components/erp';
-import { securityAPI } from '@/lib/api';
+import { securityAPI, resolveBackendAssetUrl } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 import PersianCalendar from '@/lib/persian-calendar';
 
@@ -24,7 +24,7 @@ function ShiftReportPreview({ shift }: { shift: any }) {
     {(shift.forceCloseReason || shift.closureSummary) && <div className="border-y border-[var(--sds-border-subtle)] py-3 text-sm leading-6 dark:border-[var(--sds-border-subtle)]">{shift.forceCloseReason && <p>دلیل بستن: {shift.forceCloseReason}</p>}{shift.closureSummary && <p>خلاصه پایان: {shift.closureSummary}</p>}</div>}
     {shift.corrections?.length > 0 && <div><h4 className="text-sm font-bold">تاریخچه اصلاح زمان‌های شیفت</h4><div className="mt-2 divide-y divide-[var(--sds-border-subtle)] dark:divide-[var(--sds-border-subtle)]">{shift.corrections.map((item: any) => <div key={item.id} className="py-2 text-sm"><p className="font-semibold">{item.correctedByName} · {dateTime(item.correctedAt)}</p><p className="mt-1 text-xs sds-text-muted">قبلی: {dateTime(item.previousStartedAt)} تا {dateTime(item.previousEndedAt)} · مؤثر: {dateTime(item.effectiveStartedAt)} تا {dateTime(item.effectiveEndedAt)}</p><p className="mt-1">{item.reason}</p></div>)}</div></div>}
     {shift.attendance?.length > 0 && <div><h4 className="text-sm font-bold">حضور شیفت</h4><div className="mt-2 divide-y divide-[var(--sds-border-subtle)] dark:divide-[var(--sds-border-subtle)]">{shift.attendance.map((item: any) => <div key={item.id} className="flex min-h-11 items-center justify-between gap-3 py-2"><span className="font-semibold">{item.name}</span><span className="text-xs sds-text-muted">{dateTime(item.arrivedAt)}{item.delayMinutes ? ` · ${item.delayMinutes.toLocaleString('fa-IR')} دقیقه تأخیر` : ''}{item.correctedAt ? ` · اصلاح‌شده: ${dateTime(item.correctedAt)}` : ''}</span></div>)}</div></div>}
-    <ErpShiftTimeline title="خط زمانی" entries={shift.timeline || []} formatTimestamp={dateTime} showAttachmentImages attachmentHref={(attachmentId) => `/api/security/shift-log/attachments/${attachmentId}`} />
+    <ErpShiftTimeline title="خط زمانی" entries={shift.timeline || []} formatTimestamp={dateTime} showAttachmentImages attachmentHref={(attachmentId) => resolveBackendAssetUrl(`/api/security/shift-log/attachments/${attachmentId}`)} />
   </div>;
 }
 

@@ -81,6 +81,9 @@ export function PartnerCaseRuntime({ recoverableDrafts = [] }: { recoverableDraf
     if (!background) setBusy(true);
     try {
       const version = knownVersion ?? await readPartnerCaseChangeVersion(selectedCaseId);
+      // A StrictMode replay or route exit may supersede the cheap version read.
+      // Do not start the full authorized projection after that reader is gone.
+      if (requestSequence !== loadSequenceRef.current) return false;
       const listing = await readPartnerCaseListing(selectedCaseId);
       const cases = listing.cases;
       if (requestSequence !== loadSequenceRef.current) return false;

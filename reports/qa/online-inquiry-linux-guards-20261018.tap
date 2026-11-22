@@ -1,0 +1,58 @@
+TAP version 13
+# Subtest: Inquiry mutations refuse missing or malformed recovery authority and deployment maintenance
+ok 1 - Inquiry mutations refuse missing or malformed recovery authority and deployment maintenance
+  ---
+  duration_ms: 1063.409499
+  type: 'test'
+  ...
+# Subtest: Linux Inquiry admission refuses linked or oversized authority without changing live files
+ok 2 - Linux Inquiry admission refuses linked or oversized authority without changing live files
+  ---
+  duration_ms: 73.892273
+  type: 'test'
+  ...
+# Subtest: legacy actions preserve return/error semantics and cannot enable native ownership later in the same process
+ok 3 - legacy actions preserve return/error semantics and cannot enable native ownership later in the same process
+  ---
+  duration_ms: 370.700802
+  type: 'test'
+  ...
+# Subtest: partial or missing fixed native bundle permanently refuses initialization and every action
+ok 4 - partial or missing fixed native bundle permanently refuses initialization and every action
+  ---
+  duration_ms: 242.901022
+  type: 'test'
+  ...
+# Subtest: a valid legacy Inquiry token cannot keep a deleted or changed account authorized
+ok 5 - a valid legacy Inquiry token cannot keep a deleted or changed account authorized
+  ---
+  duration_ms: 754.392954
+  type: 'test'
+  ...
+# Subtest: new Inquiry logins bind the verified credential, including same-timestamp password changes
+ok 6 - new Inquiry logins bind the verified credential, including same-timestamp password changes
+  ---
+  duration_ms: 166.105602
+  type: 'test'
+  ...
+# Subtest: Inquiry session authority rejects malformed, mixed-role and invalid-lifetime signed tokens
+ok 7 - Inquiry session authority rejects malformed, mixed-role and invalid-lifetime signed tokens
+  ---
+  duration_ms: 85.3913
+  type: 'test'
+  ...
+# Subtest: the Inquiry proxy token reader applies fresh account authority before rendering admin pages
+ok 8 - the Inquiry proxy token reader applies fresh account authority before rendering admin pages
+  ---
+  duration_ms: 37.29003
+  type: 'test'
+  ...
+1..8
+# tests 8
+# suites 0
+# pass 8
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 4578.638321

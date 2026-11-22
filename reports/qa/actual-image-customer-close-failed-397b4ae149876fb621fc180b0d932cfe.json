@@ -1,0 +1,6 @@
+{
+  "sshExitCode": 0,
+  "remoteEnvelopeSha256": "6d59044b840bc6c3369cd592a7a9479f781e36cbaf13e680b9cdd3497156e774",
+  "stdout": "{\"phase\": \"FAILED_COMPONENT_CLOSED\", \"originalOperation\": \"actual-image-customer-dd67e319494eb352c7fd8729eb5b3fa8\", \"backendExitCode\": 1, \"stopClientExitCode\": 137, \"originalLocksReacquired\": true, \"dataAndContainersRetained\": true, \"productionAdmission\": false, \"healthyRecoveryPoint\": false}\n",
+  "stderr": ""
+}

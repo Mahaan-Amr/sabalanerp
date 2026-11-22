@@ -20,7 +20,7 @@ test('legacy index mapping requires both saved index and product ID agreement', 
 test('contract quantity derivation uses decimal arithmetic and refuses hidden rounding', () => {
   const item = { quantity: new Prisma.Decimal('1'), productType: 'longitudinal' };
   assert.equal(deriveContractedQuantity(item, { length: '0.1', quantity: '0.2' }, 'meter'), '0.020');
-  assert.throws(() => deriveContractedQuantity(item, { length: '1.0004', quantity: '1' }, 'meter'), /scale three/);
+  assert.equal(deriveContractedQuantity(item, { length: '1.0004', quantity: '1' }, 'meter'), '1.0004');
 });
 
 test('last verified projection hash binds every displayed quantity', () => {

@@ -239,6 +239,7 @@ export default function HrDashboardPage() {
       {landing.links.length > 0 && <ErpNeumorphicActionGrid
         title="دسترسی سریع"
         items={[
+          { id: "attendance-devices", title: "اتصال دستگاه حضور و غیاب", href: "/dashboard/hr/attendance-devices", icon: FaClipboardCheck },
           ...landing.links.map((link) => ({
             id: link.id,
             title: link.label,

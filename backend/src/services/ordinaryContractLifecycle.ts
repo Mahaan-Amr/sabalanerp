@@ -1,3 +1,4 @@
+import { startBackgroundJob } from './backgroundJobLifecycle';
 import { ContractStatus, Prisma, type PrismaClient } from '@prisma/client';
 import { assertContractOperationMinimums } from './operationMinimumGuard';
 import { completeSalesContractCorrectionEdit } from './salesContractCorrectionDuty';
@@ -189,8 +190,7 @@ export const startOrdinaryContractExpiry = (database: PrismaClient) => {
   const run = async () => { if (running) return; running = true;
     try { await withRecoveryBackgroundWrite(async () => { await expireOrdinaryContracts(database); await expireCommercialCorrectionPeriods(database); await processContractCreditReminders(database); }); } catch (error) { console.error('Contract expiry failed:', error); }
     finally { running = false; } };
-  void run(); const timer = setInterval(() => void run(), 60_000); timer.unref?.();
-  return () => clearInterval(timer);
+  return startBackgroundJob({ name: 'startOrdinaryContractExpiry', intervalMs: 60_000, run });
 };
 
 export const expireCommercialCorrectionPeriods = async (database: PrismaClient, now = new Date()) => {

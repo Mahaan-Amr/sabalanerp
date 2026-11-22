@@ -1,5 +1,6 @@
 'use client';
 
+import { CustomerActivityCategoryBadge } from './CustomerActivityCategory';
 import { useState } from 'react';
 import { FaEdit, FaEye, FaPlus, FaTrash, FaBan, FaLock } from 'react-icons/fa';
 import { ErpBadge, ErpButton, ErpCheckbox, ErpEmptyState, ErpField, ErpFieldView, ErpInlineState, ErpInput, ErpSelect, ErpSheet, ErpTextarea } from '@/components/erp';
@@ -13,6 +14,7 @@ import { CustomerProjectFormFields, emptyCustomerProjectFormValue } from './Cust
 type Resource = 'project_addresses' | 'contacts' | 'leads';
 type Row = { id: string; isActive?: boolean; [field: string]: any };
 export type PartnerCrmCustomer = {
+  activityCategory?: string | null;
   id: string; firstName: string; lastName: string; partnerRevision: number; crmVersion: string;
   canManageCustomerCard?: boolean; partnerOwnerView?: boolean; crmCapabilities: Record<string, boolean>;
   projectAddresses: Row[]; contacts: Row[]; leads: Row[]; phoneNumbers: Row[]; salesContracts: Row[];
@@ -116,6 +118,7 @@ export function PartnerCustomerSections({ customer, onRefresh }: { customer: Par
       </div>
     </CustomerWorkflowSection>}
     <CustomerWorkflowSection title="اطلاعات مشتری">
+      <CustomerActivityCategoryBadge value={customer.activityCategory} />
       <div className="grid gap-3 sm:grid-cols-2">
         <ErpFieldView label="نام و نام خانوادگی" value={`${customer.firstName} ${customer.lastName}`} />
         <ErpFieldView label="نوع مشتری" value={({ Individual: 'حقیقی', Company: 'حقوقی', Government: 'دولتی' } as Record<string, string>)[customer.customerType] || '—'} />

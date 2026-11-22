@@ -1,0 +1,107 @@
+{
+  "format": "sabalan-inquiry-native-diagnostic/v1",
+  "cases": {
+    "normal": {
+      "nativeStatus": 0,
+      "exactCommittedValues": true,
+      "consumedGrantRefused": true,
+      "nativeClosure": true,
+      "unresolvedWorkRetained": false
+    },
+    "lost-node": {
+      "nativeStatus": 137,
+      "exactCommittedValues": true,
+      "consumedGrantRefused": true,
+      "nativeClosure": true,
+      "unresolvedWorkRetained": true
+    },
+    "prisma-actions": {
+      "nativeStatus": 0,
+      "exactCommittedValues": true,
+      "consumedGrantRefused": true,
+      "nativeClosure": true,
+      "unresolvedWorkRetained": false,
+      "actualPrisma": {
+        "exactValues": true,
+        "interactiveTransaction": true,
+        "lazyBatch": true,
+        "rollback": true,
+        "standaloneRead": true
+      }
+    }
+  },
+  "refusalFaults": {
+    "stderr-failure": {
+      "heldDespiteUnavailableStderr": true,
+      "noChild": true,
+      "activeFenceRetained": true
+    },
+    "legacy-race": {
+      "refusedUnderAcquiredInterlock": true,
+      "legacyFenceRetained": true
+    }
+  },
+  "actualNextIntegration": false,
+  "publicAdmission": false,
+  "productionRecoveryPoint": false,
+  "directory": "/app/online-runtime-acceptance/inquiry-native-a2e38134465c10cdbcaf7d2288107056",
+  "sourceCommit": "f96613a5b79d6299f11004f5e16c691c0ce7a22d",
+  "manifestSha256": "e4847247918675d535221844f7da58dac30b2c9e6bc144734e2be30309480108",
+  "sourceHashes": {
+    "online-inquiry-owner.py": "9532924cfa33eccc41f024c8fe369fe5f290314842012794632a17df5129b36c",
+    "online-runtime-scope.py": "79dae60c026833dfdd737be60bfa1ea2ba605332d5a6fbfec85f0c7cfe611d85",
+    "backend-runtime-owner.py": "7812ebf703fd3c68f0fa7e3d595034a8b27166e16865718934d284ca626d8865",
+    "online-capture-admission.py": "5f9f5229d7c697c7632e7592ccb90b61273f68cc20a9f15b647b62524ff3365a",
+    "inquiry-worker.cjs": "b861e90e6b43cb668749311fef829d968830d922ba49b1de29ea101dd87732c8",
+    "sqlite-worker.py": "45df530d882b546cd5731d95f97be2dfbe3a7eef12473596ba7d8e582c66225e",
+    "fixture.py": "cdb50cc01ccc92302d6e4a1be6cc379131a22d20f6aaffcc2f94641040a5e68c",
+    "faults.fixture.py": "aa19d48d57902a9bd1f138f2b3eeb73b5f65b02a78c60b1a9cf9c3eeaa883d95",
+    "prisma-worker.cjs": "ffebde94043e22e58bcc9e5f88aac8da19c12685fec55fec10d154c9b889eb18",
+    "services/online-runtime-scope.py": "79dae60c026833dfdd737be60bfa1ea2ba605332d5a6fbfec85f0c7cfe611d85",
+    "online-runtime/entry.cjs": "9490b860968e1dba588178c76919aae54644993e54b72eaae2a7a1d4dea57b8d",
+    "online-runtime/services/kernelWriteAdmission.js": "b8dd4d6443eb4f525613fd48d10fa838ccbbd81f43d412674464da31af6c710b",
+    "online-runtime/services/online-runtime-scope.py": "79dae60c026833dfdd737be60bfa1ea2ba605332d5a6fbfec85f0c7cfe611d85",
+    "online-runtime/services/onlineCaptureAdmission.js": "13ca0421fb76ddad38d99c1b83f0d6ac47df80eea12c3ea936c75dadf436ee40",
+    "online-runtime/services/onlineInquiryWork.js": "b84677ab08570685394c7a81c0ba7138cb18e23c7097f51a96491fbb65914b7d",
+    "online-runtime/services/onlineRuntimeScope.js": "6e3103ce7f4589c5a0063242b459e0e3dc62134ca3e9b112d74fa6da421703fd",
+    "online-runtime/services/runtimeBoundaryJournal.js": "c75bd2c91cfeff77f52e6f245fc23c2b88c54397ab3d9bc89f4b316e7b48d5dc",
+    "online-runtime/services/runtimeTaskAdmission.js": "6b1dc81d6fc3f2f9f84ea22e1eae8451a4094f6fba851d56661f5c1a8b60e393",
+    "online-runtime/services/runtimeWorkContext.js": "93747aa97f64e28ad9a79f3cbb33696c04da2bc7a562cb0fb2b887efa2b9ad7d",
+    "online-runtime/source-hashes.json": "5d0800f71bdcf27f0c517ddfc4f3aff802acab64e4247397cdc28d38f168632f",
+    "app-lib/prisma.js": "f5b304dcd5297fdcbcefc9334c02cf9d1deca38461f83cb35b29a425ec9a98c4",
+    "app-lib/runtime-work.js": "bae58b9f7a45a70c0f27be40862675eac7533d1b85923ee0f47272f6abd83496",
+    "services/onlineInquiryWork.js": "b84677ab08570685394c7a81c0ba7138cb18e23c7097f51a96491fbb65914b7d",
+    "services/onlineRuntimeScope.js": "6e3103ce7f4589c5a0063242b459e0e3dc62134ca3e9b112d74fa6da421703fd",
+    "services/onlineCaptureAdmission.js": "13ca0421fb76ddad38d99c1b83f0d6ac47df80eea12c3ea936c75dadf436ee40",
+    "services/kernelWriteAdmission.js": "b8dd4d6443eb4f525613fd48d10fa838ccbbd81f43d412674464da31af6c710b",
+    "services/runtimeBoundaryJournal.js": "c75bd2c91cfeff77f52e6f245fc23c2b88c54397ab3d9bc89f4b316e7b48d5dc",
+    "services/runtimeTaskAdmission.js": "6b1dc81d6fc3f2f9f84ea22e1eae8451a4094f6fba851d56661f5c1a8b60e393",
+    "services/runtimeWorkContext.js": "93747aa97f64e28ad9a79f3cbb33696c04da2bc7a562cb0fb2b887efa2b9ad7d"
+  },
+  "canonicalUnchanged": {
+    "backend": {
+      "id": "a1ea34a8d7d878b906fba7b4fdbe975df13a6b00d63a863eacce34b9827e86ff",
+      "image": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+      "startedAt": "2026-10-15T09:01:40.016187222Z"
+    },
+    "frontend": {
+      "id": "ad23f762dc1b27d2be76c335a3d7a4e20d08832a9a2e055904a4af84a9248c21",
+      "image": "sha256:f0a8954596279ccb01c029de7316022daa109b711a297f716cc9367d4bc9ec53",
+      "startedAt": "2026-10-15T10:11:30.825468888Z"
+    },
+    "postgres": {
+      "id": "e553787e69f44c7bdf7dab94fad43a231f5ba99d988dc783234486a5a844a528",
+      "image": "sha256:3d0f7584ed7d04e27fa050d6683a74746608faf21f202be78460d679cc56461f",
+      "startedAt": "2026-10-12T15:17:49.481269377Z"
+    },
+    "inquiry": {
+      "id": "6d161695e215498048ff24e56e9602ce77871bfb6b390bf1356caecfdf9807d8",
+      "image": "sha256:81eacc768f3c4b82bd0f0a01bef5600ae1321e87cb117bad49ca47dfba79a213",
+      "startedAt": "2026-10-12T15:17:49.463791361Z"
+    }
+  },
+  "actualConsumerImage": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+  "actualSQLiteClientImage": "sha256:81eacc768f3c4b82bd0f0a01bef5600ae1321e87cb117bad49ca47dfba79a213",
+  "sqliteClientArchiveSha256": "540600651f6b05d5a5999b40141c3afe9e2e797c8c0be454781b0d61e1faade9",
+  "independentRecovery": false
+}

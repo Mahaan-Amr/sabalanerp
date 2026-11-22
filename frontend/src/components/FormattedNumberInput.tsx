@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ErpInput } from '@/components/erp';
+import {useUnarchivedDraftGuard} from '@/lib/useUnarchivedDraftGuard';
 import {
   formatNumericInputText,
   parseFormattedNumber
@@ -54,6 +55,7 @@ const FormattedNumberInput: React.FC<FormattedNumberInputProps> = ({
 }) => {
   const [displayValue, setDisplayValue] = useState<string>('');
   const [isFocused, setIsFocused] = useState(false);
+  useUnarchivedDraftGuard('formatted-number-buffer',isFocused);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const roundToScale = useCallback((numValue: number): number => {

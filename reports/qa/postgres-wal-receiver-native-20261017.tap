@@ -1,0 +1,20 @@
+TAP version 13
+# Subtest: native slot-free WAL streaming captures committed work with normal acknowledgement
+ok 1 - native slot-free WAL streaming captures committed work with normal acknowledgement
+  ---
+  duration_ms: 23988.1034
+  ...
+# Subtest: native slot-free WAL streaming captures committed work after exec-client loss
+ok 2 - native slot-free WAL streaming captures committed work after exec-client loss
+  ---
+  duration_ms: 24944.7124
+  ...
+1..2
+# tests 2
+# suites 0
+# pass 2
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 49111.0089

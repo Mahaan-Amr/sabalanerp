@@ -1,3 +1,4 @@
+import { exactQuantityText } from '../../exactQuantity';
 import { Prisma } from '@prisma/client';
 import { canonicalHash, canonicalJson, IdSchema, RevisionRefSchema, partnerError, type Result } from '@sabalanerp/partner-sales-contracts';
 import { canonicalPartnerQuantity } from './lineage';
@@ -62,13 +63,13 @@ export async function readPartnerAllocationDrafts(tx: Prisma.TransactionClient, 
       if (!source.ok) return source;
       if (canonicalJson({ ...source.value, owner: loadingSource.owner }) !== canonicalJson(loadingSource)) return failure('INTEGRITY_CONFLICT');
       const rebuilt = await buildPartnerAllocationDraftRows(source.value, [{ sourceKind: 'PARTNER_CASE',
-        productRowId: line.productRowId, quantity: line.quantity.toFixed(3), unit: line.unit }]);
+        productRowId: line.productRowId, quantity: exactQuantityText(line.quantity), unit: line.unit }]);
       if (!rebuilt.ok || rebuilt.value[0].partnerLineageId !== line.partnerLineageId ||
           canonicalJson(rebuilt.value[0].snapshot) !== canonicalJson(line.snapshot)) return failure('INTEGRITY_CONFLICT');
       seen.add(line.productRowId);
       lines.push({ id: line.id, sourceKind: 'PARTNER_CASE', productRowId: line.productRowId,
         description: source.value.rows.find(row => row.productRowId === line.productRowId)!.description,
-        quantity: line.quantity.toFixed(3), unit: line.unit });
+        quantity: exactQuantityText(line.quantity), unit: line.unit });
     }
     result.push({ id: draft.id, queueTurnId: draft.queueTurnId, queueStatus: draft.queueTurn.status,
       reservationActive: draft.queueTurn.loadingId === loadingId && draft.queueTurn.status === 'RESERVED_FOR_LOADING', lines });

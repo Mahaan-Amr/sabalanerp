@@ -67,6 +67,7 @@ router.post('/login', [
   body('identifier').optional().isString().trim(),
   body('email').optional().isString().trim(),
   body('password').exists(),
+  body('expectedUserId').optional().isString().matches(/^[a-zA-Z0-9_-]{1,128}$/),
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -89,6 +90,11 @@ router.post('/login', [
     if (!(await bcrypt.compare(req.body.password, user.password))) {
       await recordFailedLogin(req, canonicalIdentifier, user.id, 'INVALID_PASSWORD');
       return res.status(401).json({ success: false, error: 'نام کاربری یا رمز عبور نادرست است.' });
+    }
+    if (req.body.expectedUserId && req.body.expectedUserId !== user.id) {
+      await recordFailedLogin(req, canonicalIdentifier, user.id, 'CONTINUATION_ACCOUNT_MISMATCH');
+      return res.status(409).json({ success: false, code: 'AUTH_CONTEXT_CHANGED',
+        error: 'برای ادامهٔ این فرم، با همان حساب قبلی وارد شوید.' });
     }
     const context = requestContext(req);
     const cookies = parseCookies(req.headers.cookie);
@@ -114,7 +120,7 @@ router.post('/login', [
     res.cookie(SESSION_COOKIE, created.token, cookieOptions());
     res.cookie(DEVICE_COOKIE, created.browserProfile.publicId, { ...cookieOptions(), httpOnly: true, maxAge: 365 * 24 * 60 * 60 * 1000 });
     const { password: _password, erasedAt: _erasedAt, ...safeUser } = user;
-    res.json({ success: true, data: { user: safeUser, mustChangePassword: user.mustChangePassword } });
+    res.json({ success: true, data: { user: safeUser, mustChangePassword: user.mustChangePassword }, session: { id: created.session.id } });
   } catch (error) {
     console.error('Login error:', error);
     res.status(500).json({ success: false, error: 'Server error during login' });
@@ -128,7 +134,8 @@ router.get('/me', protect, async (req: AuthRequest, res) => {
     personnel: { select: { id: true, firstName: true, lastName: true, isActive: true, department: { select: { id: true, name: true, namePersian: true } } } },
   } });
   if (!user) return res.status(404).json({ success: false, error: 'User not found' });
-  res.json({ success: true, data: user });
+  res.setHeader('Cache-Control', 'no-store, private');
+  res.json({ success: true, data: user, session: { id: req.sessionId } });
 });
 
 router.post('/logout', protect, async (req: AuthRequest, res) => {

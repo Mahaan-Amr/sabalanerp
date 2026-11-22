@@ -4,8 +4,8 @@ import type { DispatchDocumentCase, DispatchDocumentPermission, DispatchDocument
 
 const login = async (page: Page) => {
   await page.goto('/login');
-  await page.locator('input[name="identifier"]').fill('admin');
-  await page.locator('input[name="password"]').fill('admin123');
+  await page.locator('input[name="identifier"]').fill(process.env.DESIGN_SYSTEM_E2E_ADMIN_USERNAME || 'admin');
+  await page.locator('input[name="password"]').fill(process.env.DESIGN_SYSTEM_E2E_ADMIN_PASSWORD || 'admin123');
   await page.locator('form').getByRole('button', { name: 'ورود' }).click();
   await expect(page).toHaveURL(/\/dashboard$/, { timeout: 60_000 });
 };
@@ -109,7 +109,7 @@ test('VIEW projection exposes retained documents without mutation controls', asy
   await expect(page.getByText(/فقط برای مشاهده و دریافت اسناد/)).toBeVisible();
   await page.getByRole('button', { name: 'صادرشده · ۱' }).click();
   await expect(page.getByRole('button', { name: 'چاپ هر دو' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'پذیرش و صدور هر دو سند' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'پذیرش و صدور اسناد', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'اقدامات بیشتر' }).click();
   await expect(page.getByText('جایگزینی بسته اسناد')).toHaveCount(0);
 });

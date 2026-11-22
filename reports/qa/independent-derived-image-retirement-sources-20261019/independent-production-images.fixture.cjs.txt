@@ -1,0 +1,55 @@
+const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto'),assert=require('node:assert/strict'),{spawnSync}=require('node:child_process');
+const recovery=require('./recoveryCrypto.cjs'),sha=b=>crypto.createHash('sha256').update(b).digest('hex');
+(async()=>{process.umask(0o077);assert.equal(process.getuid(),0);
+ const root=path.join(__dirname,'fixture');fs.mkdirSync(root,{mode:0o700});
+ const pair=crypto.generateKeyPairSync('rsa',{modulusLength:2048,publicKeyEncoding:{type:'spki',format:'pem'},privateKeyEncoding:{type:'pkcs8',format:'pem'}});
+ const key=path.join(root,'fixture-only-private.pem');fs.writeFileSync(key,pair.privateKey,{mode:0o400,flag:'wx'});
+ const wrong=crypto.generateKeyPairSync('rsa',{modulusLength:2048,publicKeyEncoding:{type:'spki',format:'pem'},privateKeyEncoding:{type:'pkcs8',format:'pem'}}),wrongkey=path.join(root,'wrong-fixture-private.pem');fs.writeFileSync(wrongkey,wrong.privateKey,{mode:0o400,flag:'wx'});
+ async function setup(name,corrupt=false){const work=path.join(root,name),ciphers=path.join(work,'ciphertexts');fs.mkdirSync(work,{mode:0o700});fs.mkdirSync(ciphers,{mode:0o700});const images={},records={},originals={};
+ for(const service of ['backend','frontend','inquiry']){const bytes=crypto.randomBytes(4096),source=path.join(work,service+'.source');fs.writeFileSync(source,bytes,{mode:0o400,flag:'wx'});originals[service]=bytes;
+ const cipher=path.join(ciphers,service+'.sabrec');await recovery.encryptRecoveryArchiveForRecipients(source,cipher,[{keyId:'independent-recovery',publicKeyPem:pair.publicKey},{keyId:'fixture-local',passphrase:crypto.randomBytes(32).toString('hex')}]);
+ if(corrupt&&service==='backend'){const b=fs.readFileSync(cipher);b[b.length-1]^=1;fs.writeFileSync(cipher,b);}
+ const hash=sha(fs.readFileSync(cipher));images[service]={service,sourceImageId:'sha256:'+'a'.repeat(64),sourceBytes:bytes.length,sourceSha256:sha(bytes),cipherBytes:fs.statSync(cipher).size,cipherSha256:hash,verifiedRawArchive:{fixtureOnly:true}};records[service]={cipherBytes:images[service].cipherBytes,cipherSha256:hash};}
+ const metadata={format:'sabalan-private-image-transfer/v1',images:records,encryption:{images},healthyApplicationPoint:false,publicOnlineAdmission:false},mf=path.join(ciphers,'private-component.json');fs.writeFileSync(mf,JSON.stringify(metadata),{mode:0o400,flag:'wx'});return {work,mf,originals,hash:sha(fs.readFileSync(mf))};}
+ const run=(v,k=key,h=v.hash)=>spawnSync(process.execPath,[path.join(__dirname,'decrypt-images.cjs'),v.mf,h,k,v.work],{encoding:'utf8',env:{PATH:process.env.PATH,LANG:'C.UTF-8'}});
+ const good=await setup('good'),ok=run(good);assert.equal(ok.status,0,ok.stderr);const proof=JSON.parse(fs.readFileSync(path.join(good.work,'independent-image-decryption-proof.json')));assert.equal(proof.independentDecryptVerified,true);assert.equal(proof.healthyApplicationPoint,false);
+ for(const service of ['backend','frontend','inquiry'])assert.deepEqual(fs.readFileSync(path.join(good.work,service+'.docker.tar.gz')),good.originals[service]);
+ const held=sha(fs.readFileSync(path.join(good.work,'backend.docker.tar.gz'))),duplicate=run(good);assert.notEqual(duplicate.status,0);assert.equal(sha(fs.readFileSync(path.join(good.work,'backend.docker.tar.gz'))),held);
+ const badkey=await setup('bad-key');assert.notEqual(run(badkey,wrongkey).status,0);assert.equal(fs.existsSync(path.join(badkey.work,'independent-image-decryption-proof.json')),false);
+ const corrupt=await setup('corrupt',true);assert.notEqual(run(corrupt).status,0);assert.equal(fs.existsSync(path.join(corrupt.work,'independent-image-decryption-proof.json')),false);
+ const metadata=await setup('metadata');assert.notEqual(run(metadata,key,'0'.repeat(64)).status,0);assert.equal(fs.existsSync(path.join(metadata.work,'backend.docker.tar.gz')),false);
+ const python=spawnSync('python3',['-I','-B','-c',`import importlib.util,os,pathlib,tempfile,ctypes,hashlib
+spec=importlib.util.spec_from_file_location('custody',${JSON.stringify(path.join(__dirname,'custody.py'))});m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
+root=pathlib.Path(tempfile.mkdtemp(dir=${JSON.stringify(root)}));os.chmod(root,0o700);file=root/'sentinel';file.write_bytes(b'preserve');os.chmod(file,0o400)
+for target,flags in [(root,os.O_RDONLY|os.O_DIRECTORY),(file,os.O_RDONLY)]:
+ s=target.stat();nodes={(s.st_dev,s.st_ino)};fd=os.open(target,flags)
+ try:
+  try:m.no_open_references(nodes);raise AssertionError('OPEN_REFERENCE_ACCEPTED')
+  except RuntimeError as e:assert str(e)=='CUSTODY_OPEN_REFERENCE'
+ finally:os.close(fd)
+ m.no_open_references(nodes)
+assert file.read_bytes()==b'preserve'
+# An actual writable mapping remains after closing its original FD.
+old=root/'mapped-input';old.write_bytes(b'x'*4096);fd=os.open(old,os.O_RDWR)
+libc=ctypes.CDLL(None,use_errno=True);libc.mmap.argtypes=[ctypes.c_void_p,ctypes.c_size_t,ctypes.c_int,ctypes.c_int,ctypes.c_int,ctypes.c_long];libc.mmap.restype=ctypes.c_void_p;libc.msync.argtypes=[ctypes.c_void_p,ctypes.c_size_t,ctypes.c_int];libc.msync.restype=ctypes.c_int;libc.munmap.argtypes=[ctypes.c_void_p,ctypes.c_size_t];libc.munmap.restype=ctypes.c_int
+mapping=libc.mmap(None,4096,3,1,fd,0);assert mapping!=ctypes.c_void_p(-1).value;os.close(fd)
+for ref in pathlib.Path('/proc/self/fd').iterdir():
+ try:value=ref.stat()
+ except FileNotFoundError:continue
+ assert (value.st_dev,value.st_ino)!=(old.stat().st_dev,old.stat().st_ino)
+accepted=root/'accepted-copy';m.publish_copy(old,accepted,4096,hashlib.sha256(b'x'*4096).hexdigest())
+ctypes.memset(mapping,ord('y'),4096);assert libc.msync(mapping,4096,4)==0;assert libc.munmap(mapping,4096)==0
+assert old.read_bytes()==b'y'*4096 and accepted.read_bytes()==b'x'*4096
+assert old.stat().st_ino!=accepted.stat().st_ino
+oversized=root/'oversized-metadata';oversized.write_bytes(b'z'*(1024*1024+1))
+try:m.publish_copy(oversized,root/'oversized-accepted',oversized.stat().st_size,'0'*64,maximum_bytes=1024*1024);raise AssertionError('OVERSIZED_METADATA_ACCEPTED')
+except RuntimeError as e:assert str(e)=='CUSTODY_COPY_SIZE_INVALID'
+assert not (root/'oversized-accepted').exists()
+growing=root/'growing-metadata';growing.write_bytes(b'a'*1024);observed_size=growing.stat().st_size;observed_hash=hashlib.sha256(growing.read_bytes()).hexdigest()
+with growing.open('ab') as f:f.write(b'b'*1024)
+try:m.publish_copy(growing,root/'growing-rejected',observed_size,observed_hash,maximum_bytes=1024*1024);raise AssertionError('GROWN_METADATA_ACCEPTED')
+except RuntimeError as e:assert str(e)=='CUSTODY_COPY_SIZE_EXCEEDED'
+assert growing.stat().st_size==2048
+print('INODE_REFERENCE_REFUSAL_PASS')`],{encoding:'utf8'});assert.equal(python.status,0,python.stderr);assert.match(python.stdout,/INODE_REFERENCE_REFUSAL_PASS/);
+ console.log('IMAGE_CUSTODY_FIXTURE_PASS: three independent RSA readbacks; wrong recipient; authenticated corruption; metadata mismatch; duplicate preservation; live file and directory inode-reference refusal; closed-FD writable-mapping mutation cannot change accepted fresh copy; oversized and changed-size metadata refusal. Fixture keys only.');
+})().catch(e=>{console.error(e);process.exitCode=1;});

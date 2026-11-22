@@ -79,10 +79,14 @@ export default function BiometricConnectorDiagnosticsPage() {
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <ErpFieldView label="نوع اتصال" value={diagnostics.mode === 'PHYSICAL' ? 'اسکنر فیزیکی محلی' : 'شبیه‌ساز قطعی'} tone="info" />
-              <ErpFieldView label="ثبت واقعی" value={diagnostics.liveEnrollmentEnabled ? 'فعال' : 'غیرفعال'} tone={diagnostics.liveEnrollmentEnabled ? 'success' : 'warning'} />
               <ErpFieldView label="نسخه اتصال" value={readableDeviceValue(diagnostics.device.connectorVersion)} />
               <ErpFieldView label="نسخه نرم‌افزار دستگاه" value={readableDeviceValue(diagnostics.device.sdkVersion)} />
             </div>
+          </ErpSection>
+          <ErpSection title="سابقه ثبت اثر انگشت" description="زمان ثبت کامل در همین ایستگاه است؛ سلامت فعلی اسکنر در بخش بالا نمایش داده می‌شود.">
+            <ErpFieldView label="آخرین ثبت کامل (تهران)" value={diagnostics.lastCompletedEnrollmentAt
+              ? new Date(diagnostics.lastCompletedEnrollmentAt).toLocaleString('fa-IR', { timeZone: 'Asia/Tehran' })
+              : 'ثبت کاملی یافت نشد'} />
           </ErpSection>
           <ErpSection title="بررسی‌های پشتیبانی‌شده">
             <div className="grid gap-3 sm:grid-cols-2">

@@ -1,11 +1,13 @@
 import { Prisma } from '@prisma/client';
 import { hashAccountingEvidence } from './accountingLedgerFoundation';
 import { AccountingCustomerTreasuryError } from './accountingCustomerTreasury';
+import { requireCustomerSourceSharesWithin } from './customerSemanticCompatibility';
 
 /** Parent identity protects multi-component commands even when every child identity changes. */
 export async function customerCompoundCommandWithin<T>(tx: Prisma.TransactionClient, input: {
   profileId: string; kind: string; idempotencyKey: string; actor: { id: string }; payload: unknown;
 }, execute: () => Promise<T>): Promise<T> {
+  await requireCustomerSourceSharesWithin(tx);
   const commandHash = hashAccountingEvidence(input.payload);
   const prior = await tx.accountingCustomerCommand.findUnique({ where: { idempotencyKey: input.idempotencyKey } });
   if (prior) {

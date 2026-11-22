@@ -1,0 +1,44 @@
+# Per-original-qualification trust stores in the SAME existing local project.
+# Volumes merge by container target after the role-isolation overlay.
+name: sabalanerp-local
+services:
+  backend-candidate:
+    volumes:
+      - type: volume
+        source: online_runtime_authority
+        target: /app/runtime-authority
+        volume:
+          nocopy: true
+          subpath: ${ONLINE_ACCEPTANCE_AUTHORITY_SUBPATH:?Explicit fresh authority cohort required}
+      - type: volume
+        source: online_runtime_jobs_authority
+        target: /run/sabalan-online
+        read_only: true
+        volume:
+          nocopy: true
+          subpath: ${ONLINE_ACCEPTANCE_AUTHORITY_SUBPATH:?Explicit fresh authority cohort required}
+      - type: volume
+        source: online_runtime_authority
+        target: /app/qualification-authority-root
+        volume:
+          nocopy: true
+  backend-retained:
+    volumes:
+      - type: volume
+        source: online_runtime_authority
+        target: /run/sabalan-online
+        read_only: true
+        volume:
+          nocopy: true
+          subpath: ${ONLINE_ACCEPTANCE_AUTHORITY_SUBPATH:?Explicit fresh authority cohort required}
+      - type: volume
+        source: online_runtime_jobs_authority
+        target: /app/jobs-authority
+        volume:
+          nocopy: true
+          subpath: ${ONLINE_ACCEPTANCE_AUTHORITY_SUBPATH:?Explicit fresh authority cohort required}
+      - type: volume
+        source: online_runtime_jobs_authority
+        target: /app/qualification-jobs-root
+        volume:
+          nocopy: true

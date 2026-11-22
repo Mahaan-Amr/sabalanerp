@@ -2,6 +2,7 @@ import type {
   AppliedProductFinishing,
   AppliedSubService,
   ContractProduct,
+  CuttingBreakdownEntry,
   ContractUsageType,
   Product,
   RemainingStone,
@@ -206,6 +207,25 @@ export const resolveLongitudinalDraftForSave = (
     (input.lengthDisplayUnit === 'cm' ? 100 : 1);
   const width = Number(result.widthMeters) *
     (input.widthDisplayUnit === 'cm' ? 100 : 1);
+  // Rebuild all cutting witnesses together. A geometry edit must never retain
+  // a former cut's source length, width, description or monetary snapshot.
+  const cuttingBreakdown: CuttingBreakdownEntry[] = [];
+  for (const line of result.pricingLines) {
+    if (line.lineId !== 'longitudinal-cut' && line.lineId !== 'calibration-cut') continue;
+    const rate = Number(line.rateToman);
+    const existing = cuttingBreakdown.find(cut => cut.rate === rate);
+    if (existing) {
+      existing.meters += Number(line.quantity);
+      existing.cost += Number(line.amountToman);
+    } else {
+      cuttingBreakdown.push({ type: 'longitudinal', meters: Number(line.quantity),
+        rate, cost: Number(line.amountToman) });
+    }
+  }
+  const isCut = cuttingBreakdown.length > 0;
+  const cuttingCost = cuttingBreakdown.reduce((sum, cut) => sum + cut.cost, 0);
+  const originalWidth = Number(input.motherWidthMeters) * 100;
+  const cutWidth = Number(result.widthMeters) * 100;
 
   return {
     ok: true,
@@ -227,6 +247,19 @@ export const resolveLongitudinalDraftForSave = (
       sawKerfEnabled: input.sawKerfEnabled,
       sawKerfCm: input.sawKerfEnabled ? Number(input.sawKerfMeters) * 100 : null,
       calibrationCutEnabled: result.calibrationEnabled,
+      isCut,
+      cutType: isCut ? 'longitudinal' : null,
+      cutDescription: isCut ? `برش طولی (${originalWidth}cm → ${cutWidth}cm)` : '',
+      cuttingCost,
+      physicalCuttingCost: cuttingCost,
+      cuttingBreakdown,
+      cutDetails: cuttingBreakdown.map((cut, index) => ({
+        id: `${draft.rowId || input.sourceBatchId}:cut:longitudinal:${index}`,
+        originalWidth, cutWidth, remainingWidth: originalWidth - cutWidth,
+        meters: cut.meters, length: cut.meters, rate: cut.rate, cost: cut.cost,
+        cuttingCost: cut.cost, cuttingCostPerMeter: cut.rate,
+        orientation: 'longitudinal' as const
+      })),
       cuttingCostPerMeter: input.longitudinalCutRateToman === undefined
         ? draft.cuttingCostPerMeter
         : Number(input.longitudinalCutRateToman)

@@ -9,6 +9,8 @@ test('internal-driver enrollment requires neither consent nor a governance polic
   const enrollment = { id: 'enrollment-1', personnelId: 'personnel-1', status: 'ACTIVE', enrolledAt: new Date('2026-09-19T08:00:00Z') };
   const templates: Array<Record<string, unknown>> = [];
   const tx = {
+    personnel: { findUnique: async () => ({ id: 'personnel-1', internalDriverProfile: { id: 'driver-1' } }) },
+    $executeRaw: async () => undefined,
     $executeRawUnsafe: async () => undefined,
     internalDriverProfile: { findUnique: async () => ({ id: 'driver-1', status: 'ACTIVE', personnel: { isActive: true }, eligibilityPeriods: [{ status: 'ELIGIBLE' }] }) },
     dispatchLifecycleAudit: { findFirst: async () => null, create: async () => undefined },
@@ -47,4 +49,90 @@ test('internal-driver enrollment requires neither consent nor a governance polic
   assert.equal(result.templates.length, 2);
   assert.equal(templates.every((item) => item.imageMimeType === 'image/png' && item.imageByteLength === png.length), true);
   assert.equal(templates.every((item) => !JSON.stringify(item.protectedImageEnvelope).includes(png.toString('base64'))), true);
+});
+
+for (const driverSource of ['INTERNAL', 'EXTERNAL'] as const) {
+  test(`updates the ${driverSource} driver's OTP phone in place and invalidates pending codes`, async () => {
+    const enrolled = {
+      id: 'enrollment', status: 'ACTIVE', confirmationPhone: '09121111111',
+      externalDriverId: driverSource === 'EXTERNAL' ? 'driver' : null,
+      personnelId: driverSource === 'INTERNAL' ? 'personnel' : null,
+    };
+    const at = new Date('2026-10-01T10:00:00Z');
+    const updates: unknown[] = [];
+    const invalidations: unknown[] = [];
+    const audits: Array<{ eventType: string; payload: unknown }> = [];
+    const tx = {
+      $executeRaw: async () => undefined,
+      $executeRawUnsafe: async () => undefined,
+      dispatchCutoverControl: { findUnique: async () => null },
+      internalDriverProfile: { findUniqueOrThrow: async () => ({ id: 'driver' }) },
+      driverBiometricEnrollment: {
+        findUnique: async () => enrolled,
+        update: async ({ data }: { data: { confirmationPhone: string } }) => {
+          updates.push(data);
+          enrolled.confirmationPhone = data.confirmationPhone;
+          return { id: enrolled.id, confirmationPhone: enrolled.confirmationPhone };
+        },
+      },
+      dispatchOtpChallenge: { updateMany: async (args: unknown) => { invalidations.push(args); return { count: 1 }; } },
+      dispatchLifecycleAudit: {
+        findFirst: async () => null,
+        create: async ({ data }: { data: (typeof audits)[number] }) => { audits.push(data); },
+      },
+    };
+    const prisma = { $transaction: async (operation: (client: typeof tx) => unknown) => operation(tx) } as unknown as PrismaClient;
+    const service = new DispatchConfirmationService(prisma, {
+      connector: {} as never, vault: {} as never, otpSecret: 'enrollment-policy-test-secret',
+      sendOtp: async () => assert.fail('Changing the phone must not send an OTP'), now: () => at,
+    });
+    const input = { enrollmentId: enrolled.id, actorId: 'hr-operator', confirmationPhone: '+۹۸ ۹۱۲ ۲۲۲ ۲۲۲۲' };
+    assert.deepEqual(await service.updateEnrollmentConfirmationPhone(input), { id: enrolled.id, confirmationPhone: '09122222222' });
+    await service.updateEnrollmentConfirmationPhone(input);
+    await assert.rejects(service.updateEnrollmentConfirmationPhone({ ...input, confirmationPhone: '02112345678' }), /شماره موبایل/);
+    enrolled.status = 'INACTIVE';
+    await assert.rejects(service.updateEnrollmentConfirmationPhone(input), /ثبت بیومتریک فعال/);
+    assert.deepEqual(updates, [{ confirmationPhone: '09122222222' }]);
+    assert.deepEqual(invalidations, [{
+      where: {
+        session: { driverSource, driverId: 'driver', status: 'ACTIVE' },
+        verifiedAt: null, invalidatedAt: null, expiresAt: { gt: at },
+      },
+      data: { invalidatedAt: at },
+    }]);
+    assert.equal(audits.length, 1);
+    assert.equal(audits[0].eventType, 'CONFIRMATION_PHONE_UPDATED');
+    assert.deepEqual(audits[0].payload, { invalidatedChallengeCount: 1 });
+  });
+}
+
+test('resending a fallback OTP uses the current confirmation phone', async () => {
+  const at = new Date('2026-10-01T10:00:00Z');
+  const session = {
+    id: 'session', status: 'ACTIVE', driverSource: 'INTERNAL', driverId: 'driver',
+    method: 'INTERNAL_FALLBACK', expiresAt: new Date('2026-10-01T11:00:00Z'),
+    waybillIntegrityHash: 'waybill-hash', waybill: { number: 42, status: 'ISSUED', integrityHash: 'waybill-hash' },
+  };
+  const sent: string[] = [];
+  const tx = {
+    $executeRawUnsafe: async () => undefined,
+    dispatchCutoverControl: { findUnique: async () => null },
+    internalDriverProfile: {
+      findUniqueOrThrow: async () => ({ personnelId: 'personnel' }),
+      findUnique: async () => ({ status: 'ACTIVE', personnel: { isActive: true }, eligibilityPeriods: [{ status: 'ELIGIBLE' }] }),
+    },
+    personnel: { findUnique: async () => ({ id: 'personnel', internalDriverProfile: { id: 'driver' } }) },
+    driverBiometricEnrollment: { findFirstOrThrow: async () => ({ confirmationPhone: '09122222222' }) },
+    dispatchOtpChallenge: { findFirst: async () => null, updateMany: async () => undefined, create: async () => undefined },
+  };
+  const prisma = {
+    dispatchConfirmationSession: { findUnique: async () => session },
+    $transaction: async (operation: (client: typeof tx) => unknown) => operation(tx),
+  } as unknown as PrismaClient;
+  const service = new DispatchConfirmationService(prisma, {
+    connector: {} as never, vault: {} as never, otpSecret: 'enrollment-policy-test-secret', now: () => at,
+    sendOtp: async ({ phone }) => { sent.push(phone); },
+  });
+  await service.resendOtp(session.id);
+  assert.deepEqual(sent, ['09122222222']);
 });

@@ -1,9 +1,12 @@
+import { previewCustomerDeletion, deleteCustomerInTransaction } from '../../backend/src/services/crmCustomerManagement';
+import { scopeContractNavigationFixture } from './support/contract-navigation-fixture';
 import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { expect, test } from '@playwright/test';
 import { PrismaClient } from '../../backend/node_modules/@prisma/client';
 import { parseCanonicalProductGraph, projectCanonicalProductGraph } from '../../packages/contract-product-graph/src';
-import { loginAsAdmin, setTheme, assertNoHorizontalOverflow } from './support/design-system';
+import { loginAsAdmin, setTheme, assertNoHorizontalOverflow, seedContractNavigation } from './support/design-system';
+import {sdsDatabaseScope,assertSdsDatabaseIdentity} from './support/sds-database-scope';
 
 const fixture = JSON.parse(readFileSync('packages/contract-product-graph/src/__tests__/fixtures/remaining-child-chain.json', 'utf8'));
 
@@ -12,25 +15,22 @@ test('real remaining-chain draft saves, reloads, edits and reaches accounting wi
   expect(new URL(baseURL!).hostname).toMatch(/^(localhost|127\.0\.0\.1)$/);
   const databaseUrl = process.env.REMAINING_RECOVERY_QA_DATABASE_URL ||
     'postgresql://postgres:sabalanerp-local-only@127.0.0.1:55432/sabalanerp?schema=public&connection_limit=2&pool_timeout=10';
-  expect(new URL(databaseUrl).hostname).toMatch(/^(localhost|127\.0\.0\.1)$/);
-  expect(new URL(databaseUrl).port).toBe('55432');
-  const db = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
+  const databaseScope=sdsDatabaseScope(databaseUrl);
+  const db = new PrismaClient({ datasources: { db: { url: databaseScope.url.toString() } } });
   const key = `qa-remaining-ui-${randomUUID()}`;
   const productIds: string[] = [];
-  const draftIds = new Set<string>();
   const errors: string[] = [];
   const failures: string[] = [];
   let customerId: string | undefined;
+  let adminId: string | undefined;
   page.on('pageerror', error => errors.push(error.message));
   page.on('response', response => {
     if (response.status() >= 500) failures.push(`${response.status()} ${new URL(response.url()).pathname}`);
-    if (response.request().method() === 'POST' && response.url().includes('/contract-edit-sessions/')) {
-      const draft = response.request().postDataJSON()?.draftId;
-      if (typeof draft === 'string') draftIds.add(draft);
-    }
   });
   try {
-    const admin = await db.user.findUniqueOrThrow({ where: { username: process.env.DESIGN_SYSTEM_E2E_ADMIN_USERNAME || 'admin' } });
+    await assertSdsDatabaseIdentity(db,databaseScope);
+    const admin = await db.user.findUniqueOrThrow({ where: { username: databaseScope.adminUsername } });
+    adminId = admin.id;
     const customer = await db.crmCustomer.create({ data: { firstName: 'آزمون', lastName: key,
       ownerUserId: admin.id, createdBy: admin.id } });
     customerId = customer.id;
@@ -59,7 +59,8 @@ test('real remaining-chain draft saves, reloads, edits and reaches accounting wi
         currency: 'تومان', totalContractAmount: 23071875 } };
     // Exercise the real recovered-draft entry point, without intercepting any application endpoint.
     await page.evaluate(data => localStorage.setItem('contractWizardState', JSON.stringify({ currentStep: 8, wizardData: data })), wizardData);
-    await page.goto('/dashboard/sales/contracts/create?returnTo=contract&step=8', { waitUntil: 'domcontentloaded' });
+    await scopeContractNavigationFixture(page);
+    await page.goto('/dashboard/sales/contracts/create?fresh=1&returnTo=contract&step=8', { waitUntil: 'domcontentloaded' });
     const submit = page.getByRole('button', { name: 'ثبت قرارداد', exact: true });
     await expect(submit).toBeEnabled({ timeout: 60_000 });
     const responsePromise = page.waitForResponse(r => new URL(r.url()).pathname.endsWith('/sales/contracts') && r.request().method() === 'POST');
@@ -81,9 +82,9 @@ test('real remaining-chain draft saves, reloads, edits and reaches accounting wi
       expect(projectCanonicalProductGraph(graph, audience).products.slice(1, 4).map(p => p.baseAmountToman)).toEqual(['0', '0', '0']);
     }
     await expect(page).toHaveURL(new RegExp(`/dashboard/sales/contracts/${id}`), { timeout: 60_000 });
-    await expect(page.getByRole('heading', { name: 'اطلاعات قرارداد', exact: true })).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByRole('heading', { name: 'مشخصات قرارداد', exact: true })).toBeVisible({ timeout: 60_000 });
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await expect(page.getByRole('heading', { name: 'اطلاعات قرارداد', exact: true })).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByRole('heading', { name: 'مشخصات قرارداد', exact: true })).toBeVisible({ timeout: 60_000 });
     for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const) {
       await page.setViewportSize({ width, height: 900 });
       await setTheme(page, theme);
@@ -127,17 +128,13 @@ test('real remaining-chain draft saves, reloads, edits and reaches accounting wi
   } finally {
     await testInfo.attach('browser-diagnostics', { body: JSON.stringify({ errors, failures }), contentType: 'application/json' });
     try {
-      if (customerId) {
-        const contracts = await db.salesContract.findMany({ where: { customerId }, select: { id: true } });
-        const ids = contracts.map(c => c.id);
-        const events = await db.notificationEvent.findMany({ where: { resourceId: { in: ids } }, select: { id: true } });
-        await db.notification.deleteMany({ where: { eventId: { in: events.map(e => e.id) } } });
-        await db.notificationEvent.deleteMany({ where: { id: { in: events.map(e => e.id) } } });
-        await db.salesContractEditSession.deleteMany({ where: { OR: [{ contractId: { in: ids } }, { draftId: { in: [...draftIds] } }] } });
-        await db.salesContractDraftAudit.deleteMany({ where: { draftId: { in: [...draftIds] } } });
-        await db.crmCustomer.delete({ where: { id: customerId } });
+      if (customerId && adminId) {
+        // Preserve contract/customer history through the canonical audited archive boundary.
+        const preview = await previewCustomerDeletion(db, adminId, customerId);
+        await db.$transaction(tx => deleteCustomerInTransaction(tx, { actorId: adminId!, customerId: customerId!,
+          reason: 'پایان آزمون محلی زنجیره باقی‌مانده', confirmed: true, previewToken: preview.previewToken }), { timeout: 30_000 });
       }
-      await db.product.deleteMany({ where: { id: { in: productIds } } });
+      await db.product.updateMany({ where: { id: { in: productIds } }, data: { isActive: false } });
     } finally { await db.$disconnect(); }
   }
 });

@@ -6,6 +6,7 @@ import { protect } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES } from '../middleware/workspace';
 import { requireFeatureAccess, FEATURES, FEATURE_PERMISSIONS } from '../middleware/feature';
 import multer from 'multer';
+import { createDurableUpload } from '../services/durableUpload';
 import XLSX from 'xlsx';
 import path from 'path';
 import fs from 'fs';
@@ -57,7 +58,7 @@ router.use((req: any, res: any, next: any) => {
 });
 
 // Configure multer for file uploads
-const storage = multer.diskStorage({
+const storage: multer.DiskStorageOptions = {
   destination: (req, file, cb) => {
     cb(null, 'uploads/');
   },
@@ -65,9 +66,9 @@ const storage = multer.diskStorage({
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
     cb(null, 'products-' + uniqueSuffix + path.extname(file.originalname));
   }
-});
+};
 
-const upload = multer({ 
+const upload = createDurableUpload({
   storage: storage,
   fileFilter: (req, file, cb) => {
     const allowedTypes = ['.xlsx', '.xls'];

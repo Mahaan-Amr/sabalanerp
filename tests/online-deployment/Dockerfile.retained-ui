@@ -1,0 +1,13 @@
+ARG DIAGNOSTIC_BASE
+FROM ${DIAGNOSTIC_BASE}
+LABEL io.sabalan.online-acceptance="retained-ui"
+# These are diagnostic images made from already compiled, measured artifacts.
+# Production release admission is deliberately not provided by this fixture.
+USER root
+RUN rm -rf /app/public
+COPY runtime/ /app/.next-online-runtime/
+COPY public/ /app/public/
+COPY next.config.js browser-build-identity.cjs online-runtime-verify.cjs /app/
+COPY online-runtime-manifest.json /app/online-runtime-manifest.json
+ENV NODE_ENV=production NEXT_DIST_DIR=.next-online-runtime
+CMD ["sh", "-ec", "node /app/online-runtime-verify.cjs; exec node node_modules/next/dist/bin/next start -p 3000"]

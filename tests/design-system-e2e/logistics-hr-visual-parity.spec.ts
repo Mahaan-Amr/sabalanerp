@@ -52,6 +52,46 @@ test('Logistics dashboard preserves counts and HR surfaces across themes, mobile
   }
   await setViewportAndZoom(page, { width: 780, height: 900 }, 2);
   await assertNoHorizontalOverflow(page);
+  const status = main.getByText('پیش‌نویس', { exact: true });
+  expect(await status.evaluate(element => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    return range.getClientRects().length;
+  })).toBe(1);
+});
+
+test('Logistics contract selection keeps the remaining quantity and unit together on mobile', async ({ page }) => {
+  await loginAsAdmin(page);
+  await setViewportAndZoom(page, { width: 390, height: 900 });
+  await page.route('**/api/logistics/**', route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith(`/loadings/${loading.id}`)) return route.fulfill({ json: { success: true, data: {
+      ...loading, customerId: 'customer', projectId: 'project', lines: [],
+    } } });
+    if (path.endsWith('/remaining')) return route.fulfill({ json: { success: true, data: { groups: [{
+      groupKey: 'stone-group', displayName: 'سنگ آزمون', productSnapshot: { name: 'سنگ آزمون' },
+      sources: [{ contractId: 'contract', contractItemId: 'item', contractNumber: '9001', remainingQuantity: 30,
+        unit: 'meter', unitLabel: 'متر طول', productSnapshot: { name: 'سنگ آزمون', snapshot: {
+          appliedSubServices: [{ subService: { namePersian: 'پخ آزمون' }, selectedEdges: ['front'] }],
+          finishingName: 'ساب آزمون', cuttingBreakdown: [{ type: 'cross' }],
+        } } }],
+    }] } } });
+    if (path.endsWith('/drivers') || path.endsWith('/customers')) return route.fulfill({ json: { success: true, data: [] } });
+    return route.continue();
+  });
+  await page.goto(`/dashboard/logistics/loadings/new?draftId=${loading.id}`);
+  const remaining = page.getByRole('table').getByText('۳۰ متر طول', { exact: true });
+  await expect(remaining).toBeVisible();
+  expect(await remaining.evaluate(element => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    return new Set(Array.from(range.getClientRects(), rect => Math.round(rect.top))).size;
+  })).toBe(1);
+  await expect(page.getByText('ابزار: پخ آزمون', { exact: true })).toBeVisible();
+  await expect(page.getByText('پرداخت: ساب آزمون', { exact: true })).toBeVisible();
+  await expect(page.getByText('برش عرضی', { exact: true })).toBeVisible();
+  await expect(page.getByRole('checkbox', { name: /انتخاب سنگ آزمون/ })).toBeVisible();
+  await assertNoHorizontalOverflow(page);
 });
 
 test('Logistics cancellation keeps its required reason, focus, and pending protection in the workspace modal', async ({ page }, testInfo) => {
@@ -259,6 +299,39 @@ test('Logistics Sales-style stepper retains prerequisites and circles cover the 
   await assertNoHorizontalOverflow(page);
 });
 
+test('Logistics customer discovery distinguishes pending, failed and empty results', async ({ page }) => {
+  await loginAsAdmin(page);
+  let completeFirstRequest!: () => void;
+  const firstRequestPending = new Promise<void>(resolve => { completeFirstRequest = resolve; });
+  const searches: string[] = [];
+  await page.route('**/api/logistics/drivers**', route => route.fulfill({ json: { success: true, data: [] } }));
+  await page.route('**/api/logistics/customers**', async route => {
+    const search = new URL(route.request().url()).searchParams.get('search');
+    if (search === null) {
+      await firstRequestPending;
+      return route.fulfill({ json: { success: true, data: [{ id: 'customer-1', customerName: 'مشتری آزمایشی', loadableProjectCount: 1 }] } });
+    }
+    searches.push(search);
+    if (searches.length === 1) return route.fulfill({ status: 500, json: { success: false } });
+    return route.fulfill({ json: { success: true, data: [] } });
+  });
+  await page.goto('/dashboard/logistics/loadings/new');
+  const emptyState = page.getByText('مشتری قابل بارگیری پیدا نشد', { exact: true });
+  try {
+    await expect(page.getByRole('status', { name: 'در حال دریافت مشتری‌های قابل بارگیری' })).toBeVisible();
+    await expect(emptyState).toBeHidden();
+  } finally {
+    completeFirstRequest();
+  }
+  await expect(page.getByRole('button', { name: /مشتری آزمایشی/ })).toBeVisible();
+  await page.getByRole('textbox', { name: 'جستجوی مشتری' }).fill('۰۹1');
+  await page.getByRole('button', { name: 'جستجو', exact: true }).click();
+  await expect(emptyState).toBeHidden();
+  await page.getByRole('button', { name: 'تلاش دوباره', exact: true }).click();
+  await expect(emptyState).toBeVisible();
+  expect(searches).toEqual(['091', '091']);
+});
+
 test('Logistics driver tabs retain both allocations across a draft save and review', async ({ page }, testInfo) => {
   await loginAsAdmin(page);
   const drivers = [
@@ -266,7 +339,8 @@ test('Logistics driver tabs retain both allocations across a draft save and revi
     { id: 'turn-b', firstName: 'رضا', lastName: 'محمدی', queueStatus: 'RESERVED', reservedLoading: { id: loading.id } },
   ];
   const draft = { ...loading, customerId: 'customer', projectId: 'project',
-    lines: [{ ...loading.lines[0], sourceContractId: 'contract', quantity: 30, sourceSnapshot: { contractNumber: '9001', contractedQuantity: 100, remainingQuantity: 100 } }],
+    lines: [{ ...loading.lines[0], sourceContractId: 'contract', quantity: 30,
+      productSnapshot: { ...loading.lines[0].productSnapshot, snapshot: { tools: [{ name: 'نیم‌لول آزمون' }], finishingName: 'صیقلی آزمون' } }, sourceSnapshot: { contractNumber: '9001', contractedQuantity: 100, remainingQuantity: 100 } }],
     guardQueueTurns: drivers.map(driver => ({ id: driver.id, status: 'RESERVED_FOR_LOADING', loadingId: loading.id })),
     canonicalAllocationDrafts: drivers.map((driver, i) => ({ queueTurnId: driver.id, lines: [{ sourceContractItemId: 'parity-source', quantity: (i + 1) * 10 }] })),
   };
@@ -290,17 +364,26 @@ test('Logistics driver tabs retain both allocations across a draft save and revi
   await page.goto(`/dashboard/logistics/loadings/new?draftId=${loading.id}`);
   const input = page.getByRole('textbox', { name: 'مقدار مستقیم', exact: true });
   await expect(input).toHaveValue('10');
-  await input.fill('15');
+  await expect(page.getByText('ابزار: نیم‌لول آزمون', { exact: true })).toBeVisible();
+  await expect(page.getByText('پرداخت: صیقلی آزمون', { exact: true })).toBeVisible();
+  await input.fill('۱5');
   await page.getByRole('button', { name: 'رضا محمدی', exact: true }).click();
   await expect(input).toHaveValue('20');
-  await input.fill('25');
+  await page.getByRole('button', { name: 'خط راس', exact: true }).click();
+  await page.getByRole('textbox', { name: 'خط راس', exact: true }).fill('۲٫۵');
+  await page.getByRole('textbox', { name: 'تعداد', exact: true }).fill('۱۰');
+  await page.getByRole('textbox', { name: 'اضافه', exact: true }).fill('۱');
+  await page.getByRole('textbox', { name: 'کسر', exact: true }).fill('۱');
   await page.getByRole('button', { name: 'علی رضایی', exact: true }).click();
   await expect(input).toHaveValue('15');
-  await page.getByRole('button', { name: 'بعدی', exact: true }).click();
+  await page.getByRole('button', { name: /^(?:بعدی|ادامه:)/ }).click();
   await expect(page.getByRole('heading', { name: 'بازبینی و نهایی‌سازی' })).toBeVisible();
   expect(savedLoading.lines[0]).toMatchObject({ sourceContractItemId: 'parity-source', quantity: 40, unit: 'meter' });
   expect(savedAllocations['turn-a'].lines[0]).toMatchObject({ sourceContractItemId: 'parity-source', quantity: 15, unit: 'meter' });
-  expect(savedAllocations['turn-b'].lines[0]).toMatchObject({ sourceContractItemId: 'parity-source', quantity: 25, unit: 'meter' });
+  expect(savedAllocations['turn-b'].lines[0]).toMatchObject({
+    sourceContractItemId: 'parity-source', quantity: 25, unit: 'meter',
+    khatRas: '2.5', pieceCount: '10', plus: '1', minus: '1',
+  });
   await expect(page.locator('main.sds-workspace table')).toContainText('۴۰');
   for (const width of [1440, 390]) {
     await setViewportAndZoom(page, { width, height: 900 });
@@ -313,6 +396,28 @@ test('Logistics driver tabs retain both allocations across a draft save and revi
   }
 });
 
+
+test('Logistics quantity corrections send negative Persian decimals as ASCII', async ({ page }) => {
+  await loginAsAdmin(page);
+  await mockAvailability(page);
+  await page.route('**/api/dispatch-cases**', route => route.fulfill({ json: { success: true, data: [] } }));
+  await page.route(`**/api/logistics/loadings/${loading.id}`, route => route.fulfill({
+    json: { success: true, data: { ...loading, status: 'FINALIZED' } },
+  }));
+  const correctionUrl = `**/api/logistics/loadings/${loading.id}/corrections`;
+  await page.route(correctionUrl, route => route.fulfill({ json: { success: true } }));
+  await page.goto(`/dashboard/logistics/loadings/${loading.id}`);
+  await page.getByRole('button', { name: 'عملیات بارگیری', exact: true }).click();
+  await page.getByText('ثبت اصلاح مقدار', { exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'اصلاح مقدار بارگیری' });
+  await dialog.getByLabel('قلم بارگیری').selectOption('parity-source');
+  await dialog.getByRole('textbox', { name: 'مقدار تغییر' }).fill('-۲٫۵');
+  await dialog.getByRole('textbox', { name: 'دلیل اصلاح' }).fill('اصلاح مقدار آزمون');
+  const request = page.waitForRequest(req => req.method() === 'POST' && req.url().endsWith('/corrections'));
+  await dialog.getByRole('button', { name: 'ثبت اصلاح', exact: true }).click();
+  expect((await request).postDataJSON()).toMatchObject({ sourceContractItemId: 'parity-source', deltaQuantity: '-2.5' });
+  await expect(dialog).toBeHidden();
+});
 
 test('Logistics customer names stay readable on narrow phones and tablets', async ({ page }, testInfo) => {
   await loginAsAdmin(page);

@@ -37,13 +37,17 @@ export const temporaryDatabaseUrl = (sourceUrl: string, databaseName: string): s
   return url.toString();
 };
 
-const compose = (repositoryRoot: string, command: string) => execFileSync('docker', [
-  'compose', '-f', path.join(repositoryRoot, 'docker-compose.local.yml'), 'exec', '-T', 'postgres',
+const compose = (repositoryRoot: string, command: string) => {
+  verifyComposeTarget(repositoryRoot);
+  const canonical = process.env.SABALAN_LOCAL_REPOSITORY_ROOT || repositoryRoot;
+  return execFileSync('docker', [
+  'compose', '-f', path.join(canonical, 'docker-compose.local.yml'), 'exec', '-T', 'postgres',
   'sh', '-lc', command,
-], { cwd: repositoryRoot, stdio: 'pipe', encoding: 'utf8', timeout: 120_000 });
+], { cwd: canonical, stdio: 'pipe', encoding: 'utf8', timeout: 120_000 });
+};
 
 const verifyComposeTarget = (repositoryRoot: string) => assertSabalanerpLocalPostgresTarget(execFileSync('docker', [
-  'compose', '-f', path.join(repositoryRoot, 'docker-compose.local.yml'), 'ps', '--format', 'json', 'postgres',
+  'compose', '-f', path.join(process.env.SABALAN_LOCAL_REPOSITORY_ROOT || repositoryRoot, 'docker-compose.local.yml'), 'ps', '--format', 'json', 'postgres',
 ], { cwd: repositoryRoot, stdio: 'pipe', encoding: 'utf8', timeout: 30_000 }));
 
 export type TemporaryConcurrencyDatabase = {
@@ -78,7 +82,10 @@ export const createTemporaryConcurrencyDatabase = async (input: {
         timeout: 240_000,
       });
     } else {
-      compose(input.repositoryRoot, `set -o pipefail; pg_dump --username postgres --dbname sabalanerp --no-owner --no-privileges | psql -v ON_ERROR_STOP=1 --username postgres --dbname ${quoted}`);
+      // These lookup/notification tables are outside the ordinary dispatch
+      // concurrency fixture. Keep their schema but do not copy unrelated
+      // historical rows; the source database remains untouched.
+      compose(input.repositoryRoot, `set -o pipefail; pg_dump --username postgres --dbname sabalanerp --no-owner --no-privileges --exclude-table-data=public.crm_customer_cards --exclude-table-data=public.partner_case_tracking_codes --exclude-table-data=public.partner_inquiry_notification_deliveries | psql -v ON_ERROR_STOP=1 --username postgres --dbname ${quoted}`);
     }
   } catch (error) {
     compose(input.repositoryRoot, `psql -v ON_ERROR_STOP=1 --username postgres --dbname postgres --command 'DROP DATABASE IF EXISTS ${quoted}'`);
@@ -92,15 +99,26 @@ export const createTemporaryConcurrencyDatabase = async (input: {
       if (cleaned) return;
       assertTemporaryConcurrencyDatabaseName(databaseName);
       let lastError: unknown;
-      for (let attempt = 1; attempt <= 3; attempt += 1) {
+      for (let attempt = 1; attempt <= 10; attempt += 1) {
         try {
-          compose(input.repositoryRoot, `psql -v ON_ERROR_STOP=1 --username postgres --dbname postgres --command "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${databaseName}' AND pid <> pg_backend_pid()"`);
+          const outstanding = compose(input.repositoryRoot,
+            `psql -v ON_ERROR_STOP=1 --tuples-only --no-align --username postgres --dbname postgres --command "SELECT (SELECT count(*) FROM pg_stat_activity WHERE datname = '${databaseName}') + (SELECT count(*) FROM pg_prepared_xacts WHERE database = '${databaseName}')"`).trim();
+          if (outstanding !== '0') {
+            throw new Error('Temporary database still has sessions or prepared transactions; preserving its data.');
+          }
+          // A new connection racing the census makes the ordinary DROP fail.
+          // Never terminate another client's unfinished work to finish a test.
           compose(input.repositoryRoot, `psql -v ON_ERROR_STOP=1 --username postgres --dbname postgres --command 'DROP DATABASE IF EXISTS ${quoted}'`);
           const remaining = compose(input.repositoryRoot,
             `psql -v ON_ERROR_STOP=1 --tuples-only --no-align --username postgres --dbname postgres --command "SELECT count(*) FROM pg_database WHERE datname = '${databaseName}'"`).trim();
           if (remaining === '0') { cleaned = true; return; }
           lastError = new Error(`Exact database still exists after cleanup attempt ${attempt}.`);
-        } catch (error) { lastError = error; }
+        } catch (error) {
+          lastError = error;
+          // Prisma disconnect and server-side session teardown are not
+          // synchronous. Recheck normally; never terminate another session.
+          if (attempt < 10) await new Promise(resolve => setTimeout(resolve, 200));
+        }
       }
       throw new Error(`Temporary concurrency database cleanup failed for ${databaseName}: ${
         lastError instanceof Error ? lastError.message : String(lastError)}`);

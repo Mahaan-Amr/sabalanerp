@@ -1,0 +1,41 @@
+{
+  "format": "sabalan-obsolete-local-chain-selection-fixture/v1",
+  "pass": true,
+  "tap": "........\n----------------------------------------------------------------------\nRan 8 tests in 0.007s\n\nOK\n",
+  "workingRoot": "/app/online-runtime-acceptance/obsolete-local-chain-selection-89efee00756e2ef2377614c016561ffb",
+  "canonicalServicesUnchanged": {
+    "backend": {
+      "id": "a1ea34a8d7d878b906fba7b4fdbe975df13a6b00d63a863eacce34b9827e86ff",
+      "image": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+      "startedAt": "2026-10-15T09:01:40.016187222Z"
+    },
+    "frontend": {
+      "id": "ad23f762dc1b27d2be76c335a3d7a4e20d08832a9a2e055904a4af84a9248c21",
+      "image": "sha256:f0a8954596279ccb01c029de7316022daa109b711a297f716cc9367d4bc9ec53",
+      "startedAt": "2026-10-18T05:09:40.68305388Z"
+    },
+    "postgres": {
+      "id": "e553787e69f44c7bdf7dab94fad43a231f5ba99d988dc783234486a5a844a528",
+      "image": "sha256:3d0f7584ed7d04e27fa050d6683a74746608faf21f202be78460d679cc56461f",
+      "startedAt": "2026-10-12T15:17:49.481269377Z"
+    },
+    "inquiry": {
+      "id": "6d161695e215498048ff24e56e9602ce77871bfb6b390bf1356caecfdf9807d8",
+      "image": "sha256:81eacc768f3c4b82bd0f0a01bef5600ae1321e87cb117bad49ca47dfba79a213",
+      "startedAt": "2026-10-12T15:17:49.463791361Z"
+    }
+  },
+  "sourceHashes": {
+    "retire-core.py": "ee5e2d28a2aaa128c3804597b040fa5374cf9a77ac2cef2ca02d972a9f452c75",
+    "retirement.py": "8928214a3deeb91bbbc8c902cbedcf4b914f1071d46b9bcbbc6e3cae749aae9e",
+    "retirement.test.py": "8a0f0b4b62ff7cd06a524b1279dff29c5a551a407a2788c4b77bb1bb92822075",
+    "seal.json": "d41e8c14c131bfd6d824917dc3d2a7d0c070c71ed09e3d2d942e3a905d3b556f"
+  },
+  "sources": {
+    "retire-core.py": "ee5e2d28a2aaa128c3804597b040fa5374cf9a77ac2cef2ca02d972a9f452c75",
+    "retirement.py": "8928214a3deeb91bbbc8c902cbedcf4b914f1071d46b9bcbbc6e3cae749aae9e",
+    "retirement.test.py": "8a0f0b4b62ff7cd06a524b1279dff29c5a551a407a2788c4b77bb1bb92822075",
+    "seal.json": "d41e8c14c131bfd6d824917dc3d2a7d0c070c71ed09e3d2d942e3a905d3b556f"
+  },
+  "productionAdmission": false
+}

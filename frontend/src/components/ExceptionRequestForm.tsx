@@ -2,6 +2,7 @@
 
 import { ErpInput, ErpPressable, ErpTextarea } from '@/components/erp';
 import { useEffect, useState } from 'react';
+import {useUnarchivedDraftGuard} from '@/lib/useUnarchivedDraftGuard';
 import { FaCalendarAlt, FaClock, FaFileAlt, FaUser, FaPhone } from 'react-icons/fa';
 import PersianCalendarComponent from './PersianCalendar';
 import EnhancedDropdown from './EnhancedDropdown';
@@ -39,6 +40,7 @@ export default function ExceptionRequestForm({ onSubmit, onCancel, loading = fal
 
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
   const [personnel, setPersonnel] = useState<any[]>([]);
+  useUnarchivedDraftGuard('exception-request-editor',true);
 
   useEffect(() => {
     personnelAPI.getPersonnel({ includeInactive: false }).then((response) => setPersonnel(response.data.data || [])).catch(() => setPersonnel([]));

@@ -1,0 +1,90 @@
+"""Private native child: take independent custody; no deletion or application admission."""
+import os,stat,json,hashlib,pathlib,subprocess,errno
+P=pathlib.Path
+
+def require(v,c):
+ if not v:raise RuntimeError(c)
+def sha(p):
+ h=hashlib.sha256()
+ with p.open('rb') as f:
+  while b:=f.read(1024*1024):h.update(b)
+ return h.hexdigest()
+def sync(p):
+ fd=os.open(p,os.O_RDONLY|os.O_NOFOLLOW)
+ try:os.fsync(fd)
+ finally:os.close(fd)
+def save(p,v):
+ with p.open('x') as f:os.fchmod(f.fileno(),0o400);json.dump(v,f,indent=2);f.flush();os.fsync(f.fileno())
+ sync(p.parent)
+def safe(p,uid,directory=False):
+ s=p.lstat();require(p.resolve(strict=True)==p and s.st_uid==uid and (stat.S_ISDIR(s.st_mode) if directory else stat.S_ISREG(s.st_mode) and s.st_nlink==1) and not s.st_mode&0o077,'UNSAFE_CUSTODY_ENTRY');return s
+
+def no_open_references(nodes):
+ # Exact inode/device checks also cover SFTP chroot paths. No PID or age-based killing.
+ for proc in P('/proc').iterdir():
+  if not proc.name.isdecimal():continue
+  refs=[proc/'cwd',proc/'root']
+  try:refs+=list((proc/'fd').iterdir())
+  except FileNotFoundError:continue
+  for ref in refs:
+   try:s=ref.stat()
+   except (FileNotFoundError,ProcessLookupError):continue
+   except OSError as e:
+    if e.errno in (errno.ENOENT,errno.ESRCH):continue
+    raise
+   require((s.st_dev,s.st_ino) not in nodes,'CUSTODY_OPEN_REFERENCE')
+
+def publish_copy(source,destination,expected_bytes,expected_sha,maximum_bytes=2**31):
+ require(type(expected_bytes) is int and 0<expected_bytes<=maximum_bytes<=2**31,'CUSTODY_COPY_SIZE_INVALID')
+ require(not destination.exists(),'CUSTODY_COPY_EXISTS')
+ before=source.lstat();require(stat.S_ISREG(before.st_mode) and before.st_nlink==1 and source.resolve(strict=True)==source,'CUSTODY_COPY_SOURCE_UNSAFE')
+ total=0;digest=hashlib.sha256()
+ with source.open('rb') as inp,destination.open('xb') as out:
+  os.fchmod(out.fileno(),0o400)
+  while chunk:=inp.read(1024*1024):
+   total+=len(chunk);require(total<=expected_bytes,'CUSTODY_COPY_SIZE_EXCEEDED');out.write(chunk);digest.update(chunk)
+  out.flush();os.fsync(out.fileno())
+ require(total==expected_bytes and digest.hexdigest()==expected_sha and sha(destination)==expected_sha,'CUSTODY_COPY_HASH_MISMATCH')
+ accepted=safe(destination,0);require((accepted.st_dev,accepted.st_ino)!=(before.st_dev,before.st_ino),'CUSTODY_COPY_NOT_INDEPENDENT')
+ sync(destination.parent)
+ return accepted
+
+def main():
+ import sys
+ specfile,worktext=sys.argv[1:];work=P(worktext);safe(work,0,True)
+ spec=json.loads(P(specfile).read_text());proof=spec['transfer']['component'];key=proof['remoteDirectoryKey']
+ import re
+ require(re.fullmatch('private-images-transfer-[a-f0-9]{32}',key),'INVALID_TRANSFER_KEY')
+ parent=P('/srv/sabalanerp-recovery/checkpoints');require(parent.resolve(strict=True)==parent,'CHECKPOINT_PARENT_ALIAS')
+ source=parent/key;uid=spec['uploadUid'];safe(source,uid,True)
+ names={'backend.sabrec','frontend.sabrec','inquiry.sabrec','private-component.json'}
+ require({p.name for p in source.iterdir()}==names,'CUSTODY_INVENTORY_CHANGED')
+ for name in names:safe(source/name,uid)
+ require(source.stat().st_dev==work.stat().st_dev,'CUSTODY_CROSS_DEVICE')
+ unaccepted=work/'unaccepted-upload';require(not unaccepted.exists(),'UNACCEPTED_TARGET_EXISTS')
+ # Rename changes pathname authority only. Existing uploader mappings remain
+ # possible, so these inodes are never accepted as independent custody.
+ os.rename(source,unaccepted);sync(parent);sync(work)
+ target=work/'ciphertexts';target.mkdir(mode=0o700);sync(work)
+ meta=unaccepted/'private-component.json'
+ publish_copy(meta,target/'private-component.json',meta.stat().st_size,proof['metadataSha256'],maximum_bytes=1024*1024)
+ # Only the fresh, hash-pinned and size-bounded root-owned metadata is parsed.
+ metadata=json.loads((target/'private-component.json').read_text())
+ require(metadata['format']=='sabalan-private-image-transfer/v1' and metadata['healthyApplicationPoint'] is False and metadata['publicOnlineAdmission'] is False and metadata['images']==proof['images'],'TRANSFER_METADATA_UNPROVEN')
+ require(metadata['encryption']==spec['encryption'],'ENCRYPTION_GRAPH_CHANGED')
+ for service in ['backend','frontend','inquiry']:
+  expected=proof['images'][service]
+  publish_copy(unaccepted/(service+'.sabrec'),target/(service+'.sabrec'),expected['cipherBytes'],expected['cipherSha256'])
+ require({p.name for p in target.iterdir()}==names,'CUSTODY_INVENTORY_CHANGED')
+ nodes={(target.stat().st_dev,target.stat().st_ino)}
+ for name in names:
+  entry=safe(target/name,0);nodes.add((entry.st_dev,entry.st_ino));sync(target/name)
+ sync(target);sync(work);sync(parent);no_open_references(nodes)
+ custody={'format':'sabalan-independent-private-image-custody/v1','root':str(target),'metadataSha256':proof['metadataSha256'],'images':proof['images'],'backupNativeDurabilityVerified':True,'freshRootOwnedInodes':True,'acceptedOpenReferencesAbsent':True,'unacceptedUploadRetained':str(unaccepted),'independentDecryptVerified':False,'healthyApplicationPoint':False,'publicOnlineAdmission':False}
+ save(work/'custody-proof.json',custody)
+ # Core dumps are disabled by the outer owner. The independent private key never leaves this host.
+ r=subprocess.run(['node',str(work/'decrypt-images.cjs'),str(target/'private-component.json'),proof['metadataSha256'],'/root/sabalan-recovery-private/remote-recovery-private.pem',str(work)],check=False)
+ require(r.returncode==0,'INDEPENDENT_IMAGE_DECRYPT_FAILED')
+ no_open_references(nodes)
+ print(json.dumps({'custody':custody,'decryption':json.loads((work/'independent-image-decryption-proof.json').read_text())}))
+if __name__=='__main__':main()

@@ -1,0 +1,12 @@
+{
+  "format": "sabalan-actual-image-failure-readonly/v1",
+  "operation": "actual-image-customer-e75c41429d29f628e3c5dc93a105b968",
+  "readOnly": true,
+  "nativeCompletion": {
+    "status": 1,
+    "outputSha256": "812f877ce44e5b2f8b66d4edce6a90e86483e76ee5b0233a9289e25e6ce1bf87"
+  },
+  "failureCode": "LEDGER_ALREADY_CONFIGURED",
+  "rootCause": "Existing production reporting entity makes empty-ledger setup inappropriate for this cloned-data fixture.",
+  "componentPassed": false
+}

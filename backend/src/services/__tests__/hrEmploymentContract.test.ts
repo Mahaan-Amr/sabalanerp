@@ -19,7 +19,6 @@ const storedEvidence = {
   mimeType: "image/png",
   size: 2048,
   sha256: "digest",
-  malwareScanStatus: "CLEAN",
 };
 
 assert.equal(canReusePaperContractStoredEvidence(storedEvidence), true);

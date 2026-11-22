@@ -12,7 +12,7 @@ import {
 } from '@/components/erp';
 import PersianCalendarComponent from '@/components/PersianCalendar';
 
-export function ContractDateStepView({ creatorName, dateControl, error, numberPreview, numberNotice, numberLabel = 'پیش‌نمایش شماره احتمالی قرارداد' }: {
+export function ContractDateStepView({ creatorName, dateControl, error, numberPreview, numberNotice, numberLabel = 'شماره احتمالی قرارداد' }: {
   creatorName?: string;
   dateControl: React.ReactElement<{
     id?: string;
@@ -24,21 +24,23 @@ export function ContractDateStepView({ creatorName, dateControl, error, numberPr
   numberLabel?: string;
   numberNotice: string;
 }) {
-  return <div className="mx-auto max-w-md space-y-6">
-    {creatorName && <div>
-      <p className="mb-2 text-sm font-medium text-[var(--sds-text-secondary)]">کاربر ایجادکننده</p>
-      <ErpNeumorphicCard as="div" className="w-full px-4 py-3 font-medium text-[var(--sds-text-primary)]">
-        {creatorName}
-      </ErpNeumorphicCard>
-    </div>}
-    <ErpField label="تاریخ قرارداد" error={error} required>{dateControl}</ErpField>
-    <div>
-      {numberPreview !== undefined && <>
-        <ErpField label={numberLabel} hint={numberNotice}>
-          <ErpInput type="text" value={numberPreview} readOnly className="w-full" />
-        </ErpField>
-      </>}
-      {numberPreview === undefined && <p className="text-xs text-[var(--sds-text-muted)]">{numberNotice}</p>}
+  return <div className="mx-auto w-full max-w-md space-y-6">
+    <div className="min-w-0">
+      <ErpField label="تاریخ قرارداد" error={error} required>{dateControl}</ErpField>
+    </div>
+    <div className="min-w-0">
+      <h2 className="text-base font-semibold text-[var(--sds-text-primary)]">اطلاعات ثبت</h2>
+      <dl className="mt-5 space-y-4">
+        {creatorName && <div>
+          <dt className="text-xs text-[var(--sds-text-secondary)]">ثبت‌کننده</dt>
+          <dd className="mt-1 text-base font-semibold text-[var(--sds-text-primary)]">{creatorName}</dd>
+        </div>}
+        {numberPreview !== undefined && <div>
+          <dt className="text-xs text-[var(--sds-text-secondary)]">{numberLabel}</dt>
+          <dd className="mt-1 text-base font-semibold tabular-nums text-[var(--sds-text-primary)]"><bdi>{numberPreview}</bdi></dd>
+        </div>}
+      </dl>
+      <p className="mt-4 text-xs leading-5 text-[var(--sds-text-secondary)]">{numberNotice}</p>
     </div>
   </div>;
 }
@@ -111,7 +113,7 @@ export function ContractCustomerStepView({ customers, selectedCustomer, selected
   const hasSearch = searchTerm.trim().length > 0;
   const errorId = useId();
   return <div className="space-y-5">
-    <div className="flex justify-end"><ErpButton label="ایجاد مشتری" icon={FaPlus} onClick={onCreate}
+    <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-base font-semibold text-[var(--sds-text-primary)]">انتخاب مشتری</h2><ErpButton label="ایجاد مشتری" icon={FaPlus} onClick={onCreate}
       tone="primary" variant="outline" className="flex-nowrap whitespace-nowrap px-4" /></div>
     {error && <div id={errorId}><ErpInlineState kind="error" title={error} /></div>}
     {selected && <ErpNeumorphicSelectedSummary icon={FaCheck} label="مشتری انتخاب شده" title={selected.title}>
@@ -122,17 +124,17 @@ export function ContractCustomerStepView({ customers, selectedCustomer, selected
         {selected.projectCount !== undefined && <span>{selected.projectCount.toLocaleString('fa-IR')} پروژه</span>}
       </div>
     </ErpNeumorphicSelectedSummary>}
-    <ErpNeumorphicCard className="p-3 sm:p-4">
+    <div>
       <div className="relative">
         <FaSearch className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--sds-text-muted)]" />
         <ErpInput type="search" aria-label="جستجوی مشتری" placeholder={searchPlaceholder}
           value={searchTerm} onChange={event => onSearchChange(event.target.value)} className="min-h-12 w-full py-3 pl-4 pr-10" />
       </div>
-      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-[var(--sds-text-muted)]">
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-[var(--sds-text-secondary)]">
         <span>{hasSearch ? `${customers.length.toLocaleString('fa-IR')} نتیجه پیدا شد` : `نمایش ${customers.length.toLocaleString('fa-IR')} مشتری اخیر`}</span>
         <span>{`${totalCount.toLocaleString('fa-IR')} مشتری در CRM`}</span>
       </div>
-    </ErpNeumorphicCard>
+    </div>
     <div role="group" aria-label="انتخاب مشتری" aria-describedby={error ? errorId : undefined}>
     {customers.length === 0 ? <div className="rounded-xl border border-dashed border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] p-8 text-center">
       <p className="text-base font-medium text-[var(--sds-text-secondary)]">{hasSearch ? 'مشتری‌ای با این عبارت پیدا نشد' : 'هیچ مشتری‌ای موجود نیست'}</p>
@@ -153,10 +155,10 @@ export function ContractCustomerStepView({ customers, selectedCustomer, selected
           </span>
         </div>
         {(customer.companyName || customer.type || customer.status || customer.ownerLabel) && <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-[var(--sds-text-secondary)]">
-          {customer.type && <span className="rounded-full bg-[var(--sds-surface-subtle)] px-2 py-1">{customer.type}</span>}
-          {customer.status && <span className="rounded-full bg-[var(--sds-surface-subtle)] px-2 py-1">{customer.status}</span>}
-          {customer.phone && <span className="inline-flex items-center gap-1 rounded-full bg-[var(--sds-surface-subtle)] px-2 py-1"><FaPhone className="h-3 w-3" />{customer.phone}</span>}
-          {customer.ownerLabel && <span className="rounded-full bg-[var(--sds-surface-subtle)] px-2 py-1">مسئول فروش: {customer.ownerLabel}</span>}
+          {customer.type && <span className="rounded-full bg-[var(--sds-surface-subtle)] px-2 py-1">{({ Individual: 'حقیقی', Company: 'حقوقی', Government: 'دولتی' } as Record<string, string>)[customer.type] || customer.type}</span>}
+          {customer.status && <span className="rounded-full bg-[var(--sds-surface-subtle)] px-2 py-1">{({ Active: 'فعال', Inactive: 'غیرفعال' } as Record<string, string>)[customer.status] || customer.status}</span>}
+          {customer.phone && <span dir="ltr" className="inline-flex items-center gap-1"><FaPhone className="h-3 w-3" />{customer.phone}</span>}
+          {customer.ownerLabel && <span>مسئول فروش: {customer.ownerLabel}</span>}
         </div>}
       </ErpNeumorphicInteractiveCard>;
     })}</div>}

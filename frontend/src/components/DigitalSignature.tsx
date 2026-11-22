@@ -1,6 +1,7 @@
 'use client';
 import { ErpPressable } from '@/components/erp';
 import { useRef, useEffect, useState, useCallback } from 'react';
+import {useUnarchivedDraftGuard} from '@/lib/useUnarchivedDraftGuard';
 import { FaEraser, FaCheck, FaTimes, FaUndo } from 'react-icons/fa';
 
 interface DigitalSignatureProps {
@@ -21,6 +22,7 @@ export default function DigitalSignature({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [hasSignature, setHasSignature] = useState(false);
+  useUnarchivedDraftGuard('digital-signature-buffer',isDrawing||hasSignature);
   const [signatureHistory, setSignatureHistory] = useState<ImageData[]>([]);
   const [currentStep, setCurrentStep] = useState(-1);
 

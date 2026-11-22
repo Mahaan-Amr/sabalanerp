@@ -1,7 +1,7 @@
 'use client';
 import React from 'react';
 import { FaDownload, FaPrint } from 'react-icons/fa';
-import { ErpButton, ErpField, ErpSelect } from '@/components/erp';
+import { ErpButton, ErpField, ErpSelect, ErpInlineState } from '@/components/erp';
 
 export const accountingContractTabs = [
   { value: 'summary', label: 'خلاصه' }, { value: 'items', label: 'اقلام' },
@@ -10,9 +10,9 @@ export const accountingContractTabs = [
 ] as const;
 
 /** Shared Accounting print action layout; each source owns its authorized PDF. */
-export default function AccountingContractPrintActions({ value, options, onChange, pending, onDownload, onPrint }: {
+export default function AccountingContractPrintActions({ value, options, onChange, pending, blockedReason, onDownload, onPrint }: {
   value: string; options: Array<{ value: string; label: string }>; onChange: (value: string) => void;
-  pending: boolean; onDownload: () => void; onPrint: () => void;
+  pending: boolean; blockedReason?: string; onDownload: () => void; onPrint: () => void;
 }) {
   return <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
     <div className="min-w-0 flex-1"><ErpField label="نسخه چاپ">
@@ -21,8 +21,9 @@ export default function AccountingContractPrintActions({ value, options, onChang
       </ErpSelect>
     </ErpField></div>
     <div className="flex flex-wrap gap-2">
-      <ErpButton label="دانلود PDF" icon={FaDownload} tone="success" disabled={pending} onClick={onDownload} />
-      <ErpButton label="چاپ" icon={FaPrint} tone="purple" disabled={pending} onClick={onPrint} />
+      <ErpButton label="دانلود PDF" icon={FaDownload} tone="success" disabled={pending || Boolean(blockedReason)} onClick={onDownload} />
+      <ErpButton label="چاپ" icon={FaPrint} tone="purple" disabled={pending || Boolean(blockedReason)} onClick={onPrint} />
     </div>
+    {blockedReason && <ErpInlineState kind="stale" title={blockedReason} />}
   </div>;
 }

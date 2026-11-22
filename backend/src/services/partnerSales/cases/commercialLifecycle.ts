@@ -1,3 +1,5 @@
+import { partnerCommercialEditStatus } from './commercialEditStatus';
+import { readPartnerCaseRecovery } from './creationRecoveryMetadata';
 import { recordPartnerRecommitment } from './recommitment';
 import { assertContractOperationMinimums } from '../../operationMinimumGuard';
 import { recordPartnerCommercialCorrectionFinality } from './commercialCorrectionFinality';
@@ -15,8 +17,33 @@ type Tx = Prisma.TransactionClient;
 const json = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value));
 export const isPartnerCommercialFlow = (contract: Pick<SalesContract, 'partnerKind' | 'commercialFlowVersion'>) =>
   contract.partnerKind === 'PARTNER_CUSTOMER' && contract.commercialFlowVersion === 2;
-export const partnerDeadlinePassed = (contract: Pick<SalesContract, 'firstFinancialRecordAt' | 'commercialExpiresAt'>, now = new Date()) =>
-  !contract.firstFinancialRecordAt && !!contract.commercialExpiresAt && contract.commercialExpiresAt <= now;
+export const partnerDeadlinePassed = (contract: Pick<SalesContract, 'firstFinancialRecordAt' | 'commercialExpiresAt' | 'dispatchExpiryExempt'>, now = new Date()) =>
+  !contract.firstFinancialRecordAt && !contract.dispatchExpiryExempt && !!contract.commercialExpiresAt && contract.commercialExpiresAt <= now;
+
+/** Renewal never reactivates a cancelled/voided Case or reopens financial history. */
+export function partnerContractCanRenew(contract: Pick<SalesContract, 'partnerKind' | 'commercialFlowVersion' |
+  'status' | 'isInactive' | 'firstFinancialRecordAt' | 'commercialExpiresAt' | 'dispatchExpiryExempt'>,
+  caseState: string, now = new Date()) {
+  return isPartnerCommercialFlow(contract) && !contract.isInactive && !['CANCELLED', 'VOIDED'].includes(caseState)
+    && contract.status !== 'CANCELLED' && !contract.firstFinancialRecordAt
+    && (contract.status === 'EXPIRED' || partnerDeadlinePassed(contract, now));
+}
+
+export async function renewPartnerContract(tx: Tx, input: { caseId: string; actorId: string; revision: number; reason: string }) {
+  const reason = input.reason.trim();
+  if (!reason) throw new Error('دلیل تمدید قرارداد الزامی است.');
+  const { root, contract } = await lockPartnerCommercialContract(tx, input.caseId);
+  if (contract.commercialRevision !== input.revision) throw new Error('قرارداد تغییر کرده است؛ صفحه را تازه‌سازی کنید.');
+  if (!partnerContractCanRenew(contract, root.state)) throw new Error('قرارداد قابل تمدید نیست.');
+  await resetPartnerCommercialApprovals(tx, root.id, input.actorId, reason);
+  const updated = await tx.salesContract.update({ where: { id: contract.id }, data: {
+    commercialExpiresAt: new Date(Date.now() + (contract.commercialExpiryDays || 10) * 86_400_000),
+    signatures: { ...((contract.signatures as Record<string, Prisma.JsonValue>) || {}),
+      approve: null, sign: null, customerAcceptance: null, digitalConfirmation: null },
+  } });
+  await audit(tx, contract.id, input.actorId, 'COMMERCIAL_EXPIRY_RENEWED', contract, updated, reason);
+  return updated;
+}
 
 export async function lockPartnerCommercialContract(tx: Tx, caseId: string) {
   await tx.$queryRaw`SELECT id FROM partner_sale_cases WHERE id = ${caseId} FOR UPDATE`;
@@ -24,6 +51,14 @@ export async function lockPartnerCommercialContract(tx: Tx, caseId: string) {
   if (!root?.customerContractId) throw new Error('قرارداد مشتری هنوز آماده نشده است.');
   await tx.$queryRaw`SELECT id FROM sales_contracts WHERE id = ${root.customerContractId} FOR UPDATE`;
   const contract = await tx.salesContract.findUniqueOrThrow({ where: { id: root.customerContractId } });
+  if (isPartnerCommercialFlow(contract)) {
+    const exempt = !!await tx.contractDispatchAuthority.findFirst({ where: { contractId: contract.id, kind: 'MANAGER',
+      status: 'APPROVED', revision: contract.commercialRevision } });
+    if (contract.dispatchExpiryExempt !== exempt) {
+      await tx.salesContract.update({ where: { id: contract.id }, data: { dispatchExpiryExempt: exempt } });
+      contract.dispatchExpiryExempt = exempt;
+    }
+  }
   return { root, contract };
 }
 
@@ -122,6 +157,7 @@ export async function acceptPartnerCustomer(tx: Tx, input: { caseId: string; rev
   assertPartnerCommercialAvailable(contract);
   await assertPartnerPreparationComplete(tx, root);
   if (contract.commercialRevision !== input.revision) throw new Error('این نسخه قرارداد تغییر کرده است.');
+  if (contract.customerAcceptanceRevision === input.revision) return contract;
   const updated = await tx.salesContract.update({ where: { id: contract.id }, data: {
     customerAcceptanceRevision: input.revision, customerAcceptanceMethod: input.method, signedAt: new Date(),
     ...(input.method === 'DIGITAL' ? { isSigned: true } : {}),
@@ -150,12 +186,19 @@ export async function resetPartnerCommercialApprovals(tx: Tx, caseId: string, ac
   const { root, contract } = await lockPartnerCommercialContract(tx, caseId);
   const retainedAcceptance = options.preserveCustomerAcceptance && contract.customerAcceptanceRevision === contract.commercialRevision;
   const updated = await tx.salesContract.update({ where: { id: contract.id }, data: {
-    commercialFlowVersion: 2, commercialRevision: { increment: 1 }, status: 'DRAFT',
+    commercialFlowVersion: 2, commercialRevision: { increment: 1 }, status: 'DRAFT', dispatchExpiryExempt: false,
     salesApprovalRevision: null, customerAcceptanceRevision: retainedAcceptance ? contract.commercialRevision + 1 : null,
     approvedBy: null,
     ...(!retainedAcceptance ? { customerAcceptanceMethod: null, signedBy: null, signedAt: null, isSigned: false,
       signedByPhoneNumber: null, verificationCodeId: null } : {}),
   } });
+  const { closeContractDispatchDuty } = await import('../../crossWorkspaceDutyAdapters/contractDispatchDutyAdapter');
+  const authorities = await tx.contractDispatchAuthority.findMany({ where: { contractId: contract.id,
+    kind: { in: ['MANAGER', 'DATE'] }, status: { in: ['PENDING', 'APPROVED'] } } });
+  for (const authority of authorities) {
+    await tx.contractDispatchAuthority.update({ where: { id: authority.id }, data: { status: 'SUPERSEDED' } });
+    await closeContractDispatchDuty(tx, authority.id, actorId, 'SUPERSEDED', reason);
+  }
   await tx.partnerSaleCase.update({ where: { id: root.id }, data: { commercialFlowVersion: 1,
     ...(!retainedAcceptance ? { customerConfirmationState: 'RECONFIRMATION_REQUIRED' as const } : {}), stateRevision: { increment: 1 } } });
   await appendPartnerCommercialEvent(tx, root.id, actorId, 'PARTNER_COMMERCIAL_APPROVALS_RESET', {
@@ -169,16 +212,37 @@ export async function resetPartnerCommercialApprovals(tx: Tx, caseId: string, ac
 export async function readPartnerCommercialState(tx: Tx, caseId: string,
   response?: 'READY' | 'PARTIAL' | 'WAITING' | 'REJECTED' | 'EXPIRED',
   presentation?: { complete: boolean; resubmittedWaiting: boolean }): Promise<PartnerCommercialState | undefined> {
+  return (await readPartnerCommercialDetails(tx, caseId, response, presentation))?.commercial;
+}
+
+/** Reuse only inside this authorized read transaction. The public state reader
+ * continues to load current evidence on every independent invocation. */
+export async function readPartnerCommercialDetails(tx: Tx, caseId: string,
+  response?: 'READY' | 'PARTIAL' | 'WAITING' | 'REJECTED' | 'EXPIRED',
+  presentation?: { complete: boolean; resubmittedWaiting: boolean }) {
+  const value = await readPartnerCommercialDetailsInternal(tx, caseId, response, presentation);
+  return value && 'commercial' in value ? value : undefined;
+}
+
+export async function readPartnerCommercialEditingDetails(tx: Tx, caseId: string) {
+  const value = await readPartnerCommercialDetailsInternal(tx, caseId, undefined, undefined, true);
+  return value && 'editingStatus' in value ? value : undefined;
+}
+
+async function readPartnerCommercialDetailsInternal(tx: Tx, caseId: string,
+  response?: 'READY' | 'PARTIAL' | 'WAITING' | 'REJECTED' | 'EXPIRED',
+  presentation?: { complete: boolean; resubmittedWaiting: boolean }, navigationOnly = false) {
   const root = await tx.partnerSaleCase.findUnique({ where: { id: caseId }, include: { customerContract: true, profile: { select: { userId: true } } } });
   const contract = root?.customerContract;
   if (!root || !contract || !isPartnerCommercialFlow(contract)) return undefined;
-  if (response === undefined) {
-    const recovery = await tx.salesContractEditSession.findFirst({ where: { ownerUserId: root.profile.userId, purpose: 'PARTNER_TECHNICAL',
-      OR: [{ contractId: contract.id }, { recovery: { path: ['partnerCaseId'], equals: caseId } }] }, select: { recovery: true } });
+  let recovery: { draftId: string; baseRevision: number; recovery: Prisma.JsonValue } | null = null;
+  let pricingPresentation: Awaited<ReturnType<typeof readCasePricingPresentation>>;
+  if (response === undefined && !navigationOnly) {
+    recovery = await readPartnerCaseRecovery(tx, { ownerUserId: root.profile.userId, contractId: contract.id, caseId });
     if (recovery) {
       const current = await readCasePricingPresentation(tx, { caseId, headRevision: root.headRevision,
         profileId: root.profileId, actorId: root.profile.userId, recovery: recovery.recovery });
-      response = current?.state; presentation = current;
+      response = current?.state; presentation = current; pricingPresentation = current;
     }
   }
   const final = contract.status === 'SIGNED';
@@ -187,10 +251,15 @@ export async function readPartnerCommercialState(tx: Tx, caseId: string,
   const salesApproved = contract.salesApprovalRevision === contract.commercialRevision;
   const customerAccepted = contract.customerAcceptanceRevision === contract.commercialRevision;
   const expired = contract.status === 'EXPIRED' || partnerDeadlinePassed(contract);
+  if (navigationOnly) return { actorId: root.profile.userId,
+    editingStatus: partnerCommercialEditStatus({ salesApproved, customerAccepted, pricingAccepted: validPricing,
+      edited: contract.commercialRevision > 1, expired, cancelled: ['CANCELLED', 'VOIDED'].includes(root.state) }),
+    expiresAt: contract.commercialExpiresAt?.toISOString() ?? null,
+    firstFinancialRecordAt: contract.firstFinancialRecordAt?.toISOString() ?? null };
   const priceRejection = await tx.partnerCaseEvent.findFirst({ where: { caseId, caseRevision: root.headRevision, type: 'PARTNER_PRICING_REJECTED' }, select: { id: true } });
   const inquiry = validPricing ? 'ACCEPTED' : response === 'EXPIRED' || response === 'REJECTED'
     || root.pricingState === 'INCOMPLETE' || root.pricingState === 'EXPIRED' ? 'CORRECTION_REQUIRED' : priceRejection ? 'REJECTED' : 'WAITING';
-  return { version: 1, revision: contract.commercialRevision,
+  const commercial: PartnerCommercialState = { version: 1, revision: contract.commercialRevision,
     status: partnerCommercialStatus({ salesApproved, customerAccepted, pricingAccepted: validPricing,
       pricingReceived: presentation?.complete ?? response === 'READY', inquiryWaiting: presentation?.resubmittedWaiting,
       edited: contract.commercialRevision > 1,
@@ -198,6 +267,7 @@ export async function readPartnerCommercialState(tx: Tx, caseId: string,
       cancelled: ['CANCELLED', 'VOIDED'].includes(root.state) }), salesApproved, customerAccepted, inquiry,
     expiresAt: contract.commercialExpiresAt?.toISOString() ?? null,
     firstFinancialRecordAt: contract.firstFinancialRecordAt?.toISOString() ?? null };
+  return { commercial, actorId: root.profile.userId, recovery, pricingPresentation };
 }
 
 export async function assertPartnerFinancialFinality(tx: Tx, caseId: string) {

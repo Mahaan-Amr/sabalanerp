@@ -1,0 +1,31 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto'),zlib=require('node:zlib'),{spawnSync}=require('node:child_process');
+const recovery=require('./recoveryCrypto.cjs');
+(async()=>{
+ process.umask(0o077);assert.equal(process.getuid(),0);
+ const root=path.join(__dirname,'fixture'),source=path.join(root,'source'),keys=path.join(root,'keys'),output=path.join(root,'output');
+ for(const p of [root,source,keys,output])fs.mkdirSync(p,{mode:0o700});
+ const pair=crypto.generateKeyPairSync('rsa',{modulusLength:2048,publicKeyEncoding:{type:'spki',format:'pem'},privateKeyEncoding:{type:'pkcs8',format:'pem'}});
+ fs.writeFileSync(path.join(keys,'local-rollback-key'),crypto.randomBytes(32).toString('hex'),{flag:'wx',mode:0o600});
+ fs.writeFileSync(path.join(keys,'remote-recovery-public.pem'),pair.publicKey,{flag:'wx',mode:0o600});
+ const images={},hash=data=>crypto.createHash('sha256').update(data).digest('hex');
+ for(const service of ['backend','frontend','inquiry']){
+  const bytes=zlib.gzipSync(Buffer.from(service+' EXACT NATIVE FIXTURE 123456789.12345678'));
+  const archive=path.join(source,service+'.docker.tar.gz');fs.writeFileSync(archive,bytes,{flag:'wx',mode:0o400});
+  images[service]={service,sourceImageId:'sha256:'+'a'.repeat(64),archive,compressedBytes:bytes.length,compressedSha256:hash(bytes),verifiedRawArchive:{fixtureOnly:true},fullLocalRoundtripVerified:true};
+ }
+ const point=path.join(source,'component.json');fs.writeFileSync(point,JSON.stringify({format:'sabalan-production-image-component/v1',images,healthyApplicationPoint:false,publicOnlineAdmission:false}),{flag:'wx',mode:0o400});
+ const run=dir=>spawnSync(process.execPath,[path.join(__dirname,'encrypt.cjs'),point,keys,dir],{encoding:'utf8',env:{PATH:process.env.PATH,LANG:'C.UTF-8'}});
+ const result=run(output);assert.equal(result.status,0,result.stderr);const proof=JSON.parse(result.stdout);
+ for(const [service,image] of Object.entries(proof.images)){
+  const cipher=path.join(output,service+'.sabrec'),restored=path.join(root,service+'.independent.gz');
+  assert.equal(hash(fs.readFileSync(cipher)),image.cipherSha256);await recovery.decryptRecoveryArchive(cipher,restored,pair.privateKey);
+  assert.equal(hash(fs.readFileSync(restored)),images[service].compressedSha256);assert.equal(fs.existsSync(path.join(output,service+'.validated.docker.tar.gz')),false);
+ }
+ const cipher=path.join(output,'backend.sabrec'),original=fs.readFileSync(cipher),mutated=Buffer.from(original);mutated[mutated.length-1]^=1;
+ const corrupt=path.join(root,'corrupt.sabrec');fs.writeFileSync(corrupt,mutated,{flag:'wx',mode:0o600});const denied=path.join(root,'corrupt-output.gz');
+ await assert.rejects(recovery.decryptRecoveryArchive(corrupt,denied,pair.privateKey),{code:'RECOVERY_DECRYPTION_FAILED'});assert.equal(fs.existsSync(denied),false);
+ const replay=run(output);assert.equal(replay.status,1);assert.match(replay.stderr,/IMAGE_CIPHER_OUTPUT_EXISTS/);assert.deepEqual(fs.readFileSync(cipher),original);
+ const changed=path.join(source,'backend.docker.tar.gz');fs.chmodSync(changed,0o600);fs.writeFileSync(changed,'CHANGED SOURCE');const fresh=path.join(root,'refused');fs.mkdirSync(fresh,{mode:0o700});
+ const refusal=run(fresh);assert.equal(refusal.status,1);assert.match(refusal.stderr,/IMAGE_CIPHER_SOURCE_CHANGED/);assert.deepEqual(fs.readdirSync(fresh),[]);
+ console.log('IMAGE_CIPHER_FIXTURE_PASS: three independent RSA readbacks; corrupted cipher refusal; duplicate output preservation; changed source refusal; owned roundtrip duplicates removed. No production key or image was used.');
+})().catch(error=>{console.error(error);process.exitCode=1;});

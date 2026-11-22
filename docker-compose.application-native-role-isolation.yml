@@ -1,0 +1,37 @@
+# Diagnostic cross-issued native scopes in the SAME existing Compose project.
+# Each actor sees its own scope only through a different read-only volume;
+# peer issuance is not production release admission.
+name: sabalanerp-local
+services:
+  backend-candidate:
+    # Execute the qualified immutable image's own dist/client/packages. No
+    # compiled worktree overlay may replace the code under qualification.
+    volumes: !override
+      - ${LOCAL_BACKEND_STORAGE_CONTRACTS_SOURCE:-backend_storage_contracts}:/app/storage/contracts:ro
+      - ${LOCAL_BACKEND_STORAGE_HR_SOURCE:-backend_storage_hr_hiring}:/app/storage/hr-hiring:ro
+      - ${LOCAL_BACKEND_STORAGE_ACCOUNTING_SOURCE:-backend_storage_accounting_contracts}:/app/storage/accounting-contracts:ro
+      - ${LOCAL_BACKEND_STORAGE_SUPPORT_SOURCE:-backend_storage_support_tickets}:/app/storage/support-tickets:ro
+      - ${LOCAL_BACKEND_UPLOADS_SOURCE:-backend_uploads}:/app/uploads:ro
+      - ${LOCAL_BACKEND_RECOVERY_SOURCE:-backend_recovery}:/app/storage/recovery:ro
+      - ${LOCAL_BACKEND_SEPIDAR_BACKUP_SOURCE:-backend_storage_sepidar_backups}:/app/storage/sepidar-backups:ro
+      - ${LOCAL_RECOVERY_COORDINATION_SOURCE:-recovery_coordination}:/app/recovery-coordination:ro
+      - ${LOCAL_INQUIRY_RECOVERY_SOURCE:-inquiry_data}:/app/recovery-sources/inquiry:ro
+      - online_runtime_acceptance:/app/online-runtime-acceptance
+      - online_runtime_authority:/app/runtime-authority
+      - online_runtime_jobs_authority:/run/sabalan-online:ro
+  backend-retained:
+    volumes: !override
+      - ${LOCAL_BACKEND_STORAGE_CONTRACTS_SOURCE:-backend_storage_contracts}:/app/storage/contracts:ro
+      - ${LOCAL_BACKEND_STORAGE_HR_SOURCE:-backend_storage_hr_hiring}:/app/storage/hr-hiring:ro
+      - ${LOCAL_BACKEND_STORAGE_ACCOUNTING_SOURCE:-backend_storage_accounting_contracts}:/app/storage/accounting-contracts:ro
+      - ${LOCAL_BACKEND_STORAGE_SUPPORT_SOURCE:-backend_storage_support_tickets}:/app/storage/support-tickets:ro
+      - ${LOCAL_BACKEND_UPLOADS_SOURCE:-backend_uploads}:/app/uploads:ro
+      - ${LOCAL_BACKEND_RECOVERY_SOURCE:-backend_recovery}:/app/storage/recovery:ro
+      - ${LOCAL_BACKEND_SEPIDAR_BACKUP_SOURCE:-backend_storage_sepidar_backups}:/app/storage/sepidar-backups:ro
+      - ${LOCAL_RECOVERY_COORDINATION_SOURCE:-recovery_coordination}:/app/recovery-coordination:ro
+      - ${LOCAL_INQUIRY_RECOVERY_SOURCE:-inquiry_data}:/app/recovery-sources/inquiry:ro
+      - online_runtime_acceptance:/app/online-runtime-acceptance
+      - online_runtime_authority:/run/sabalan-online:ro
+      - online_runtime_jobs_authority:/app/jobs-authority
+volumes:
+  online_runtime_jobs_authority:

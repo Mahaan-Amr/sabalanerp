@@ -1,0 +1,27 @@
+TAP version 13
+# Subtest: closed streamed WAL is durably encrypted for retained local and independent RSA authorities
+not ok 1 - closed streamed WAL is durably encrypted for retained local and independent RSA authorities
+  ---
+  duration_ms: 1.4984
+  location: 'C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\tests\\online-deployment\\postgres-wal-seal.integration.test.mjs:22:1'
+  failureType: 'testCodeFailure'
+  error: "ENOENT: no such file or directory, open 'C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\deploy\\scripts\\seal-postgres-wal.cjs'"
+  code: 'ENOENT'
+  stack: |-
+    Object.openSync (node:fs:562:18)
+    Object.readFileSync (node:fs:446:35)
+    TestContext.<anonymous> (file:///C:/Users/mahan/.codex/worktrees/online-deployment/sabalanerp/tests/online-deployment/postgres-wal-seal.integration.test.mjs:25:23)
+    Test.runInAsyncScope (node:async_hooks:211:14)
+    Test.run (node:internal/test_runner/test:931:25)
+    Test.start (node:internal/test_runner/test:829:17)
+    startSubtestAfterBootstrap (node:internal/test_runner/harness:296:17)
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 0
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 90.884

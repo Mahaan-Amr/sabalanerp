@@ -2,7 +2,7 @@ import { partnerReactivationAt } from './reactivationPricing';
 import type { Prisma } from '@prisma/client';
 import { inquiryConfigurationHash } from '@sabalanerp/partner-sales-contracts';
 import { decodeTechnicalRecovery } from './technicalRecoveryRecords';
-import { decodeTechnicalSavedSnapshot } from './technicalSavedRecords';
+import { latestTechnicalSavedSnapshot } from './technicalSavedRecords';
 import { parseInquiryDefinition } from '../inquiries/definition';
 import { canRetainCasePricingApproval } from '../inquiries/approvalUsage';
 
@@ -43,11 +43,7 @@ export async function readCasePricingPresentation(tx: Prisma.TransactionClient, 
 }): Promise<{ state: ResponseState; complete: boolean; resubmittedWaiting: boolean } | undefined> {
   const recovery = decodeTechnicalRecovery(input.recovery);
   if (!recovery) return undefined;
-  let saved: Awaited<ReturnType<typeof decodeTechnicalSavedSnapshot>>;
-  for (const record of Array.isArray(recovery.validatedSnapshots) ? recovery.validatedSnapshots : []) {
-    const candidate = await decodeTechnicalSavedSnapshot(record);
-    if (candidate && (!saved || candidate.view.recoveryRevision > saved.view.recoveryRevision)) saved = candidate;
-  }
+  const saved = await latestTechnicalSavedSnapshot(Array.isArray(recovery.validatedSnapshots) ? recovery.validatedSnapshots : []);
   if (!saved || recovery.draft.inputRevision > saved.view.inputRevision) return undefined;
   const subjectIds = saved.view.pricingSubjects?.map(subject => subject.configurationRef.productRowId);
   const subjects = saved.identities.filter(item => (!subjectIds || subjectIds.includes(item.productRowId)) && !saved!.draft.dependents?.some(dependent =>

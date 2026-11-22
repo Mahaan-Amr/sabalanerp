@@ -1,17 +1,25 @@
-﻿import { normalizePartnerInput } from '@sabalanerp/partner-sales-contracts';
+import { buildAssetEvidenceForm } from '@/features/accounting/assetEvidenceContentDigest';
+import { normalizePartnerInput } from '@sabalanerp/partner-sales-contracts';
 import axios from 'axios';
 
-import type { InternalAxiosRequestConfig } from 'axios';
+import type { AxiosRequestConfig, InternalAxiosRequestConfig } from 'axios';
 import { createClientRequestId } from './requestIdentity';
 import { buildLoadingFinalizeRequest } from './loadingFinalizeRequest';
 import { buildAuthorizedPhysicalExitRequest } from './authorizedPhysicalExitRequest';
+import { createPrivateClient } from './privateClientScope';
+import { BrowserSessionContinuation, type BrowserSessionLease, type BrowserLoginAttempt } from './browserSessionContinuation';
+import { bindBrowserBuildRequestIdentity, bindBrowserBuildResourceUrl } from './browserBuildRequestIdentity';
+import { browserBuildHandoff } from './browserBuildHandoff';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:5000');
 const API_BASE = API_URL.endsWith('/api') ? API_URL : `${API_URL}/api`;
 export const API_ORIGIN = API_BASE.endsWith('/api') ? API_BASE.slice(0, -4) : API_BASE;
 
-const isPublicVerificationPath = (pathname: string) => (
-  pathname === '/apply'
+const isPublicBrowserPath = (pathname: string) => (
+  pathname === '/'
+  || pathname === '/about'
+  || pathname === '/contact'
+  || pathname === '/apply'
   || pathname.startsWith('/apply/')
   || pathname === '/contracts/confirm'
   || pathname.startsWith('/contracts/confirm/')
@@ -51,8 +59,8 @@ export const normalizeOperationalErrorPayload = (
 
 export const resolveBackendAssetUrl = (url?: string | null) => {
   if (!url) return '';
-  if (/^https?:\/\//i.test(url) || url.startsWith('data:')) return url;
-  return url.startsWith('/') ? url : `/${url}`;
+  const value = /^https?:\/\//i.test(url) || /^(?:data|blob):/i.test(url) || url.startsWith('/') ? url : `/${url}`;
+  return bindBrowserBuildResourceUrl(value, API_ORIGIN);
 };
 
 // Create axios instance
@@ -64,7 +72,15 @@ const api = axios.create({
   },
 });
 
-type RetryAwareConfig = InternalAxiosRequestConfig & { supportMutationFingerprint?: string };
+const sessionProbe = axios.create({ baseURL: API_BASE, withCredentials: true });
+sessionProbe.interceptors.request.use(config => {bindBrowserBuildRequestIdentity(config.headers); return config;});
+export const browserSessionContinuation = new BrowserSessionContinuation(async expectedUserId => {
+  const response = await sessionProbe.get('/auth/me', { headers: expectedUserId ? { 'x-sabalan-expected-user': expectedUserId } : undefined });
+  return { userId: response.data.data?.id, sessionId: response.data.session?.id };
+});
+
+type RetryAwareConfig = InternalAxiosRequestConfig & { supportMutationFingerprint?: string; browserSessionLease?: BrowserSessionLease;
+  browserBootstrapScope?: BrowserLoginAttempt; browserLoginAttempt?: BrowserLoginAttempt };
 const retryKeys = new Map<string, { key: string; expiresAt: number }>();
 const retryStorageKey = 'sabalan.mutation-retry-keys.v1';
 const loadRetryKeys = () => {
@@ -132,6 +148,34 @@ const clearRetryKey = (config?: RetryAwareConfig) => {
 };
 
 api.interceptors.request.use(async (config) => {
+  bindBrowserBuildRequestIdentity(config.headers);
+  if (typeof window !== 'undefined' && config.url === '/auth/me') {
+    (config as RetryAwareConfig).browserBootstrapScope = browserSessionContinuation.beginLogin();
+    const owner = browserSessionContinuation.expectedUserId();
+    if (owner && !config.headers.has('x-sabalan-expected-user')) config.headers.set('x-sabalan-expected-user', owner);
+  }
+  if (typeof window !== 'undefined' && config.url !== '/auth/login') {
+    if (config.url === '/auth/me') {
+      const owner = browserSessionContinuation.expectedUserId();
+      if (owner && !config.headers.has('x-sabalan-expected-user')) config.headers.set('x-sabalan-expected-user', owner);
+    } else {
+      const attempt = browserSessionContinuation.beginLogin();
+      let lease: BrowserSessionLease;
+      try { lease = await browserSessionContinuation.acquire(); }
+      catch (error) {
+        if (error && typeof error === 'object') Object.assign(error, { browserSessionAttempt: attempt });
+        throw error;
+      }
+      for (const [key, value] of [['x-sabalan-expected-user', lease.userId], ['x-sabalan-expected-session', lease.sessionId]]) {
+        if (config.headers.has(key) && config.headers.get(key) !== value) {
+          browserSessionContinuation.invalidate();
+          throw Object.assign(new Error('نشست این صفحه تغییر کرده است.'), { code: 'AUTH_CONTEXT_CHANGED' });
+        }
+        config.headers.set(key, value);
+      }
+      (config as RetryAwareConfig).browserSessionLease = lease;
+    }
+  }
   if (config.url?.startsWith('/partner/') && config.data && typeof config.data === 'object'
       && !(typeof FormData !== 'undefined' && config.data instanceof FormData)) {
     config.data = normalizePartnerInput(config.data);
@@ -159,17 +203,42 @@ let unauthorizedRedirectStarted = false;
 
 api.interceptors.response.use(
   (response) => {
+    const lease = (response.config as RetryAwareConfig).browserSessionLease;
+    if (lease) browserSessionContinuation.assertCurrent(lease);
+    if (typeof window !== 'undefined' && response.config.url === '/auth/me') {
+      browserSessionContinuation.acceptBootstrap({ userId: response.data.data?.id, sessionId: response.data.session?.id },
+        (response.config as RetryAwareConfig).browserBootstrapScope!);
+    }
     if (response.config.url === '/auth/login') unauthorizedRedirectStarted = false;
     clearRetryKey(response.config as RetryAwareConfig);
     return response;
   },
-  (error) => {
+  async (error) => {
+    if (error.response?.status === 409
+      && [error.response.data?.code, error.response.data?.error].includes('API_BUILD_REFRESH_REQUIRED')) {
+      // Expiry can reject the fresh /auth/me probe before a business request
+      // acquires its lease. A prior tab lease may preserve local bytes only;
+      // it never bypasses that denied request or authorizes a retry.
+      const lease = (error.config as RetryAwareConfig | undefined)?.browserSessionLease
+        || browserSessionContinuation.localRecoveryLease();
+      const handoff = lease ? await browserBuildHandoff.preserve(lease, () => browserSessionContinuation.assertCurrent(lease))
+        : { status: 'BLOCKED', code: 'BROWSER_BUILD_HANDOFF_OWNER_UNPROVEN', archives: [] };
+      error.browserBuildHandoff = handoff;
+      error.response.data = { ...error.response.data, code: 'API_BUILD_REFRESH_REQUIRED', buildHandoff: handoff,
+        message: handoff.status === 'PRESERVED'
+          ? 'پیش‌نویس‌های ثبت‌شده محفوظ شدند؛ برای ادامه صفحه را تازه کنید.'
+          : 'ذخیرهٔ مطمئن نوشته‌های این صفحه تأیید نشد؛ صفحه را نبندید یا تازه نکنید.' };
+    }
     if (error.response?.status === 401) {
+      if (browserSessionContinuation.expectedUserId()) browserSessionContinuation.invalidate(error.browserSessionAttempt
+        || error.config?.browserLoginAttempt || error.config?.browserSessionLease || error.config?.browserBootstrapScope);
       if (
         typeof window !== 'undefined'
         && !window.location.pathname.startsWith('/login')
-        && !isPublicVerificationPath(window.location.pathname)
+        && !isPublicBrowserPath(window.location.pathname)
         && !unauthorizedRedirectStarted
+        && !browserSessionContinuation.expectedUserId()
+        && !error.config?.headers?.['x-sabalan-expected-user']
       ) {
         unauthorizedRedirectStarted = true;
         window.location.replace('/login');
@@ -190,11 +259,20 @@ api.interceptors.response.use(
 
 // Auth API
 export const authAPI = {
-  login: (identifier: string, password: string) =>
-    api.post('/auth/login', { identifier, email: identifier, password }),
+  login: (identifier: string, password: string) => {
+    const attempt = browserSessionContinuation.beginLogin();
+    const request: AxiosRequestConfig & { browserLoginAttempt: BrowserLoginAttempt } = { browserLoginAttempt: attempt };
+    return api.post('/auth/login', { identifier, email: identifier, password,
+      ...(attempt.userId ? { expectedUserId: attempt.userId } : {}) }, request)
+      .then(response => {
+        const identity = { userId: response.data.data?.user?.id, sessionId: response.data.session?.id };
+        browserSessionContinuation.completeLogin(identity, attempt);
+        return response;
+      });
+  },
 
-  getMe: () => api.get('/auth/me'),
-  logout: () => api.post('/auth/logout'),
+  getMe: (expectedUserId?: string) => api.get('/auth/me', { headers: expectedUserId ? { 'x-sabalan-expected-user': expectedUserId } : undefined }),
+  logout: () => api.post('/auth/logout').finally(() => browserSessionContinuation.clear()),
   getSessions: () => api.get('/auth/sessions'),
   revokeSession: (id: string) => api.delete(`/auth/sessions/${id}`),
   revokeOtherSessions: () => api.post('/auth/sessions/revoke-others'),
@@ -208,17 +286,17 @@ const notifyReadStateChanged = <T,>(response: T): T => {
   return response;
 };
 
-export const notificationsAPI = {
+const notificationClient = (headers: Record<string, string> = {}) => ({
   list: (params?: { cursor?: string; limit?: number; state?: 'ALL' | 'UNREAD' | 'READ' | 'IMPORTANT'; search?: string; workspace?: string; category?: string }) =>
-    api.get('/notifications', { params }),
-  getUnreadCount: () => api.get('/notifications/unread-count'),
-  getMetadata: () => api.get('/notifications/metadata'),
-  markRead: (id: string) => api.put(`/notifications/${id}/read`).then(notifyReadStateChanged),
-  markUnread: (id: string) => api.delete(`/notifications/${id}/read`).then(notifyReadStateChanged),
-  markAllRead: () => api.put('/notifications/read-all').then(notifyReadStateChanged),
+    api.get('/notifications', { params, headers }),
+  getUnreadCount: () => api.get('/notifications/unread-count', { headers }),
+  getMetadata: () => api.get('/notifications/metadata', { headers }),
+  markRead: (id: string) => api.put(`/notifications/${id}/read`, undefined, { headers }).then(notifyReadStateChanged),
+  markUnread: (id: string) => api.delete(`/notifications/${id}/read`, { headers }).then(notifyReadStateChanged),
+  markAllRead: () => api.put('/notifications/read-all', undefined, { headers }).then(notifyReadStateChanged),
   resolveSecurityAlert: (id: string, decision: 'MINE' | 'NOT_MINE') =>
-    api.post(`/notifications/${id}/security-resolution`, { decision }).then(notifyReadStateChanged),
-  getPolicies: () => api.get('/notifications/admin/policies'),
+    api.post(`/notifications/${id}/security-resolution`, { decision }, { headers }).then(notifyReadStateChanged),
+  getPolicies: () => api.get('/notifications/admin/policies', { headers }),
   createPolicyVersion: (eventType: string, data: {
     enabled: boolean;
     titleTemplate: string;
@@ -228,15 +306,20 @@ export const notificationsAPI = {
     recipientResolvers: string[];
     batching: 'IMMEDIATE' | 'DAILY';
     changeReason: string;
-  }) => api.post(`/notifications/admin/policies/${eventType}/versions`, data),
-  getPreferences: () => api.get('/notifications/settings/preferences'),
+  }) => api.post(`/notifications/admin/policies/${eventType}/versions`, data, { headers }),
+  getPreferences: () => api.get('/notifications/settings/preferences', { headers }),
   updatePreferences: (data: { webPushEnabled: boolean; mutedCategories: string[]; lowPriorityDelivery: 'IMMEDIATE' | 'DAILY' }) =>
-    api.put('/notifications/settings/preferences', data),
+    api.put('/notifications/settings/preferences', data, { headers }),
   registerDevice: (data: { endpoint: string; keys: { p256dh: string; auth: string }; deviceLabel?: string }) =>
-    api.post('/notifications/settings/devices', data),
-  disableDevice: (deviceId: string) => api.delete(`/notifications/settings/devices/${deviceId}`),
-  disableAllDevices: () => api.delete('/notifications/settings/devices'),
-};
+    api.post('/notifications/settings/devices', data, { headers }),
+  disableDevice: (deviceId: string) => api.delete(`/notifications/settings/devices/${deviceId}`, { headers }),
+  disableAllDevices: () => api.delete('/notifications/settings/devices', { headers }),
+});
+export const notificationsAPI = notificationClient();
+export const createScopedNotificationsAPI = (userId: string) => createPrivateClient(userId, async () => {
+  const response = await authAPI.getMe(userId);
+  return { userId: response.data.data?.id, sessionId: response.data.session?.id };
+}, notificationClient);
 
 export const supportTicketsAPI = {
   getContext: () => api.get('/support-tickets/context'),
@@ -409,6 +492,7 @@ export const hrAPI = {
   getPersonnelDeletionPreview: (id: string) => api.get(`/hr/personnel/${id}/deletion-preview`),
   permanentlyDeletePersonnel: (id: string, data: any) => api.post(`/hr/personnel/${id}/permanent-delete`, data),
   createExceptionalPersonnel: (data: any) => api.post('/hr/personnel/exceptional', data),
+  getPersonnelIdentity: (id: string) => api.get(`/hr/personnel/${id}/identity`),
   updatePersonnel: (id: string, data: any) => api.put(`/hr/personnel/${id}`, data),
   updatePersonnelWorkSchedule: (id: string, data: any) => api.put(`/hr/personnel/${id}/work-schedule`, data),
   createRelationship: (personnelId: string, data: any) => api.post(`/hr/personnel/${personnelId}/relationships`, data),
@@ -428,6 +512,17 @@ export const hrAPI = {
   applyHrRedesignBackfill: () => api.post('/hr/migration/redesign-backfill'),
 };
 
+export const externalVehicleAssignmentsAPI = {
+  list: () => api.get('/dispatch-master-data/external/driver-vehicle-assignments'),
+  preview: (data: any) => api.post('/dispatch-master-data/external/driver-vehicle-assignments/preview', data),
+  assign: (data: any) => api.post('/dispatch-master-data/external/driver-vehicle-assignments', data),
+  end: (id: string, data: any) => api.post(`/dispatch-master-data/external/driver-vehicle-assignments/${id}/end`, data),
+  updatePlan: (id: string, data: any) => api.put(`/dispatch-master-data/external/driver-vehicle-assignment-plans/${id}`, data),
+  cancelPlan: (id: string, data: any) => api.post(`/dispatch-master-data/external/driver-vehicle-assignment-plans/${id}/cancel`, data),
+  executePlan: (id: string, data: any) => api.post(`/dispatch-master-data/external/driver-vehicle-assignment-plans/${id}/execute`, data),
+};
+const biometricDriverPath = (key: string) => key.startsWith('external:') ? `external-drivers/${encodeURIComponent(key.slice(9))}` : `internal-drivers/${encodeURIComponent(key)}`;
+
 export const dispatchMasterDataAPI = {
   getInternalDrivers: (params?: { at?: string }) => api.get('/dispatch-master-data/internal-drivers', { params }),
   getPersonnelDriverEligibility: (personnelId: string, params?: { at?: string }) => api.get(`/dispatch-master-data/internal-drivers/personnel/${personnelId}`, { params }),
@@ -440,8 +535,20 @@ export const dispatchMasterDataAPI = {
   createCompanyVehicle: (data: any) => api.post('/dispatch-master-data/company-vehicles', data),
   changeCompanyVehiclePlate: (id: string, data: any) => api.post(`/dispatch-master-data/company-vehicles/${id}/plates`, data),
   transitionCompanyVehicleStatus: (id: string, data: any) => api.post(`/dispatch-master-data/company-vehicles/${id}/status`, data),
-  deleteCompanyVehicleDraft: (id: string, reason: string) => api.delete(`/dispatch-master-data/company-vehicles/${id}`, { data: { reason } }),
+  deleteCompanyVehicleDraft: (id: string, reason?: string) => api.delete(`/dispatch-master-data/company-vehicles/${id}`, { data: { reason } }),
+  getDriverPersonnelCandidates: () => api.get('/dispatch-master-data/vehicle-operations/personnel-candidates'),
+  endInternalDriverActivity: (id: string, data: any) => api.post(`/dispatch-master-data/internal-drivers/${id}/end-activity`, data),
+  updateCompanyVehicle: (id: string, data: any) => api.put(`/dispatch-master-data/company-vehicles/${id}`, data),
+  getVehicleAssignments: () => api.get('/dispatch-master-data/driver-vehicle-assignments'),
+  previewVehicleAssignment: (data: any) => api.post('/dispatch-master-data/driver-vehicle-assignments/preview', data),
+  endVehicleAssignment: (id: string, data: any) => api.post(`/dispatch-master-data/driver-vehicle-assignments/${id}/end`, data),
+  updateVehicleAssignmentPlan: (id: string, data: any) => api.put(`/dispatch-master-data/driver-vehicle-assignment-plans/${id}`, data),
+  cancelVehicleAssignmentPlan: (id: string, data: any) => api.post(`/dispatch-master-data/driver-vehicle-assignment-plans/${id}/cancel`, data),
+  executeVehicleAssignmentPlan: (id: string, data: any) => api.post(`/dispatch-master-data/driver-vehicle-assignment-plans/${id}/execute`, data),
   assignCompanyVehicle: (data: any) => api.post('/dispatch-master-data/driver-vehicle-assignments', data),
+  getExternalDriverEligibility: (id: string) => api.get(`/dispatch-master-data/external-drivers/${id}/eligibility`),
+  updateExternalDriver: (id: string, data: any) => api.put(`/dispatch-master-data/external-drivers/${id}`, data),
+  updateExternalVehicle: (id: string, data: any) => api.put(`/dispatch-master-data/external-vehicles/${id}`, data),
   getExternalRegistry: (params?: { archived?: 'exclude' | 'include' | 'only' }) => api.get('/dispatch-master-data/external-registry', { params }),
   createExternalDriver: (data: any) => api.post('/dispatch-master-data/external-drivers', data),
   createExternalVehicle: (data: any) => api.post('/dispatch-master-data/external-vehicles', data),
@@ -648,7 +755,7 @@ export const salesAPI = {
   
   printContract: (id: string, note?: string) => api.put(`/sales/contracts/${id}/print`, { note }),
 
-  reassignResponsibleSeller: (id: string, sellerId: string, reason: string) =>
+  reassignResponsibleSeller: (id: string, sellerId: string, reason?: string) =>
     api.put(`/sales/contracts/${id}/responsible-seller`, { sellerId, reason }),
 
   assignLegacyRealizedCredit: (id: string, sellerId: string, reason: string) =>
@@ -1088,6 +1195,15 @@ export const accountingAPI = {
   createAssetClassPolicy: (data: any) => api.post('/accounting/period-end/asset-policies', data),
   createFixedAsset: (data: any) => api.post('/accounting/period-end/assets', data),
   postAssetDepreciation: (id: string, data: any) => api.post(`/accounting/period-end/assets/${id}/depreciation`, data),
+  getAssetEvidence: (id: string, bookId: string) => api.get(`/accounting/period-end/assets/${id}/evidence`, { params: { bookId } }),
+  downloadAssetEvidence: (assetId: string, evidenceId: string, bookId: string) => api.get(
+    `/accounting/period-end/assets/${assetId}/evidence/${evidenceId}/download`,
+    { params: { bookId }, responseType: 'blob' },
+  ),
+  uploadAssetEvidence: async (id: string, bookId: string, purpose: 'COST' | 'READY', file: File) => {
+    const data = await buildAssetEvidenceForm(bookId, purpose, file);
+    return api.post(`/accounting/period-end/assets/${id}/evidence`, data, { headers: { 'Content-Type': undefined } });
+  },
   createRecognitionSchedule: (data: any) => api.post('/accounting/period-end/schedules', data),
   createEstimateCase: (data: any) => api.post('/accounting/period-end/estimate-cases', data),
   createFinancialStatementMapping: (data: any) => api.post('/accounting/period-end/mappings', data),
@@ -1109,11 +1225,18 @@ export const accountingAPI = {
   getWorkspace: (params?: any) => api.get('/accounting/workspace', { params }),
   getDashboard: (params: { range: '1m' | '3m' | '6m' | '1y'; due?: string; deadlineType?: string }) =>
     api.get('/accounting/dashboard', { params }),
+  getDashboardChange: (params: { range: '1m' | '3m' | '6m' | '1y'; due?: string; deadlineType?: string;
+    accessRevision?: string; workspaceRevision?: string; trendRevision?: string }) => api.get('/accounting/dashboard/change', { params }),
+  getDashboardWorkspace: (params: { range: '1m' | '3m' | '6m' | '1y'; due?: string; deadlineType?: string }) =>
+    api.get('/accounting/dashboard/workspace', { params }),
   getFinancialTrend: (range: '1m' | '3m' | '6m' | '1y') => api.get('/accounting/financial-trend', { params: { range } }),
   getDispatchCandidates: () => api.get('/accounting/dispatch-candidates'),
+  issueLoadingDocuments: (loadingId: string, recovery?: { waybillId: string; invoiceId: string; reason: string }) =>
+    api.post(`/accounting/loadings/${encodeURIComponent(loadingId)}/issue-dispatch-documents`, recovery ? { recovery } : undefined),
+  reconstructLegacyWaybill: (waybillId: string, reason: string) => api.post(`/accounting/dispatch-waybills/${encodeURIComponent(waybillId)}/reconstruct-legacy`, { reason }),
   decideDispatchCandidate: (id: string, data: { action: 'ACCEPT' | 'REJECT'; reason: string; idempotencyKey: string }) =>
     api.post(`/accounting/dispatch-candidates/${id}/decision`, data),
-  voidDispatchWaybill: (id: string, data: { reason: string; idempotencyKey: string }) =>
+  voidDispatchWaybill: (id: string, data: { reason: string; idempotencyKey: string; expectedInvoiceId?: string | null }) =>
     api.post(`/accounting/dispatch-waybills/${id}/void`, data),
   replaceDispatchWaybill: (id: string, data: { reason: string; idempotencyKey: string }) =>
     api.post(`/accounting/dispatch-waybills/${id}/replace`, data),
@@ -1183,10 +1306,12 @@ export const accountingAPI = {
 
 export const dispatchConfirmationAPI = {
   getCapabilities: () => api.get('/dispatch-confirmation/capabilities'),
-  enrollInternalDriver: (personnelId: string, data: any) => api.post(`/dispatch-confirmation/internal-drivers/${personnelId}/enrollment`, data),
-  cancelEnrollmentSession: (personnelId: string, enrollmentSessionId: string) => api.post(`/dispatch-confirmation/internal-drivers/${personnelId}/enrollment-session/cancel`, { enrollmentSessionId }),
-  acceptEnrollmentCapture: (personnelId: string, data: any) => api.post(`/dispatch-confirmation/internal-drivers/${personnelId}/enrollment-captures`, data),
-  createEnrollmentCommand: (personnelId: string, data: { workstationId: string; finger: string; enrollmentSessionId: string }) => api.post(`/dispatch-confirmation/internal-drivers/${personnelId}/enrollment-commands`, data),
+  enrollInternalDriver: (personnelId: string, data: any) => api.post(`/dispatch-confirmation/${biometricDriverPath(personnelId)}/enrollment`, data),
+  cancelEnrollmentSession: (personnelId: string, enrollmentSessionId: string) => api.post(`/dispatch-confirmation/${biometricDriverPath(personnelId)}/enrollment-session/cancel`, { enrollmentSessionId }),
+  acceptEnrollmentCapture: (personnelId: string, data: any) => api.post(`/dispatch-confirmation/${biometricDriverPath(personnelId)}/enrollment-captures`, data),
+  createEnrollmentCommand: (personnelId: string, data: { workstationId: string; finger: string; enrollmentSessionId: string }) => api.post(`/dispatch-confirmation/${biometricDriverPath(personnelId)}/enrollment-commands`, data),
+  updateEnrollmentConfirmationPhone: (enrollmentId: string, confirmationPhone: string) =>
+    api.patch(`/dispatch-confirmation/enrollments/${enrollmentId}/confirmation-phone`, { confirmationPhone }),
   deactivateEnrollment: (enrollmentId: string, reason: string) => api.post(`/dispatch-confirmation/enrollments/${enrollmentId}/deactivate`, { reason }),
   getEnrollmentImage: (enrollmentId: string, finger: string) => api.get(`/dispatch-confirmation/enrollments/${enrollmentId}/images/${finger}`, { responseType: 'blob' }),
   startSession: (waybillId: string, workstationId: string) => api.post(`/dispatch-confirmation/waybills/${waybillId}/sessions`, { workstationId }),
@@ -1229,7 +1354,8 @@ export const salesReportsAPI = {
 export const logisticsAPI = {
   getDashboard: () => api.get('/logistics/dashboard'),
   getLoadableCustomers: (params?: any) => api.get('/logistics/customers', { params }),
-  getCustomerProjects: (customerId: string) => api.get(`/logistics/customers/${customerId}/projects`),
+  getCustomerProjects: (customerId: string, projectId?: string) =>
+    api.get(`/logistics/customers/${customerId}/projects`, { params: { projectId } }),
   getProjects: (params?: any) => api.get('/logistics/projects', { params }),
   getRemaining: (projectId: string) => api.get(`/logistics/projects/${projectId}/remaining`),
   createOrResumeDraft: (projectId: string, data?: any) => api.post(`/logistics/projects/${projectId}/draft`, data || {}),
@@ -1242,14 +1368,20 @@ export const logisticsAPI = {
     const request = buildLoadingFinalizeRequest(id);
     return api.post(request.path, request.body, request.config);
   },
-  cancelLoading: (id: string, reason: string) => api.post(`/logistics/loadings/${id}/cancel`, { reason }),
+  requestLoadingCancellation: (id: string, reason: string) =>
+    api.post(`/logistics/loadings/${encodeURIComponent(id)}/cancellation-request`, { reason }),
+  getCancellationDocuments: (id: string) => api.get(`/logistics/loadings/${encodeURIComponent(id)}/cancellation-documents`),
+  cancelLoading: (id: string, reason: string, expectedDocumentIds?: string[]) =>
+    api.post(`/logistics/loadings/${encodeURIComponent(id)}/cancel`, { reason, expectedDocumentIds }),
   createCorrection: (id: string, data: any) => api.post(`/logistics/loadings/${id}/corrections`, data),
   getDrivers: (params?: any) => api.get('/logistics/drivers', { params }),
-  reserveCanonicalDriver: (queueTurnId: string, loadingId: string) =>
-    api.post(`/logistics/canonical-driver-queue/${queueTurnId}/reserve`, { loadingId }),
+  selectLoadingTransport: (loadingId: string, mode: 'PERSONAL' | 'DRIVERS', expected?: unknown) =>
+    api.put(`/logistics/loadings/${encodeURIComponent(loadingId)}/transport`, { mode, expected }),
+  reserveCanonicalDriver: (queueTurnId: string, loadingId: string, context?: { expected: unknown; reason: string }) =>
+    api.post(`/logistics/canonical-driver-queue/${queueTurnId}/reserve`, { loadingId, ...context }),
   releaseCanonicalDriver: (queueTurnId: string, loadingId: string, reason: string) =>
     api.post(`/logistics/canonical-driver-queue/${queueTurnId}/release`, { loadingId, reason }),
-  saveCanonicalAllocation: (loadingId: string, queueTurnId: string, data: { lines: any[] }) =>
+  saveCanonicalAllocation: (loadingId: string, queueTurnId: string, data: { lines: any[]; expected?: unknown; reason?: string }) =>
     api.put(`/logistics/loadings/${loadingId}/canonical-allocations/${queueTurnId}`, data),
 };
 
@@ -1311,6 +1443,7 @@ const publicApi = axios.create({
     'Content-Type': 'application/json'
   }
 });
+publicApi.interceptors.request.use(config => {bindBrowserBuildRequestIdentity(config.headers); return config;});
 
 export const publicContractsAPI = {
   lookupConfirmationContract: (contractNumber: string, phoneNumber: string) =>
@@ -1466,8 +1599,8 @@ export const securityAPI = {
   downloadCompletedSecurityShiftsPdf: (shiftIds: string[]) => api.post('/security/reports/completed-shifts.pdf', { shiftIds }, { responseType: 'blob' }),
   previewSecurityShiftAttendance: (shiftIds: string[], personnelIds: string[] = []) => api.post('/security/reports/attendance-preview', { shiftIds, personnelIds }),
   downloadSecurityShiftAttendancePdf: (shiftIds: string[], personnelIds: string[] = []) => api.post('/security/reports/attendance.pdf', { shiftIds, personnelIds }, { responseType: 'blob' }),
-  previewPersonnelAttendance: (options: { startDate: string; endDate: string; restMinutes: number; personnelIds: string[]; includeNoMovement: boolean; mergeMatchingNames: boolean }) => api.post('/security/reports/personnel-attendance-preview', options),
-  downloadPersonnelAttendancePdf: (options: { startDate: string; endDate: string; restMinutes: number; personnelIds: string[]; includeNoMovement: boolean; mergeMatchingNames: boolean }) => api.post('/security/reports/personnel-attendance.pdf', options, { responseType: 'blob' }),
+  previewPersonnelAttendance: (options: { startDate: string; endDate: string; restMinutes?: number; personnelIds: string[]; includeNoMovement: boolean; mergeMatchingNames: boolean }) => api.post('/security/reports/personnel-attendance-preview', options),
+  downloadPersonnelAttendancePdf: (options: { startDate: string; endDate: string; restMinutes?: number; personnelIds: string[]; includeNoMovement: boolean; mergeMatchingNames: boolean }) => api.post('/security/reports/personnel-attendance.pdf', options, { responseType: 'blob' }),
   getPersonnelReportDirectory: (params?: any) => api.get('/security/reports/personnel-history', { params }),
   getPersonnelReportHistory: (personnelId: string, params?: any) => api.get(`/security/reports/personnel-history/${personnelId}`, { params }),
   downloadPersonnelReportHistoryPdf: (personnelId: string, filters: any, includeImages: boolean) => api.post(`/security/reports/personnel-history/${personnelId}.pdf`, { filters, includeImages }, { responseType: 'blob' }),
@@ -1486,7 +1619,8 @@ export const securityAPI = {
   getDriverQueue: (history = false) => api.get('/security/driver-queue', { params: { history } }),
   getCanonicalDriverQueue: (history = false) => api.get('/security/canonical-driver-queue', { params: { history } }),
   getCanonicalQueueAdmissionOptions: () => api.get('/security/canonical-driver-queue/admission-options'),
-  admitCanonicalQueueTurn: (data: { source: 'INTERNAL' | 'EXTERNAL'; driverId: string; vehicleId?: string }) => api.post('/security/canonical-driver-queue', data),
+  admitCanonicalQueueTurn: (data: { source: 'INTERNAL' | 'EXTERNAL'; driverId: string; vehicleId?: string } |
+    { source: 'CUSTOMER_PICKUP'; vehicleType: string; plate: string; phone: string }) => api.post('/security/canonical-driver-queue', data),
   makeCanonicalQueueTurnAvailable: (id: string) => api.post(`/security/canonical-driver-queue/${id}/available`),
   returnCanonicalQueueTurnToWaiting: (id: string, reason: string) => api.post(`/security/canonical-driver-queue/${id}/return-to-waiting`, { reason }),
   closeCanonicalQueueTurnWithoutLoading: (id: string, reason: string) => api.post(`/security/canonical-driver-queue/${id}/close-without-loading`, { reason }),

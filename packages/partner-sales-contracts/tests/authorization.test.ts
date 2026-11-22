@@ -1,6 +1,14 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { checkPartnerDomainRestrictions, ERROR_CATALOG, publicError, partnerError, PermissionContextSchema } from '../src';
+import { checkPartnerDomainRestrictions, ERROR_CATALOG, publicError, partnerError, PartnerErrorSchema, PermissionContextSchema } from '../src';
+
+test('component failures have a bounded public identity and a canonical Persian message', () => {
+  const error = partnerError('CATALOG_COMPONENT_UNAVAILABLE', { kind: 'FINISHING', title: 'پوساب پالیش پله', reason: 'INACTIVE' });
+  assert.deepEqual(PartnerErrorSchema.parse(error), error);
+  assert.equal(publicError(error, 'support-313').message, error.message);
+  assert.equal(PartnerErrorSchema.safeParse({ ...error, message: 'private diagnostics' }).success, false);
+  assert.equal(PartnerErrorSchema.safeParse({ ...partnerError('FORBIDDEN'), component: error.component }).success, false);
+});
 
 test('central authorization receives all four non-bypassable Partner restrictions', () => {
   const context = PermissionContextSchema.parse({

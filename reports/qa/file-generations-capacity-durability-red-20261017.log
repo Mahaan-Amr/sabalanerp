@@ -1,0 +1,12 @@
+file:///C:/Users/mahan/.codex/worktrees/online-deployment/sabalanerp/scripts/run-file-generations-local.mjs:63
+    : reject(Error('FILE_GENERATION_NATIVE_FIXTURE_FAILED ' + JSON.stringify({ code, signal, stderr, directory }))));
+             ^
+
+Error: FILE_GENERATION_NATIVE_FIXTURE_FAILED {"code":1,"signal":null,"stderr":"Traceback (most recent call last):\n  File \"/app/online-runtime-acceptance/file-generations-be3a6279079e2dded43900e818abe1d0/fixture.py\", line 131, in <module>\n    expect_error('FILE_GENERATION_RECORD_TOO_LARGE', lambda: module.publish_record(\n  File \"/app/online-runtime-acceptance/file-generations-be3a6279079e2dded43900e818abe1d0/fixture.py\", line 37, in expect_error\n    raise AssertionError('Expected ' + code)\nAssertionError: Expected FILE_GENERATION_RECORD_TOO_LARGE\n","directory":"/app/online-runtime-acceptance/file-generations-be3a6279079e2dded43900e818abe1d0"}
+    at ChildProcess.<anonymous> (file:///C:/Users/mahan/.codex/worktrees/online-deployment/sabalanerp/scripts/run-file-generations-local.mjs:63:14)
+    at Object.onceWrapper (node:events:639:26)
+    at ChildProcess.emit (node:events:524:28)
+    at maybeClose (node:internal/child_process:1101:16)
+    at ChildProcess._handle.onexit (node:internal/child_process:304:5)
+
+Node.js v22.13.0

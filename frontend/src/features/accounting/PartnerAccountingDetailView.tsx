@@ -4,12 +4,14 @@ import { formatPartnerMoneyTotal } from '@/features/partner-sales/presentation';
 import { FaBalanceScale, FaFileInvoice, FaFlag, FaMoneyCheckAlt, FaReceipt, FaSync, FaExclamationTriangle } from 'react-icons/fa';
 import { partnerTrackingCode, partnerCommercialLabels } from '@sabalanerp/partner-sales-contracts';
 import { ErpButton, ErpCard, ErpInlineState, ErpPage, ErpSection, ErpSegmentedControl, ErpSummaryGrid, ErpTwoColumn } from '@/components/erp';
-import { CompactQueueItem, FinancialInvoiceApprovalForm, type FinancialInvoiceApprovalPayload, StatusBadge, dateFa, invoiceStatusLabels, money, receivableStatusLabels, taxStatusLabels } from './accountingUi';
+import { CompactQueueItem, StatusBadge, dateFa, invoiceStatusLabels, money, receivableStatusLabels, taxStatusLabels } from './accountingUi';
 import { operationalStatusLabel } from '@/features/dispatch/operationalStatusPresentation';
 import AccountingCustomPrintSettings, { defaultCustomPrintSettings, salesPdfVariantLabels, type SalesPdfVariant, type CustomPrintSettings, type CustomPrintPreset } from './AccountingCustomPrintSettings';
 import AccountingContractPrintActions, { accountingContractTabs } from './AccountingContractPrintActions';
+import { financialRecordReviewHref } from './financialRecordReviewHref';
 
 export type PartnerInternalDocument = {
+  customerSignature?: { showActions: boolean; contractId: string; revision: number; updatedAt: string; canRecordPaperSignature: boolean };
   owner?: { caseId: string; revision: number; integrityHash: string };
   preparationOnly?: boolean; amountKnown?: boolean; commercial?: { status: keyof typeof partnerCommercialLabels } | null;
   id: string; caseState?: string; status: string; amount: string; receivedAmount: string; remainingAmount: string;
@@ -33,11 +35,12 @@ export type PartnerInternalDocument = {
 export type PartnerDetailSection = typeof accountingContractTabs[number]['value'];
 export const partnerQuantityLabel = (unit: string) => ({ meter: 'متر طول', count: 'عدد', squareMeter: 'متر مربع', ton: 'تن' } as Record<string, string>)[unit] || unit;
 
-export function PartnerAccountingDetailView({ lifecyclePanel, financialVoidPanel, document: doc, section, onSection, pending, error, onRefresh, onPdf, onFlag, onCorrection, onResolve, invoiceOpen = false, onOpenInvoice, onApproveInvoice, onCreateReceivable, printVariant = 'accounting', onPrintVariant, customPrintSettings = defaultCustomPrintSettings, setCustomPrintSettings, applyCustomPreset }: {
+export function PartnerAccountingDetailView({ signaturePanel, lifecyclePanel, financialVoidPanel, document: doc, section, onSection, pending, error, onRefresh, onPdf, onFlag, onCorrection, onResolve, onOpenInvoice, onCreateReceivable, printVariant = 'accounting', onPrintVariant, customPrintSettings = defaultCustomPrintSettings, setCustomPrintSettings, applyCustomPreset }: {
+  signaturePanel?: React.ReactNode;
   lifecyclePanel?: React.ReactNode;
   financialVoidPanel?: React.ReactNode;
   onCreateReceivable?: () => void;
-  invoiceOpen?: boolean; onOpenInvoice?: () => void; onApproveInvoice?: (payload: FinancialInvoiceApprovalPayload) => void | Promise<void>;
+  onOpenInvoice?: () => void;
   printVariant?: SalesPdfVariant; onPrintVariant?: (value: SalesPdfVariant) => void; customPrintSettings?: CustomPrintSettings;
   setCustomPrintSettings?: React.Dispatch<React.SetStateAction<CustomPrintSettings>>; applyCustomPreset?: (preset: CustomPrintPreset) => void;
   document: PartnerInternalDocument; section: PartnerDetailSection; onSection: (value: PartnerDetailSection) => void;
@@ -81,9 +84,11 @@ export function PartnerAccountingDetailView({ lifecyclePanel, financialVoidPanel
     {error && <ErpInlineState kind="error" title={error} />}
     <ErpSegmentedControl value={section} onChange={onSection} options={[...accountingContractTabs]} />
     {section === 'summary' && <>
+      {signaturePanel}
       {lifecyclePanel}
       {doc.flags.filter(flag => flag.status === 'OPEN').map(flag => <ErpInlineState key={flag.id} kind="stale" title={flag.title} className="mt-3" />)}
       <ErpSection title="خروجی چاپ قرارداد"><AccountingContractPrintActions value={printVariant} options={Object.entries(salesPdfVariantLabels).map(([value, label]) => ({ value, label }))}
+        blockedReason={['production', 'workshop'].includes(printVariant) && (doc.preparationOnly || !['ISSUED', 'POSTED'].includes(doc.status)) ? 'این خروجی به رکورد مالی تأییدشده و معتبر نیاز دارد.' : undefined}
         onChange={value => onPrintVariant?.(value as SalesPdfVariant)} pending={pending} onDownload={() => onPdf(false)} onPrint={() => onPdf(true)} />
         {printVariant === 'custom' && setCustomPrintSettings && applyCustomPreset && <AccountingCustomPrintSettings
           customPrintSettings={customPrintSettings} setCustomPrintSettings={setCustomPrintSettings} applyCustomPreset={applyCustomPreset} />}
@@ -108,11 +113,9 @@ export function PartnerAccountingDetailView({ lifecyclePanel, financialVoidPanel
     {section === 'financial' && !doc.preparationOnly && <ErpTwoColumn main={<ErpSection title="رکوردهای مالی">
       <CompactQueueItem icon={FaFileInvoice} title="صورتحساب قرارداد" meta={`شماره صورتحساب: ${doc.systemInvoiceNumber || 'ثبت نشده'}`}
         amount={money(doc.amount, doc.currency)} status={<StatusBadge status={doc.status} />}
-        footer={invoiceOpen && onApproveInvoice ? <ErpCard className="p-3">
-          <FinancialInvoiceApprovalForm invoice={{ id: doc.id, amount: doc.amount, status: doc.status,
-            currency: doc.currency, sourceKind: 'PARTNER_INTERNAL_RECORD', systemInvoiceNumber: doc.systemInvoiceNumber,
-            systemInvoiceDate: doc.systemInvoiceDate, sepidarAmount: doc.sepidarAmount, metadata: doc.metadata }}
-            busy={pending || !doc.actions.canReviewInvoice} onApprove={onApproveInvoice} />
+        footer={doc.actions.canReviewInvoice ? <ErpCard className="p-3">
+          <ErpButton label="بررسی و تأیید مالی" href={financialRecordReviewHref(doc.id,
+            `/dashboard/accounting/contracts/partner/${encodeURIComponent(doc.partnerContext.caseId)}`)} />
         </ErpCard> : undefined} />
       {doc.totals && <div className="mt-3"><ErpSummaryGrid items={[
         { label: 'جمع اقلام', value: money(doc.totals.net, doc.currency) }, { label: 'تخفیف', value: money(doc.totals.discount, doc.currency) },

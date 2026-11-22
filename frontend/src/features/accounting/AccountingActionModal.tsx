@@ -1,6 +1,7 @@
 'use client';
 import { ErpField, ErpInlineState, ErpInput, ErpSheet, ErpTextarea } from '@/components/erp';
 import { useEffect, useMemo, useState } from 'react';
+import {useUnarchivedDraftGuard} from '@/lib/useUnarchivedDraftGuard';
 import FormattedNumberInput from '@/components/FormattedNumberInput';
 import PersianCalendarComponent from '@/components/PersianCalendar';
 import PersianTimePicker from '@/components/PersianTimePicker';
@@ -61,6 +62,7 @@ export default function AccountingActionModal({
 }: AccountingActionModalProps) {
   const [values, setValues] = useState<Record<string, string | number>>({});
   const [touched, setTouched] = useState<Record<string, boolean>>({});
+  useUnarchivedDraftGuard('accounting-action-editor',open);
   const fieldDefaultsKey = useMemo(
     () => fields.map((field) => `${field.id}:${field.type}:${String(field.defaultValue ?? '')}`).join('|'),
     [fields]

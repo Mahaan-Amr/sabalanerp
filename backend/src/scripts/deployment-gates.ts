@@ -9,6 +9,7 @@ import { RECOVERY_COORDINATION_DIR } from '../services/recoveryRuntime';
 import { sha256File } from '../services/recoveryCrypto';
 import { validateLiveStoredFileReferences } from '../services/systemRecoveryEngine';
 import { verifyShipmentStatementDeploymentState } from '../services/shipmentStatementOperations';
+import { verifyInquiryBaseline, inspectInquiryBaseline } from '../services/inquiryMigrationPlan';
 
 const execFileAsync = promisify(execFile);
 const deploymentId = String(process.env.DEPLOYMENT_ID || '').trim();
@@ -57,6 +58,7 @@ const performanceExportStorageGate = async () => {
 
 const main = async () => {
   if (!deploymentId) throw Object.assign(new Error('DEPLOYMENT_ID is required.'), { code: 'DEPLOYMENT_CONFIGURATION_MISSING' });
+  if (process.env.DEPLOYMENT_ONLINE_GATE_CONTEXT) throw new Error('ONLINE_GATE_RETIRED');
   const inquiryDatabase = process.env.INQUIRY_RECOVERY_SOURCE_DIR
     ? path.join(process.env.INQUIRY_RECOVERY_SOURCE_DIR, 'inquiry.db')
     : '/app/recovery-sources/inquiry/inquiry.db';
@@ -99,7 +101,15 @@ const main = async () => {
       run: async () => {
         const result = await execFileAsync('sqlite3', [inquiryDatabase, 'PRAGMA integrity_check;'], { timeout: 30_000, windowsHide: true });
         if (result.stdout.trim() !== 'ok') throw new Error(`SQLite integrity check failed: ${result.stdout.trim()}`);
-        return { integrity: 'ok' };
+        let identity;
+        if(releaseMode) {
+          const checkpoint=JSON.parse(await fs.promises.readFile(checkpointPath,'utf8'));
+          const unchangedConfiguration=process.env.DEPLOYMENT_MODE==='configuration' && checkpoint.deploymentId===deploymentId
+            && checkpoint.rollbackReleaseSet?.inquiry===process.env.DEPLOYMENT_INQUIRY_IMAGE
+            && /^sha256:[a-f0-9]{64}$/.test(process.env.DEPLOYMENT_INQUIRY_IMAGE||'');
+          identity=unchangedConfiguration?await inspectInquiryBaseline(inquiryDatabase):await verifyInquiryBaseline(inquiryDatabase);
+        }
+        return { integrity: 'ok', identity };
       },
     },
     { name: 'backend-readiness', run: httpGate('http://backend:5000/api/ready') },
@@ -109,6 +119,7 @@ const main = async () => {
     { name: 'contracts-storage', run: writableDirectoryGate('/app/storage/contracts') },
     { name: 'hr-storage', run: writableDirectoryGate('/app/storage/hr-hiring') },
     { name: 'accounting-storage', run: writableDirectoryGate('/app/storage/accounting-contracts') },
+    { name: 'dispatch-storage', run: writableDirectoryGate('/app/storage/dispatch-documents') },
     { name: 'support-storage', run: writableDirectoryGate('/app/storage/support-tickets') },
     { name: 'performance-export-storage', run: performanceExportStorageGate },
     { name: 'uploads-storage', run: writableDirectoryGate('/app/uploads') },
@@ -116,7 +127,8 @@ const main = async () => {
     ...(!previousUnchangedMode ? [{
       name: 'checkpoint-manifest',
       run: async () => {
-        const checkpoint = JSON.parse(await fs.promises.readFile(checkpointPath, 'utf8'));
+        const checkpoint:any=JSON.parse(await fs.promises.readFile(checkpointPath, 'utf8'));
+        if(!checkpoint)throw Error('DEPLOYMENT_CHECKPOINT_REQUIRED');
         if (!checkpoint.localVerified || !checkpoint.remoteVerified || !checkpoint.manifestReadable) throw new Error('Checkpoint verification flags are incomplete.');
         const configuredRemoteRoot = String(process.env.DEPLOYMENT_REMOTE_MOUNT || '').trim();
         if (!configuredRemoteRoot) throw new Error('DEPLOYMENT_REMOTE_MOUNT is required for checkpoint read-back.');

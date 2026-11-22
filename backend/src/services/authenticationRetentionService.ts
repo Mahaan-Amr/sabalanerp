@@ -1,3 +1,4 @@
+import { startBackgroundJob } from './backgroundJobLifecycle';
 import { PrismaClient } from '@prisma/client';
 import { FAILED_EVENT_DAYS, SESSION_HISTORY_DAYS } from './identitySessionService';
 import { getRecoveryRuntimeState } from './recoveryRuntime';
@@ -21,7 +22,5 @@ export const startAuthenticationRetentionCleanup = (prisma: PrismaClient) => {
     if (getRecoveryRuntimeState().mode !== 'NORMAL') return Promise.resolve();
     return cleanupAuthenticationEvidence(prisma).then(() => undefined).catch((error) => console.error('Authentication retention cleanup failed:', error));
   };
-  run();
-  const timer = setInterval(run, DAY_MS);
-  timer.unref();
+  return startBackgroundJob({ name: 'startAuthenticationRetentionCleanup', intervalMs: DAY_MS, run });
 };

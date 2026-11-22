@@ -1,4 +1,5 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
+import { requireCustomerSourceSharesWithin } from './customerSemanticCompatibility';
 import { resolveCustomerWorkspace } from './accountingCustomerWorkspace';
 import { customerOpeningSnapshot } from './accountingCustomerOpening';
 import { AccountingCustomerTreasuryError, type CustomerTreasuryActor } from './accountingCustomerTreasury';
@@ -13,6 +14,7 @@ export async function attributeCustomerOpening(database: PrismaClient, id: strin
   if (input.actor.profile === 'VIEWER' || !input.confirmed || input.reason.trim().length < 8 || !input.reference.trim()
     || input.idempotencyKey.length < 8 || !Number.isSafeInteger(input.expectedSequence)) fail('مجوز، نسخه و مستندات انتساب لازم است.');
   return database.$transaction(async tx => {
+    await requireCustomerSourceSharesWithin(tx);
     const resolved = await resolveCustomerWorkspace(tx, id);
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`customer-account:${resolved.customerId}`}))`;
     const review = resolved.profile ? await tx.accountingCustomerOpeningReview.findUnique({ where: { profileId: resolved.profile.id } }) : null;

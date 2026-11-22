@@ -77,7 +77,15 @@ test('CI runs on the approved local-project runner and retains failure evidence'
   assert.match(workflow, /permissions:\s+contents: read/s);
   assert.match(workflow, /npm run test:design-system:e2e/);
   assert.match(workflow, /npm run docker:local:ps/);
-  assert.match(workflow, /npm run docker:local:up/);
+  assert.match(workflow, /npm run docker:local:acceptance:build/);
+  assert.match(workflow, /npm run docker:local:acceptance:up/);
+  assert.match(workflow, /SABALAN_BROWSER_BUILD_ID: erp_ci_\$\{\{ github\.sha \}\}/);
+  assert.ok(workflow.indexOf('npm run docker:local:acceptance:build') < workflow.indexOf('npm run docker:local:acceptance:up'));
+  assert.ok(workflow.indexOf('npm run docker:local:acceptance:up') < workflow.indexOf('npm run test:design-system:e2e'));
+  const acceptance = read('docker-compose.performance-acceptance.yml');
+  assert.match(acceptance, /target: runner/);
+  assert.equal((acceptance.match(/SABALAN_BROWSER_BUILD_ID: \$\{SABALAN_BROWSER_BUILD_ID:-\}/g) || []).length, 2);
+
   assert.match(workflow, /sabalanerp-local-design-system-browser/);
   assert.match(workflow, /if: failure\(\)/);
   assert.match(workflow, /test-results\/design-system\//);

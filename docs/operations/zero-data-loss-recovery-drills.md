@@ -14,7 +14,7 @@ The newest verified remote deployment checkpoint must be restored monthly in a n
 Run the built backend command with `DEPLOYMENT_DRILL_METADATA_PATH` pointing to the newest remote `.sabrec.json` sidecar:
 
 ```sh
-node dist/scripts/deployment-recovery-drill.js
+sh scripts/with-backend-control-ownership.sh node dist/scripts/deployment-recovery-drill.js
 ```
 
 The command validates the encrypted object and checksum, restores PostgreSQL, SQLite, and protected files, applies current migrations in the isolated environment, validates database-to-file references, finalizes recovery, runs a database probe, records a durable report, and marks the remote metadata with the successful drill result. Any failure leaves a non-zero result and must be resolved before the next production deployment.

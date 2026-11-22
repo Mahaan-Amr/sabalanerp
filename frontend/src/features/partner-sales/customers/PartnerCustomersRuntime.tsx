@@ -1,4 +1,5 @@
 'use client';
+import { CustomerActivityCategoryBadge } from '@/features/crm/customer-workflow/CustomerActivityCategory';
 import { partnerSalesActionFeedback } from '../partnerSalesErrorMessage';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -13,7 +14,7 @@ import { buildPartnerCustomerUpdateCommand,
 
 type PartnerCustomer = {
   customerId: string; revision: number; displayName: string; firstName: string; lastName: string;
-  companyName?: string; customerType: 'Individual' | 'Company' | 'Government'; personType: 'NATURAL' | 'LEGAL';
+  activityCategory?: string | null; companyName?: string; customerType: 'Individual' | 'Company' | 'Government'; personType: 'NATURAL' | 'LEGAL';
   status: string; isBlacklisted: boolean; isLocked: boolean; nationalCode?: string; city?: string;
   address?: string; phone: string; projectCount: number;
   responsibleSeller?: { id: string; displayName: string };
@@ -97,6 +98,7 @@ export function PartnerCustomersRuntime() {
     { id: 'status', header: 'وضعیت', priority: 'secondary', cell: customer => <div className="flex flex-wrap gap-1.5">
       <ErpBadge tone={statusTone[customer.status] ?? 'neutral'}>{statusLabel(customer.status)}</ErpBadge>
       <ErpBadge tone="neutral">{typeLabel(customer.customerType)}</ErpBadge>
+      <CustomerActivityCategoryBadge value={customer.activityCategory} />
     </div> },
     { id: 'contact', header: 'اطلاعات تماس', priority: 'secondary', cell: customer => <div className="space-y-1 text-xs text-[var(--sds-text-secondary)]">
       <p className="flex items-center gap-1"><FaUser className="h-3 w-3" />{customer.displayName}</p>

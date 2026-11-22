@@ -1,0 +1,74 @@
+{
+  "format": "sabalan-file-generations-native/v1",
+  "pass": true,
+  "first": {
+    "manifestSha256": "6dce5f4ddf0c36c12c4a8f1813c9270f68da63c41740300967488db0fdb0d90f",
+    "files": 2,
+    "bytes": 53,
+    "sha256": "6dce5f4ddf0c36c12c4a8f1813c9270f68da63c41740300967488db0fdb0d90f"
+  },
+  "second": {
+    "manifestSha256": "e1fad06593593f4c826f56bde1709424f89662f5be7f5534e97aaa1bf4dba536",
+    "files": 2,
+    "bytes": 36,
+    "sha256": "e1fad06593593f4c826f56bde1709424f89662f5be7f5534e97aaa1bf4dba536"
+  },
+  "deletionLineage": [
+    {
+      "source": "uploads",
+      "path": "deleted.txt"
+    }
+  ],
+  "refusedSources": [
+    "symlink",
+    "unfinished",
+    "fifo"
+  ],
+  "sameSizeTamperRefused": true,
+  "interruptedNativeChild": {
+    "bytes": 409600,
+    "inode": "1294408",
+    "device": "2096"
+  },
+  "manifestSizeBoundRefusedBeforeCreation": true,
+  "oversizedNativeSourceInventoryRefusedBeforeCapture": true,
+  "cachedManifestSyncFailureRefused": true,
+  "interruptedManifestDurablyAdopted": true,
+  "captureCapacity": 10000,
+  "retainedRestoreAtCapacity": true,
+  "nativeChildSignal": "SIGKILL",
+  "partialCaptureRetained": true,
+  "replacementRefused": true,
+  "workingRoot": "/app/online-runtime-acceptance/file-generations-384a363e1029d491c8b32ec0f548a61a",
+  "sealedRestoreOutsideWritePause": {
+    "manifestSha256": "6dce5f4ddf0c36c12c4a8f1813c9270f68da63c41740300967488db0fdb0d90f",
+    "files": 2,
+    "bytes": 53
+  },
+  "canonicalServicesUnchanged": {
+    "backend": {
+      "id": "a1ea34a8d7d878b906fba7b4fdbe975df13a6b00d63a863eacce34b9827e86ff",
+      "image": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+      "startedAt": "2026-10-15T09:01:40.016187222Z"
+    },
+    "frontend": {
+      "id": "ad23f762dc1b27d2be76c335a3d7a4e20d08832a9a2e055904a4af84a9248c21",
+      "image": "sha256:f0a8954596279ccb01c029de7316022daa109b711a297f716cc9367d4bc9ec53",
+      "startedAt": "2026-10-15T10:11:30.825468888Z"
+    },
+    "postgres": {
+      "id": "e553787e69f44c7bdf7dab94fad43a231f5ba99d988dc783234486a5a844a528",
+      "image": "sha256:3d0f7584ed7d04e27fa050d6683a74746608faf21f202be78460d679cc56461f",
+      "startedAt": "2026-10-12T15:17:49.481269377Z"
+    },
+    "inquiry": {
+      "id": "6d161695e215498048ff24e56e9602ce77871bfb6b390bf1356caecfdf9807d8",
+      "image": "sha256:81eacc768f3c4b82bd0f0a01bef5600ae1321e87cb117bad49ca47dfba79a213",
+      "startedAt": "2026-10-12T15:17:49.463791361Z"
+    }
+  },
+  "sources": {
+    "recovery-file-generations.py": "af815a3d296d1b7675e796cbc158e5bc7392fd95439f6a0ab5c033082d77e98b",
+    "fixture.py": "f4cfc51b309fa4cdf8415ff1251f5a9ac279d1b9c448d49241f2fccb862ea85c"
+  }
+}

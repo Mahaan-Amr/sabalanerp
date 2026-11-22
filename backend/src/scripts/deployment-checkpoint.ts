@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { verifyUnit } from '../../scripts/clamav-checkpoint.mjs';
+import { boundIncidentTarget, verifyUnit } from '../../scripts/clamav-checkpoint.mjs';
 import path from 'node:path';
 import { disconnectDatabase, prisma } from '../lib/prisma';
 import {
@@ -58,7 +58,11 @@ const main = async () => {
   const targetCommit = required('DEPLOYMENT_TARGET_COMMIT');
   const remoteRoot = required('DEPLOYMENT_REMOTE_MOUNT');
   const clamavUnit = path.join(RECOVERY_COORDINATION_DIR, `clamav-checkpoint-${deploymentId}`);
-  if (process.env.DEPLOYMENT_CLAMAV_REPAIR === 'true') await verifyUnit({ unit: clamavUnit, id: deploymentId });
+  const reports = process.env.DEPLOYMENT_REPORT_DIR || '/app/deployment-reports';
+  const target = process.env.DEPLOYMENT_CLAMAV_OPERATION === 'incident-recovery'
+    ? boundIncidentTarget(JSON.parse(await fs.promises.readFile(path.join(reports, 'active-deployment-session.json'), 'utf8')))
+    : undefined;
+  if (process.env.DEPLOYMENT_CLAMAV_REPAIR === 'true') await verifyUnit({ unit: clamavUnit, id: deploymentId, target });
   const localKey = await readSecret('DEPLOYMENT_LOCAL_ROLLBACK_KEY');
   const remotePublicKey = await readConfiguredFile('DEPLOYMENT_REMOTE_RECOVERY_PUBLIC_KEY');
   const packagesRoot = path.join(RECOVERY_ROOT, 'packages');
@@ -168,7 +172,7 @@ const main = async () => {
   };
 
   if (process.env.DEPLOYMENT_CLAMAV_REPAIR === 'true') {
-    await verifyUnit({ unit: clamavUnit, id: deploymentId, checkpoint: { ...metadata, manifest: localValidation.manifest } });
+    await verifyUnit({ unit: clamavUnit, id: deploymentId, target, checkpoint: { ...metadata, manifest: localValidation.manifest } });
   }
 
   const transportMetadata=checkpointMetadataTransport(metadata);

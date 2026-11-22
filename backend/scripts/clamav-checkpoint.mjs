@@ -7,13 +7,13 @@ import { execFile, spawn } from 'node:child_process';
 import { pipeline } from 'node:stream/promises';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
-import { validateIncidentSnapshot, requireIncidentSession } from './clamav-incident-policy.mjs';
+import { validateIncidentSnapshot, requireIncidentSession, incidentAcquisitionStateNames } from './clamav-incident-policy.mjs';
 const exec = promisify(execFile);
 const fail = (message) => { throw new Error(message); };
 const validId = id => /^[a-zA-Z0-9_-]{1,160}$/.test(id) ? id : fail('Unsafe deployment id');
 export const immutableImage = value => /^(?:[a-zA-Z0-9./:_-]+@)?sha256:[a-f0-9]{64}$/.test(value || '') ? value : fail('An immutable ClamAV image digest is required');
 export function requireBoundary({session, active, maintenance, id, token, phase}) {
- if (!['SERVICES_DRAINED','MUTATION_STARTED','ROLLBACK_STARTED'].includes(phase)
+ if (!['SERVICES_DRAINED','REMOTE_CHECKPOINT_VERIFIED','MUTATION_STARTED','ROLLBACK_STARTED'].includes(phase)
    || !token || session?.deploymentId !== id || session?.leaseToken !== token || session?.phase !== phase
    || active?.id !== id || active?.leaseToken !== token || active?.phase !== phase
    || !Number.isFinite(new Date(active.leaseExpiresAt).getTime()) || new Date(active.leaseExpiresAt).getTime() <= Date.now() || maintenance?.deploymentId !== id) fail('ClamAV operation requires the owned lease, journal phase and maintenance boundary');
@@ -31,7 +31,30 @@ async function safeTree(root) {
    if(entry.isDirectory()) await safeTree(path.join(root,entry.name));
  }
 }
-export async function captureUnit({bank,unit,id,image}) {
+export function boundIncidentTarget(session,env=process.env) {
+ const operation=env.DEPLOYMENT_CLAMAV_OPERATION;
+ if(operation!=='incident-recovery'){
+  if(session.clamavOperation==='incident-recovery')fail('Incident operation cannot be downgraded to ordinary repair');
+  return;
+ }
+ requireIncidentSession(session,operation,env.DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256);
+ const receiptSha256=env.DEPLOYMENT_CLAMAV_INCIDENT_RECEIPT_SHA256;
+ if(!/^[a-f0-9]{64}$/.test(receiptSha256 || '') || session.clamavIncidentReceiptSha256!==receiptSha256){
+  fail('Incident target receipt does not match the owned session preflight');
+ }
+ return {receiptSha256,image:immutableImage(env.DEPLOYMENT_CLAMAV_TARGET_IMAGE)};
+}
+async function verifyTargetReceipt(unit,files,target) {
+ if(!target)return;
+ if(files['target.json']?.sha256!==target.receiptSha256)fail('Backend incident target receipt differs from preflight');
+ const bytes=await fs.readFile(path.join(unit,'target.json'));
+ if(crypto.createHash('sha256').update(bytes).digest('hex')!==target.receiptSha256)fail('Backend incident target receipt differs from preflight');
+ const receipt=JSON.parse(bytes);
+ if(receipt.image!==target.image || !files['target-bank.tar'] || receipt.bankSha256!==files['target-bank.tar'].sha256){
+  fail('Backend incident target image/bank differs from its preflight receipt');
+ }
+}
+export async function captureUnit({bank,unit,id,image,target}) {
  validId(id); immutableImage(image);
  await safeTree(bank);
  await fs.mkdir(unit,{recursive:true,mode:0o700});
@@ -39,14 +62,26 @@ export async function captureUnit({bank,unit,id,image}) {
  await exec('tar',['-cpf',path.join(unit,'bank.tar'),'-C',bank,'.']);
  const incident = await fs.stat(path.join(unit,'incident-snapshot.json')).catch(()=>null);
  if (incident && await fs.stat(path.join(unit,'rollback-proof.json')).catch(()=>null)) fail('Incident evidence cannot be substituted for a healthy rollback proof');
+ const incidentCapturedAt = incident ? new Date().toISOString() : undefined;
  const evidenceFile = incident ? 'incident-snapshot.json' : 'rollback-proof.json';
  if(await fs.stat(path.join(unit,evidenceFile)).catch(()=>null)) {
   const proof=JSON.parse(await fs.readFile(path.join(unit,evidenceFile),'utf8'));
-  if (incident) validateIncidentSnapshot(proof, image);
+  if (incident) validateIncidentSnapshot(proof, image, Date.parse(incidentCapturedAt));
   if(proof.image!==image || proof.configArchiveSha256!==(await digest(path.join(unit,'config.tar'))).sha256) fail('Rehearsed rollback configuration/image differs from the drained snapshot');
   if(Object.keys(proof.bankFiles || {}).length!==3) fail('Rollback bank evidence is incomplete');
   for(const [file,expected] of Object.entries(proof.bankFiles)) {
    if(!/^(main|daily|bytecode)[.](cvd|cld)$/.test(file) || (await digest(path.join(bank,file))).sha256!==expected) fail('Rollback bank changed after rehearsal; refusing maintenance mutation');
+  }
+  if(incident && proof.acquisition){
+   const original=proof.acquisition;
+   const hashes={
+    '.source-state/migration.json':original.migrationSha256,
+    ...Object.fromEntries(incidentAcquisitionStateNames.map(name=>[name,original.stateFileHashes[name]])),
+    ...Object.fromEntries(incidentAcquisitionStateNames.map(name=>['.source-state/vendor-cdn/'+name,original.sourceMigration.originalStateFiles[name].sha256])),
+   };
+   for(const [file,sha256] of Object.entries(hashes)){
+    if((await digest(path.join(bank,file))).sha256!==sha256)fail('Original FEUP acquisition state changed after the incident snapshot');
+   }
   }
  }
  const files={};
@@ -54,11 +89,12 @@ export async function captureUnit({bank,unit,id,image}) {
    if((file.startsWith('target') || file==='rollback-proof.json' || file==='incident-snapshot.json') && !await fs.stat(path.join(unit,file)).catch(()=>null)) continue;
    files[file]=await digest(path.join(unit,file));
  }
- const metadata={version:1,deploymentId:id,image,files};
+ await verifyTargetReceipt(unit,files,target);
+ const metadata={version:1,deploymentId:id,image,files,...(incidentCapturedAt ? {incidentCapturedAt} : {})};
  await fs.writeFile(path.join(unit,'unit.json'),JSON.stringify(metadata)+'\n',{mode:0o600,flag:'wx'});
  return metadata;
 }
-export async function verifyUnit({unit,id,checkpoint}) {
+export async function verifyUnit({unit,id,checkpoint,target}) {
  validId(id);
  const metadata=JSON.parse(await fs.readFile(path.join(unit,'unit.json'),'utf8'));
  if(metadata.version!==1 || metadata.deploymentId!==id) fail('ClamAV checkpoint identity mismatch');
@@ -74,7 +110,21 @@ export async function verifyUnit({unit,id,checkpoint}) {
      if(!expected || expected.sha256!==actual.sha256 || expected.size!==actual.size) fail('ClamAV unit is absent from the verified encrypted checkpoint manifest');
    }
  }
+ await verifyTargetReceipt(unit,metadata.files,target);
  return metadata;
+}
+export async function verifyIncidentCapture({unit,id,checkpoint,target,snapshotSha256,now=Date.now()}) {
+ if (!checkpoint) fail('Original incident capture requires the verified coordinated checkpoint');
+ const metadata=await verifyUnit({unit,id,checkpoint,target});
+ const capturedAt=Date.parse(metadata.incidentCapturedAt);
+ if (!Number.isFinite(capturedAt) || capturedAt>now || !/^[a-f0-9]{64}$/.test(snapshotSha256 || '')
+  || metadata.files['incident-snapshot.json']?.sha256!==snapshotSha256) {
+  fail('Original incident snapshot capture binding is missing or changed');
+ }
+ const bytes=await fs.readFile(path.join(unit,'incident-snapshot.json'));
+ if (crypto.createHash('sha256').update(bytes).digest('hex')!==snapshotSha256) fail('Original incident snapshot capture binding changed');
+ validateIncidentSnapshot(JSON.parse(bytes),metadata.image,capturedAt);
+ return capturedAt;
 }
 export async function recoverUnit({unit,id,checkpoint,readArchive}) {
  validId(id);
@@ -124,20 +174,31 @@ export async function validateBankArchive(archive) {
  if(!names.length || entries.length!==names.length || entries.some(line=>!['-','d'].includes(line[0]))
    || names.some(name=>name.startsWith('/') || /^[a-z]:/i.test(name) || name.includes('\\') || name.split('/').includes('..'))) fail('Unsafe bank archive paths or file types');
 }
-export async function restoreUnit({bank,unit,id,checkpoint,archive='bank.tar',beforeMutation}) {
- const verified=await verifyUnit({unit,id,checkpoint});
+export async function restoreUnit({bank,unit,id,checkpoint,archive='bank.tar',target,beforeMutation}) {
+ const verified=await verifyUnit({unit,id,checkpoint,target});
  if(!['bank.tar','target-bank.tar'].includes(archive) || !verified.files[archive]) fail('Unprotected bank archive');
- await validateBankArchive(path.join(unit,archive));
  // Only archives produced by captureUnit and authenticated by the recovery manifest reach extraction.
  const staging=await fs.mkdtemp(path.join(os.tmpdir(),'clamav-restore-'));
  try {
-   await exec('tar',['-xpf',path.join(unit,archive),'-C',staging]);
-   await safeTree(staging);
+   let archiveFile=path.join(unit,archive);
+   if(target){
+    if(archive!=='target-bank.tar' || !checkpoint)fail('Incident activation requires the verified coordinated target archive');
+    // Keep the checked bytes private across validation and the last owned-boundary check.
+    const stagedArchive=path.join(staging,archive);
+    await fs.copyFile(archiveFile,stagedArchive);
+    if((await digest(stagedArchive)).sha256!==verified.files[archive].sha256)fail('Incident activation archive changed during staging');
+    archiveFile=stagedArchive;
+   }
+   const contents=path.join(staging,'bank');
+   await fs.mkdir(contents);
+   await validateBankArchive(archiveFile);
+   await exec('tar',['-xpf',archiveFile,'-C',contents]);
+   await safeTree(contents);
    // The scanner and updater must remain stopped under the owned deployment lease.
    await safeTree(bank);
    if (beforeMutation) await beforeMutation();
    for(const entry of await fs.readdir(bank)) await fs.rm(path.join(bank,entry),{recursive:true,force:true});
-   await exec('tar',['-xpf',path.join(unit,archive),'-C',bank]);
+   await exec('tar',['-xpf',archiveFile,'-C',bank]);
  } finally {await fs.rm(staging,{recursive:true,force:true});}
 }
 async function main() {
@@ -151,29 +212,41 @@ async function main() {
   const session=JSON.parse(await fs.readFile(path.join(reports,'active-deployment-session.json'),'utf8'));
   const active=await prisma.deploymentOperation.findUnique({where:{activeKey:'production'}});
   const maintenance=JSON.parse(await fs.readFile(path.join(coordination,'deployment-maintenance.json'),'utf8'));
-  const phase=process.argv[2]==='capture'?'SERVICES_DRAINED':'MUTATION_STARTED';
+  const command=process.argv[2];
+  const phase={capture:'SERVICES_DRAINED','verify-incident-capture':'REMOTE_CHECKPOINT_VERIFIED',activate:'MUTATION_STARTED'}[command];
+  if (!phase) fail('Unsupported ClamAV checkpoint command');
   requireBoundary({session,active,maintenance,id,token:process.env.DEPLOYMENT_LEASE_TOKEN,phase});
   const unit=path.join(coordination,`clamav-checkpoint-${id}`);
-  const incident = process.env.DEPLOYMENT_CLAMAV_OPERATION === 'incident-recovery';
-  if (incident) requireIncidentSession(session, process.env.DEPLOYMENT_CLAMAV_OPERATION, process.env.DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256);
-  else if (session.clamavOperation === 'incident-recovery') fail('Incident operation cannot be downgraded to ordinary repair');
+  const target=boundIncidentTarget(session);
   if(process.argv[2]==='capture') {
-   const evidence = incident ? 'incident-snapshot.json' : 'rollback-proof.json';
-   const expected = incident ? process.env.DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256 : process.env.DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_SHA256;
+   const evidence = target ? 'incident-snapshot.json' : 'rollback-proof.json';
+   const expected = target ? process.env.DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256 : process.env.DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_SHA256;
    if((await digest(path.join(unit,evidence))).sha256!==expected) fail('Original-instance evidence changed after preflight');
-   await captureUnit({bank:'/app/recovery-sources/clamav',unit,id,image:process.env.DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE});
-  } else if(process.argv[2]==='activate') {
+   await captureUnit({bank:'/app/recovery-sources/clamav',unit,id,image:process.env.DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE,target});
+  } else if (command==='verify-incident-capture') {
+   if (!target) fail('An owned incident operation is required');
+   const capturedAt=await verifyIncidentCapture({unit,id,checkpoint:active.checkpointJson,target,snapshotSha256:session.clamavIncidentSnapshotSha256});
+   const liveSession=JSON.parse(await fs.readFile(path.join(reports,'active-deployment-session.json'),'utf8'));
+   const liveMaintenance=JSON.parse(await fs.readFile(path.join(coordination,'deployment-maintenance.json'),'utf8'));
+   const liveActive=await prisma.deploymentOperation.findUnique({where:{activeKey:'production'}});
+   requireBoundary({session:liveSession,active:liveActive,maintenance:liveMaintenance,id,token:process.env.DEPLOYMENT_LEASE_TOKEN,phase});
+   boundIncidentTarget(liveSession);
+   console.log(capturedAt);
+   return;
+  } else if(command==='activate') {
     const checkpoint=JSON.parse(await fs.readFile(path.join(coordination,'deployment-checkpoint.json'),'utf8'));
-    await verifyUnit({unit,id,checkpoint});
-    const receipt=JSON.parse(await fs.readFile(path.join(unit,'target.json'),'utf8'));
-    const actual=await digest(path.join(unit,'target-bank.tar'));
-    if(receipt.image!==immutableImage(process.env.DEPLOYMENT_CLAMAV_TARGET_IMAGE) || receipt.bankSha256!==actual.sha256) fail('Target image/bank binding failed');
-    await restoreUnit({bank:'/app/recovery-sources/clamav',unit,id,checkpoint,archive:'target-bank.tar',beforeMutation: async () => {
+    if(!target){
+      await verifyUnit({unit,id,checkpoint});
+      const receipt=JSON.parse(await fs.readFile(path.join(unit,'target.json'),'utf8'));
+      const actual=await digest(path.join(unit,'target-bank.tar'));
+      if(receipt.image!==immutableImage(process.env.DEPLOYMENT_CLAMAV_TARGET_IMAGE) || receipt.bankSha256!==actual.sha256) fail('Target image/bank binding failed');
+    }
+    await restoreUnit({bank:'/app/recovery-sources/clamav',unit,id,checkpoint,archive:'target-bank.tar',target,beforeMutation: async () => {
       const liveSession=JSON.parse(await fs.readFile(path.join(reports,'active-deployment-session.json'),'utf8'));
       const liveMaintenance=JSON.parse(await fs.readFile(path.join(coordination,'deployment-maintenance.json'),'utf8'));
       const liveActive=await prisma.deploymentOperation.findUnique({where:{activeKey:'production'}});
       requireBoundary({session:liveSession,active:liveActive,maintenance:liveMaintenance,id,token:process.env.DEPLOYMENT_LEASE_TOKEN,phase:'MUTATION_STARTED'});
-      if (incident) requireIncidentSession(liveSession, process.env.DEPLOYMENT_CLAMAV_OPERATION, process.env.DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256);
+      boundIncidentTarget(liveSession);
     }});
   } else fail('Unsupported ClamAV checkpoint command');
   console.log(JSON.stringify({ok:true,unit:id}));

@@ -1,4 +1,4 @@
-# Local-only image. Production continues to use deploy/clamav/Dockerfile.
+# Fixed UFPR image. Production may select it only through protected scanner repair.
 ARG CLAMAV_BASE_IMAGE=clamav/clamav@sha256:fefe26428207c7ec3e51396376cbd5084528f134b504db76a92363ed534e0b10
 FROM ${CLAMAV_BASE_IMAGE}
 ARG CLAMAV_ACQUISITION_TRANSPORT=direct

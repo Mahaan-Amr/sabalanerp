@@ -1,3 +1,21 @@
+export const feupIncidentImage='sha256:269ade6b36a74a2e188dc26265385a13141276d8acdab80c65f09df3b106f355';
+export const incidentAcquisitionStateNames=['freshclam.dat','.sabalan-updater-state','.sabalan-freshclam-result'];
+const isSha256=value=>typeof value==='string' && /^[a-f0-9]{64}$/.test(value);
+const feupOrigin='https://mirrors.fe.up.pt/pub/clamav';
+
+function validAcquisition(acquisition,now) {
+ const {attempted,succeeded,result,next,stateFileHashes,sourceMigration}=acquisition||{};
+ return acquisition?.origin===feupOrigin
+  && [attempted,succeeded,result,next].every(Number.isSafeInteger)
+  && attempted>0 && attempted<=now && succeeded>=0 && succeeded<=now && result>=0
+  && (result===0 ? succeeded>=attempted : succeeded<=attempted)
+  && next===attempted+7200 && isSha256(acquisition.migrationSha256)
+  && Object.keys(stateFileHashes||{}).length===incidentAcquisitionStateNames.length
+  && sourceMigration?.targetOrigin===feupOrigin
+  && Object.keys(sourceMigration.originalStateFiles||{}).length===incidentAcquisitionStateNames.length
+  && incidentAcquisitionStateNames.every(name=>isSha256(stateFileHashes[name]) && isSha256(sourceMigration.originalStateFiles[name]?.sha256));
+}
+
 // Incident evidence records an unhealthy original. It is deliberately not a
 // rollback-health proof and can never authorize reopening the original release.
 export function validateIncidentSnapshot(value, image, now = Date.now()) {
@@ -12,6 +30,7 @@ export function validateIncidentSnapshot(value, image, now = Date.now()) {
   || Object.keys(value.bankFiles || {}).length !== 3
   || families.some(name => !Number.isSafeInteger(value.versions?.[name]) || value.versions[name] < 1
    || Object.entries(value.bankFiles).filter(([file, digest]) => new RegExp('^' + name + '[.](cvd|cld)$').test(file) && /^[a-f0-9]{64}$/.test(digest)).length !== 1)
+  || (image===feupIncidentImage ? !validAcquisition(value.acquisition,Math.floor(now/1000)) : 'acquisition' in value)
   || value.reopenOriginal !== false || ['updaterHealthy', 'restoreRehearsalPassed', 'fullReleaseRehearsalPassed'].some(key => key in value)) {
   throw new Error('Explicit, fresh degraded-instance evidence is required; it is not a healthy rollback proof');
  }
@@ -22,5 +41,11 @@ export function requireIncidentSession(session, operation, snapshotSha256) {
  if (operation !== 'incident-recovery' || session?.clamavOperation !== operation
   || !/^[a-f0-9]{64}$/.test(snapshotSha256 || '') || session.clamavIncidentSnapshotSha256 !== snapshotSha256) {
   throw new Error('Incident recovery must match the operation and snapshot bound to its owned session');
+ }
+}
+
+export function requireStaleFeupPredecessor(snapshot) {
+ if(snapshot?.acquisition?.origin!==feupOrigin || !snapshot.issues?.includes('SIGNATURES_STALE')){
+  throw new Error('UFPR incident requires an observed FEUP predecessor with SIGNATURES_STALE');
  }
 }

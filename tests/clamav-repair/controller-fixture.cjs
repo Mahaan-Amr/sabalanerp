@@ -6,7 +6,10 @@ const hash=b=>crypto.createHash('sha256').update(b).digest('hex');
 const read=file=>JSON.parse(fs.readFileSync(path.join(root,file),'utf8'));
 const save=(file,value)=>fs.writeFileSync(path.join(root,file),JSON.stringify(value));
 const record=value=>fs.appendFileSync(log,JSON.stringify(value)+'\n');
-const env=key=>(a.find(value=>value.startsWith(key+'='))||'').slice(key.length+1);
+const env=key=>{
+ const exported=a.find((value,index)=>a[index-1]==='-e' && (value===key || value.startsWith(key+'=')));
+ return exported===key ? process.env[key] || '' : (exported || '').slice(key.length+1);
+};
 const phase=()=>fs.existsSync(path.join(root,'reports/active-deployment-session.json'))?read('reports/active-deployment-session.json').phase:'';
 const failure=process.env.TEST_RELEASE_FAILURE;
 const copy=(source,destination)=>fs.cpSync(source,destination,{recursive:true});
@@ -38,8 +41,8 @@ const rollbackEnvironment={PERFORMANCE_RELEASE_COMMIT:'a'.repeat(40),PERFORMANCE
  if(kind==='python3'){
   const [script,mode,compose,environment,previousImage,plan,session]=a;
   if(script?.endsWith('/deploy/scripts/dispatch-volume-transition.py')){
-   if(!['stage','attest','transition'].includes(mode)||compose!==path.join(root,'docker-compose.prod.yml')||environment!==path.join(root,'.env.prod')||previousImage!==backendId||plan!==image('backend')||a.length!==6)throw Error('Dispatch transition fixture identity mismatch');
-   console.log('legacy');return;
+   if(!['stage','attest','transition','verify-mounted'].includes(mode)||compose!==path.join(root,'docker-compose.prod.yml')||environment!==path.join(root,'.env.prod')||previousImage!==backendId||plan!==image('backend')||a.length!==6)throw Error('Dispatch transition fixture identity mismatch');
+   console.log(process.env.DEPLOYMENT_CLAMAV_OPERATION==='incident-recovery'?'mounted':'legacy');return;
   }
   if(!script?.endsWith('/deploy/scripts/legacy-backend-signal.py')||!['--preflight','--forward','--assert-resolved','--assert-current-stopped','--assert-unleased-drain-allowed'].includes(mode))throw Error('Unexpected fixture python command');
   if(failure==='legacy-signal'&&mode==='--preflight')process.exit(48);
@@ -75,6 +78,20 @@ const rollbackEnvironment={PERFORMANCE_RELEASE_COMMIT:'a'.repeat(40),PERFORMANCE
    if(value.format!=='fixture-only-host-retention'||!['BEFORE_CHECKPOINT','AFTER_CHECKPOINT'].includes(value.stage)||path.basename(file)!==`remote-retention-${value.deploymentId}-${value.stage}.json`)throw Error('Invalid fixture receipt identity');
    process.stdout.write(hash(raw));return;
   }
+  if(a[0]?.endsWith('/preserved-clamav.mjs')&&a[1]==='resume'){
+   const file=path.join(root,'reports/active-deployment-session.json'),stat=fs.lstatSync(file);
+   if(a[2]!==file||a.length!==3||!stat.isFile()||stat.uid!==process.getuid()||stat.nlink!==1||(stat.mode&0o077)!==0
+     ||read('reports/active-deployment-session.json').preservedClamav)throw Error('Invalid fixture resume session');
+   return;
+  }
+ if(a[0]?.endsWith('/maintenance-image-selection.mjs')&&a[1]==='resume'&&process.getuid()!==0){
+   const file=path.join(root,'reports/active-deployment-session.json');
+   if(a[2]!==file||a.length!==3||read('reports/active-deployment-session.json').maintenanceImages)throw Error('Invalid fixture maintenance-image resume');
+   const {validatePreservationJournal}=await import(require('node:url').pathToFileURL(path.join(repository,'deploy/scripts/preserved-clamav.mjs')));
+   const first=validatePreservationJournal(fs.readFileSync(path.join(root,'reports/active-deployment.jsonl'),'utf8').trimEnd().split('\n').map(JSON.parse));
+   if(first.deploymentId!==read('reports/active-deployment-session.json').deploymentId||first.details?.maintenanceImages)throw Error('Invalid fixture maintenance-image journal');
+   return;
+ }
   if(a[0]?.endsWith('/backup-retention-host.mjs')){
    if(a[1]==='--inspect'){if(a.length!==3||a[2]!==path.join(root,'.env.prod'))throw Error('Unexpected backup inspection');console.log(JSON.stringify({inspected:true,sshStarted:false}));return;}
    const [,environment,id,stage,receipt,holds]=a;
@@ -94,16 +111,31 @@ const rollbackEnvironment={PERFORMANCE_RELEASE_COMMIT:'a'.repeat(40),PERFORMANCE
    const versions={main:63,daily:28157,bytecode:339};
    if(command==='rollback-proof')policy.validateRollbackProof(JSON.parse(fs.readFileSync(input)),expected,versions);
    else if(command==='scope')policy.validateRepairPaths(['deploy/clamav/inspect-native.sh']);
-   else if(command==='verify'){
+   else if(command==='verify'||command==='verify-incident'){
     const receipt=policy.validateReceipt(JSON.parse(fs.readFileSync(input)),expected,versions);
     if(receipt.bankSha256!==hash(fs.readFileSync(path.join(path.dirname(input),'target-bank.tar'))))throw Error('Target binding mismatch');
+    if(command==='verify-incident'){
+     const snapshot=JSON.parse(fs.readFileSync(a[4]));
+     const {validateIncidentSnapshot}=await import(require('node:url').pathToFileURL(path.join(repository,'backend/scripts/clamav-incident-policy.mjs')));
+     let observedAt=Date.now();
+     if (phase()==='REMOTE_CHECKPOINT_VERIFIED') {
+      const unit=read('coordination/clamav-checkpoint-'+read('reports/active-deployment-session.json').deploymentId+'/unit.json');
+      observedAt=Date.parse(unit.incidentCapturedAt);
+      if (Number(a[6])!==observedAt) throw Error('Controller did not use the authenticated capture time');
+     } else if (a[6]!==undefined) throw Error('Preflight must use current time');
+     validateIncidentSnapshot(snapshot,snapshot.image,observedAt);
+     policy.validateIncidentTarget(receipt,snapshot,Number(a[5]));
+     console.log(hash(fs.readFileSync(input)));return;
+    }
    } else if(command==='inspect-rollback'){
     const proof=JSON.parse(fs.readFileSync(expected));policy.validateRollbackProof(proof,proof.image,versions);
     if(failure==='qualification' || (failure==='rollback-qualifier' && phase()==='ROLLBACK_STARTED'))process.exit(41);
     for(const [file,digest] of Object.entries(proof.bankFiles))if(hash(fs.readFileSync(path.join(bank,file)))!==digest)throw Error('Rollback bank mismatch');
     if(read('runtime.json').clamav!==proof.image)throw Error('Wrong rollback image');
    } else if(command==='inspect'){
-    const receipt=read('candidate/target.json');policy.validateReceipt(receipt,read('runtime.json').clamav,versions);
+    const bytes=fs.readFileSync(expected||path.join(root,'candidate','target.json'));
+    if(expected&&a[4]!==hash(bytes))throw Error('Installed ClamAV incident receipt differs from preflight');
+    policy.validateReceipt(JSON.parse(bytes),read('runtime.json').clamav,versions);
    } else throw Error('Unexpected readiness command');
    console.log('{}');return;
   }
@@ -112,11 +144,23 @@ const rollbackEnvironment={PERFORMANCE_RELEASE_COMMIT:'a'.repeat(40),PERFORMANCE
  }
  if(kind!=='docker')throw Error('Only known test adapters are permitted');
  if(a[0]==='info'){console.log(root);return;}
+ if(a[0]==='tag'){
+  if(a.length!==3||a[1]!==image('postgres')||a[2]!=='sabalanerp-recovery-postgres:'+a[1].slice(7))throw Error('Invalid fixture recovery PostgreSQL tag');
+  save('recovery-postgres-tag.json',{target:a[2],image:a[1]});return;
+ }
  if(a[0]==='image' && a[1]==='inspect'){
   if(a.some(value=>value.includes('io.sabalan.performance.source-commit')))console.log('c'.repeat(40));
   else if(a.some(value=>value.includes('io.sabalan.performance.source-hash')))console.log('b'.repeat(64));
   else if(a.includes('{{.Size}}'))console.log('1000000');
-  else {const name=a.at(-1); console.log(name.startsWith('sha256:')?name:name.startsWith('fixture/backend:')?'sha256:'+'8'.repeat(64):name.startsWith('fixture/frontend:')?'sha256:'+'9'.repeat(64):name.startsWith('fixture/inquiry:')?'sha256:'+'a'.repeat(64):image('nginx'));}return;
+  else {
+   const name=a.at(-1);
+   if(name.startsWith('sabalanerp-recovery-postgres:')){
+    const tag=read('recovery-postgres-tag.json');
+    if(name!==tag.target)throw Error('Fixture recovery PostgreSQL image was not retained');
+    console.log(tag.image);
+   } else console.log(name.startsWith('sha256:')?name:name.startsWith('fixture/backend:')?'sha256:'+'8'.repeat(64):name.startsWith('fixture/frontend:')?'sha256:'+'9'.repeat(64):name.startsWith('fixture/inquiry:')?'sha256:'+'a'.repeat(64):image('nginx'));
+  }
+  return;
  }
  if(a[0]==='builder')return;
  if(a[0]==='volume'&&a[1]==='inspect'){console.log(root);return;}
@@ -131,6 +175,12 @@ const rollbackEnvironment={PERFORMANCE_RELEASE_COMMIT:'a'.repeat(40),PERFORMANCE
    if(format==='{{index .Config.Labels "io.sabalan.release.upload-policy"}}'){
     if(name!=='backend')throw Error('Upload policy must be read from the previous backend');
     console.log('');return;
+   }
+   if(format==='{{.Image}} {{.State.Running}}'&&name==='postgres'){
+    console.log((failure==='resume-wrong-postgres'?image('inquiry'):image('postgres'))+' '+(failure!=='resume-stopped-postgres'));return;
+   }
+   if(name==='clamav' && format==='{{.State.Status}}'){
+    console.log(read('runtime.json').clamavRunning===false?'exited':'running');return;
    }
    console.log(format==='{{.Image}}'?image(name):format==='{{.Id}}'?service:format==='{{.State.Running}}'?'false':'10.0.0.2');
   } else console.log(JSON.stringify([container('backend',backendId,{...runtimeEnvironment,...rollbackEnvironment})]));
@@ -148,17 +198,23 @@ const rollbackEnvironment={PERFORMANCE_RELEASE_COMMIT:'a'.repeat(40),PERFORMANCE
   throw Error('Unexpected copy');
  }
  if(a[0]==='exec'&&a[1]===backendId&&a.at(-1).includes('p=/app/storage/dispatch-documents'))return;
- if(a[0]!=='compose')throw Error('Unexpected Docker command');
- if(a.includes('ps')){console.log(a.at(-1)==='backend'?backendId:a.at(-1)==='postgres'?postgresId:a.at(-1));return;}
+ if(a[0]!=='compose')throw Error('Unexpected fixture Docker command: '+a[0]);
+ if(a.includes('ps')){
+  if(a.at(-1)==='postgres'&&failure==='resume-missing-postgres')return;
+  console.log(a.at(-1)==='backend'?backendId:a.at(-1)==='postgres'?postgresId:a.at(-1));return;
+ }
  if(a.includes('config')){console.log(a.includes('json')?JSON.stringify({name:'sabalanerp',services:{postgres:{environment:bootstrapEnvironment},deployment:{environment:controlEnvironment},backend:{environment:runtimeEnvironment,volumes:[{type:'volume',source:'backend_storage_dispatch_documents',target:'/app/storage/dispatch-documents'}]}},volumes:{backend_storage_dispatch_documents:{name:'fixture_dispatch_documents'}}}):'services: {}');return;}
  if(a.some(value=>value.includes('exec python3 - --assert-closed'))){if(failure==='runtime-not-closed')process.exit(49);return;}
+ if(a.includes('stop') && a.includes('clamav')){
+  const state=read('runtime.json');state.clamavRunning=false;save('runtime.json',state);return;
+ }
  if(a.includes('build')||a.includes('create')||a.includes('stop')||a.includes('start'))return;
  if(a.includes('up')){
-  if(a.includes('clamav')){const state=read('runtime.json');state.clamav=process.env.DEPLOYMENT_CLAMAV_IMAGE;save('runtime.json',state);}return;
+  if(a.includes('clamav')){const state=read('runtime.json');state.clamav=process.env.DEPLOYMENT_CLAMAV_IMAGE;state.clamavRunning=true;save('runtime.json',state);}return;
  }
  if(a.includes('dist/scripts/deployment-control.js')){
   const command=a[a.indexOf('dist/scripts/deployment-control.js')+1],session='reports/active-deployment-session.json';
-  if(command==='prepare')save(session,{deploymentId:env('DEPLOYMENT_ID'),leaseToken:'fixture-lease',phase:'PREFLIGHT',rollbackPerformanceEnvironment:rollbackEnvironment,clamavOperation:env('DEPLOYMENT_CLAMAV_OPERATION'),clamavIncidentSnapshotSha256:env('DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256')});
+  if(command==='prepare')save(session,{deploymentId:env('DEPLOYMENT_ID'),leaseToken:'fixture-lease',phase:'PREFLIGHT',rollbackPerformanceEnvironment:rollbackEnvironment,clamavOperation:env('DEPLOYMENT_CLAMAV_OPERATION'),clamavIncidentSnapshotSha256:env('DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256'),clamavIncidentReceiptSha256:env('DEPLOYMENT_CLAMAV_INCIDENT_RECEIPT_SHA256')});
   else if(command==='maintenance-on'){
    save('maintenance.json',{deploymentId:env('DEPLOYMENT_ID')});
    if(failure==='marker-interrupted')process.exit(25);
@@ -183,24 +239,32 @@ const rollbackEnvironment={PERFORMANCE_RELEASE_COMMIT:'a'.repeat(40),PERFORMANCE
  }
  const id=env('DEPLOYMENT_ID'),unit=path.join(coordination,'clamav-checkpoint-'+id);
  if(a.includes('scripts/clamav-checkpoint.mjs')){
-  const {requireBoundary,captureUnit,restoreUnit,verifyUnit}=await import(require('node:url').pathToFileURL(path.join(repository,'backend/scripts/clamav-checkpoint.mjs')));
+  const {requireBoundary,boundIncidentTarget,captureUnit,restoreUnit,verifyUnit,verifyIncidentCapture}=await import(require('node:url').pathToFileURL(path.join(repository,'backend/scripts/clamav-checkpoint.mjs')));
   const command=a[a.indexOf('scripts/clamav-checkpoint.mjs')+1];
-  requireBoundary({session:read('reports/active-deployment-session.json'),active:read('active.json'),maintenance:read('maintenance.json'),id,token:env('DEPLOYMENT_LEASE_TOKEN'),phase:command==='capture'?'SERVICES_DRAINED':'MUTATION_STARTED'});
+  requireBoundary({session:read('reports/active-deployment-session.json'),active:read('active.json'),maintenance:read('maintenance.json'),id,token:env('DEPLOYMENT_LEASE_TOKEN'),phase:{capture:'SERVICES_DRAINED','verify-incident-capture':'REMOTE_CHECKPOINT_VERIFIED',activate:'MUTATION_STARTED'}[command]});
+  const binding=()=>boundIncidentTarget(read('reports/active-deployment-session.json'),Object.fromEntries(['DEPLOYMENT_CLAMAV_OPERATION',
+   'DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256','DEPLOYMENT_CLAMAV_INCIDENT_RECEIPT_SHA256','DEPLOYMENT_CLAMAV_TARGET_IMAGE'].map(key=>[key,env(key)])));
+  const target=binding();
   if(command==='capture'){
-   const incident=env('DEPLOYMENT_CLAMAV_OPERATION')==='incident-recovery';
-   if(incident){const {requireIncidentSession}=await import(require('node:url').pathToFileURL(path.join(repository,'backend/scripts/clamav-incident-policy.mjs')));requireIncidentSession(read('reports/active-deployment-session.json'),'incident-recovery',env('DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256'));}
+   const incident=Boolean(target);
+   if(failure==='target-coordinate-capture')fs.appendFileSync(path.join(unit,'target.json'),'\n');
    if(hash(fs.readFileSync(path.join(unit,incident?'incident-snapshot.json':'rollback-proof.json')))!==env(incident?'DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256':'DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_SHA256'))throw Error('Original evidence changed');
-   await captureUnit({bank,unit,id,image:image('clamav')});
-  }
-  else {
+   await captureUnit({bank,unit,id,image:image('clamav'),target});
+  } else if (command==='verify-incident-capture') {
+   const capturedAt=await verifyIncidentCapture({unit,id,checkpoint:read('checkpoint.json'),target,
+    snapshotSha256:env('DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256')});
+   console.log(capturedAt);
+  } else {
    const checkpoint=read('checkpoint.json');await verifyUnit({unit,id,checkpoint});
    const receipt=JSON.parse(fs.readFileSync(path.join(unit,'target.json')));
    if(receipt.image!==env('DEPLOYMENT_CLAMAV_TARGET_IMAGE')||receipt.bankSha256!==hash(fs.readFileSync(path.join(unit,'target-bank.tar'))))throw Error('Activation binding mismatch');
-   await restoreUnit({bank,unit,id,checkpoint,archive:'target-bank.tar',beforeMutation:async()=>{
+   await restoreUnit({bank,unit,id,checkpoint,target,archive:'target-bank.tar',beforeMutation:async()=>{
     if(failure==='install-interrupted')throw Error('Injected interrupted installation');
     const active=read('active.json');if(failure==='lease-expired')active.leaseExpiresAt=new Date(0).toISOString();
     requireBoundary({session:read('reports/active-deployment-session.json'),active,maintenance:read('maintenance.json'),id,token:env('DEPLOYMENT_LEASE_TOKEN'),phase:'MUTATION_STARTED'});
+    binding();
    }});
+   if(failure==='post-mutation'&&env('DEPLOYMENT_CLAMAV_OPERATION')==='incident-recovery')process.exit(44);
   }
   return;
  }
@@ -231,6 +295,34 @@ const rollbackEnvironment={PERFORMANCE_RELEASE_COMMIT:'a'.repeat(40),PERFORMANCE
   const {verifyUnit}=await import(require('node:url').pathToFileURL(path.join(repository,'backend/scripts/clamav-checkpoint.mjs')));
   await verifyUnit({unit,id,checkpoint});save('checkpoint.json',checkpoint);return;
  }
+ if(a.includes('dist/scripts/deployment-owned-migrations.js')&&a.includes('--verify-current')){
+  installTsHook();
+  const directory=path.join(repository,'backend/prisma/migrations');
+  const history=fs.readdirSync(directory,{withFileTypes:true}).filter(entry=>entry.isDirectory()).map(entry=>({
+   name:entry.name,checksum:hash(fs.readFileSync(path.join(directory,entry.name,'migration.sql'))),finished:new Date(),rolledBack:null
+  }));
+  if(failure==='ledger-checksum')history[0].checksum='0'.repeat(64);
+  if(failure==='ledger-pending')history.pop();
+  const script=path.join(repository,'backend/src/scripts/deployment-owned-migrations.ts');
+  const Module=require('node:module');
+  const load=Module._load;
+  const argv=process.argv;
+  try {
+   await new Promise(resolve=>{
+    Module._load=function(request,parent,isMain){
+     if(parent?.filename===script){
+      if(request==='../lib/prisma')return {prisma:{$queryRaw:async()=>history},disconnectDatabase:resolve};
+      if(request==='../services/protectedBridgeMigrations')throw Error('Read-only verification must not load migration writers');
+     }
+     return load.apply(this,arguments);
+    };
+    process.argv=[process.execPath,script,'--verify-current'];
+    require(script);
+   });
+  } finally { Module._load=load; process.argv=argv; }
+  return;
+ }
+ if(a.some(value=>value.includes('verifyInquiryBaseline(path.join')))return;
  if(a.includes('dist/scripts/deployment-inquiry.js')){
   if(!a.includes('scripts/with-backend-control-ownership.sh')||phase()!=='MIGRATIONS_APPLIED')throw Error('Inquiry ownership boundary unproven');
   return;
@@ -254,6 +346,7 @@ const rollbackEnvironment={PERFORMANCE_RELEASE_COMMIT:'a'.repeat(40),PERFORMANCE
   if(!prior.some(row=>row.kind==='python3'&&row.args[1]==='--assert-resolved'))throw Error('Native closure before signal resolution');
   return;
  }
+ if(a.includes('exec')&&a.some(value=>value.includes('pg_isready')))return;
  if(a.includes('exec')){
   const text=a.at(-1);
   if(text.includes('default_transaction_read_only')){

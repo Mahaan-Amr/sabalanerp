@@ -2,8 +2,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { prisma, disconnectDatabase } from '../lib/prisma';
-import { assertProtectedBridgeMigrationAuthority, compileProtectedCurrentRelease, applyProtectedCurrentRelease,
-  protectedCurrentReleaseNames } from '../services/protectedBridgeMigrations';
 
 const fail = (code: string): never => { throw Object.assign(new Error(code), { code }); };
 const required = (key: string) => {
@@ -13,10 +11,14 @@ const required = (key: string) => {
 };
 
 async function main() {
-  if (process.argv.length !== 2) fail('PROTECTED_MIGRATION_ARGUMENTS_UNSUPPORTED');
-  const owner = Object.freeze({ deploymentId: required('DEPLOYMENT_ID'), releaseId: required('DEPLOYMENT_RELEASE_ID'),
-    leaseToken: required('DEPLOYMENT_LEASE_TOKEN') });
-  await assertProtectedBridgeMigrationAuthority(prisma, owner);
+  const verifyCurrent = process.argv.length === 3 && process.argv[2] === '--verify-current';
+  if (!verifyCurrent && process.argv.length !== 2) fail('PROTECTED_MIGRATION_ARGUMENTS_UNSUPPORTED');
+  const authority = verifyCurrent ? null : {
+    owner: Object.freeze({ deploymentId: required('DEPLOYMENT_ID'), releaseId: required('DEPLOYMENT_RELEASE_ID'),
+      leaseToken: required('DEPLOYMENT_LEASE_TOKEN') }),
+    migrations: await import('../services/protectedBridgeMigrations'),
+  };
+  if (authority) await authority.migrations.assertProtectedBridgeMigrationAuthority(prisma, authority.owner);
   const directory = path.resolve(__dirname, '../../prisma/migrations');
   const files = new Map(fs.readdirSync(directory, { withFileTypes: true }).filter(entry => entry.isDirectory()).map(entry => {
     if (!/^\d{14}_[a-zA-Z0-9_]+$/.test(entry.name)) fail('PROTECTED_MIGRATION_SOURCE_NAME_INVALID');
@@ -34,6 +36,14 @@ async function main() {
     applied.add(row.name);
   }
   const pending = [...files].filter(([name]) => !applied.has(name)).sort(([a], [b]) => a.localeCompare(b));
+  if (!authority) {
+    if (pending.length) fail('PROTECTED_MIGRATION_CURRENT_LEDGER_INCOMPLETE');
+    console.log(JSON.stringify({ protectedMigrationLedgerCurrent: true, appliedCount: applied.size }));
+    return;
+  }
+  const { owner, migrations } = authority;
+  const { protectedCurrentReleaseNames, compileProtectedCurrentRelease, applyProtectedCurrentRelease,
+    assertProtectedBridgeMigrationAuthority } = migrations;
   // The entire pinned current release is compiled before the first DDL.
   // The old Oct14 migration is historical native history on the retained
   // production state; it is not retroactively given a bridge receipt.

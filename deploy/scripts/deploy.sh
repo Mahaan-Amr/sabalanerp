@@ -630,13 +630,13 @@ restore_clamav_configuration() {
   # deployment-rollback has already authenticated this unit against the decrypted checkpoint.
   # Never start the old scanner with the target bank or target configuration.
   clamav_config="${REPO_ROOT}/.deploy-state/$(clamav_unit_name)-restore.tar"
-  docker cp "$(compose ps -aq backend):/app/recovery-coordination/$(clamav_unit_name)/config.tar" "${clamav_config}"
+  docker cp "$(compose ps -aq backend):/app/recovery-coordination/$(clamav_unit_name)/config.tar" "${clamav_config}" || return 1
   if [ "${DEPLOYMENT_CLAMAV_OPERATION}" != incident-recovery ]; then
     DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_FILE="${REPO_ROOT}/.deploy-state/$(clamav_unit_name)-rollback-proof.json"
-    docker cp "$(compose ps -aq backend):/app/recovery-coordination/$(clamav_unit_name)/rollback-proof.json" "${DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_FILE}"
+    docker cp "$(compose ps -aq backend):/app/recovery-coordination/$(clamav_unit_name)/rollback-proof.json" "${DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_FILE}" || return 1
     export DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_FILE
   fi
-  compose create --no-deps clamav
+  compose up --no-start --no-deps --no-build --pull never clamav || return 1
   docker cp -a - "$(compose ps -aq clamav):/etc/clamav/" <"${clamav_config}"
 }
 

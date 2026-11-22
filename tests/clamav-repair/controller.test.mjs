@@ -7,6 +7,10 @@ test('protected release captures the stopped bank before checkpoint, applies tar
  const steps=['phase SERVICES_DRAINED','preserved_clamav_guard identity || exit 1','capture_clamav_checkpoint','run_backend_timed_with_heartbeat "${checkpoint_timeout}" node dist/scripts/deployment-checkpoint.js','phase REMOTE_CHECKPOINT_VERIFIED','phase MUTATION_STARTED','node scripts/clamav-checkpoint.mjs activate','phase RELEASE_STARTED','verify_clamav_repair_runtime\nremaining_mutation_seconds','phase TRAFFIC_OPENED'];
  let previous=-1;
  for(const step of steps) {const index=source.indexOf(step, previous + 1);assert.ok(index>previous,`missing or out of order: ${step}`);previous=index;}
+ const restoreScanner=source.slice(source.indexOf('restore_clamav_configuration() {'),source.indexOf('verify_clamav_repair_runtime() {'));
+ const createStopped='compose up --no-start --no-deps --no-build --pull never clamav || return 1';
+ assert.ok(restoreScanner.includes(createStopped));
+ assert.ok(restoreScanner.indexOf(createStopped)<restoreScanner.indexOf('docker cp -a -'));
  assert.doesNotMatch(source,/compose up -d postgres clamav/,'pre-checkpoint must not replace AV');
  assert.match(source,/if \[ "\$\{DEPLOYMENT_CLAMAV_REPAIR\}" = true \] && \[ "\$\{MUTATION_STARTED\}" -eq 0 \]; then[\s\S]*compose start clamav[\s\S]*--no-deps/);
  assert.match(source,/deployment-rollback.js[\s\S]*switch_to_previous_images\n    restore_clamav_configuration[\s\S]*verify_clamav_repair_runtime[\s\S]*DEPLOYMENT_GATE_MODE=ROLLBACK/);

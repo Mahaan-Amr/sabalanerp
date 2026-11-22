@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -12,9 +13,12 @@ test('restricted recovery startup preserves pending owner requests and keeps res
   process.env.RECOVERY_COORDINATION_DIR = coordination;
   process.env.DATABASE_URL = 'postgresql://sabalan_application_runtime:fixture@localhost/sabalanerp';
   try {
-    const { RESTORE_JOURNAL_PATH, readRestoreJournal } = await import('../systemRecoveryEngine');
-    const { initializeSystemRecovery } = await import('../systemRecoveryLifecycle');
-    const { getRecoveryRuntimeState } = await import('../recoveryRuntime');
+    // Load after setting the fixture environment, using the same module cache as
+    // the recovery engine and lifecycle so the one-shot HTTP binding stays single.
+    const load = createRequire(__filename);
+    const { RESTORE_JOURNAL_PATH, readRestoreJournal }: typeof import('../systemRecoveryEngine') = load('../systemRecoveryEngine');
+    const { initializeSystemRecovery }: typeof import('../systemRecoveryLifecycle') = load('../systemRecoveryLifecycle');
+    const { getRecoveryRuntimeState }: typeof import('../recoveryRuntime') = load('../recoveryRuntime');
     const updates: Prisma.RecoveryOperationUpdateManyArgs[] = [];
     const startupDatabase = {
       recoveryOperation: {

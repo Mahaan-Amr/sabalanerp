@@ -671,6 +671,22 @@ _Avoid_: one number reused across document types, substituting a journal number 
 The posted credit note, reversal, or corrective journal that changes recognized revenue, tax, receivable, inventory, and cost after reviewed physical-return evidence. Guard inbound evidence preserves the actual return time but never mutates the ledger directly or substitutes for Accounting's posted decision.
 _Avoid_: posting from Guard entry alone, rewriting the original sale, losing physical effective time, changing a Hard-Closed period silently, or reducing revenue without linked return evidence
 
+**تخصیص مقدار مرجوعی به فروش**:
+تصمیم حسابداری درباره اینکه مقدار سنگ مرجوعی به کدام ردیف یا ردیف‌های فروش همان مشتری نسبت داده شود. اگر مبدأ دقیق قابل تشخیص نباشد، حسابدار دلیل انتخاب ردیف‌های هم‌خوان را ثبت می‌کند؛ تخصیص بخشی از مقدار پذیرفته‌شده قابل نگهداری است، اما بستانکاری پس از تخصیص تمام آن مقدار قطعی می‌شود.
+_Avoid_: یکی‌گرفتن دریافت فیزیکی با تعیین ردیف فروش یا انتساب بیش از ماندهٔ قابل‌برگشت یک ردیف
+
+**نرخ توافقی مرجوعی**:
+مبلغ توافق‌شده به‌ازای هر واحد سنگ مرجوعی که حسابدار مجاز مستقیماً قطعی می‌کند و مبنای محاسبهٔ بستانکاری مشتری است. نرخ توافقی سقف ندارد و می‌تواند بالاتر از نرخ فروش اولیه باشد؛ مبلغ متناظر با فروش اولیه برای مقایسه در پرونده می‌ماند و دلیل اختلاف ثبت می‌شود.
+_Avoid_: جایگزینی نرخ فروش اولیه با نرخ توافقی یا ثبت اختلاف بدون دلیل
+
+**مرجوعی سنگ اضافهٔ پروژه**:
+برگشت سنگ تحویل‌شده‌ای که پس از پایان نیاز مشتری اضافه مانده است. مقدار پذیرفته‌شده مبنای بستانکاری مشتری است و تعهد ارسال سنگ جایگزین برای آن مقدار ایجاد نمی‌کند. توافق سبلان و مشتری برای پذیرش کالای مشمول بند عدم مرجوعی قرارداد نیز در همین گردش عادی انجام می‌شود و پیام یا دلیل پذیرش جداگانه‌ای ندارد.
+_Avoid_: یکی‌گرفتن مرجوعی سنگ اضافه با تعویض یا بازکردن دوبارهٔ تعهد ارسال
+
+**پذیرش سنگ مرجوعی**:
+تصمیم لجستیک دربارهٔ مقدار قابل قبول از سنگ دریافتی. مقدار پذیرفته‌شدهٔ سالم و قابل فروش با همین تصمیم برای فروش در دسترس قرار می‌گیرد؛ حسابداری مستقلاً تخصیص و مبلغ آن را بررسی می‌کند و مقدار ردشده همراه با دلیل در پرونده می‌ماند.
+_Avoid_: یکی‌گرفتن کل مقدار دریافتی با مقدار پذیرفته‌شده
+
 **Rial Posting Amount**:
 The whole-rial base-currency debit or credit carried by a posted journal line. Source quantity, unit price, pre-rounding amount, rounding rule and version, and any explicit rounding-difference line remain preserved, while binary floating-point and hidden fractional rial never enter ledger truth.
 _Avoid_: fractional posted rial, floating-point money, silent rounding, discarding source precision, or forcing commercial quantity and unit-price precision onto the ledger amount

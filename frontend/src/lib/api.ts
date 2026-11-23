@@ -1239,7 +1239,7 @@ export const accountingAPI = {
   getDashboardWorkspace: (params: { range: '1m' | '3m' | '6m' | '1y'; due?: string; deadlineType?: string }) =>
     api.get('/accounting/dashboard/workspace', { params }),
   getFinancialTrend: (range: '1m' | '3m' | '6m' | '1y') => api.get('/accounting/financial-trend', { params: { range } }),
-  getDispatchCandidates: () => api.get('/accounting/dispatch-candidates'),
+  getDispatchCandidates: (loadingId?: string) => api.get('/accounting/dispatch-candidates', { params: { loadingId } }),
   registerSepidarLoadingReference: (loadingId: string, data: { value: string | null; expectedVersion: string | null; reason?: string }) =>
     api.post(`/accounting/loadings/${encodeURIComponent(loadingId)}/sepidar-reference`, data),
   issueLoadingDocuments: (loadingId: string, recovery?: { waybillId: string; invoiceId: string; reason: string }) =>

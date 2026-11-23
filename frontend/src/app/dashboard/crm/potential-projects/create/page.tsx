@@ -8,12 +8,12 @@ import EnhancedDropdown from '@/components/EnhancedDropdown';
 import PersianCalendarComponent from '@/components/PersianCalendar';
 import { CustomerWorkflowSection } from '@/features/crm/customer-workflow/CustomerWorkflowUi';
 import { crmAPI } from '@/lib/api';
-import { crmPersonName, CRM_WORK_TYPES, persianDateToApiDate, POTENTIAL_PROJECT_STATUSES } from '@/lib/crmPipeline';
+import { CrmCustomerPicker } from '@/features/crm/customer-workflow/CrmCustomerPicker';
+import { CRM_WORK_TYPES, persianDateToApiDate, POTENTIAL_PROJECT_STATUSES } from '@/lib/crmPipeline';
 import {ModelDraftRecovery} from '@/components/ModelDraftRecovery';
 import {useModelDraftRecovery} from '@/lib/useModelDraftRecovery';
 import {parsePotentialProjectDraft,emptyPotentialProjectDraft} from '@/features/crm/potentialProjectDraft';
 
-type Customer = { id: string; firstName?: string; lastName?: string; companyName?: string; phoneNumbers?: Array<{ number: string }> };
 type Seller = { id: string; firstName?: string; lastName?: string; username?: string };
 
 const inputClass = 'min-h-12 w-full rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] px-4 py-3 text-sm text-[var(--sds-text-primary)] outline-none transition focus:border-[var(--sds-accent)] focus:bg-[var(--sds-surface-raised)] focus:ring-2 focus:ring-[var(--sds-accent)]/15 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)] dark:focus:border-[var(--sds-border-strong)] dark:focus:bg-[var(--sds-surface-raised)]';
@@ -23,9 +23,9 @@ export default function CreatePotentialProjectPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const presentationScope = useErpPresentationScope();
-  const [customers, setCustomers] = useState<Customer[]>([]);
   const [sellers, setSellers] = useState<Seller[]>([]);
   const [loading, setLoading] = useState(true);
+  const [optionsError, setOptionsError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [submissionUncertain,setSubmissionUncertain]=useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -52,18 +52,15 @@ export default function CreatePotentialProjectPage() {
 
   const loadOptions = async () => {
     setLoading(true);
+    setOptionsError(null);
     try {
-      const [customerResponse, ownersResponse] = await Promise.all([
-        crmAPI.getCustomers({ limit: 100 }),
-        crmAPI.getSellers(),
-      ]);
-      if (customerResponse.data.success) setCustomers(customerResponse.data.data);
-      if (ownersResponse.data.success) {
-        setSellers(ownersResponse.data.data);
-        setForm((prev) => ({ ...prev, responsibleSellerId: prev.responsibleSellerId || ownersResponse.data.data[0]?.id || '' }));
+      const response = await crmAPI.getSellers();
+      if (response.data.success) {
+        setSellers(response.data.data);
+        setForm((prev) => ({ ...prev, responsibleSellerId: prev.responsibleSellerId || response.data.data[0]?.id || '' }));
       }
     } catch (err: any) {
-      setError(err.response?.data?.error || 'بارگذاری گزینه‌های فرم ناموفق بود.');
+      setOptionsError(err.response?.data?.error || 'بارگذاری گزینه‌های فرم ناموفق بود.');
     } finally {
       setLoading(false);
     }
@@ -93,7 +90,7 @@ export default function CreatePotentialProjectPage() {
   };
 
   if (loading) return <ErpLoading />;
-  if (error && !customers.length) return <ErpEmptyState title="خطا در بارگذاری فرم" description={error} action={{ label: 'تلاش دوباره', onClick: loadOptions, tone: 'primary' }} />;
+  if (optionsError) return <ErpEmptyState title="خطا در بارگذاری فرم" description={optionsError} action={{ label: 'تلاش دوباره', onClick: loadOptions, tone: 'primary' }} />;
 
   return (
     <ErpPage
@@ -110,18 +107,7 @@ export default function CreatePotentialProjectPage() {
       <form id="potential-project-form" onSubmit={submit} className={presentationScope === 'workspace' ? "mx-auto max-w-[850px] space-y-5" : "space-y-5"}>
         <ErpSection title="اطلاعات اصلی" description="این فیلدها برای ایجاد پروژه احتمالی الزامی هستند." className="space-y-4">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <label className={labelClass}>مخاطب CRM
-              <EnhancedDropdown
-                className="mt-2"
-                value={form.customerId}
-                onChange={(value) => update('customerId', value)}
-                placeholder="انتخاب مخاطب"
-                options={customers.map((customer) => ({ value: customer.id, label: crmPersonName(customer) }))}
-                searchable
-                required
-                noOptionsText="مخاطبی پیدا نشد"
-              />
-            </label>
+            <CrmCustomerPicker value={form.customerId} onChange={(value) => update('customerId', value)} />
             <label className={labelClass}>عنوان پروژه
               <ErpInput className={`${inputClass} mt-2`} value={form.title} onChange={(e) => update('title', e.target.value)} required />
             </label>

@@ -10,11 +10,14 @@ import { PARTNER_INTERNAL_ACCOUNTING_SOURCE, preparePartnerFinancialSource } fro
 
 /** Fake persistence only: authorization, projection reconstruction, preparation,
  * current plan validation and accounting read scope all execute production code. */
-export async function historicalAccountingFixture(status = 'DRAFT', identity: { invoiceId?: string; customerContractNumber?: string } = {}) {
+export type HistoricalAccountingFixtureIdentity = { invoiceId?: string; customerContractNumber?: string;
+  configureGraph?: (graph: ReturnType<typeof parseCanonicalProductGraph>) => void;
+  wholesalePricing?: NonNullable<ReturnType<typeof createPartnerFixtures>['accounting']['products'][number]['wholesalePricing']> };
+export async function historicalAccountingFixture(status = 'DRAFT', identity: HistoricalAccountingFixtureIdentity = {}) {
   const base = createPartnerFixtures();
   const plan: ReturnType<typeof PaymentPlanSchema.parse> = { ...base.accounting.sabalanPaymentPlan, planId: 'historical-plan-3', version: 3,
     predecessorPlanId: 'historical-plan-2', installments: [] };
-  const product = { ...base.accounting.products[0], configurationHash: `sha256-v1:${'a'.repeat(64)}` };
+  const product = { ...base.accounting.products[0], ...(identity.wholesalePricing ? { wholesalePricing: identity.wholesalePricing } : {}), configurationHash: `sha256-v1:${'a'.repeat(64)}` };
   const graph = parseCanonicalProductGraph({ schemaVersion: 1, revision: 1,
     calculationPolicy: { calculation: 'calculation-v1', packing: 'packing-v1', pricing: 'pricing-v1', rounding: 'rounding-v1' },
     catalogSnapshots: [{ catalogProductId: 'fixture-stone', snapshotVersion: 'catalog-v1', facts: {} }],
@@ -22,6 +25,7 @@ export async function historicalAccountingFixture(status = 'DRAFT', identity: { 
       productType: 'longitudinal', contractualTitle: product.description, commercial: { requestedLengthMeters: '1',
         requestedQuantity: '2', requestedAreaSquareMeters: '1', totalAmountToman: '200', calculationSnapshot: { quantityMode: 'piece-count' } } }],
     stairSystems: [], layerConfigurations: [], sourceBatches: [], remainingStones: [], allocations: [], operationGroups: [], toolSelections: [], finishingSelections: [] });
+  identity.configureGraph?.(graph);
   const evidence = { graphHash: await canonicalHash({ purpose: 'PARTNER_CASE_GRAPH', schemaVersion: 1, graph }), graph,
     partySnapshots: { partner: base.accounting.debtor, customer: base.customer.customer },
     wholesaleEnvelope: { schemaVersion: 1, products: [product], totals: base.accounting.totals, termsVersionId: 'fixture-terms' },

@@ -16,8 +16,8 @@ function currency(value: any) {
   if (['RIAL', 'IRR', 'ریال'].includes(code)) return 1;
   return null;
 }
-function rate(input: { explicit: any; cost: any; quantity: any; base: any; expectedBase: string; currency: any; documentCurrency: string; minimum?: any }) {
-  const from = currency(input.currency || input.documentCurrency), to = currency(input.documentCurrency);
+function rate(input: { explicit: any; cost: any; quantity: any; base: any; expectedBase: string; currency: any; sourceCurrency?: string; documentCurrency: string; minimum?: any }) {
+  const from = currency(input.currency || input.sourceCurrency), to = currency(input.documentCurrency);
   if (!from || !to) return null;
   // A catalog lookup never supplies price or calculation-basis evidence.
   if (input.base != null && input.base !== input.expectedBase) return null;
@@ -30,7 +30,7 @@ function rate(input: { explicit: any; cost: any; quantity: any; base: any; expec
 }
 
 /** Decorates a copy of frozen financial evidence; catalog reads resolve identity only. */
-export async function historicalServicePrintData(tx: PrismaTypes.TransactionClient, contractData: unknown, documentCurrency: string) {
+export async function historicalServicePrintData(tx: PrismaTypes.TransactionClient, contractData: unknown, documentCurrency: string, sourceCurrency?: string) {
   const data = obj(contractData);
   if (!Array.isArray(data.products)) return contractData;
   const products: Record<string, any>[] = data.products.map((value: any) => { const product = obj(value); return { ...product, meta: { ...obj(product.meta) } }; });
@@ -57,7 +57,7 @@ export async function historicalServicePrintData(tx: PrismaTypes.TransactionClie
       const historicalRate = rate({ explicit: first(operation.pricePerMeter, operation.rate, operation.unitPrice),
         cost: first(operation.totalPrice, operation.cost), quantity: first(operation.computedMeters, operation.meters, operation.amount),
         base: operation.calculationBase || 'length', expectedBase: 'length', currency: operation.currency,
-        documentCurrency, minimum: operation.minimumQuantity });
+        documentCurrency, sourceCurrency, minimum: operation.minimumQuantity });
       return { ...operation, namePersian: text(operation.namePersian, operation.name, catalog?.namePersian, catalog?.name),
         code: text(operation.code, operation.toolCode, operation.sourceCode, catalog?.code),
         dispatchHistoricalRate: historicalRate };
@@ -70,7 +70,7 @@ export async function historicalServicePrintData(tx: PrismaTypes.TransactionClie
       const expectedBase = base === 'squareMeters' ? 'squareMeters' : base === 'count' ? 'count' : 'length';
       return { ...operation, dispatchHistoricalRate: rate({ explicit: first(operation.unitPrice, operation.rate, saved.pricePerMeter),
         cost: operation.cost, quantity: first(operation.quantity, operation.meter), base, expectedBase,
-        currency: operation.currency || saved.currency, documentCurrency, minimum: first(operation.minimumQuantity, saved.minimumQuantity) }),
+        currency: operation.currency || saved.currency, documentCurrency, sourceCurrency, minimum: first(operation.minimumQuantity, saved.minimumQuantity) }),
         subService: { ...saved, code: text(saved.code, operation.code, operation.sourceCode, catalog?.code),
           namePersian: text(saved.namePersian, saved.name, operation.namePersian, operation.name, catalog?.namePersian, catalog?.name) } };
     });
@@ -82,7 +82,7 @@ export async function historicalServicePrintData(tx: PrismaTypes.TransactionClie
       p.dispatchHistoricalFinishingRate = rate({ explicit: first(p.finishingUnitPrice, saved.unitPrice, p.finishingPricePerSquareMeter, saved.pricePerSquareMeter),
         cost: p.finishingCost, quantity: first(p.finishingQuantity, saved.quantity, p.finishingSquareMeters, saved.squareMeters, base === 'squareMeters' ? p.squareMeters : undefined),
         base, expectedBase: base === 'length' ? 'length' : 'squareMeters', currency: p.finishingCurrency || saved.currency,
-        documentCurrency, minimum: first(p.finishingMinimumQuantity, saved.minimumQuantity) });
+        documentCurrency, sourceCurrency, minimum: first(p.finishingMinimumQuantity, saved.minimumQuantity) });
     }
     p.finishings = array(p.finishings).map((f: any) => {
       const catalog = finishingById.get(text(f.finishingId, f.id) || '');
@@ -90,14 +90,14 @@ export async function historicalServicePrintData(tx: PrismaTypes.TransactionClie
       return { ...f, code: text(f.code, catalog?.code), name: text(f.namePersian, f.name, catalog?.namePersian, catalog?.name),
         dispatchHistoricalRate: rate({ explicit: f.unitPrice, cost: f.cost, quantity: f.quantity, base,
           expectedBase: base === 'length' ? 'length' : base === 'count' ? 'count' : 'squareMeters', currency: f.currency,
-          documentCurrency, minimum: f.minimumQuantity }) };
+          documentCurrency, sourceCurrency, minimum: f.minimumQuantity }) };
     });
     p.cuttingBreakdown = array(p.cuttingBreakdown).map((cut: any) => ({ ...cut,
       dispatchHistoricalRate: rate({ explicit: cut.rate, cost: cut.cost, quantity: cut.meters,
-        base: cut.calculationBase || 'length', expectedBase: 'length', currency: cut.currency, documentCurrency, minimum: cut.minimumQuantity }) }));
+        base: cut.calculationBase || 'length', expectedBase: 'length', currency: cut.currency, documentCurrency, sourceCurrency, minimum: cut.minimumQuantity }) }));
     p.cutDetails = array(p.cutDetails).map((cut: any) => ({ ...cut,
       dispatchHistoricalRate: rate({ explicit: first(cut.rate, cut.cuttingCostPerMeter), cost: first(cut.cost, cut.cuttingCost), quantity: first(cut.meters, cut.length),
-        base: cut.calculationBase, expectedBase: 'length', currency: cut.currency, documentCurrency, minimum: cut.minimumQuantity }) }));
+        base: cut.calculationBase, expectedBase: 'length', currency: cut.currency, documentCurrency, sourceCurrency, minimum: cut.minimumQuantity }) }));
   }
   return { ...data, products };
 }

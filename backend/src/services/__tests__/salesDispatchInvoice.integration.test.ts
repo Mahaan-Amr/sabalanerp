@@ -95,6 +95,7 @@ async function run() {
             versionId = randomUUID(),
             itemId = randomUUID();
           const sourceSnapshot = {
+            currency: index === 0 ? "TOMAN" : "RIAL",
             customerId: customer.id,
             contractData: {
               project: { projectName: `پروژه ${index}`, address: `نشانی ذخیره‌شدهٔ قرارداد ${index}`,
@@ -113,7 +114,7 @@ async function run() {
                   unitPrice: 11,
                   tools: [{ code: "TEST-TOOL", name: "ابزار نیم‌لول",
                     computedMeters: 2, pricePerMeter: 4, totalPrice: 8 },
-                    { toolId: historicalTool.id, code: "923218", computedMeters: 155,
+                    { toolId: historicalTool.id, code: "923218", name: index === 1 ? "نیم لول با ارز ریالی" : undefined, computedMeters: 155,
                       totalPrice: 7750000, edges: { front: true, left: true } },
                     { name: "ابزار رایگان تاریخی", computedMeters: 3, pricePerMeter: 0, totalPrice: 0 },
                     { name: "ابزار نرخ نامعلوم", computedMeters: 3 },
@@ -516,6 +517,7 @@ async function run() {
         assert.match(invoiceHtml, /برش طولی[\s\S]*۳۰ \/ متر طول/);
         assert.match(invoiceHtml, /ساب آزمون[\s\S]*۲۰ \/ متر مربع/);
         assert.match(invoiceHtml, /۹۲۳۲۱۸[\s\S]*نیم لول \(جلو، چپ\)[\s\S]*۵۰۰٬۰۰۰ \/ متر طول/);
+        assert.match(invoiceHtml, /نیم لول با ارز ریالی[\s\S]*۵۰٬۰۰۰ \/ متر طول/);
         assert.match(invoiceHtml, /ابزار رایگان تاریخی[\s\S]*۰ \/ متر طول/);
         const missingRateRow = invoiceHtml.match(/<tr[^>]*>(?:(?!<\/tr>)[\s\S])*ابزار نرخ نامعلوم(?:(?!<\/tr>)[\s\S])*<\/tr>/)?.[0];
         assert.ok(missingRateRow);

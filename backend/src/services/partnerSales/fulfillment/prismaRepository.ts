@@ -48,10 +48,14 @@ export function createPrismaPartnerFulfillmentRepository(input: {
       const run = async (tx: Prisma.TransactionClient) => {
         let mutating = false;
         await lockPartnerOperationsControl(tx);
-        const source = async (expected: PartnerFulfillmentSource['view']['owner'], action: 'MATERIALIZE' | 'SELECT_DELIVERY' | 'INSPECT_LOADING' | 'INSPECT_DEPENDENCIES' | 'INSPECT_VOIDING',
+        const source = async (expected: PartnerFulfillmentSource['view']['owner'], action: 'MATERIALIZE' | 'SELECT_DELIVERY' | 'SELECT_DRAFT_DELIVERY' | 'INSPECT_LOADING' | 'INSPECT_DEPENDENCIES' | 'INSPECT_VOIDING',
           authenticatedActorId?: string): Promise<Result<PartnerFulfillmentSource>> => {
           if (authenticatedActorId && authenticatedActorId !== input.actorId) return { ok: false, error: partnerError('FORBIDDEN') };
-          await tx.$queryRaw`SELECT id FROM partner_sale_cases WHERE id = ${expected.caseId} FOR UPDATE`;
+          // A draft reader already owns the operations fence and a consistent
+          // snapshot. Its writer also holds the Case before authorizing.
+          if (action !== 'SELECT_DRAFT_DELIVERY') {
+            await tx.$queryRaw`SELECT id FROM partner_sale_cases WHERE id = ${expected.caseId} FOR UPDATE`;
+          }
           const row = await tx.partnerSaleCase.findUnique({ where: { id: expected.caseId }, select: {
             id: true, state: true, headRevision: true, integrityHash: true, customerId: true, internalRecordId: true,
             head: { select: { graphHash: true, graph: true, internalProjection: true, partySnapshots: true } },

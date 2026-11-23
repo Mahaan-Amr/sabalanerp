@@ -38,11 +38,14 @@ import type { PartnerCorrectionDependencyInput } from '../partnerSales/correctio
 import { prepareRetailSuccessor } from '../partnerSales/corrections/retailSuccessor';
 import { readPartnerOutstandingHistory, readPartnerAccountingTrend } from '../partnerSales/accounting/history';
 import { createPartnerCaseLoading, readPartnerCaseLoading } from '../dispatchAllocation';
+import { shipmentQuantityEvidenceIntegrityHash } from '../shipmentQuantityProjectionStore';
 import { dryRunLegacyContractProductGraphMigration } from '../contractProductGraphMigration';
 
-function databaseUrl() {
-  const url = new URL(process.env.CONTRACT_RECOVERY_TEST_DATABASE_URL ?? '');
-  if (url.hostname !== '127.0.0.1' || url.port !== '55432' || url.pathname !== '/sabalanerp') throw new Error('Existing local DB required');
+function databaseUrl(schemaOnly = true) {
+  const url = new URL((schemaOnly ? process.env.PARTNER_LIFECYCLE_SCHEMA_SOURCE_URL : undefined) ??
+    process.env.CONTRACT_RECOVERY_TEST_DATABASE_URL ?? '');
+  const localDatabase = schemaOnly ? /^\/sabalanerp(?:_qa_[a-z0-9_]{1,48})?$/ : /^\/sabalanerp$/;
+  if (url.hostname !== '127.0.0.1' || url.port !== '55432' || !localDatabase.test(url.pathname)) throw new Error('Existing local DB required');
   url.searchParams.set('connection_limit', '2'); url.searchParams.set('pool_timeout', '10'); return url.toString();
 }
 
@@ -447,7 +450,7 @@ Promise<Extract<PartnerCommand, { type: 'CASE_CANCEL' }>> {
 
 async function fixture(run: (tx: Prisma.TransactionClient, ids: Ids, owner: RevisionRef) => Promise<void>,
   tamperAccounting = false, loss = false) {
-  const database = new PrismaClient({ datasources: { db: { url: databaseUrl() } } });
+  const database = new PrismaClient({ datasources: { db: { url: databaseUrl(false) } } });
   const rollback = new Error('rollback Partner lifecycle fixture');
   try { await database.$transaction(async tx => { const ids = idsFor(`partner-lifecycle-${randomUUID()}`);
     const owner = await seedCase(tx, ids, tamperAccounting, false, undefined, loss);
@@ -1759,6 +1762,121 @@ test('Partner customer SMS uses the customer recipient, immutable public details
     assert.equal(verified?.success, true, verified?.error);
     assert.equal((await hooks.getPublicContractByToken(token))?.data?.decision, 'APPROVED');
   } finally { await database.$disconnect(); await temporary.cleanup(); }
+});
+
+test('effective Partner financial approval opens Logistics selection and draft creation', async () => {
+  const temporary = await createPartnerLifecycleDatabase({ repositoryRoot: path.resolve(process.cwd()), sourceDatabaseUrl: databaseUrl() });
+  const database = temporary.client();
+  const ids = idsFor(`partner-financial-loading-${temporary.runId}`);
+  const accountantId = `${ids.caseId}-accountant`;
+  try {
+    await database.effectiveAuthorizationState.create({ data: { id: 1, revision: 1 } });
+    await database.$transaction(async tx => {
+      const seeded = await seedCase(tx, ids, false, false, [
+        { deliveryId: 'first-delivery', date: '2026-09-05', destination: 'محل نخست مشتری', items: [{ productRowId: ids.rowId, quantity: '1.00' }] },
+        { deliveryId: 'separate-delivery', date: '2026-09-10', destination: 'محل دوم مشتری', items: [{ productRowId: ids.rowId, quantity: '0.75' }] },
+      ]);
+      const lifecycle = createPartnerCaseLifecycleService(dependencies(tx, ids));
+      await lifecycle.markAwaitingCustomerConfirmation({ expected: seeded, commandId: `${ids.caseId}-send`,
+        correlationId: `${ids.caseId}-send`, snapshotId: `${ids.caseId}-snapshot` });
+      await lifecycle.markCustomerApproved({ expected: seeded, commandId: `${ids.caseId}-approve`,
+        correlationId: `${ids.caseId}-approve`, snapshotId: `${ids.caseId}-snapshot`,
+        verifiedAt: '2026-08-30T08:00:00.000Z' });
+      const committed = await lifecycle.execute(await commitCommand(ids, seeded, 'SIGNED'));
+      assert.equal(committed.ok, true);
+      await tx.partnerSaleCase.update({ where: { id: ids.caseId }, data: { commercialFlowVersion: 1, stateRevision: { increment: 1 } } });
+      await tx.salesContract.update({ where: { id: ids.contractId }, data: { commercialFlowVersion: 2,
+        commercialRevision: 1, salesApprovalRevision: 1, customerAcceptanceRevision: 1, status: 'SIGNED',
+        realizedAt: null, realizedAmount: null, realizedSellerId: null, realizedSellerSource: null } });
+      await tx.salesReportingEvent.deleteMany({ where: { contractId: ids.contractId } });
+      const { appendPartnerCommercialEvent } = await import('../partnerSales/cases/commercialEvents');
+      await appendPartnerCommercialEvent(tx, ids.caseId, ids.partnerId, 'PARTNER_FLOW_MIGRATED', { commercialFlowVersion: 2 });
+      assert.equal(await tx.partnerCaseRevision.count({ where: { caseId: ids.caseId } }), 1, 'retained revision before fixture commit');
+      await tx.$executeRawUnsafe('SET CONSTRAINTS ALL IMMEDIATE');
+      return seeded;
+    });
+    const revision = await database.partnerCaseRevision.findUniqueOrThrow({ where: {
+      caseId_revision: { caseId: ids.caseId, revision: 1 },
+    }, select: { internalProjection: true } });
+    const accounting = (revision.internalProjection as Prisma.JsonObject).accounting as Prisma.JsonObject;
+    const committedEvent = await database.partnerCaseEvent.findFirstOrThrow({ where: {
+      caseId: ids.caseId, type: 'CASE_COMMITTED',
+    }, select: { evidence: true } });
+    const commitment = PartnerEventSchema.parse((committedEvent.evidence as Prisma.JsonObject).publicEvent);
+    if (commitment.type !== 'CASE_COMMITTED') throw new Error('Invalid Accounting replay fixture');
+    await database.$transaction(async tx => {
+      await tx.user.create({ data: { id: accountantId, username: accountantId,
+        email: `${accountantId}@example.invalid`, password: 'not-a-login', firstName: 'Accounting', lastName: 'Replay' } });
+      await tx.effectiveActionGrant.create({ data: { id: `${ids.caseId}-accounting-grant`, principalKind: 'USER',
+        principalId: accountantId, subjectUserId: accountantId, domain: 'PARTNER', action: 'ACCOUNTING_WRITE',
+        rootKind: 'CASE', purpose: 'ACCOUNTING', scope: 'COMPANY', effect: 'ALLOW', grantedBy: accountantId,
+        reason: 'isolated financial void fixture', correlationId: `${ids.caseId}-grant` } });
+    });
+    await database.featurePermission.create({ data: { userId: accountantId, workspace: 'accounting',
+      feature: 'accounting_invoice_candidates_manage', permissionLevel: 'edit', grantedBy: accountantId } });
+    await database.workspacePermission.create({ data: { userId: accountantId, workspace: 'accounting', permissionLevel: 'admin' } });
+    const logisticsId = `${ids.caseId}-logistics`;
+    await database.user.create({ data: { id: logisticsId, username: logisticsId, email: `${logisticsId}@example.invalid`,
+      password: 'not-a-login', firstName: 'Logistics', lastName: 'Operator' } });
+    await database.workspacePermission.create({ data: { userId: logisticsId, workspace: 'logistics', permissionLevel: 'edit' } });
+    await database.featurePermission.createMany({ data: ['logistics_loadings_view', 'logistics_loadings_create'].map(feature => ({
+      userId: logisticsId, workspace: 'logistics', feature, permissionLevel: 'edit', grantedBy: logisticsId,
+    })) });
+    const directCustomer = await database.crmCustomer.create({ data: { firstName: 'Direct', lastName: 'Logistics' } });
+    const directProject = await database.projectAddress.create({ data: { customerId: directCustomer.id,
+      projectName: 'Direct Site', address: 'نشانی آزمون بارگیری مستقیم' } });
+    const product = await database.product.create({ data: {
+      code: 'direct-fixture', name: 'Direct fixture', namePersian: 'سنگ آزمون',
+      cuttingDimensionCode: '1', cuttingDimensionName: 'Cut', cuttingDimensionNamePersian: 'برش',
+      stoneTypeCode: '1', stoneTypeName: 'Stone', stoneTypeNamePersian: 'سنگ', widthCode: '1',
+      widthValue: 1, widthName: 'Width', thicknessCode: '1', thicknessValue: 1, thicknessName: 'Thickness',
+      mineCode: '1', mineName: 'Mine', mineNamePersian: 'معدن', finishCode: '1', finishName: 'Finish',
+      finishNamePersian: 'پرداخت', colorCode: '1', colorName: 'Color', colorNamePersian: 'رنگ',
+      qualityCode: '1', qualityName: 'Quality', qualityNamePersian: 'کیفیت', images: [],
+    } });
+    const directRowId = randomUUID();
+    const directContract = await database.salesContract.create({ data: {
+      contractNumber: `direct-${temporary.runId}`, title: 'Direct logistics', titlePersian: 'بارگیری مستقیم',
+      content: '', status: 'APPROVED', customerId: directCustomer.id, departmentId: ids.departmentId,
+      createdBy: logisticsId, responsibleSellerId: logisticsId, currency: 'IRR', totalAmount: 20,
+      contractData: { projectId: directProject.id, products: [{ rowId: directRowId, productId: product.id, quantity: 2, unit: 'count' }] },
+    } });
+    const directItem = await database.contractItem.create({ data: { contractId: directContract.id, productId: product.id,
+      productRowId: directRowId, productType: 'count', quantity: 2, unitPrice: 10, totalPrice: 20 } });
+    const directApprovedAt = new Date();
+    await database.accountingFinancialRecord.create({ data: { kind: 'INVOICE_CANDIDATE', status: 'ISSUED',
+      sourceKind: 'SALES_CONTRACT', sourceId: directContract.id, contractId: directContract.id, customerId: directCustomer.id,
+      amount: 20, currency: directContract.currency, sepidarAmount: 20, systemInvoiceNumber: 'direct-fixture-invoice',
+      systemInvoiceDate: directApprovedAt, financiallyApprovedAt: directApprovedAt,
+      financiallyApprovedBy: accountantId, createdBy: accountantId } });
+    const baseline = { id: `direct-contracted:${directItem.id}`, contractId: directContract.id,
+      contractItemId: directItem.id, productRowId: directRowId, unit: 'count', kind: 'CONTRACTED_SET' as const,
+      quantity: '2.000', effectiveAt: directApprovedAt.toISOString(), recordedAt: directApprovedAt.toISOString(),
+      sourceType: 'CONTRACT_QUANTITY_VERSION', sourceId: directItem.id, sourceVersion: 1, integrityHash: '', metadata: {} };
+    await database.shipmentQuantityEvidence.create({ data: { ...baseline, effectiveAt: directApprovedAt, recordedAt: directApprovedAt,
+      integrityHash: shipmentQuantityEvidenceIntegrityHash(baseline) } });
+
+    const adapter = createPartnerAccountingAdapter(createPrismaPartnerAccountingRepository({ database,
+      actorId: accountantId, correlationId: `${ids.caseId}-accounting` }));
+    const view = { ...accounting, state: 'COMMITTED' } as Parameters<typeof adapter.enqueueCommitted>[0];
+
+    const queued = await adapter.enqueueCommitted(view, commitment);
+    assert.equal(queued.ok, true, JSON.stringify(queued));
+    const invoice = await database.accountingFinancialRecord.findFirstOrThrow({ where: { sourceId: ids.internalId } });
+    await promisify(execFile)(process.execPath, ['backend/node_modules/tsx/dist/cli.mjs', 'backend/src/services/__tests__/partnerFinancialLoadingHttpProbe.ts'],
+      { timeout: 120_000, env: { ...process.env, DATABASE_URL: temporary.databaseUrl, PARTNER_TEST_INVOICE_ID: invoice.id, PARTNER_TEST_ACTOR_ID: accountantId,
+        PARTNER_TEST_LOADING_ACTOR_ID: logisticsId, PARTNER_TEST_DIRECT_PROJECT_ID: directProject.id,
+        PARTNER_TEST_DIRECT_CUSTOMER_ID: directCustomer.id } });
+  } finally {
+    await database.$disconnect();
+    for (let attempt = 0; ; attempt++) {
+      try { await temporary.cleanup(); break; }
+      catch (error) {
+        if (attempt >= 5 || !(error instanceof Error) || !error.message.includes('still has sessions')) throw error;
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+    }
+  }
 });
 
 test('Partner independent financial void keeps the commercial contract and commitment intact', async () => {

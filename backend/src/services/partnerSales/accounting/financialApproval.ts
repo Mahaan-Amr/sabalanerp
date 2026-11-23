@@ -15,6 +15,8 @@ import { readPartnerAccountingCapabilities } from './capabilities';
 import { partnerError } from '@sabalanerp/partner-sales-contracts';
 import { readPartnerInvoiceSource } from './invoiceSource';
 import { withCurrentSabalanPlan } from './sabalanPlan';
+import { hasEffectivePartnerLoadingRevision, isFinalPartnerLoadingContract } from '../fulfillment/effectiveRevision';
+import { synchronizePartnerContractedQuantities } from '../fulfillment/quantityStore';
 
 const object = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
@@ -108,7 +110,7 @@ export async function approvePartnerFinancialSourceWithinTransaction(
   }
 
   const row = await tx.partnerSaleCase.findUnique({ where: { id: caseId }, select: {
-    id: true, state: true, headRevision: true, integrityHash: true, internalRecordId: true,
+    id: true, state: true, headRevision: true, integrityHash: true, internalRecordId: true, customerContract: true,
     profile: { select: { userId: true } }, head: { select: { internalProjection: true } },
     events: { where: { type: 'CASE_COMMITTED' }, orderBy: { sequence: 'asc' }, take: 1, select: { evidence: true } },
   } });
@@ -156,6 +158,13 @@ export async function approvePartnerFinancialSourceWithinTransaction(
   if (await tx.accountingReceivable.count({ where: { status: { not: 'VOIDED' },
     invoiceRecord: { sourceKind: PARTNER_INTERNAL_ACCOUNTING_SOURCE, sourceId: record.sourceId } } })) {
     throw new Error('تعهد فعال قبلی باید در همان گردش اصلاح پرونده همکار تعیین تکلیف شود.');
+  }
+  // Staging returns above. A real, effective approval owns the locked Case and
+  // captures quantity evidence inside the same invoice publication transaction.
+  if (row.customerContract && isFinalPartnerLoadingContract(row.customerContract) &&
+      await hasEffectivePartnerLoadingRevision(tx, view.data.owner) &&
+      record.amount.gt(0) && record.sepidarAmount?.equals(record.amount)) {
+    await synchronizePartnerContractedQuantities(tx, caseId, { initialize: true });
   }
   if (!replacePublishedObligation) {
     return tx.accountingFinancialRecord.update({ where: { id: record.id }, data: {

@@ -87,13 +87,14 @@ export function createPartnerFulfillmentAdapter(repository: PartnerFulfillmentRe
   });
   const inspectDependencies: FulfillmentPartnerPort['inspectDependencies'] = view => inspect(view, 'SUCCESSOR');
 
-  const readLoading = (expected: FulfillmentView['owner'], deliveryId: string, historical: boolean): Promise<Result<PartnerLoadingSource>> => repository.transaction(async tx => {
+  const readLoading = (expected: FulfillmentView['owner'], deliveryId: string,
+    action: 'SELECT_DELIVERY' | 'SELECT_DRAFT_DELIVERY' | 'INSPECT_LOADING'): Promise<Result<PartnerLoadingSource>> => repository.transaction(async tx => {
       if (!contracts.RevisionRefSchema.safeParse(expected).success || !contracts.IdSchema.safeParse(deliveryId).success) return failure('INVALID_PAYLOAD');
-      const loaded = await tx.readAuthorizedSource(expected, historical ? 'INSPECT_LOADING' : 'SELECT_DELIVERY');
+      const loaded = await tx.readAuthorizedSource(expected, action);
       if (!loaded.ok) return loaded;
       const stale = contracts.checkExpectedRevision(expected, loaded.value.view.owner);
       if (stale) return { ok: false, error: stale };
-      const validated = validateSource(loaded.value.view, loaded.value, historical);
+      const validated = validateSource(loaded.value.view, loaded.value, action === 'INSPECT_LOADING');
       if (!validated.ok) return validated;
       const source = validated.value;
       const delivery = source.view.deliveries.find(row => row.deliveryId === deliveryId);
@@ -114,8 +115,9 @@ export function createPartnerFulfillmentAdapter(repository: PartnerFulfillmentRe
         recipient: { ...source.customer, destination: delivery.destination }, rows } };
     });
   return {
-    readLoadingSource: (expected: FulfillmentView['owner'], deliveryId: string) => readLoading(expected, deliveryId, false),
-    readLoadingEvidence: (expected: FulfillmentView['owner'], deliveryId: string) => readLoading(expected, deliveryId, true),
+    readLoadingSource: (expected: FulfillmentView['owner'], deliveryId: string) => readLoading(expected, deliveryId, 'SELECT_DELIVERY'),
+    readDraftLoadingSource: (expected: FulfillmentView['owner'], deliveryId: string) => readLoading(expected, deliveryId, 'SELECT_DRAFT_DELIVERY'),
+    readLoadingEvidence: (expected: FulfillmentView['owner'], deliveryId: string) => readLoading(expected, deliveryId, 'INSPECT_LOADING'),
     inspectDependencies,
     inspectVoidingDependencies: (view: FulfillmentView) => inspect(view, 'VOIDING'),
     ensureCommittedLineage: (view: FulfillmentView, command: PartnerFulfillmentCommand) => repository.transaction(async tx => {

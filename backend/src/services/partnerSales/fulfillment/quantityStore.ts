@@ -4,10 +4,12 @@ import { canonicalHash, FulfillmentViewSchema, partnerError, type Result, type F
 import { projectPartnerShipmentQuantities, type PartnerShipmentQuantityEvidence } from '../../shipmentQuantityProjection';
 import { guardReturnValidationFailure, shipmentQuantityEvidenceIntegrityHash,
   shipmentQuantitySourceFields, type PartnerPersistedShipmentEvidence } from '../../shipmentQuantityProjectionStore';
+import { buildPartnerPhysicalLineage, canonicalPartnerQuantity } from './lineage';
 
 const object = (value: unknown): Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
-const conflict = (): never => { throw new Error('Partner shipment quantity evidence integrity conflict'); };
+export class PartnerQuantityEvidenceConflictError extends Error {}
+const conflict = (): never => { throw new PartnerQuantityEvidenceConflictError('Partner shipment quantity evidence integrity conflict'); };
 
 const matchesPartnerEvidenceHash = (fact: PartnerPersistedShipmentEvidence) => {
   if (fact.integrityHash === shipmentQuantityEvidenceIntegrityHash(fact)) return true;
@@ -91,22 +93,23 @@ export async function capturePartnerContractedQuantities(tx: Prisma.TransactionC
 }
 
 /** A successor cannot leave already-materialized obligations on the old head. */
-export async function synchronizePartnerContractedQuantities(tx: Prisma.TransactionClient, caseId: string) {
-  if (!await tx.partnerFulfillmentLineage.count({ where: { caseId } })) return;
+export async function synchronizePartnerContractedQuantities(tx: Prisma.TransactionClient, caseId: string, options: { initialize?: boolean } = {}) {
+  if (!options.initialize && !await tx.partnerFulfillmentLineage.count({ where: { caseId } })) return;
   const row = await tx.partnerSaleCase.findUniqueOrThrow({ where: { id: caseId }, include: { head: true } });
   const view = FulfillmentViewSchema.parse(object(row.head.internalProjection).fulfillment);
   const customer = object(object(row.head.partySnapshots).customer);
   const destination = view.deliveries[0]?.destination ?? customer.address;
   if (typeof customer.displayName !== 'string' || typeof customer.phone !== 'string' || typeof destination !== 'string' || !destination) return conflict();
+  const recipient = { customerId: row.customerId, displayName: customer.displayName, phone: customer.phone, destination };
   for (const product of view.products) {
     if (await tx.partnerFulfillmentLineage.findUnique({ where: { caseId_productRowId: { caseId, productRowId: product.productRowId } } })) continue;
+    if (!canonicalPartnerQuantity(product.quantity)) return conflict();
+    const lineage = await buildPartnerPhysicalLineage({ view, customer: recipient }, product);
     await tx.partnerFulfillmentLineage.create({ data: {
-      id: `partner-fulfillment:${(await canonicalHash(`${caseId}:${product.productRowId}`)).slice(10)}`,
-      caseId, caseRevision: view.owner.revision, integrityHash: view.owner.integrityHash,
-      internalRecordId: view.recordId, productRowId: product.productRowId, quantity: product.quantity, unit: product.unit,
-      recipient: { customerId: row.customerId, displayName: customer.displayName, phone: customer.phone, destination },
-      deliveryIds: view.deliveries.filter(delivery => delivery.items.some(item => item.productRowId === product.productRowId)).map(delivery => delivery.deliveryId),
-      commandId: `partner-successor-lineage:${caseId}:${view.owner.revision}:${product.productRowId}`,
+      id: lineage.lineageId, caseId, caseRevision: lineage.createdFrom.revision, integrityHash: lineage.createdFrom.integrityHash,
+      internalRecordId: lineage.internalRecordId, productRowId: lineage.productRowId, quantity: lineage.quantity, unit: lineage.unit,
+      recipient: lineage.recipient, deliveryIds: lineage.deliveryIds,
+      commandId: `partner-quantity-lineage:${caseId}:${view.owner.revision}:${product.productRowId}`,
     } });
   }
   await capturePartnerContractedQuantities(tx, view);

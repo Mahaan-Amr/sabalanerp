@@ -1,0 +1,164 @@
+import assert from 'node:assert/strict';
+import express from 'express';
+import type { AddressInfo } from 'node:net';
+import { prisma } from '../../lib/prisma';
+import accountingRouter from '../../routes/accounting';
+import logisticsRouter from '../../routes/logistics';
+import { createAuthoritativeSession, SESSION_COOKIE } from '../identitySessionService';
+import { shipmentQuantityEvidenceIntegrityHash } from '../shipmentQuantityProjectionStore';
+
+async function main() {
+  const database = new URL(process.env.DATABASE_URL ?? '');
+  assert.equal(database.hostname, '127.0.0.1');
+  assert.equal(database.port, '55432');
+  assert.match(database.pathname, /^\/sabalanerp_concurrency_[a-f0-9]{16}$/);
+
+  const accountantId = process.env.PARTNER_TEST_ACTOR_ID!;
+  const logisticsId = process.env.PARTNER_TEST_LOADING_ACTOR_ID!;
+  const invoiceId = process.env.PARTNER_TEST_INVOICE_ID!;
+  try {
+    await prisma.featurePermission.create({ data: { userId: accountantId, workspace: 'accounting',
+      feature: 'accounting_records_approve_void', permissionLevel: 'edit', grantedBy: accountantId } });
+    const issueSession = (actorId: string) => createAuthoritativeSession(prisma, actorId, {
+      ipAddress: '127.0.0.1', userAgent: 'isolated-partner-financial-loading',
+    });
+    const [accountant, loader] = await Promise.all([issueSession(accountantId), issueSession(logisticsId)]);
+    const invoice = await prisma.accountingFinancialRecord.findUniqueOrThrow({ where: { id: invoiceId } });
+    const sale = await prisma.partnerSaleCase.findUniqueOrThrow({ where: { internalRecordId: invoice.sourceId! },
+      include: { customerContract: true } });
+    const expected = { caseId: sale.id, revision: sale.headRevision, integrityHash: sale.integrityHash };
+    const app = express();
+    app.use(express.json());
+    app.use('/api/accounting', accountingRouter);
+    app.use('/api/logistics', logisticsRouter);
+    const server = app.listen(0, '127.0.0.1');
+    await new Promise<void>(resolve => server.once('listening', resolve));
+    try {
+      const request = async (path: string, token: string, body?: unknown, key = 'financial-loading') => {
+        const response = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api${path}`, {
+          method: body ? 'POST' : 'GET',
+          headers: { 'content-type': 'application/json', cookie: `${SESSION_COOKIE}=${token}`,
+            'Idempotency-Key': key, 'X-Correlation-Id': key },
+          ...(body ? { body: JSON.stringify(body) } : {}),
+        });
+        return { status: response.status, body: await response.json() as any };
+      };
+      const logistics = (path: string, body?: unknown, key?: string) => request(`/logistics${path}`, loader.token, body, key);
+      const projectsPath = `/customers/${sale.customerId}/projects`;
+      const customersPath = '/customers?search=Customer%20Lifecycle';
+      const approve = (amount: string, key: string, token = accountant.token) => request('/accounting/actions', token, {
+        kind: 'APPROVE_FINANCIAL_INVOICE', invoiceId, systemInvoiceNumber: `${invoiceId}-official`,
+        systemInvoiceDate: new Date().toISOString().slice(0, 10), sepidarAmount: amount, note: 'تأیید صورتحساب آزمایشی پرونده همکار',
+      }, key);
+      const assertHidden = async () => {
+        for (const path of [customersPath, projectsPath]) {
+          const response = await logistics(path);
+          assert.equal(response.status, 200, JSON.stringify(response.body));
+          assert.deepEqual(response.body.data, []);
+        }
+      };
+
+      const anticipated = { sourceKind: 'PARTNER_CASE', expected, deliveryId: 'separate-delivery' };
+      await assertHidden();
+      assert.equal((await logistics('/loadings', anticipated, 'before-approval')).status, 409);
+      assert.equal((await approve('1600', 'unprivileged-approval', loader.token)).status, 403);
+      assert.equal((await approve('1599', 'mismatched-approval')).status, 400);
+      assert.equal((await approve('1600.01', 'fractional-mismatch')).status, 400);
+      await assertHidden();
+
+      const [approved, approvalReplay] = await Promise.all([
+        approve('1600', 'valid-approval'), approve('1600', 'valid-approval'),
+      ]);
+      assert.equal(approved.status, 200, JSON.stringify(approved.body));
+      assert.equal(approvalReplay.status, 200, JSON.stringify(approvalReplay.body));
+      const customers = await logistics(customersPath);
+      assert.equal(customers.status, 200, JSON.stringify(customers.body));
+      assert.ok(customers.body.data.some((row: { id: string }) => row.id === sale.customerId),
+        'matching effective financial approval makes the end customer searchable');
+
+      const projects = await logistics(projectsPath);
+      assert.equal(projects.status, 200, JSON.stringify(projects.body));
+      const selected = projects.body.data.find((row: { deliveryId: string }) => row.deliveryId === 'separate-delivery');
+      assert.ok(selected, JSON.stringify(projects.body));
+      assert.equal(selected.contractNumber, sale.customerContract?.contractNumber);
+      assert.equal(selected.remainingCount, 1);
+      assert.deepEqual(selected.owner, expected);
+      const payload = { sourceKind: 'PARTNER_CASE', expected: selected.owner, deliveryId: selected.deliveryId };
+      const draft = await logistics('/loadings', payload);
+      assert.equal(draft.status, 201, JSON.stringify(draft.body));
+      const loadingId = draft.body.data.loadingId;
+      const reopened = await logistics(`/loadings/${loadingId}`);
+      assert.equal(reopened.status, 200, JSON.stringify(reopened.body));
+      assert.equal(reopened.body.data.status, 'DRAFT');
+      assert.deepEqual(reopened.body.data.source.owner, payload.expected);
+      assert.equal(reopened.body.data.source.deliveryId, payload.deliveryId);
+      assert.equal(reopened.body.data.source.recipient.customerId, sale.customerId);
+      assert.equal(reopened.body.data.source.rows[0].plannedQuantity, '0.750');
+      assert.equal((await approve('1600', 'valid-approval')).status, 200);
+      const retry = await logistics('/loadings', payload);
+      assert.equal(retry.status, 200, JSON.stringify(retry.body));
+      assert.equal(retry.body.data.loadingId, loadingId);
+
+      const contractId = sale.customerContractId!;
+      await prisma.salesContract.update({ where: { id: contractId }, data: { isInactive: true } });
+      try {
+        await assertHidden();
+        assert.equal((await logistics('/loadings', payload, 'inactive-contract')).status, 409);
+        assert.equal((await logistics(`/loadings/${loadingId}`)).status, 200, 'an existing draft remains accessible');
+      } finally {
+        await prisma.salesContract.update({ where: { id: contractId }, data: { isInactive: false } });
+      }
+      await prisma.salesContract.update({ where: { id: contractId }, data: { status: 'APPROVED' } });
+      try {
+        await assertHidden();
+        assert.equal((await logistics('/loadings', payload, 'not-final')).status, 409);
+      } finally {
+        await prisma.salesContract.update({ where: { id: contractId }, data: { status: 'SIGNED' } });
+      }
+
+      // Isolated physical evidence fixture: a previously finalized reservation
+      // consumes the whole contract row, including any unplanned quantity.
+      const baselines = await prisma.shipmentQuantityEvidence.findMany({ where: {
+        partnerCaseId: sale.id, kind: 'CONTRACTED_SET',
+      } });
+      assert.equal(baselines.length, 1, 'concurrent and repeated approval records exactly one baseline');
+      const [baseline] = baselines;
+      assert.equal(baseline.quantity.toString(), '2', 'the base comes from the contract row even when the delivery plans total less');
+      const reservedAt = new Date();
+      const reservation = { id: 'fully-reserved-partner-row', sourceKind: 'PARTNER_CASE' as const,
+        contractId: null, contractItemId: null, partnerCaseId: sale.id, partnerLineageId: baseline.partnerLineageId!,
+        partnerCaseRevision: expected.revision, partnerIntegrityHash: expected.integrityHash,
+        productRowId: baseline.productRowId, unit: baseline.unit, kind: 'ALLOCATION_FINALIZED' as const,
+        quantity: '2.000', effectiveAt: reservedAt.toISOString(), recordedAt: reservedAt.toISOString(),
+        sourceType: 'PARTNER_LOGISTICS_ALLOCATION_REVISION', sourceId: 'fully-reserved-partner-row', sourceVersion: 1,
+        integrityHash: '', metadata: {} };
+      await prisma.shipmentQuantityEvidence.create({ data: { ...reservation, effectiveAt: reservedAt, recordedAt: reservedAt,
+        integrityHash: shipmentQuantityEvidenceIntegrityHash(reservation) } });
+      await assertHidden();
+      assert.equal((await logistics('/loadings', payload, 'zero-remaining')).status, 409);
+
+      const directCustomerId = process.env.PARTNER_TEST_DIRECT_CUSTOMER_ID!;
+      const directProjectId = process.env.PARTNER_TEST_DIRECT_PROJECT_ID!;
+      const directCustomers = await logistics('/customers?search=Direct%20Logistics');
+      assert.equal(directCustomers.status, 200, JSON.stringify(directCustomers.body));
+      assert.ok(directCustomers.body.data.some((row: { id: string }) => row.id === directCustomerId));
+      const directProjects = await logistics(`/customers/${directCustomerId}/projects`);
+      assert.equal(directProjects.status, 200, JSON.stringify(directProjects.body));
+      assert.ok(directProjects.body.data.some((row: { id: string }) => row.id === directProjectId));
+      const directDraft = await logistics('/loadings', { projectId: directProjectId });
+      assert.equal(directDraft.status, 201, JSON.stringify(directDraft.body));
+      assert.equal(directDraft.body.data.projectId, directProjectId);
+      assert.equal(directDraft.body.data.customerId, directCustomerId);
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    }
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
+void main().catch(error => {
+  console.error(error);
+  process.exitCode = 1;
+});

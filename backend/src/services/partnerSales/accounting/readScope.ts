@@ -23,6 +23,7 @@ import { readAuthorizedPartnerAuditWitnesses } from '../../accountingReadProject
 import { batchAccountingCaseAuthority } from './batchCaseAuthority';
 import { groupPaymentsByReceivable } from './groupPaymentsByReceivable';
 import { financialReviewOwners } from './financialReviewSelection';
+import { startAccountingReadPhase } from '../../accountingReadTiming';
 
 const object = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
@@ -55,6 +56,7 @@ export function withAccountingReadScope<T>(database: PrismaClient, actor: Accoun
 
 async function createScope(database: Prisma.TransactionClient, actor: AccountingReadActor | undefined,
   selection: AccountingReadSelection = {}) {
+  const finishCaseSelection = startAccountingReadPhase('population');
   const reviewRecordId = selection.financialRecordId ?? selection.auditRecordId;
   // Bound live authority and expensive Case evidence reconstruction to the
   // review's relational owners. Keep global provenance/hidden-owner predicates:
@@ -70,6 +72,7 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
   const cases = caseRows.filter((row): row is typeof row & { internalRecordId: string; customerContractId: string;
     internalRecord: NonNullable<typeof row.internalRecord>; customerContract: NonNullable<typeof row.customerContract> } =>
     Boolean(row.internalRecordId && row.customerContractId && row.internalRecord && row.customerContract));
+  finishCaseSelection();
   const allowedInternalIds: string[] = [];
   const writableCases = new Set<string>();
   let canManagePayments = false;
@@ -78,6 +81,7 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
   const readActorAuthority: typeof resolvePartnerAccountingScopedAuthority = (tx, input) =>
     actorAuthority ??= resolvePartnerAccountingScopedAuthority(tx, input);
   if (actor && !selection.ordinaryOnly) {
+    const finishAuthorization = startAccountingReadPhase('authorization');
     // The central actor grants and workspace bridge are identical for every
     // Case in this repeatable-read snapshot. Root locks, resource evidence,
     // expiry checks and a distinct audited decision still run for each Case.
@@ -99,7 +103,9 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
     const capabilities = await readPartnerAccountingCapabilities(database, actor.userId);
     canManagePayments = capabilities.payments;
     canManageTax = capabilities.tax;
+    finishAuthorization();
   }
+  const finishPopulation = startAccountingReadPhase('population');
   const partnerContracts = cases.map(row => row.customerContractId);
   const ordinaryContract = { OR: [{ contractId: null }, { contractId: { notIn: partnerContracts } }] };
   // Static, code-owned SQL literal lets generic prepared plans prove the
@@ -334,6 +340,7 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
     assertWitnesses(audit.afterState, preparation);
   }
   auditAccess.AND = [...auditAccess.AND as Prisma.AccountingAuditLogWhereInput[], { id: { notIn: rejectedAuditIds } }];
+  finishPopulation();
   return { database,
     actorId: actor?.userId ?? null,
     readActorAuthority,

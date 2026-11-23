@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { accountingReadTiming, type AccountingReadTimings } from '../services/accountingReadTiming';
 
 const accountingRoutes = [
   [/^\/api\/accounting\/dashboard(?:\/(?:change|workspace))?$/, '/api/accounting/dashboard'],
@@ -63,6 +64,7 @@ type AccountingApiRecord = {
   outcome: Outcome;
   code?: DatabaseFailure;
   trackingId?: string;
+  stagesMs?: AccountingReadTimings;
 };
 
 const requestFailures = new WeakMap<ServerResponse, Pick<AccountingApiRecord, 'code' | 'trackingId'> | undefined>();
@@ -93,6 +95,7 @@ export function createAccountingRequestObserver(
     requestFailures.set(response, undefined);
     const requestId = randomUUID();
     const started = performance.now();
+    const timings: AccountingReadTimings = {};
     const method = request.method && methods.has(request.method) ? request.method : 'OTHER';
     response.setHeader('X-Accounting-Request-Id', requestId);
     response.setHeader('X-Accounting-Commit', commit);
@@ -101,6 +104,7 @@ export function createAccountingRequestObserver(
       response.off('finish', onFinish);
       response.off('close', onClose);
       const failure = requestFailures.get(response);
+      const stages = Object.entries(timings);
       log({
         kind: 'accounting_api_request',
         at: new Date().toISOString(),
@@ -111,6 +115,7 @@ export function createAccountingRequestObserver(
         durationMs: Math.round((performance.now() - started) * 100) / 100,
         status: completed ? response.statusCode : null,
         outcome: completed ? outcomeFor(response.statusCode, failure?.code, Boolean(failure)) : 'client_abort',
+        ...(stages.length ? { stagesMs: Object.fromEntries(stages.map(([name, ms]) => [name, Math.round(ms * 100) / 100])) } : {}),
         ...failure,
       });
     };
@@ -118,6 +123,6 @@ export function createAccountingRequestObserver(
     const onClose = () => finish(false);
     response.once('finish', onFinish);
     response.once('close', onClose);
-    next();
+    accountingReadTiming.run(timings, next);
   };
 }

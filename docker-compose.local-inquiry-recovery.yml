@@ -1,0 +1,33 @@
+# Apply last, only with docker-compose.local.yml and the optional development override.
+x-inquiry-data-subpath: &inquiry-data-subpath ${LOCAL_INQUIRY_DATA_SUBPATH:?Set the existing local-recovered Inquiry volume subdirectory}
+
+services:
+  backend:
+    restart: "${LOCAL_BACKEND_RESTART_POLICY:-no}"
+    volumes:
+      - type: volume
+        source: inquiry_data
+        target: /app/recovery-sources/inquiry
+        volume:
+          subpath: *inquiry-data-subpath
+      - recovery_coordination:/app/recovery-coordination
+
+  inquiry:
+    command: ["node", "/app/run-inquiry-local-restored.cjs"]
+    environment:
+      NODE_ENV: production
+      INQUIRY_LOCAL_RESTORED: "1"
+      INQUIRY_LOCAL_DATA_SUBPATH: *inquiry-data-subpath
+    volumes:
+      - type: volume
+        source: inquiry_data
+        target: /data
+        volume:
+          subpath: *inquiry-data-subpath
+      - recovery_coordination:/app/recovery-coordination
+      - type: bind
+        source: ./deploy/scripts/run-inquiry-local-restored.cjs
+        target: /app/run-inquiry-local-restored.cjs
+        read_only: true
+        bind:
+          create_host_path: false

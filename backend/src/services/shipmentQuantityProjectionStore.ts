@@ -1,8 +1,13 @@
 import { exactQuantityText, ExactQuantityDecimal } from './exactQuantity';
 import { createHash } from 'node:crypto';
-import { Prisma, PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient, type ShipmentQuantityEvidence as PersistedShipmentQuantityEvidence } from '@prisma/client';
 import {
   projectShipmentQuantities,
+  excessShipmentReturnEvidenceFailure,
+  isPhysicalDispatchEvidence,
+  parseShipmentQuantityToScaledInteger,
+  formatShipmentQuantity,
+  type ShipmentQuantities,
   type ShipmentQuantityEvidence,
   type ShipmentQuantityProjection,
 } from './shipmentQuantityProjection';
@@ -11,6 +16,17 @@ import { approvedPricingOperationalContractItemId } from './approvedPricing';
 type Scope = { contractId?: string; customerId?: string };
 
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+
+export const lockShipmentTruth = async (tx: Prisma.TransactionClient, contractItemIds: readonly string[]) => {
+  const ids = [...new Set(contractItemIds)].sort();
+  if (ids.length === 0) return;
+  await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "contract_items"
+    WHERE "id" IN (${Prisma.join(ids)}) ORDER BY "id" FOR UPDATE`);
+  await tx.$queryRaw(Prisma.sql`SELECT "contractItemId" FROM "shipment_quantity_projections"
+    WHERE "contractItemId" IN (${Prisma.join(ids)}) ORDER BY "contractItemId" FOR UPDATE`);
+  await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "shipment_quantity_evidence"
+    WHERE "contractItemId" IN (${Prisma.join(ids)}) ORDER BY "contractItemId", "recordedAt", "id" FOR UPDATE`);
+};
 
 const asRecord = (value: unknown): Record<string, any> =>
   value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {};
@@ -56,26 +72,29 @@ export const resolveContractProductSnapshot = (contractData: unknown, identity: 
   return { snapshot: null, conflict: 'Stable productRowId is missing and no validated legacy index exists' };
 };
 
-const mapPersistedEvidence = (item: any, guardReturnValidated = false): ShipmentQuantityEvidence => ({
-  id: item.id,
-  contractId: item.contractId,
-  contractItemId: item.contractItemId,
-  productRowId: item.productRowId,
-  unit: item.unit,
-  kind: item.kind,
-  quantity: exactQuantityText(item.quantity),
-  effectiveAt: item.effectiveAt.toISOString(),
-  recordedAt: item.recordedAt.toISOString(),
-  sourceType: item.sourceType,
-  sourceId: item.sourceId,
-  sourceVersion: item.sourceVersion,
-  integrityHash: item.integrityHash,
-  metadata: asRecord(item.metadata),
-  guardReturnMovementId: item.guardReturnMovementId || undefined,
-  returnEvidenceId: item.returnEvidenceId || undefined,
-  dispatchEvidenceId: item.dispatchEvidenceId || undefined,
-  guardReturnValidated: item.kind === 'GUARD_RETURN_VERIFIED' ? guardReturnValidated : undefined,
-});
+export const mapPersistedEvidence = (item: PersistedShipmentQuantityEvidence, guardReturnValidated = false): ShipmentQuantityEvidence => {
+  if (!item.contractId || !item.contractItemId) throw new Error('Shipment evidence has no ordinary contract identity');
+  return {
+    id: item.id,
+    contractId: item.contractId,
+    contractItemId: item.contractItemId,
+    productRowId: item.productRowId,
+    unit: item.unit,
+    kind: item.kind,
+    quantity: exactQuantityText(item.quantity),
+    effectiveAt: item.effectiveAt.toISOString(),
+    recordedAt: item.recordedAt.toISOString(),
+    sourceType: item.sourceType,
+    sourceId: item.sourceId,
+    sourceVersion: item.sourceVersion,
+    integrityHash: item.integrityHash,
+    metadata: asRecord(item.metadata),
+    guardReturnMovementId: item.guardReturnMovementId || undefined,
+    returnEvidenceId: item.returnEvidenceId || undefined,
+    dispatchEvidenceId: item.dispatchEvidenceId || undefined,
+    guardReturnValidated: item.kind === 'GUARD_RETURN_VERIFIED' ? guardReturnValidated : undefined,
+  };
+};
 
 export const isPersistedContractQuantitySupersededByApprovedPricing = (
   item: { kind: string; contractItemId: string | null },
@@ -111,7 +130,10 @@ const persistedEvidencePayload = (item: ShipmentQuantityEvidence | PartnerPersis
     : { contractId: item.contractId, contractItemId: item.contractItemId }), productRowId: item.productRowId,
   unit: item.unit, kind: item.kind, quantity: item.quantity, effectiveAt: item.effectiveAt,
   recordedAt: item.recordedAt, sourceType: item.sourceType, sourceId: item.sourceId,
-  sourceVersion: item.sourceVersion, metadata: item.metadata || {},
+  sourceVersion: item.sourceVersion,
+  metadata: item.kind === 'EXCESS_RETURN_FINALIZED'
+    ? Object.fromEntries(Object.entries(item.metadata || {}).sort(([left], [right]) => left.localeCompare(right)))
+    : item.metadata || {},
   guardReturnMovementId: item.guardReturnMovementId || null, returnEvidenceId: item.returnEvidenceId || null,
   ...(item.dispatchEvidenceId ? { dispatchEvidenceId: item.dispatchEvidenceId } : {}),
 });
@@ -119,9 +141,36 @@ const persistedEvidencePayload = (item: ShipmentQuantityEvidence | PartnerPersis
 export const shipmentQuantityEvidenceIntegrityHash = (item: ShipmentQuantityEvidence | PartnerPersistedShipmentEvidence) =>
   hash(persistedEvidencePayload(item));
 
+// These immutable v1 writers hashed the literal metadata key order before
+// PostgreSQL stored it as JSONB. Reconstruct that order without dropping any fields.
+const evidenceMetadataWriteOrder: Record<string, readonly string[]> = {
+  GUARD_PHYSICAL_EXIT: ['loadingId', 'waybillId', 'physicalExitId', 'authorizationId', 'allocationLineId', 'allocationRevisionId'],
+  MANUAL_OUTAGE_EXIT: ['loadingId', 'waybillId', 'paperNumber', 'manualOutageExitId', 'allocationRevisionId'],
+  GUARD_RETURN_MOVEMENT: ['loadingId', 'movementNumber', 'dispatchLoadingId'],
+  DISPATCH_CORRECTION: ['waybillId', 'correctionId', 'reversalOfId'],
+  LOGISTICS_ALLOCATION_REVISION: ['loadingId', 'revisionId', 'loadingLineId'],
+  STALE_ALLOCATION_SUCCESSOR: ['predecessorRevisionId', 'successorRevisionId'],
+  FINALIZED_LOADING_CANCELLATION: ['loadingId', 'revisionId', 'revisionLineId'],
+  ACCOUNTING_CANDIDATE_DISPOSITION: ['revisionId', 'candidateId', 'revisionLineId'],
+  FINANCIALLY_APPROVED_CONTRACT_QUANTITY_VERSION: [
+    'financialRecordId', 'financiallyApprovedAt', 'capturedAtCutover', 'quantityEvidenceOrigin', 'approvedPricingRowId',
+  ],
+  CONTRACT_QUANTITY_VERSION_CAPTURE_CONFLICT: ['financialRecordId', 'financiallyApprovedAt', 'reason'],
+};
+
+export const shipmentQuantityEvidenceHashMatches = (item: ShipmentQuantityEvidence) => {
+  if (item.integrityHash === shipmentQuantityEvidenceIntegrityHash(item)) return true;
+  const order = evidenceMetadataWriteOrder[item.sourceType];
+  const stored = item.metadata || {};
+  if (!order || Object.keys(stored).some(key => !order.includes(key))) return false;
+  const metadata = Object.fromEntries(order.filter(key => Object.prototype.hasOwnProperty.call(stored, key)).map(key => [key, stored[key]]));
+  return item.integrityHash === shipmentQuantityEvidenceIntegrityHash({ ...item, metadata });
+};
+
+
 const projectionIntegrityPayload = (row: {
   contractId: string; contractItemId: string; productRowId: string; unit: string;
-  quantities: { contracted: string; finalizedReserved: string; physicallyDispatched: string; availableToLoad: string } | null;
+  quantities: ShipmentQuantities | null;
   health: string; healthReasons: readonly string[]; sourceEvidenceIds: readonly string[]; cutoff: string; lastVerifiedAt: string | null;
 }) => ({
   contractId: row.contractId, contractItemId: row.contractItemId, productRowId: row.productRowId, unit: row.unit,
@@ -139,6 +188,8 @@ export const shipmentProjectionPersistenceData = (row: ShipmentQuantityProjectio
   finalizedReserved: row.quantities?.finalizedReserved,
   physicallyDispatched: row.quantities?.physicallyDispatched,
   availableToLoad: row.quantities?.availableToLoad,
+  approvedGrossContracted: row.quantities?.approvedGrossContracted ?? null,
+  excessRetired: row.quantities?.excessRetired ?? null,
   health: row.health,
   healthReasons: row.healthReasons as string[],
   sourceEvidenceIds: row.sourceEvidenceIds as string[],
@@ -146,6 +197,17 @@ export const shipmentProjectionPersistenceData = (row: ShipmentQuantityProjectio
   lastVerifiedAt: row.lastVerifiedAt ? new Date(row.lastVerifiedAt) : null,
   integrityHash: shipmentQuantityProjectionIntegrityHash(row),
 });
+
+export const persistShipmentQuantityProjection = async (tx: Prisma.TransactionClient, projection: ShipmentQuantityProjection) => {
+  for (const row of projection.rows) {
+    const data = shipmentProjectionPersistenceData(row);
+    await tx.shipmentQuantityProjection.upsert({
+      where: { contractItemId: row.contractItemId },
+      create: { contractItemId: row.contractItemId, contractId: row.contractId, ...data },
+      update: data,
+    });
+  }
+};
 
 export const guardReturnValidationFailure = (item: any, allReturns: readonly any[]): string | null => {
   if (item.kind !== 'GUARD_RETURN_VERIFIED') return null;
@@ -188,6 +250,54 @@ export const guardReturnValidationFailure = (item: any, allReturns: readonly any
   const quantity = new ExactQuantityDecimal(item.quantity);
   if (!quantity.gt(0) || quantity.gt(new ExactQuantityDecimal(item.dispatchEvidence.quantity))) return 'Verified Guard return quantity exceeds its dispatch attribution';
   return null;
+};
+
+export class ShipmentReturnConflictError extends Error {}
+
+export const readPhysicalDispatchReturnHolding = async (tx: Prisma.TransactionClient, dispatchEvidenceId: string) => {
+  const row = await tx.shipmentQuantityEvidence.findUnique({
+    where: { id: dispatchEvidenceId },
+    include: {
+      contractItem: { select: { contractId: true, productRowId: true } },
+      linkedReturns: {
+        where: { kind: { in: ['GUARD_RETURN_VERIFIED', 'EXCESS_RETURN_FINALIZED'] } },
+        include: { guardReturnMovement: true },
+      },
+    },
+  });
+  if (!row || row.sourceKind !== 'SALES_CONTRACT' || !row.contractId || !row.contractItemId
+    || !row.productRowId.trim() || row.productRowId.startsWith('missing:') || !row.unit.trim()
+    || row.contractItem?.contractId !== row.contractId || row.contractItem.productRowId !== row.productRowId
+    || !isPhysicalDispatchEvidence(row)
+    || row.sourceType !== (row.kind === 'PHYSICAL_EXIT' ? 'GUARD_PHYSICAL_EXIT' : 'MANUAL_OUTAGE_EXIT')
+    || row.sourceVersion !== 1) {
+    throw new ShipmentReturnConflictError('سند ارسال فیزیکی معتبر برای ردیف مرجوعی یافت نشد.');
+  }
+  const dispatch = mapPersistedEvidence(row);
+  const physical = parseShipmentQuantityToScaledInteger(dispatch.quantity);
+  if (physical <= 0n || row.recordedAt < row.effectiveAt || row.recordedAt.getTime() > Date.now()
+    || !shipmentQuantityEvidenceHashMatches(dispatch)) {
+    throw new ShipmentReturnConflictError('مقدار، زمان یا اصالت سند ارسال فیزیکی قابل تأیید نیست.');
+  }
+  const returns = row.linkedReturns.map(item => ({ ...item, dispatchEvidence: row }));
+  let remaining = physical;
+  for (const persisted of returns) {
+    const item = mapPersistedEvidence(persisted);
+    const failure = item.kind === 'GUARD_RETURN_VERIFIED'
+      ? guardReturnValidationFailure(persisted, returns)
+      : excessShipmentReturnEvidenceFailure(item, dispatch);
+    const returned = parseShipmentQuantityToScaledInteger(item.quantity);
+    if (persisted.sourceKind !== 'SALES_CONTRACT' || item.contractId !== dispatch.contractId
+      || item.contractItemId !== dispatch.contractItemId || item.productRowId !== dispatch.productRowId
+      || item.unit !== dispatch.unit || failure || returned <= 0n || !shipmentQuantityEvidenceHashMatches(item)) {
+      throw new ShipmentReturnConflictError('سابقهٔ مرجوعی پیوندخورده به سند ارسال قابل تأیید نیست.');
+    }
+    // A verified Guard inbound movement reserves physical capacity. Posting its
+    // associated correction does not consume that physical quantity a second time.
+    remaining -= returned;
+  }
+  if (remaining < 0n) throw new ShipmentReturnConflictError('مرجوعی‌های ثبت‌شده از مقدار سند ارسال بیشتر هستند.');
+  return { dispatch, remainingQuantity: formatShipmentQuantity(remaining) };
 };
 
 type ContractQuantityEvidencePolicy = {
@@ -265,11 +375,47 @@ export const captureContractQuantityVersionAtFinancialApproval = async (
     effectiveAt: approvedAt, recordedAt: approvedAt, sourceId: `${approval.financialRecordId}:${item.id}`, sourceVersion: 1,
     successMetadata: metadata, conflictMetadata: metadata,
   }, pricingRows.get(item.id)));
+  await assertExcessRetirementAllowsApproval(tx, approval, pricingVersion.id, versions);
   if (versions.length > 0) await tx.shipmentQuantityEvidence.createMany({
     data: versions.map(persistedContractQuantityEvidence),
     skipDuplicates: true,
   });
   return versions.length;
+};
+
+const assertExcessRetirementAllowsApproval = async (tx: Prisma.TransactionClient,
+  approval: { contractId: string; approvedAt: Date }, pricingVersionId: string,
+  proposed: readonly Omit<ShipmentQuantityEvidence, 'id'>[]) => {
+  const retirements = await tx.shipmentQuantityEvidence.findMany({
+    where: { contractId: approval.contractId, kind: 'EXCESS_RETURN_FINALIZED' },
+    select: { contractItemId: true, productRowId: true, unit: true },
+    distinct: ['contractItemId', 'productRowId', 'unit'],
+  });
+  if (!retirements.length) return;
+  // A financial approval selects a new gross obligation. Retirements on that
+  // identity carry forward independently from commercial pricing.
+  await lockShipmentTruth(tx, retirements.flatMap(row => row.contractItemId ? [row.contractItemId] : []));
+  const previous = await readShipmentQuantityProjection(tx, { contractId: approval.contractId }, {
+    cutoff: approval.approvedAt.toISOString(),
+    excludedApprovedPricingVersionId: pricingVersionId,
+  });
+  for (const retired of retirements) {
+    const candidate = proposed.find(row => row.contractItemId === retired.contractItemId
+      && row.productRowId === retired.productRowId && row.unit === retired.unit);
+    const existing = previous.rows.find(row => row.contractItemId === retired.contractItemId
+      && row.productRowId === retired.productRowId && row.unit === retired.unit);
+    if (!candidate || candidate.kind !== 'CONTRACTED_SET' || existing?.health !== 'CURRENT' || !existing.quantities?.excessRetired) {
+      throw new ShipmentReturnConflictError('ردیف یا واحد دارای مرجوعی قطعی باید با سابقهٔ تعهد ارسال تطبیق داشته باشد.');
+    }
+    const proposedGross = parseShipmentQuantityToScaledInteger(candidate.quantity);
+    const { approvedGrossContracted, excessRetired, finalizedReserved, physicallyDispatched } = existing.quantities;
+    const proposedEffective = proposedGross - parseShipmentQuantityToScaledInteger(excessRetired);
+    const committed = parseShipmentQuantityToScaledInteger(finalizedReserved)
+      + parseShipmentQuantityToScaledInteger(physicallyDispatched);
+    if (approvedGrossContracted && proposedGross < parseShipmentQuantityToScaledInteger(approvedGrossContracted) && proposedEffective < committed) {
+      throw new ShipmentReturnConflictError('تعهد ارسال پس از کسر مرجوعی قطعی از مجموع مقدار رزروشده و ارسال فیزیکی کمتر می‌شود.');
+    }
+  }
 };
 
 export const captureFinanciallyApprovedContractQuantityVersions = async (prisma: PrismaClient, scope: Scope, cutoverAt = new Date()) => {
@@ -312,7 +458,11 @@ export const captureFinanciallyApprovedContractQuantityVersions = async (prisma:
 export const readShipmentQuantityProjection = async (
   prisma: Prisma.TransactionClient,
   scope: Scope,
-  options: { cutoff?: string; mode?: 'OPERATIONAL_AS_OF' | 'AUDIT_KNOWN_AT' } = {},
+  options: {
+    cutoff?: string;
+    mode?: 'OPERATIONAL_AS_OF' | 'AUDIT_KNOWN_AT';
+    excludedApprovedPricingVersionId?: string;
+  } = {},
 ): Promise<ShipmentQuantityProjection> => {
   if (!scope.contractId && !scope.customerId) throw new Error('A contract or customer scope is required');
   const contracts = await prisma.salesContract.findMany({
@@ -355,6 +505,7 @@ export const readShipmentQuantityProjection = async (
     for (const row of version.rows) {
       const operationalContractItemId = approvedPricingOperationalContractItemId(row);
       approvedPricingContractItems.add(operationalContractItemId);
+      if (version.id === options.excludedApprovedPricingVersionId) continue;
       const event: ShipmentQuantityEvidence = {
         id: `approved-pricing:${row.id}`,
         contractId: version.contractId,
@@ -380,7 +531,7 @@ export const readShipmentQuantityProjection = async (
     if (isPersistedContractQuantitySupersededByApprovedPricing(persistedItem, approvedPricingContractItems)) continue;
     const validationFailure = guardReturnValidationFailure(persistedItem, persisted);
     const item = mapPersistedEvidence(persistedItem, !validationFailure);
-    if (item.integrityHash === shipmentQuantityEvidenceIntegrityHash(item)) {
+    if (shipmentQuantityEvidenceHashMatches(item)) {
       if (!validationFailure) evidence.push(item);
       else evidence.push({
         ...item, id: `guard-return-conflict:${item.id}`, kind: 'EVIDENCE_CONFLICT', quantity: '0.000',
@@ -470,7 +621,16 @@ export const readShipmentQuantityProjection = async (
       || (options.cutoff && row.lastVerifiedAt.toISOString() > options.cutoff)) return [];
     const normalized = {
       contractId: row.contractId, contractItemId: row.contractItemId, productRowId: row.productRowId, unit: row.unit,
-      quantities: { contracted: exactQuantityText(row.contracted), finalizedReserved: exactQuantityText(row.finalizedReserved), physicallyDispatched: exactQuantityText(row.physicallyDispatched), availableToLoad: exactQuantityText(row.availableToLoad) },
+      quantities: {
+        contracted: exactQuantityText(row.contracted),
+        finalizedReserved: exactQuantityText(row.finalizedReserved),
+        physicallyDispatched: exactQuantityText(row.physicallyDispatched),
+        availableToLoad: exactQuantityText(row.availableToLoad),
+        ...(row.approvedGrossContracted != null && row.excessRetired != null ? {
+          approvedGrossContracted: exactQuantityText(row.approvedGrossContracted),
+          excessRetired: exactQuantityText(row.excessRetired),
+        } : {}),
+      },
       health: row.health, healthReasons: asRecord(row.healthReasons) as any, sourceEvidenceIds: row.sourceEvidenceIds as any,
       cutoff: row.cutoff.toISOString(), lastVerifiedAt: row.lastVerifiedAt.toISOString(),
     };

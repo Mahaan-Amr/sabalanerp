@@ -56,6 +56,7 @@ import {
   updateAccountingSettings
 } from '../services/accountingService';
 import { FinancialEvidenceConflictError } from '../services/approvedPricing';
+import { ShipmentReturnConflictError } from '../services/shipmentQuantityProjectionStore';
 import type { ContractCustomPrintOptions, ContractPrintVariant } from '../utils/printTemplate';
 import { publishNotificationEvent } from '../services/notificationService';
 import { listDispatchDocumentRecoveryAudit } from '../services/dispatchDocumentAuditRecovery';
@@ -1815,6 +1816,9 @@ export const createAccountingActionHandler = (
         workflow: error.workflow,
         actionUrl: error.actionUrl,
       });
+      if (error instanceof ShipmentReturnConflictError) {
+        return res.status(409).json({ success: false, message: error.message });
+      }
       if (error instanceof OrdinaryAccountingCommercialError) {
         return res.status(error.status).json({ success: false, message: error.message });
       }

@@ -68,11 +68,12 @@ async function main() {
         }, { timeout: 30_000 });
         return waiting!;
       };
-      const payload = { sourceKind: 'PARTNER_CASE', expected, deliveryId: 'second-delivery',
+      const repairFixture = process.env.PARTNER_TEST_REPAIR_FINALIZE === '1';
+      const payload = { sourceKind: 'PARTNER_CASE', expected, deliveryId: repairFixture ? 'separate-delivery' : 'second-delivery',
         reason: 'ثبت بارگیری نهایی پرونده همکار با قیمت مصوب' };
       const control = await prisma.partnerOperationsControl.findUniqueOrThrow({ where: { id: 'partner-operations' } });
       if (!control.cohortId) throw new Error('Partner rollout cohort fixture is missing');
-      await prisma.$transaction(async tx => {
+      if (!repairFixture) await prisma.$transaction(async tx => {
         await tx.partnerOperationsControl.update({ where: { id: 'partner-operations' }, data: { operationalPaused: true } });
         await tx.partnerReleaseCohort.update({ where: { id: control.cohortId! }, data: {
           activationEnabled: false, operationalPaused: true,
@@ -112,7 +113,7 @@ async function main() {
       const finalized = await request(`/loadings/${loadingId}/finalize`, 'POST', { expected,
         reason: 'نهایی‌سازی بارگیری با شواهد مالی رسمی' }, logisticsSession.token, `${expected.caseId}-finalize`);
       assert.equal(finalized.status, 200, JSON.stringify(finalized.body));
-      assert.equal((await prisma.partnerOperationsControl.findUniqueOrThrow({ where: { id: 'partner-operations' } })).operationalPaused,
+      if (!repairFixture) assert.equal((await prisma.partnerOperationsControl.findUniqueOrThrow({ where: { id: 'partner-operations' } })).operationalPaused,
         true, 'committed loading create, reserve, allocate, and finalize must survive the emergency pause');
       const revisionId = finalized.body.data.revisions[0].id;
       const candidateId = finalized.body.data.revisions[0].candidate.id;
@@ -122,6 +123,7 @@ async function main() {
       assert.equal(revision.lines.every(line => line.sourceContractId === null && line.sourceContractItemId === null), true);
       assert.equal(revision.pricingReferences.length, 0, 'Partner pricing must not manufacture ordinary pricing references');
       assert.equal(revision.partnerPricing?.events.length, 1);
+      if (repairFixture) return;
       const workspacePermissionBeforeRaces = await prisma.workspacePermission.findUnique({ where: { userId_workspace: {
         userId: accountantId, workspace: 'accounting',
       } } });

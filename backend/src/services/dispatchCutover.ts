@@ -24,7 +24,23 @@ const required = (value: unknown, name: string) => {
 };
 const serializable = <T>(prisma: PrismaClient, work: (tx: Tx) => Promise<T>) =>
   prisma.$transaction(work, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
-const lock = (tx: Tx) => tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', 'DISPATCH_CUTOVER');
+const CUTOVER_LOCK = 'DISPATCH_CUTOVER';
+const lock = (tx: Tx) => tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${CUTOVER_LOCK}))`;
+export class DispatchCutoverBusyError extends Error {}
+
+/** A Partner command may already hold Case locks that downstream dispatch
+ * commands acquire after cutover. Wait for cutover only after rolling back
+ * the Partner transaction, so the two paths cannot wait on each other. */
+export async function retryDispatchCutoverContention<T>(database: PrismaClient, command: () => Promise<T>): Promise<T> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await command();
+    } catch (error) {
+      if (!(error instanceof DispatchCutoverBusyError) || attempt >= 2) throw error;
+      await database.$transaction(lock);
+    }
+  }
+}
 const lockLegacyDispatchTables = (tx: Tx) => tx.$executeRawUnsafe(`LOCK TABLE
   "security_vehicle_pairs", "security_vehicle_pair_photos", "security_driver_queue_turns",
   "logistics_loading_driver_assignments", "logistics_loading_driver_allocations"
@@ -487,8 +503,15 @@ export const resumeDispatchPilot = (prisma: PrismaClient, input: { actorId: stri
     return updated;
   });
 
-export const assertCanonicalDispatchCommandAllowed = async (tx: Tx, options: { readOnly?: boolean } = {}) => {
-  if (!options.readOnly) await lock(tx);
+export const assertCanonicalDispatchCommandAllowed = async (tx: Tx,
+  options: { readOnly?: boolean; partnerLocksHeld?: boolean } = {}) => {
+  if (options.partnerLocksHeld) {
+    const [lockResult] = await tx.$queryRaw<Array<{ acquired: boolean }>>
+      `SELECT pg_try_advisory_xact_lock(hashtext(${CUTOVER_LOCK})) AS acquired`;
+    if (!lockResult.acquired) throw new DispatchCutoverBusyError('Dispatch cutover is busy.');
+    // A cutover update since an earlier repeatable snapshot requires a retry.
+    await tx.$queryRaw`SELECT id FROM dispatch_cutover_control WHERE id = ${CONTROL_ID} FOR SHARE`;
+  } else if (!options.readOnly) await lock(tx);
   const state = await tx.dispatchCutoverControl.findUnique({ where: { id: CONTROL_ID } });
   if (state?.phase === DispatchCutoverPhase.PILOT_SAFETY_PAUSE) throw new PilotSafetyPauseError('Pilot Safety Pause blocks new canonical dispatch work.');
   if (state?.phase === DispatchCutoverPhase.ROLLED_BACK) throw new PilotSafetyPauseError('Canonical dispatch writes are disabled while legacy writes are restored.');

@@ -49,7 +49,7 @@ export default function ContractDispatchCreditPanel({ contractId, refreshKey, ch
       <ErpButton label="پس‌گرفتن درخواست" variant="outline" onClick={() => open({ kind: 'ACTION', authority: row, action: 'WITHDRAW' })} />}
     {row.status === 'APPROVED' && ['MANAGER','CREDIT'].includes(row.kind) && (view?.access.request || view?.access.seller || view?.access.manage) &&
       <ErpButton label="درخواست تغییر موعد" variant="outline" onClick={() => open({ kind: 'DATE', authority: row })} />}
-    {row.id === view?.activeManagerId && view.access.manage &&
+    {row.id === view?.commercialManagerId && view.access.manage &&
       <ErpButton label="لغو مجوز ارسال" tone="danger" variant="outline" onClick={() => open({ kind: 'ACTION', authority: row, action: 'REVOKE' })} />}
     {row.kind === 'CREDIT' && row.status === 'APPROVED' && view?.access.manage && row.sellerId !== view.responsibleSeller.id &&
       <ErpButton label={`انتقال ضمانت به ${view.responsibleSeller.displayName}`} variant="outline" onClick={() => open({ kind: 'TRANSFER', authority: row })} />}
@@ -68,7 +68,7 @@ export default function ContractDispatchCreditPanel({ contractId, refreshKey, ch
   return <div className="space-y-3">
     <div className="flex flex-wrap gap-2">{children}
       {(view?.access.request || view?.access.manage || view?.access.managerDecision) && <ErpButton label="درخواست تأیید مدیریتی" variant="outline" tone="primary"
-        disabled={pending || !view.canRequestManager || !!view.activeManagerId || view.authorities.some(row => row.kind === 'MANAGER' && row.status === 'PENDING')}
+        disabled={pending || !view.canRequestManager}
         onClick={() => open({ kind: 'MANAGER' })} />}
     </div>
     {error && !operation && <ErpInlineState kind="error" title={error} action={{ label: 'تلاش دوباره', onClick: () => void load() }} />}

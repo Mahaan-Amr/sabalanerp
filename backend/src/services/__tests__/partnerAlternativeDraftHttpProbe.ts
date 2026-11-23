@@ -1,12 +1,18 @@
 import assert from 'node:assert/strict';
 import express from 'express';
-import { PartnerEventSchema, CustomerContractOutputSchema } from '@sabalanerp/partner-sales-contracts';
+import { PartnerEventSchema, CustomerContractOutputSchema, canonicalHash } from '@sabalanerp/partner-sales-contracts';
 import type { Prisma } from '@prisma/client';
 import type { AddressInfo } from 'node:net';
 import { prisma } from '../../lib/prisma';
 import accountingRouter from '../../routes/accounting';
 import partnerAccountingRouter from '../../routes/partner-accounting';
 import dispatchCreditRouter from '../../routes/dispatchCredit';
+import correctionRouter from '../../routes/partner-corrections';
+import * as outputContracts from '@sabalanerp/partner-sales-contracts';
+import { createCustomerOutputSnapshots } from '../partnerSales/customerOutput/snapshots';
+import { createAuditedPartnerAuthorization } from '../partnerSales/authorization/audited';
+import { readAuthorizationDecisionByCorrelation } from '../effectiveAuthorization/audit';
+import { createContractDispatchDuty } from '../crossWorkspaceDutyAdapters/contractDispatchDutyAdapter';
 import logisticsRouter from '../../routes/logistics';
 import { createAuthoritativeSession, SESSION_COOKIE } from '../identitySessionService';
 
@@ -33,6 +39,7 @@ async function main() {
   app.use('/accounting', accountingRouter);
   app.use('/partner/accounting', partnerAccountingRouter);
   app.use('/dispatch-credit', dispatchCreditRouter);
+  app.use('/corrections', correctionRouter);
   app.use('/logistics', logisticsRouter);
   const server = app.listen(0, '127.0.0.1');
   await new Promise<void>(resolve => server.once('listening', resolve));
@@ -48,7 +55,7 @@ async function main() {
     const load = (path: string, body?: unknown, key?: string) => request(`/logistics${path}`, logistics.token, body, key);
     const projectsPath = `/customers/${sale.customerId}/projects`;
     const customersPath = '/customers?search=Customer%20Lifecycle';
-    const selection = { sourceKind: 'PARTNER_CASE', expected, deliveryId: 'separate-delivery' };
+    let selection = { sourceKind: 'PARTNER_CASE', expected, deliveryId: 'separate-delivery' };
     const assertHidden = async (key: string) => {
       for (const path of [customersPath, projectsPath]) {
         const response = await load(path);
@@ -196,6 +203,109 @@ async function main() {
       assert.equal(renewedDecision.status, 200, JSON.stringify(renewedDecision.body));
       const renewedDraft = await load('/loadings', selection, 'renewed-manager-approval');
       assert.equal(renewedDraft.status, 201, JSON.stringify(renewedDraft.body));
+
+      const partnerId = sale.profile.userId;
+      const partner = await issueSession(partnerId);
+      const command = async (intent: Record<string, unknown>, actorId: string, suffix: string) => {
+        const commandId = `${sale.id}-${suffix}`;
+        return { schemaVersion: 1, ...intent, commandId, correlationId: commandId,
+          idempotency: { actorId, operation: intent.type, targetId: sale.id, key: commandId, payloadHash: await canonicalHash(intent) } };
+      };
+      const correctionRequest = await command({ type: 'CORRECTION_REQUEST', expected, expectedState: 'COMMITTED',
+        scope: 'RETAIL_ONLY', reason: 'اصلاح مستند قیمت فروش به مشتری' }, partnerId, 'manager-retail-request');
+      const requested = await request('/corrections/commands', partner.token, correctionRequest);
+      assert.equal(requested.status, 200, JSON.stringify(requested.body));
+      const correctionId = `correction:${correctionRequest.commandId}`;
+      const evidence = await prisma.$transaction(async tx => {
+        const correlationId = `${sale.id}-manager-retail-scope-evidence`;
+        const binding = { actorId: managerId!, purpose: 'MANAGEMENT', channel: 'API' } as const;
+        const result = await createAuditedPartnerAuthorization(tx, binding, { correlationId, reason: 'تأیید دامنه اصلاح خرده‌فروشی' })
+          .authorize('CORRECTION_SCOPE_APPROVE', { kind: 'CASE', id: sale.id });
+        assert.equal(result.ok, true);
+        return readAuthorizationDecisionByCorrelation(tx, { ...binding, domain: 'PARTNER', action: 'CORRECTION_SCOPE_APPROVE',
+          rootKind: 'CASE', rootId: sale.id, correlationId, allowed: true });
+      });
+      assert.ok(evidence);
+      const gate = await command({ type: 'CORRECTION_GATE', expected, expectedState: 'COMMITTED', correctionId,
+        gate: 'SALES_SCOPE', outcome: 'APPROVE', evidenceId: evidence.id, reason: 'تأیید دامنه اصلاح خرده‌فروشی' }, managerId!, 'manager-retail-scope');
+      const gated = await request('/corrections/commands', manager.token, gate);
+      assert.equal(gated.status, 200, JSON.stringify(gated.body));
+      const plan = CustomerContractOutputSchema.parse(sale.head.customerProjection).customerPaymentPlan;
+      const save = await command({ type: 'RETAIL_CORRECTION_SAVE', expected, expectedState: 'COMMITTED',
+        opportunityId: `opportunity:${correctionId}`,
+        retailPrices: [{ productRowId: reopened.body.data.source.rows[0].productRowId,
+          retailUnitPrice: { amount: '1100', currency: 'IRR' } }],
+        customerPaymentPlan: { ...plan, planId: `${sale.id}-manager-retail-plan`, predecessorPlanId: plan.planId,
+          version: plan.version + 1, effectiveDate: '2099-01-01', installments: [{ installmentId: `${sale.id}-manager-retail-installment`,
+            dueDate: '2099-01-02', amount: { amount: '2200', currency: 'IRR' }, method: 'CASH' }] },
+      }, partnerId, 'manager-retail-save');
+      const saved = await request('/corrections/commands', partner.token, save);
+      assert.equal(saved.status, 200, JSON.stringify(saved.body));
+      const successor = saved.body.data.head;
+      // Seed a valid verified customer session at the correction service's
+      // confirmation seam. The real command verifies it and activates the Case.
+      const snapshotId = `${sale.id}-confirmed-retail-successor`;
+      await prisma.$transaction(async tx => {
+        const revision = await tx.partnerCaseRevision.findUniqueOrThrow({ where: { caseId_revision: {
+          caseId: sale.id, revision: successor.revision,
+        } } });
+        const { seller, outputHash: _outputHash, ...retail } = CustomerContractOutputSchema.parse(revision.customerProjection);
+        const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
+        const expiresAt = new Date(clock.now.getTime() + 60_000);
+        const phone = retail.customer.phone.replace(/\D/g, '');
+        const normalizedRecipient = phone.startsWith('0') ? `+98${phone.slice(1)}` : `+${phone}`;
+        const snapshot = await createCustomerOutputSnapshots(outputContracts).mint({ snapshotId, owner: successor, normalizedRecipient,
+          createdAt: clock.now.toISOString(), expiresAt: expiresAt.toISOString(), business: {
+            legalName: seller.displayName, businessPhone: seller.phone, businessAddress: seller.address,
+          }, retail: { ...retail, status: 'PENDING_APPROVAL', confirmation: 'PENDING' } });
+        await tx.partnerCustomerOutputSnapshot.create({ data: { id: snapshotId, caseId: sale.id,
+          caseRevision: successor.revision, integrityHash: successor.integrityHash, contentHash: snapshot.content.outputHash,
+          contractNumber: snapshot.content.contractNumber, recipient: normalizedRecipient, expiresAt,
+          content: snapshot, commandId: snapshotId } });
+        await tx.contractPublicConfirmation.create({ data: { contractId: sale.customerContractId!, tokenHash: snapshotId,
+          phoneNumber: `0${normalizedRecipient.slice(3)}`, otpCodeHash: snapshotId, otpExpiresAt: expiresAt,
+          linkExpiresAt: expiresAt, status: 'VERIFIED', verifiedAt: clock.now, createdBy: `partner-output:${snapshotId}`,
+          commercialRevision: sale.customerContract!.commercialRevision } });
+      });
+      const confirm = await command({ type: 'CORRECTION_GATE', expected: successor, expectedState: 'COMMITTED', correctionId,
+        gate: 'CUSTOMER_CONFIRM', outcome: 'APPROVE', evidenceId: snapshotId, reason: 'تأیید نسخه اصلاحی با شواهد مشتری' },
+      partnerId, 'manager-retail-confirm');
+      const confirmed = await request('/corrections/commands', partner.token, confirm);
+      assert.equal(confirmed.status, 200, JSON.stringify(confirmed.body));
+      const corrected = await prisma.salesContract.findUniqueOrThrow({ where: { id: sale.customerContractId! } });
+      assert.equal(corrected.commercialRevision, sale.customerContract?.commercialRevision);
+      assert.equal(corrected.partnerRevision, expected.revision + 1);
+      selection = { ...selection, expected: saved.body.data.head };
+      await assertHidden('before-corrected-managerial-approval');
+      const authorityPath = `/dispatch-credit/contracts/${sale.customerContractId}`;
+      // An older pending request may coexist with a legacy commercial grant.
+      const earlierGrant = await prisma.contractDispatchAuthority.findUniqueOrThrow({ where: { id: renewed.body.data.id } });
+      const staleRequest = await prisma.contractDispatchAuthority.create({ data: { contractId: corrected.id,
+        kind: 'MANAGER', revision: corrected.commercialRevision, requestedBy: requesterId, createdAt: earlierGrant.createdAt } });
+      await createContractDispatchDuty(prisma, staleRequest.id);
+      const staleManager = await request(authorityPath, requester.token);
+      assert.equal(staleManager.body.data.activeManagerId, null);
+      assert.equal(staleManager.body.data.commercialManagerId, earlierGrant.id);
+      assert.equal(staleManager.body.data.canRequestManager, true);
+      assert.equal(staleManager.body.data.authorities.find((row: { id: string }) => row.id === staleRequest.id).canDecide, false);
+      const stalePath = `/dispatch-credit/authorities/${staleRequest.id}/actions`;
+      assert.equal((await request(stalePath, manager.token, { action: 'APPROVE', promisedDate: '2099-02-01' })).status, 409);
+      assert.equal(staleManager.body.data.eligible, true, 'the earlier commercial-revision grant still governs downstream dispatch');
+      const replacement = await request(`${authorityPath}/requests`, requester.token, { kind: 'MANAGER' });
+      assert.equal(replacement.status, 200, JSON.stringify(replacement.body));
+      const superseded = await prisma.crossWorkspaceDuty.findUniqueOrThrow({ where: { stableKey: `CONTRACT_DISPATCH:${staleRequest.id}` } });
+      assert.equal(superseded.status, 'CANCELLED');
+      assert.equal((await request(authorityPath, requester.token)).body.data.eligible, true,
+        'requesting fresh draft authority preserves the current commercial grant while pending');
+      const replacementPath = `/dispatch-credit/authorities/${replacement.body.data.id}/actions`;
+      const replacementDecision = { action: 'APPROVE', promisedDate: '2099-02-01' };
+      assert.equal((await request(replacementPath, requester.token, replacementDecision)).status, 409);
+      assert.equal((await request(replacementPath, manager.token, replacementDecision)).status, 200);
+      const afterRenewal = await request(authorityPath, requester.token);
+      assert.equal(afterRenewal.body.data.activeManagerId, replacement.body.data.id);
+      assert.equal(afterRenewal.body.data.authorities.find((row: { id: string }) => row.id === renewed.body.data.id).status, 'SUPERSEDED');
+      assert.equal((await load('/loadings', selection, 'corrected-managerial-approval')).status, 201);
+
       assert.ok(invoiceId && accountant);
       const approvedInvoice = await request('/accounting/actions', accountant.token, {
         kind: 'APPROVE_FINANCIAL_INVOICE', invoiceId, sepidarAmount: '1600',
@@ -203,7 +313,7 @@ async function main() {
         note: 'تأیید مبنای مالی مستقل از مجوز مدیر',
       }, 'alternate-financial-approval');
       assert.equal(approvedInvoice.status, 200, JSON.stringify(approvedInvoice.body));
-      const revokedRenewed = await revoke(renewed.body.data.id);
+      const revokedRenewed = await revoke(replacement.body.data.id);
       assert.equal(revokedRenewed.status, 200, JSON.stringify(revokedRenewed.body));
       const retained = await load(projectsPath);
       assert.ok(retained.body.data.some((row: { deliveryId: string }) => row.deliveryId === selection.deliveryId));

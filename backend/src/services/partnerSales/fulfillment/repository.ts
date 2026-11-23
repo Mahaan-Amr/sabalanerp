@@ -88,6 +88,7 @@ export interface PartnerFulfillmentTransaction {
    * changed command ID cannot bypass a durable replay decision. */
   readLineageCommand(command: PartnerFulfillmentCommandScope): Promise<PartnerFulfillmentCommandReceipt | null>;
   findLineage(caseId: string, productRowId: string): Promise<PartnerPhysicalLineage | null>;
+  findLineages?(caseId: string, productRowIds: string[]): Promise<Map<string, PartnerPhysicalLineage>>;
   /** Atomically CASes expected Case state/revision, enforces unique
    * (caseId, productRowId), inserts every missing lineage, and records the
    * command receipt. It must commit all three effects or none of them. */

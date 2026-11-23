@@ -7,7 +7,7 @@ import { authorizePartnerTechnicalRollout } from '../authorization/technicalRoll
 import { readCurrentPartnerCaseViews } from '../cases/lifecycle';
 import { partnerPredecessorIsFrozen } from '../corrections/mutationFreeze';
 import { PartnerQuantityEvidenceConflictError, readPartnerShipmentQuantityProjection, synchronizePartnerContractedQuantities } from './quantityStore';
-import { hasPartnerDraftManagerApproval } from './draftManagerApproval';
+import { readPartnerDraftManagerApproval } from './draftManagerApproval';
 import { hasEffectivePartnerLoadingRevision, isFinalPartnerLoadingContract } from './effectiveRevision';
 
 export async function readPartnerDraftCase(tx: Prisma.TransactionClient, caseId: string) {
@@ -25,7 +25,7 @@ export async function readPartnerDraftCase(tx: Prisma.TransactionClient, caseId:
 
 export async function hasPartnerDraftAuthority(tx: Prisma.TransactionClient, draftCase: NonNullable<Awaited<ReturnType<typeof readPartnerDraftCase>>>) {
   return await hasPartnerDraftFinancialApproval(tx, { owner: draftCase.view.owner, internalRecordId: draftCase.view.recordId }) ||
-    await hasPartnerDraftManagerApproval(tx, draftCase.contract, draftCase.view.owner) ||
+    Boolean(await readPartnerDraftManagerApproval(tx, draftCase.contract, draftCase.view.owner)) ||
     await hasPartnerDraftSettlement(tx, draftCase.accounting, draftCase.row.profile.userId);
 }
 

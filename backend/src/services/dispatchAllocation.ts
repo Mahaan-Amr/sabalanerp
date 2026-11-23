@@ -19,7 +19,8 @@ import {
   shipmentProjectionPersistenceData,
   shipmentQuantityEvidenceIntegrityHash,
 } from './shipmentQuantityProjectionStore';
-import { assertCanonicalDispatchCommandAllowed } from './dispatchCutover';
+import { assertCanonicalDispatchCommandAllowed, DispatchCutoverBusyError, PilotSafetyPauseError,
+  retryDispatchCutoverContention } from './dispatchCutover';
 import { isPostCutoverFinalization } from './dispatchDocuments/featureGate';
 import { loadShipmentStatementRuntimeStateUnderLock } from './dispatchDocuments/runtimeState';
 import { assessBoundAllocationPricingFreshness } from './allocationPricingReadModel';
@@ -173,6 +174,12 @@ export const withLogisticsLoadingReadScope = <T>(prisma: Database, input: Partne
 
 export const findLoadablePartnerDeliveries = (db: Database, input: PartnerLoadingActor & { customerIds: string[] }) =>
   readPartnerSnapshot(db, async tx => {
+    try {
+      await assertCanonicalDispatchCommandAllowed(tx, { readOnly: true });
+    } catch (error) {
+      if (error instanceof PilotSafetyPauseError) return [];
+      throw error;
+    }
     const sales = await tx.partnerSaleCase.findMany({ where: {
       state: 'COMMITTED', customerId: { in: input.customerIds },
       customerContract: { is: { isInactive: false, status: { notIn: ['CANCELLED', 'EXPIRED'] } } },
@@ -182,10 +189,14 @@ export const findLoadablePartnerDeliveries = (db: Database, input: PartnerLoadin
       deliveryId: string; projectName: string; address: string; date: string; contractNumber: string; remainingCount: number }[] = [];
     for (const sale of sales) {
       if (!(await authorizePartnerLoading(tx, input, sale.id, 'READ')).ok ||
-          !(await authorizePartnerLoading(tx, input, sale.id, 'CREATE')).ok) continue;
-      for (const delivery of await readLoadablePartnerDraftDeliveries(tx, sale.id)) {
-        const source = await adapter.readDraftLoadingSource(delivery.owner, delivery.deliveryId);
-        if (!source.ok || source.value.recipient.customerId !== delivery.customerId) continue;
+          !(await authorizePartnerLoading(tx, input, sale.id, 'DISCOVER_CREATE')).ok) continue;
+      const deliveries = await readLoadablePartnerDraftDeliveries(tx, sale.id);
+      if (!deliveries.length) continue;
+      const sources = await adapter.readDraftLoadingSources(deliveries[0].owner, deliveries.map(delivery => delivery.deliveryId));
+      if (!sources.ok) continue;
+      for (const delivery of deliveries) {
+        const source = sources.value.get(delivery.deliveryId);
+        if (!source?.ok || source.value.recipient.customerId !== delivery.customerId) continue;
         results.push({
           id: `partner:${sale.id}:${delivery.deliveryId}`, customerId: delivery.customerId, sourceKind: 'PARTNER_CASE',
           owner: delivery.owner, deliveryId: delivery.deliveryId, projectName: delivery.destination, address: delivery.destination,
@@ -200,7 +211,8 @@ export const findLoadablePartnerDeliveries = (db: Database, input: PartnerLoadin
  * Case delivery. Draft creation does not reserve quantities or approve prices. */
 export const createPartnerCaseLoading = (prisma: Database, input: PartnerLoadingActor & {
   expected: RevisionRef; deliveryId: string; idempotencyKey: string;
-}): Promise<Result<{ loadingId: string; replayed: boolean }>> => serializable(prisma, async tx => {
+}): Promise<Result<{ loadingId: string; replayed: boolean }>> =>
+  retryDispatchCutoverContention<Result<{ loadingId: string; replayed: boolean }>>(prisma, () => serializable(prisma, async tx => {
   if (!validLoadingActor(input) || !RevisionRefSchema.safeParse(input.expected).success ||
       !IdSchema.safeParse(input.deliveryId).success || !IdSchema.safeParse(input.idempotencyKey).success) return partnerFailure('INVALID_PAYLOAD');
   await lockPartnerOperationsControl(tx);
@@ -228,7 +240,7 @@ export const createPartnerCaseLoading = (prisma: Database, input: PartnerLoading
   }
   const deliveries = await readLoadablePartnerDraftDeliveries(tx, input.expected.caseId);
   if (!deliveries.some(delivery => delivery.deliveryId === input.deliveryId && delivery.customerId === source.value.recipient.customerId)) return partnerFailure('DEPENDENCY_BLOCKED');
-  await assertCanonicalDispatchCommandAllowed(tx);
+  await assertCanonicalDispatchCommandAllowed(tx, { partnerLocksHeld: true });
   const loading = await tx.logisticsLoading.create({ data: { loadingNumber: await allocateLoadingNumber(tx),
     sourceKind: 'PARTNER_CASE', customerId: source.value.recipient.customerId,
     partnerCaseId: input.expected.caseId, partnerCaseRevision: input.expected.revision,
@@ -241,6 +253,10 @@ export const createPartnerCaseLoading = (prisma: Database, input: PartnerLoading
       sourceHash: loading.partnerSourceHash, correlationId: input.correlationId, idempotencyKey: input.idempotencyKey,
       reason: input.reason ?? null, effectiveAuthority: authorized.value } });
   return { ok: true, value: { loadingId: loading.id, replayed: false } };
+})).catch(error => {
+  if (error instanceof PilotSafetyPauseError) return partnerFailure('DEPENDENCY_BLOCKED');
+  if (error instanceof DispatchCutoverBusyError) return partnerFailure('STATE_CONFLICT');
+  throw error;
 });
 
 export const readPartnerCaseLoading = (prisma: Database, input: PartnerLoadingActor & {

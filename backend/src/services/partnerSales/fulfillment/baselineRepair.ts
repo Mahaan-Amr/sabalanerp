@@ -1,13 +1,14 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { canonicalHash } from '@sabalanerp/partner-sales-contracts';
-import { assertCanonicalDispatchCommandAllowed, PilotSafetyPauseError } from '../../dispatchCutover';
+import { assertCanonicalDispatchCommandAllowed, DispatchCutoverBusyError, PilotSafetyPauseError,
+  retryDispatchCutoverContention } from '../../dispatchCutover';
 import { exactQuantityText } from '../../exactQuantity';
 import { authorizePartnerTechnicalRollout, lockPartnerOperationsControl } from '../authorization/technicalRollout';
 import { partnerPredecessorIsFrozen } from '../corrections/mutationFreeze';
 import { hasPartnerDraftAuthority, readPartnerDraftCase } from './draftEligibility';
 import { isFinalPartnerLoadingContract } from './effectiveRevision';
 import { canonicalPartnerQuantity } from './lineage';
-import { validatePartnerPhysicalLineage } from './prismaRepository';
+import { createPartnerPhysicalLineageValidator } from './prismaRepository';
 import { PartnerQuantityEvidenceConflictError, readPartnerRepairQuantityProjection,
   synchronizePartnerContractedQuantities } from './quantityStore';
 
@@ -34,14 +35,14 @@ async function preflight(tx: Tx, contractNumber: string, apply: boolean): Promis
   if (apply) {
     // Preserve the regular command lock order, and read mutable witnesses after waiting.
     await tx.$queryRaw`SELECT id FROM partner_sale_cases WHERE id = ${caseId} FOR UPDATE`;
-    await tx.$queryRaw`SELECT id FROM sales_contracts WHERE id = ${selected.id} FOR UPDATE`;
   }
   try {
-    await assertCanonicalDispatchCommandAllowed(tx, { readOnly: !apply });
+    await assertCanonicalDispatchCommandAllowed(tx, { readOnly: !apply, partnerLocksHeld: apply });
   } catch (error) {
     if (error instanceof PilotSafetyPauseError) return ineligible(error.message);
     throw error;
   }
+  if (apply) await tx.$queryRaw`SELECT id FROM sales_contracts WHERE id = ${selected.id} FOR UPDATE`;
   const contract = await tx.salesContract.findUnique({ where, include: {
     customer: { select: { isActive: true } },
     partnerCase: { select: { state: true, customerId: true, committedAt: true } },
@@ -77,9 +78,10 @@ async function preflight(tx: Tx, contractNumber: string, apply: boolean): Promis
   }
 
   const lineages = await tx.partnerFulfillmentLineage.findMany({ where: { caseId }, orderBy: { productRowId: 'asc' } });
+  const validateLineage = createPartnerPhysicalLineageValidator(tx);
   for (const lineage of lineages) {
     if (lineage.caseRevision > view.owner.revision || lineage.internalRecordId !== view.recordId || !lineage.quantity.isFinite() ||
-        !await validatePartnerPhysicalLineage(tx, lineage)) return conflict('A stored physical lineage has invalid origin evidence');
+        !await validateLineage(lineage)) return conflict('A stored physical lineage has invalid origin evidence');
   }
 
   const expected = [...view.products, ...lineages.filter(lineage => !view.products.some(product => product.productRowId === lineage.productRowId))
@@ -123,15 +125,16 @@ async function preflight(tx: Tx, contractNumber: string, apply: boolean): Promis
 export async function repairPartnerLoadingBaseline(database: PrismaClient, contractNumber: string, apply: boolean): Promise<RepairReport> {
   let target: RepairTarget = { contractNumber };
   try {
-    return await database.$transaction(async tx => {
+    return await retryDispatchCutoverContention(database, () => database.$transaction(async tx => {
       if (!apply) await tx.$executeRaw`SET TRANSACTION READ ONLY`;
       const report = await preflight(tx, contractNumber, apply);
       target = { contractNumber, caseId: report.caseId };
       if (!apply || report.status !== 'missing') return report;
       await synchronizePartnerContractedQuantities(tx, report.caseId!, { initialize: true });
       return { ...report, status: 'repaired' };
-    }, { isolationLevel: apply ? 'ReadCommitted' : 'RepeatableRead', timeout: 30_000 });
+    }, { isolationLevel: apply ? 'ReadCommitted' : 'RepeatableRead', timeout: 30_000 }));
   } catch (error) {
+    if (error instanceof DispatchCutoverBusyError) return { ...target, status: 'conflict', reason: error.message };
     if (error instanceof PartnerQuantityEvidenceConflictError ||
         (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')) {
       return { ...target, status: 'conflict', reason: 'Conflicting or invalid immutable shipment evidence' };

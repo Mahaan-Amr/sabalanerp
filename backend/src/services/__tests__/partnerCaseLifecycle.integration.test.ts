@@ -1379,13 +1379,7 @@ test('real-schema loading source selects canonical delivery evidence without cha
     if (process.env.PERSONAL_PICKUP_ACCEPTANCE === '1') console.log(result.stdout.trim());
   } finally {
     await database.$disconnect();
-    for (let attempt = 0; ; attempt++) {
-      try { await temporary.cleanup(); break; }
-      catch (error) {
-        if (attempt >= 8 || !(error instanceof Error) || !error.message.includes('still has sessions')) throw error;
-        await new Promise(resolve => setTimeout(resolve, 500));
-      }
-    }
+    await temporary.cleanup();
   }
 });
 
@@ -1905,7 +1899,7 @@ test('current Partner manager approval opens Logistics selection and draft creat
   const requesterId = `${ids.caseId}-requester`;
   try {
     await database.effectiveAuthorizationState.create({ data: { id: 1, revision: 1 } });
-    const expected = await seedCommittedDraftCase(database, ids);
+    const expected = await seedCommittedDraftCase(database, ids, true);
     const logisticsId = await seedDraftLogisticsActor(database, ids);
     await database.user.createMany({ data: [managerId, requesterId].map(id => ({ id, username: id,
       email: `${id}@example.invalid`, password: 'not-a-login', firstName: 'Managerial', lastName: 'Admission', role: 'ADMIN',
@@ -2010,13 +2004,7 @@ test('effective Partner financial approval opens Logistics selection and draft c
         PARTNER_TEST_DIRECT_CUSTOMER_ID: directCustomer.id } });
   } finally {
     await database.$disconnect();
-    for (let attempt = 0; ; attempt++) {
-      try { await temporary.cleanup(); break; }
-      catch (error) {
-        if (attempt >= 5 || !(error instanceof Error) || !error.message.includes('still has sessions')) throw error;
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
-    }
+    await temporary.cleanup();
   }
 });
 

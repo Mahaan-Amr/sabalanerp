@@ -26,7 +26,7 @@ export async function recordPartnerCommercialCorrectionFinality(
   if (!effective || effective.owner.revision === root.headRevision) return;
   if (effective.owner.revision > root.headRevision) throw new Error('سابقه نسخه مؤثر قرارداد ناسازگار است.');
   const physical = await validatePartnerCommercialPhysicalFloor(tx, caseId,
-    views.accounting.products.filter(product => product.productType !== 'service'));
+    views.accounting.products.filter(product => product.productType !== 'service'), { allowMissingContractedEvidence: true });
   if (!physical.ok) throw new Error(physical.error.message);
   const request = await tx.accountingCorrectionRequest.findFirst({ where: { contractId: contract.id,
     status: { in: ['APPROVED_FOR_SALES_EDIT', 'RESOLVED'] } }, orderBy: { createdAt: 'desc' } });

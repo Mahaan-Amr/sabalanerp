@@ -1248,8 +1248,10 @@ export const accountingAPI = {
     api.get('/accounting/dispatch-candidates', { params: { page, pageSize, search } }),
   registerSepidarLoadingReference: (loadingId: string, data: { value: string | null; expectedVersion: string | null; reason?: string }) =>
     api.post(`/accounting/loadings/${encodeURIComponent(loadingId)}/sepidar-reference`, data),
-  issueLoadingDocuments: (loadingId: string, recovery?: { waybillId: string; invoiceId: string; reason: string }) =>
-    api.post(`/accounting/loadings/${encodeURIComponent(loadingId)}/issue-dispatch-documents`, recovery ? { recovery } : undefined),
+  issueLoadingDocuments: (loadingId: string, commandId: string, recovery?: { waybillId: string; invoiceId: string; reason: string }) =>
+    api.post(`/accounting/loadings/${encodeURIComponent(loadingId)}/issue-dispatch-documents`, { commandId, recovery }),
+  getLoadingDocumentIssueReceipt: (loadingId: string, commandId: string) =>
+    api.get(`/accounting/loadings/${encodeURIComponent(loadingId)}/issue-dispatch-documents/${encodeURIComponent(commandId)}`),
   reconstructLegacyWaybill: (waybillId: string, reason: string) => api.post(`/accounting/dispatch-waybills/${encodeURIComponent(waybillId)}/reconstruct-legacy`, { reason }),
   decideDispatchCandidate: (id: string, data: { action: 'ACCEPT' | 'REJECT'; reason: string; idempotencyKey: string }) =>
     api.post(`/accounting/dispatch-candidates/${id}/decision`, data),

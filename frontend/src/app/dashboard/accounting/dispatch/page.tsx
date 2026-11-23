@@ -30,8 +30,24 @@ import { biometricAttemptNotice, confirmationActionsFor } from "@/features/biome
 import api, { accountingAPI, dispatchConfirmationAPI } from "@/lib/api";
 import { biometricConnectorClient } from "@/lib/biometricConnector";
 import { formatNumericInputText, normalizeDigits } from "@/lib/numberFormat";
+import { useAuth } from "@/contexts/AuthContext";
 
 type DispatchNotice = { kind: "success" | "error"; text: string };
+type LoadingIssueRequest = {
+  id: string;
+  recovery?: { waybillId: string; invoiceId: string; reason: string };
+};
+type LoadingIssueScope = { actorId: string; loadingId: string; key: string };
+type LoadingIssueConclusion =
+  | { status: "rejected"; text: string }
+  | { status: "confirmed"; invoice: { id: string; number: string } };
+type LoadingIssueState =
+  | { status: "pending" }
+  | { status: "unknown"; command: LoadingIssueRequest; receiptMissing: boolean }
+  | (LoadingIssueConclusion & { read?: "pending" | "failed" | "ready" });
+
+const errorStatus = (error: unknown) => (error as { response?: { status?: number } })?.response?.status;
+const errorCode = (error: unknown) => (error as { response?: { data?: { code?: string } } })?.response?.data?.code;
 type DispatchSection = "candidates" | "confirmation" | "cases";
 type ReferenceAuditEntry = {
   id: string;
@@ -52,7 +68,7 @@ type ReferenceCandidate = {
 type ReferenceError = { text: string; stale?: boolean; reason?: boolean };
 const referenceLabel = "شماره بارگیری سپیدار";
 const dispatchCandidateAccessDenied = (error: unknown) => {
-  const status = (error as { response?: { status?: number } })?.response?.status;
+  const status = errorStatus(error);
   return status === 401 || status === 403;
 };
 type ReasonAction = {
@@ -77,6 +93,11 @@ const quantityUnitLabels: Record<string, string> = { meter: "متر طول", squ
 const dispatchPageSize = 50;
 
 export default function AccountingDispatchPage() {
+  const { user } = useAuth();
+  const issueActorId = useRef(user?.id);
+  issueActorId.current = user?.id;
+  const [loadingIssues, setLoadingIssues] = useState<Record<string, LoadingIssueState>>({});
+  const groupReads = useRef(new Set<string>());
   const [section, setSection] = useState<DispatchSection>("candidates");
   const [search, setSearch] = useState("");
   const [voidInvoiceLoadingId, setVoidInvoiceLoadingId] = useState<string | null>(null);
@@ -364,7 +385,122 @@ export default function AccountingDispatchPage() {
     return () => controller.abort();
   }, [selectedId, selectedWaybillId, detailKey]);
   const loadingId = selectedCandidate?.loadingId;
+  const selectedLoadingId = useRef(loadingId);
+  selectedLoadingId.current = loadingId;
   const group = loadingId ? dispatchCandidates.filter(candidate => candidate.loadingId === loadingId) : [];
+  const groupSnapshot = useRef({ rows: group, version: 0 });
+  const previousGroup = groupSnapshot.current;
+  if (previousGroup.rows.length !== group.length || group.some((candidate, index) => candidate !== previousGroup.rows[index])) {
+    groupSnapshot.current = { rows: group, version: previousGroup.version + 1 };
+  }
+  const issueScope: LoadingIssueScope | null = user && loadingId
+    ? { actorId: user.id, loadingId, key: JSON.stringify([user.id, loadingId]) }
+    : null;
+  const issue = issueScope ? loadingIssues[issueScope.key] : undefined;
+  const setIssue = (scope: LoadingIssueScope, state: LoadingIssueState) => {
+    if (issueActorId.current === scope.actorId) {
+      setLoadingIssues(current => ({ ...current, [scope.key]: state }));
+    }
+  };
+  const clearIssueGroup = (scope: LoadingIssueScope) => {
+    if (issueActorId.current !== scope.actorId) return;
+    setDispatchCandidates(current => current.filter(candidate => candidate.loadingId !== scope.loadingId));
+  };
+  const readIssueGroup = async (scope: LoadingIssueScope, conclusion: LoadingIssueConclusion) => {
+    if (groupReads.current.has(scope.key)) return;
+    groupReads.current.add(scope.key);
+    setIssue(scope, { ...conclusion, read: "pending" });
+    try {
+      const response = await accountingAPI.getDispatchCandidates(scope.loadingId);
+      if (issueActorId.current !== scope.actorId) return;
+      const rows = response.data.data;
+      if (!response.data.success || !Array.isArray(rows) || rows.some(row => row.loadingId !== scope.loadingId)) {
+        throw new Error("Invalid dispatch group response");
+      }
+      setDispatchCandidates(current => {
+        if (!current.some(candidate => candidate.loadingId === scope.loadingId)) return current;
+        const updated = new Map(rows.map(row => [row.id, row]));
+        const merged = current.flatMap(candidate => {
+          if (candidate.loadingId !== scope.loadingId) return [candidate];
+          const row = updated.get(candidate.id);
+          updated.delete(candidate.id);
+          return row ? [row] : [];
+        });
+        return [...merged, ...Array.from(updated.values())];
+      });
+      setCandidatePage(current => {
+        if (!current) return current;
+        const invoiceActionIds = new Set(current.invoiceActionIds);
+        for (const row of rows) invoiceActionIds.delete(row.id);
+        const eligible = rows.filter(row => current.ids.has(row.id) && row.currentSalesInvoice);
+        const actionRow = eligible.find(row => row.waybills?.some((waybill: any) => waybill.status === "ISSUED")) ?? eligible[0];
+        if (actionRow) invoiceActionIds.add(actionRow.id);
+        return { ...current, invoiceActionIds };
+      });
+      if (selectedLoadingId.current === scope.loadingId) retryDetail(attempt => attempt + 1);
+      setIssue(scope, { ...conclusion, read: "ready" });
+    } catch (error) {
+      if (dispatchCandidateAccessDenied(error)) clearIssueGroup(scope);
+      setIssue(scope, { ...conclusion, read: "failed" });
+    } finally {
+      groupReads.current.delete(scope.key);
+    }
+  };
+  const confirmIssueReceipt = (scope: LoadingIssueScope, command: LoadingIssueRequest, result?: {
+    commandId?: unknown; status?: unknown; invoice?: { id?: unknown; number?: unknown };
+  }) => {
+    if (result?.commandId !== command.id || result.status !== "ISSUED" ||
+        typeof result.invoice?.id !== "string" || typeof result.invoice?.number !== "string") {
+      throw new Error("Invalid dispatch issue receipt");
+    }
+    if (issueActorId.current === scope.actorId) {
+      void readIssueGroup(scope, { status: "confirmed", invoice: { id: result.invoice.id, number: result.invoice.number } });
+    }
+  };
+  const readIssueReceipt = async (scope: LoadingIssueScope, command: LoadingIssueRequest) => {
+    try {
+      const response = await accountingAPI.getLoadingDocumentIssueReceipt(scope.loadingId, command.id);
+      confirmIssueReceipt(scope, command, response.data.data);
+    } catch (error) {
+      if (dispatchCandidateAccessDenied(error)) {
+        clearIssueGroup(scope);
+        setIssue(scope, { status: "rejected", text: "مجوز دریافت رسید صدور اسناد بارگیری را ندارید." });
+        return;
+      }
+      setIssue(scope, { status: "unknown", command, receiptMissing: errorCode(error) === "LOADING_ISSUE_RECEIPT_MISSING" });
+    }
+  };
+  const handleIssue = async (scope: LoadingIssueScope, command: LoadingIssueRequest, receiptOnly = false) => {
+    if (dispatchPendingRef.current || issueActorId.current !== scope.actorId) return;
+    dispatchPendingRef.current = true;
+    setDispatchPending(true);
+    setIssue(scope, { status: "pending" });
+    try {
+      if (receiptOnly) {
+        await readIssueReceipt(scope, command);
+        return;
+      }
+      try {
+        const response = await accountingAPI.issueLoadingDocuments(scope.loadingId, command.id, command.recovery);
+        confirmIssueReceipt(scope, command, response.data.data);
+      } catch (error) {
+        const status = errorStatus(error);
+        if (dispatchCandidateAccessDenied(error)) {
+          clearIssueGroup(scope);
+          setDispatchNotice({ kind: "error", text: userFacingError(error, "مجوز صدور اسناد بارگیری را ندارید.") });
+        } else if (status && status >= 400 && status < 500 && status !== 408) {
+          const conclusion = { status: "rejected", text: userFacingError(error, "صدور اسناد بارگیری کامل نشد.") } as const;
+          if (status === 409) void readIssueGroup(scope, conclusion);
+          else setIssue(scope, conclusion);
+        } else {
+          await readIssueReceipt(scope, command);
+        }
+      }
+    } finally {
+      dispatchPendingRef.current = false;
+      setDispatchPending(false);
+    }
+  };
   const pendingPickupVerification = (candidate: any) =>
     candidate.summary?.driverSource === "CUSTOMER_PICKUP" && candidate.status === "PENDING" && !candidate.pickupVerification?.verifiedAt;
   const showCandidate = (id: string) => {
@@ -843,7 +979,18 @@ export default function AccountingDispatchPage() {
           {detail === undefined && <ErpLoading />}
           {detail === null && <ErpInlineState kind="stale" title="جزئیات قیمت این پرونده در دسترس نیست؛ پیش از تصمیم اطلاعات حسابداری را بررسی کنید."
             action={{ label: "تلاش دوباره", onClick: () => retryDetail(attempt => attempt + 1) }} />}
-          {loadingId && <SalesDispatchInvoices workspace="accounting" loadingId={loadingId}
+          {issue?.status === "confirmed" && <ErpInlineState kind="success"
+            title={<span>بارنامه‌ها و فاکتور فروش صادر شدند. <bdi>{issue.invoice.number}</bdi></span>} />}
+          {issueScope && (issue?.status === "confirmed" || issue?.status === "rejected") && issue.read === "failed" &&
+            <ErpInlineState kind="stale" title="وضعیت بارگیری به‌روز نشد."
+              action={{ label: "تلاش دوباره برای خواندن وضعیت بارگیری", onClick: () => void readIssueGroup(issueScope, issue) }} />}
+          {issueScope && issue?.status === "unknown" && <ErpInlineState kind="stale" title="نتیجهٔ فرمان صدور هنوز مشخص نیست."
+            action={{ label: "بررسی دوبارهٔ رسید صدور", onClick: () => void handleIssue(issueScope, issue.command, true) }}
+            actions={issue.receiptMissing && canManageLoadingInvoices(issueScope.loadingId) ? [{
+              label: "ادامهٔ همان فرمان صدور", onClick: () => void handleIssue(issueScope, issue.command),
+            }] : []} />}
+          {issue?.status === "rejected" && <ErpInlineState kind="error" title={issue.text} />}
+          {loadingId && <SalesDispatchInvoices key={loadingId} workspace="accounting" loadingId={loadingId}
             canManage={canManageLoadingInvoices(loadingId)}
             onVoided={loadDispatch}
             issuanceBlockReason={group.some(pendingPickupVerification) ? "کد پیامکی همه راننده‌های متفرقه این بارگیری را تأیید کنید." : undefined}
@@ -851,19 +998,11 @@ export default function AccountingDispatchPage() {
               !candidate.waybills?.some((waybill: any) =>
                 ['ISSUED', 'EXIT_RECORDED'].includes(waybill.status) && (waybill.legacyReconstruction || waybill.hasWaybillArtifact)))
               ? 'فایل بارنامه موجود نیست؛ برای بارنامه قدیمی، صدور اسناد نسخه بازسازی‌شده را ایجاد می‌کند.' : undefined}
+            groupedIssueBlocked={dispatchPending || issue?.status === "unknown" ||
+              ((issue?.status === "confirmed" || issue?.status === "rejected") && (issue.read === "pending" || issue.read === "failed"))}
+            confirmedInvoiceId={issue?.status === "confirmed" ? issue.invoice.id : undefined}
             onIssueAll={async recovery => {
-              try { await accountingAPI.issueLoadingDocuments(loadingId, recovery); await loadDispatch(); }
-              catch (error) {
-                setDispatchNotice({ kind: 'error', text: userFacingError(error, 'صدور همه اسناد کامل نشد؛ وضعیت راننده‌ها را بررسی کنید.') });
-                try {
-                  const candidates = await accountingAPI.getDispatchCandidates();
-                  setDispatchCandidates(candidates.data.data || []);
-                  retryDetail(attempt => attempt + 1);
-                } catch (refreshError) {
-                  if (dispatchCandidateAccessDenied(refreshError)) setDispatchCandidates([]);
-                }
-                throw error;
-              }
+              if (issueScope) await handleIssue(issueScope, { id: crypto.randomUUID(), recovery });
             }}
             onPrintAll={async () => {
               const preview = window.open('', '_blank');
@@ -875,7 +1014,7 @@ export default function AccountingDispatchPage() {
                 window.setTimeout(() => URL.revokeObjectURL(url), 60000);
               } catch (error) { preview.close(); throw error; }
             }}
-            refreshKey={dispatchCandidates}/>}
+            refreshKey={groupSnapshot.current.version}/>}
         </div>}
       </ErpSheet>
       <ErpSheet open={Boolean(referenceLoadingId)} title={referenceIsCorrection ? "اصلاح شماره بارگیری سپیدار" : "ثبت شماره بارگیری سپیدار"} presentation="modal"

@@ -33,12 +33,7 @@ test('native Prisma histogram sees a queued checkout in an isolated one-connecti
       const stop = startRuntimeCapacityObservation({
         commit: 'local', intervalMs: 750, emit: receiveWindow,
         poolMetrics: async () => {
-          try {
-            const metrics = await prisma.$metrics.json();
-            console.info(JSON.stringify({ nativePoolWait: metrics.histograms.find(metric => metric.key === 'prisma_client_queries_wait_histogram_ms')?.value,
-              histogramKeys: metrics.histograms.map(metric => metric.key) }));
-            return metrics;
-          }
+          try { return await prisma.$metrics.json(); }
           finally { baselineReady(); }
         },
       });

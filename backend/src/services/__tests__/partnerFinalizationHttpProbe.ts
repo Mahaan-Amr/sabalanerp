@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import express from 'express';
+import { randomUUID } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 import { prisma } from '../../lib/prisma';
 import logisticsRouter from '../../routes/logistics';
@@ -203,18 +204,27 @@ async function main() {
         'GET', undefined, readerSession.token);
       assert.equal(combinedDenied.status, 404, 'the combined model is wholesale-sensitive');
       let otp = '';
+      const connector = new DeterministicBiometricSimulator();
       const confirmation = new DispatchConfirmationService(prisma, {
-        connector: new DeterministicBiometricSimulator(),
+        connector,
         vault: new ProtectedTemplateVault({ activeKeyId: 'test', keys: { test: Buffer.alloc(32, 7) } }),
         otpSecret: 'issue-334-isolated-dispatch-confirmation-secret',
         sendOtp: async message => { otp = message.code; },
       });
       const confirmationSession = await confirmation.startSession({ waybillId, actorId: accountantId,
         workstationId: 'ISSUE-334-ACCOUNTING-DESK' });
-      assert.ok(otp, 'the external-driver confirmation must issue an OTP');
+      const failedCapture = await connector.execute({ commandId: randomUUID(), nonce: randomUUID(), workstationId: 'ISSUE-334-ACCOUNTING-DESK',
+        issuedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 60_000).toISOString(), operation: 'VERIFY',
+        payload: { challengeId: confirmationSession.id, simulation: { scenario: 'DISCONNECT' } } });
+      await confirmation.recordInternalBiometricResult({ sessionId: confirmationSession.id, actorId: accountantId, result: failedCapture });
+      await confirmation.beginInternalFallback({ sessionId: confirmationSession.id, actorId: accountantId });
+      assert.ok(otp, 'a qualifying biometric failure opens the external-driver OTP path');
       await confirmation.verifyOtp({ sessionId: confirmationSession.id, code: otp, actorId: accountantId });
       const authorization = await confirmation.approveByGuard({ sessionId: confirmationSession.id,
-        guardActorId: actorId, reauthenticatedAt: new Date() });
+        guardActorId: actorId, reauthenticatedAt: new Date(), reason: 'آزمون مسیر جایگزین قطع دستگاه بیومتریک' });
+      const loadingInvoices = await request(`/api/accounting/loadings/${loadingId}/sales-invoices`,
+        'POST', {}, accountingSession.token, `${expected.caseId}-issue-loading-invoice`);
+      assert.equal(loadingInvoices.status, 200, JSON.stringify(loadingInvoices.body));
       await prisma.effectiveActionGrant.updateMany({ where: { principalId: accountantId, domain: 'PARTNER',
         action: 'ACCOUNTING_WRITE', revokedAt: null }, data: { revokedAt: new Date(), revokedBy: accountantId,
         revocationReason: 'آزمون لغو دسترسی نوشتن اسناد', revocationCorrelationId: `${expected.caseId}-revoke-document-write` } });

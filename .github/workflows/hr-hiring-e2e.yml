@@ -1,16 +1,6 @@
 name: HR hiring browser workflow
 
 on:
-  pull_request:
-    paths:
-      - "backend/**"
-      - "frontend/**"
-      - "tests/hr-hiring/**"
-      - "playwright.hr-hiring.config.ts"
-      - "docker-compose.e2e.yml"
-      - "package.json"
-      - "package-lock.json"
-      - ".github/workflows/hr-hiring-e2e.yml"
   workflow_dispatch:
 
 jobs:

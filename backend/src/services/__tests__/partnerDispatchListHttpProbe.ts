@@ -26,7 +26,7 @@ async function main() {
   try {
     const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/accounting`;
     const headers = { cookie: `${SESSION_COOKIE}=${session.token}`, 'X-Correlation-Id': `${actorId}-candidate-list` };
-    const fetchCandidates = () => fetch(`${base}/dispatch-candidates`, { headers });
+    const fetchCandidates = (groupId?: string) => fetch(`${base}/dispatch-candidates` + (groupId ? '?loadingId=' + encodeURIComponent(groupId) : ''), { headers });
     const register = (id: string, value: string) => fetch(`${base}/loadings/${id}/sepidar-reference`, {
       method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ value }),
     });
@@ -66,6 +66,15 @@ async function main() {
     assert.ok(returnedIds.includes(expected.allowed), 'the individually authorized Partner candidate is visible');
     assert.equal(returnedIds.includes(expected.hidden), false, 'a different Partner Case is excluded before serialization');
     assert.equal(response.headers.get('X-Dispatch-Documents-Permission'), 'MANAGE');
+    assert.equal(body.capabilities.canManageAccountingCandidates, true);
+    const groupResponse = await fetchCandidates(loadingId);
+    assert.equal(groupResponse.status, 200);
+    assert.deepEqual((await groupResponse.json() as any).data,
+      body.data.filter((row: any) => row.loadingId === loadingId),
+      'the group response matches the list rows for the loading, including permission and evidence flags');
+    const hiddenGroup = await fetchCandidates(hiddenLoadingId);
+    assert.equal(hiddenGroup.status, 200);
+    assert.deepEqual((await hiddenGroup.json() as any).data, [], 'a filtered read cannot disclose an unauthorized loading');
     assert.equal(body.data.find((row: any) => row.id === expected.ordinary)?.canManage, true,
       'ordinary candidates retain workspace-level mutation availability');
     assert.equal(body.data.find((row: any) => row.id === expected.allowed)?.canManage, true,

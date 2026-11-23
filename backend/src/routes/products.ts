@@ -1,7 +1,6 @@
 import { prisma } from '../lib/prisma';
 import express, { Response } from 'express';
 import { body, query, validationResult } from 'express-validator';
-import { PrismaClient } from '@prisma/client';
 import { protect } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES } from '../middleware/workspace';
 import { requireFeatureAccess, FEATURES, FEATURE_PERMISSIONS } from '../middleware/feature';
@@ -383,249 +382,6 @@ router.get('/', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERM
     return res.status(500).json(unexpectedSalesErrorResponse({
       code: 'SALES_PRODUCTS_LIST_UNEXPECTED',
       failedAction: 'دریافت فهرست محصولات',
-      trackingId
-    }));
-  }
-});
-
-// @desc    Generate Excel template for product import
-// @route   GET /api/products/template
-// @access  Private/Sales Products Import
-router.get('/template', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.SALES_PRODUCTS_TEMPLATE, FEATURE_PERMISSIONS.VIEW), async (req: any, res: Response) => {
-  console.log('ðŸ“„ Template route called:', req.originalUrl);
-  console.log('ðŸ“„ Request headers:', req.headers);
-  console.log('ðŸ“„ Request method:', req.method);
-  try {
-    console.log('ðŸ“„ Starting template generation...');
-    // Get all active master data for dropdowns
-    const [
-      cutTypes,
-      stoneMaterials,
-      cutWidths,
-      thicknesses,
-      mines,
-      finishTypes,
-      colors
-    ] = await Promise.all([
-      prisma.cutType.findMany({ where: { isActive: true }, orderBy: { namePersian: 'asc' } }),
-      prisma.stoneMaterial.findMany({ where: { isActive: true }, orderBy: { namePersian: 'asc' } }),
-      prisma.cutWidth.findMany({ where: { isActive: true }, orderBy: { value: 'asc' } }),
-      prisma.thickness.findMany({ where: { isActive: true }, orderBy: { value: 'asc' } }),
-      prisma.mine.findMany({ where: { isActive: true }, orderBy: { namePersian: 'asc' } }),
-      prisma.finishType.findMany({ where: { isActive: true }, orderBy: { namePersian: 'asc' } }),
-      prisma.color.findMany({ where: { isActive: true }, orderBy: { namePersian: 'asc' } })
-    ]);
-    
-    console.log('ðŸ“„ Master data fetched:', {
-      cutTypes: cutTypes.length,
-      stoneMaterials: stoneMaterials.length,
-      cutWidths: cutWidths.length,
-      thicknesses: thicknesses.length,
-      mines: mines.length,
-      finishTypes: finishTypes.length,
-      colors: colors.length
-    });
-
-    // Create workbook
-    const workbook = XLSX.utils.book_new();
-
-    // Create main data sheet
-    const headers = [
-      'کد محصول',
-      'نام محصول (انگلیسی)',
-      'نام محصول (فارسی)',
-      'کد نوع برش',
-      'نام نوع برش',
-      'نام نوع برش (فارسی)',
-      'کد جنس سنگ',
-      'نام جنس سنگ',
-      'نام جنس سنگ (فارسی)',
-      'کد عرض',
-      'مقدار عرض',
-      'نام عرض',
-      'کد ضخامت',
-      'مقدار ضخامت',
-      'نام ضخامت',
-      'کد معدن',
-      'نام معدن',
-      'نام معدن (فارسی)',
-      'کد نوع پرداخت',
-      'نام نوع پرداخت',
-      'نام نوع پرداخت (فارسی)',
-      'کد رنگ',
-      'نام رنگ',
-      'نام رنگ (فارسی)',
-      'کد کیفیت',
-      'نام کیفیت',
-      'نام کیفیت (فارسی)',
-      'قیمت پایه',
-      'ارز',
-      'موجود',
-      'زمان تحویل',
-      'توضیحات',
-      'فعال'
-    ];
-
-    // Add sample data
-    const sampleData = [
-      [
-        'CT001-SM001-CW001-TH001-MN001-FT001-CL001',
-        'Travertine 10cm x 2cm - Abbas Abad - Polished',
-        'تراورتن 10 سانتی‌متر × 2 سانتی‌متر - عباس آباد - صیقلی',
-        cutTypes[0]?.code || 'CT001',
-        cutTypes[0]?.name || 'Longitudinal',
-        cutTypes[0]?.namePersian || 'طولی',
-        stoneMaterials[0]?.code || 'SM001',
-        stoneMaterials[0]?.name || 'Travertine',
-        stoneMaterials[0]?.namePersian || 'تراورتن',
-        cutWidths[0]?.code || 'CW001',
-        cutWidths[0]?.value || 10,
-        cutWidths[0]?.namePersian || 'عرض 10',
-        thicknesses[0]?.code || 'TH001',
-        thicknesses[0]?.value || 2,
-        thicknesses[0]?.namePersian || 'ضخامت 2',
-        mines[0]?.code || 'MN001',
-        mines[0]?.name || 'Abbas Abad',
-        mines[0]?.namePersian || 'عباس آباد',
-        finishTypes[0]?.code || 'FT001',
-        finishTypes[0]?.name || 'Polished',
-        finishTypes[0]?.namePersian || 'صیقلی',
-        colors[0]?.code || 'CL001',
-        colors[0]?.name || 'White',
-        colors[0]?.namePersian || 'سفید',
-        'QUALITY-001',
-        'Standard',
-        'استاندارد',
-        500000,
-        'ریال',
-        true,
-        7,
-        'محصول نمونه',
-        true
-      ]
-    ];
-
-    const worksheetData = [headers, ...sampleData];
-    const worksheet = XLSX.utils.aoa_to_sheet(worksheetData);
-
-    // Set column widths
-    const colWidths = [
-      { wch: 25 }, // کد محصول
-      { wch: 40 }, // نام محصول (انگلیسی)
-      { wch: 40 }, // نام محصول (فارسی)
-      { wch: 15 }, // کد نوع برش
-      { wch: 20 }, // نام نوع برش
-      { wch: 20 }, // نام نوع برش (فارسی)
-      { wch: 15 }, // کد جنس سنگ
-      { wch: 20 }, // نام جنس سنگ
-      { wch: 20 }, // نام جنس سنگ (فارسی)
-      { wch: 15 }, // کد عرض
-      { wch: 12 }, // مقدار عرض
-      { wch: 15 }, // نام عرض
-      { wch: 15 }, // کد ضخامت
-      { wch: 12 }, // مقدار ضخامت
-      { wch: 15 }, // نام ضخامت
-      { wch: 15 }, // کد معدن
-      { wch: 20 }, // نام معدن
-      { wch: 20 }, // نام معدن (فارسی)
-      { wch: 15 }, // کد نوع پرداخت
-      { wch: 20 }, // نام نوع پرداخت
-      { wch: 20 }, // نام نوع پرداخت (فارسی)
-      { wch: 15 }, // کد رنگ
-      { wch: 15 }, // نام رنگ
-      { wch: 15 }, // نام رنگ (فارسی)
-      { wch: 15 }, // کد کیفیت
-      { wch: 15 }, // نام کیفیت
-      { wch: 15 }, // نام کیفیت (فارسی)
-      { wch: 15 }, // قیمت پایه
-      { wch: 10 }, // ارز
-      { wch: 10 }, // موجود
-      { wch: 12 }, // زمان تحویل
-      { wch: 30 }, // توضیحات
-      { wch: 10 }  // فعال
-    ];
-
-    worksheet['!cols'] = colWidths;
-
-    // Add worksheet to workbook
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'محصولات');
-
-    // Create master data reference sheet
-    const masterDataSheet = XLSX.utils.aoa_to_sheet([
-      ['نوع برش', 'کد', 'نام فارسی', 'نام انگلیسی'],
-      ...cutTypes.map(item => [item.namePersian, item.code, item.namePersian, item.name || '']),
-      ['', '', '', ''],
-      ['جنس سنگ', 'کد', 'نام فارسی', 'نام انگلیسی'],
-      ...stoneMaterials.map(item => [item.namePersian, item.code, item.namePersian, item.name || '']),
-      ['', '', '', ''],
-      ['عرض', 'کد', 'مقدار', 'واحد'],
-      ...cutWidths.map(item => [item.namePersian, item.code, item.value, item.unit]),
-      ['', '', '', ''],
-      ['ضخامت', 'کد', 'مقدار', 'واحد'],
-      ...thicknesses.map(item => [item.namePersian, item.code, item.value, item.unit]),
-      ['', '', '', ''],
-      ['معدن', 'کد', 'نام فارسی', 'نام انگلیسی'],
-      ...mines.map(item => [item.namePersian, item.code, item.namePersian, item.name || '']),
-      ['', '', '', ''],
-      ['نوع پرداخت', 'کد', 'نام فارسی', 'نام انگلیسی'],
-      ...finishTypes.map(item => [item.namePersian, item.code, item.namePersian, item.name || '']),
-      ['', '', '', ''],
-      ['رنگ', 'کد', 'نام فارسی', 'نام انگلیسی'],
-      ...colors.map(item => [item.namePersian, item.code, item.namePersian, item.name || ''])
-    ]);
-
-    XLSX.utils.book_append_sheet(workbook, masterDataSheet, 'مرجع داده‌ها');
-
-    // Generate Excel file buffer
-    console.log('ðŸ“„ Generating Excel buffer...');
-    const excelBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
-    console.log('ðŸ“„ Excel buffer generated, size:', excelBuffer.length);
-
-    // Set response headers
-    console.log('ðŸ“„ Setting response headers...');
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', 'attachment; filename="product-import-template.xlsx"');
-    res.setHeader('Content-Length', excelBuffer.length);
-
-    console.log('ðŸ“„ Sending Excel file...');
-    return res.send(excelBuffer);
-    console.log('ðŸ“„ Excel file sent successfully');
-
-  } catch (error) {
-    console.error('Template generation error:', error);
-    return res.status(500).json({
-      success: false,
-      error: 'خطا در تولید قالب Excel'
-    });
-  }
-});
-
-// @desc    Get product by ID
-// @route   GET /api/products/:id
-// @access  Private/Sales Workspace
-router.get('/:id', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.SALES_PRODUCTS_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: any, res: Response) => {
-  try {
-    const product = await prisma.product.findUnique({
-      where: { id: req.params.id }
-    });
-
-    if (!product) {
-      return res.status(404).json({
-        success: false,
-        error: 'محصول پیدا نشد؛ به فهرست محصولات برگردید و محصول دیگری را انتخاب کنید.'
-      });
-    }
-
-    return res.json({
-      success: true,
-      data: product
-    });
-  } catch (error) {
-    const trackingId = randomUUID();
-    console.error('Get product error:', { trackingId, error });
-    return res.status(500).json(unexpectedSalesErrorResponse({
-      code: 'SALES_PRODUCT_READ_UNEXPECTED',
-      failedAction: 'دریافت اطلاعات محصول',
       trackingId
     }));
   }
@@ -1297,127 +1053,35 @@ router.post('/import', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPA
   }
 });
 
-// @desc    Export products to Excel
-// @route   GET /api/products/export
-// @access  Private/Sales Products Export
-router.get('/export', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.SALES_PRODUCTS_EXPORT, FEATURE_PERMISSIONS.VIEW), async (req: any, res: Response) => {
+// Keep the generic GET after the named endpoints so their own permissions run first.
+// @desc    Get product by ID
+// @route   GET /api/products/:id
+// @access  Private/Sales Workspace
+router.get('/:id', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.SALES_PRODUCTS_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: any, res: Response) => {
   try {
-    // Get filter parameters
-    const {
-      search,
-      stoneType,
-      color,
-      finish,
-      mine,
-      quality,
-      isAvailable,
-      isActive,
-      includeDeleted
-    } = req.query;
-
-    // Build where clause
-    let whereClause: any = {
-      deletedAt: null
-    };
-
-    if (includeDeleted !== 'true') {
-      whereClause.deletedAt = null;
-    }
-
-    if (search) {
-      whereClause.OR = [
-        { name: { contains: search, mode: 'insensitive' } },
-        { namePersian: { contains: search, mode: 'insensitive' } },
-        { code: { contains: search, mode: 'insensitive' } }
-      ];
-    }
-
-    if (stoneType) whereClause.stoneTypeCode = stoneType;
-    if (color) whereClause.colorCode = color;
-    if (finish) whereClause.finishCode = finish;
-    if (mine) whereClause.mineCode = mine;
-    if (quality) whereClause.qualityCode = quality;
-    if (isAvailable !== undefined) whereClause.isAvailable = isAvailable === 'true';
-    if (isActive !== undefined) whereClause.isActive = isActive === 'true';
-
-    // Get products
-    const products = await prisma.product.findMany({
-      where: whereClause,
-      orderBy: { createdAt: 'desc' }
+    const product = await prisma.product.findUnique({
+      where: { id: req.params.id }
     });
 
-    // Create workbook
-    const workbook = XLSX.utils.book_new();
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        error: 'محصول پیدا نشد؛ به فهرست محصولات برگردید و محصول دیگری را انتخاب کنید.'
+      });
+    }
 
-    // Prepare data
-    const headers = [
-      'کد محصول',
-      'نام محصول (انگلیسی)',
-      'نام محصول (فارسی)',
-      'نوع برش',
-      'جنس سنگ',
-      'عرض',
-      'ضخامت',
-      'معدن',
-      'نوع پرداخت',
-      'رنگ',
-      'کیفیت',
-      'قیمت پایه',
-      'ارز',
-      'موجود',
-      'زمان تحویل',
-      'توضیحات',
-      'فعال',
-      'تاریخ ایجاد'
-    ];
-
-    const exportData = products.map(product => [
-      product.code,
-      product.name,
-      product.namePersian,
-      product.cuttingDimensionNamePersian,
-      product.stoneTypeNamePersian,
-      product.widthName,
-      product.thicknessName,
-      product.mineNamePersian,
-      product.finishNamePersian,
-      product.colorNamePersian,
-      product.qualityNamePersian,
-      product.basePrice,
-      product.currency,
-      product.isAvailable ? 'بله' : 'خیر',
-      product.leadTime,
-      product.description,
-      product.isActive ? 'بله' : 'خیر',
-      new Date(product.createdAt).toLocaleDateString('fa-IR')
-    ]);
-
-    const worksheetData = [headers, ...exportData];
-    const worksheet = XLSX.utils.aoa_to_sheet(worksheetData);
-
-    // Set column widths
-    worksheet['!cols'] = [
-      { wch: 25 }, { wch: 40 }, { wch: 40 }, { wch: 20 }, { wch: 20 },
-      { wch: 15 }, { wch: 15 }, { wch: 20 }, { wch: 20 }, { wch: 15 },
-      { wch: 15 }, { wch: 15 }, { wch: 10 }, { wch: 10 }, { wch: 12 },
-      { wch: 30 }, { wch: 10 }, { wch: 15 }
-    ];
-
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'محصولات');
-
-    // Generate Excel file buffer
-    const excelBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
-
-    // Set response headers
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename="products-export-${new Date().toISOString().split('T')[0]}.xlsx"`);
-    res.setHeader('Content-Length', excelBuffer.length);
-
-    return res.send(excelBuffer);
-
+    return res.json({
+      success: true,
+      data: product
+    });
   } catch (error) {
-    console.error('Export error:', error);
-    return sendUnexpectedProductFailure(res, error, 'خروجی Excel محصولات', 'SALES_PRODUCT_LEGACY_EXPORT_UNEXPECTED');
+    const trackingId = randomUUID();
+    console.error('Get product error:', { trackingId, error });
+    return res.status(500).json(unexpectedSalesErrorResponse({
+      code: 'SALES_PRODUCT_READ_UNEXPECTED',
+      failedAction: 'دریافت اطلاعات محصول',
+      trackingId
+    }));
   }
 });
 

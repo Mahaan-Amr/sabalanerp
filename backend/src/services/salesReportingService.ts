@@ -1,5 +1,5 @@
 import { prisma } from '../lib/prisma';
-import { AccountingRecordStatus, FinancialRecordKind, Prisma, PrismaClient } from '@prisma/client';
+import { AccountingRecordStatus, FinancialRecordKind, Prisma } from '@prisma/client';
 import { rankBiSellers } from './biRecommendationService';
 import * as partnerContracts from '@sabalanerp/partner-sales-contracts';
 import { projectSabalanRevenue } from './partnerSales/reporting/revenue';
@@ -394,39 +394,174 @@ const bucketKey = (date: Date, monthly: boolean) => monthly
   ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
   : date.toISOString().slice(0, 10);
 
-export const buildSalesReport = async (access: SalesReportAccess, query: SalesReportQuery) => {
+export const SALES_REPORT_SECTIONS = ['overview', 'customers', 'products', 'finance', 'delivery', 'sellers', 'accountingRegistered', 'metadata'] as const;
+type SalesReportSection = typeof SALES_REPORT_SECTIONS[number];
+
+export type SalesReportDrilldown =
+  | { kind: 'contracts' | 'accountingUnassigned' | 'accountingConflict' }
+  | { kind: 'trend' | 'customer' | 'product' | 'seller' | 'accountingSeller'; key: string }
+  | { kind: 'status'; key: string; commercialFlowVersion: 0 | 1 };
+
+type SalesReportPage = { page: number; pageSize: number };
+type ReportView = 'full' | SalesReportSection | { drilldown: SalesReportDrilldown; page: SalesReportPage };
+const customerSelect = { firstName: true, lastName: true, companyName: true } as const;
+const sellerSelect = { firstName: true, lastName: true, username: true } as const;
+const contractDisplaySelect = {
+  contractNumber: true,
+  contractData: true,
+  customer: { select: customerSelect },
+  responsibleSeller: { select: sellerSelect },
+  realizedSeller: { select: sellerSelect },
+  wonCrmPotentialProject: { select: { title: true } },
+} as const;
+const contractMetricSelect = {
+  id: true,
+  customerId: true,
+  status: true,
+  commercialFlowVersion: true,
+  partnerKind: true,
+  partnerCaseId: true,
+  responsibleSellerId: true,
+  realizedSellerId: true,
+  createdBy: true,
+  createdAt: true,
+  updatedAt: true,
+  signedAt: true,
+  realizedAt: true,
+  realizedAmount: true,
+  lostAt: true,
+  totalAmount: true,
+  reportingEvents: { select: { contractId: true, eventType: true, amount: true, effectiveAt: true, sellerId: true } },
+} as const satisfies Prisma.SalesContractSelect;
+const reportItemSelect = {
+  productId: true,
+  totalPrice: true,
+  quantity: true,
+  product: { select: { namePersian: true, name: true, code: true } },
+} as const satisfies Prisma.ContractItemSelect;
+
+type ContractMetric = Prisma.SalesContractGetPayload<{ select: typeof contractMetricSelect }>;
+type ContractDisplay = Prisma.SalesContractGetPayload<{ select: typeof contractDisplaySelect }>;
+type ReportItem = Prisma.ContractItemGetPayload<{ select: typeof reportItemSelect }>;
+type ReportItemRow = Omit<ReportItem, 'product'> & { product?: ReportItem['product'] };
+const isInStatusDistribution = (contract: ContractMetric, status: string, ordinary: boolean, period: { from: Date; to: Date }) =>
+  isOrdinaryCommercialFlow(contract) === ordinary && contract.status === status && inRange(
+    !ordinary && REALIZED.has(status) ? contract.realizedAt || contract.signedAt || contract.createdAt
+      : LOST.has(status) ? contract.lostAt || contract.updatedAt
+        : contract.createdAt,
+    period.from, period.to,
+  );
+
+const contractTime = (contract: ContractMetric) => (contract.realizedAt || contract.lostAt || contract.createdAt).getTime();
+
+const buildReportMetadata = (scope: ReturnType<typeof buildSalesReportScope>) => {
+  const generatedAt = new Date();
+  return {
+    generatedAt: generatedAt.toISOString(),
+    generatedAtLabel: faDateTime(generatedAt),
+    currency: 'تومان',
+    permissions: { canManage: scope.canManage, canCompany: scope.canCompany, canSelectSeller: scope.canManage, canViewSellerComparisons: scope.canManage },
+    scope: {
+      mode: scope.mode,
+      departmentId: scope.departmentId === '__no_department__' ? null : scope.departmentId,
+      sellerId: scope.sellerId,
+      label: scope.mode === 'company' ? 'کل شرکت' : scope.mode === 'department' ? 'دپارتمان فروش' : 'قراردادهای خودم',
+    },
+  };
+};
+
+const toContractDetail = (contract: ContractMetric, display: ContractDisplay, access: SalesReportAccess,
+  sellerId: string | null, productIds: string[]) => ({
+  id: contract.id,
+  customerId: contract.customerId,
+  responsibleSellerId: contract.responsibleSellerId,
+  realizedSellerId: contract.realizedSellerId,
+  productIds,
+  contractNumber: display.contractNumber,
+  customer: customerName(display.customer),
+  project: display.wonCrmPotentialProject?.title || recordMetadata(recordMetadata(display.contractData).project as Prisma.JsonValue).address || 'ثبت نشده',
+  status: contract.status,
+  commercialFlowVersion: contract.commercialFlowVersion,
+  statusLabel: (isOrdinaryCommercialFlow(contract) ? commercialStatusInfo[contract.status]?.label : undefined) || statusInfo[contract.status]?.label || contract.status,
+  statusDescription: (isOrdinaryCommercialFlow(contract) ? commercialStatusInfo[contract.status]?.description : undefined) || statusInfo[contract.status]?.description || '',
+  amount: n(contract.totalAmount),
+  responsibleSeller: userName(display.responsibleSeller),
+  realizedSeller: display.realizedSeller ? userName(display.realizedSeller) : contract.realizedAt ? 'تخصیص‌نیافته قدیمی' : '—',
+  createdAt: contract.createdAt,
+  realizedAt: contract.realizedAt,
+  lostAt: contract.lostAt,
+  reportingEventDates: contract.reportingEvents.filter((event) => !sellerId || event.sellerId === sellerId).map((event) => event.effectiveAt),
+  canOpenSource: Boolean(access.canOpenSalesSource),
+});
+
+const sliceReportPage = <T>(rows: T[], { page, pageSize }: SalesReportPage) => {
+  const total = rows.length;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const offset = (currentPage - 1) * pageSize;
+  return { rows: rows.slice(offset, offset + pageSize), page: currentPage, pageSize, total, totalPages };
+};
+
+const readSalesReport = async (access: SalesReportAccess, query: SalesReportQuery, view: ReportView) => {
+  const full = view === 'full';
+  const drilldown = typeof view === 'object' ? view.drilldown : null;
+  const accountingDetailsRequested = drilldown?.kind === 'accountingSeller'
+    || drilldown?.kind === 'accountingUnassigned' || drilldown?.kind === 'accountingConflict';
+  const needsAccountingRegistered = full || view === 'accountingRegistered' || accountingDetailsRequested;
+  const needsFinance = full || view === 'finance';
+  const needsAccounting = needsFinance || needsAccountingRegistered;
+  const needsLoading = full || view === 'delivery';
+  const needsSellerRows = full || view === 'sellers';
+  const needsCrm = full || view === 'sellers';
+  const needsCustomer = view === 'customers' || needsAccountingRegistered;
+  const needsItems = full || view === 'products';
+  const needsProductIds = needsItems || drilldown?.kind === 'product';
+  if ((view === 'sellers' || view === 'accountingRegistered' || accountingDetailsRequested || drilldown?.kind === 'seller') && !access.canManage) {
+    throw new Error('Sales report view is not permitted');
+  }
   const allTime = String(query.period || '') === 'all';
   let period = resolveSalesReportPeriod(query);
   const scope = await validateSalesReportScope(access, query);
   const where = buildSalesReportContractWhere(access, query);
 
-  const contractInclude = Prisma.validator<Prisma.SalesContractInclude>()({
-      customer: { include: { projectAddresses: true } },
-      department: { select: { id: true, namePersian: true, name: true } },
-      createdByUser: { select: { id: true, firstName: true, lastName: true, username: true } },
-      responsibleSeller: { select: { id: true, firstName: true, lastName: true, username: true } },
-      realizedSeller: { select: { id: true, firstName: true, lastName: true, username: true } },
-      items: { where: { retiredAt: null }, include: { product: true } },
-      deliveries: true,
-      payments: { include: { installments: true } },
-      reportingEvents: true,
-      wonCrmPotentialProject: { select: { id: true, title: true } },
-  });
-  const partitions = buildSalesReportContractPartitions(where);
-  const ordinaryContracts = await prisma.salesContract.findMany({
-    where: partitions.ordinary,
-    include: contractInclude,
-  });
-  const partnerRows = await prisma.salesContract.findMany({
-    where: partitions.partner,
-    include: {
-      ...contractInclude,
-      partnerCase: { select: { id: true, internalRecordId: true, events: { orderBy: { sequence: 'asc' },
-        select: { id: true, type: true, caseRevision: true, integrityHash: true, evidence: true } } } },
+  const reportEvents = full || allTime ? contractMetricSelect.reportingEvents : {
+    ...contractMetricSelect.reportingEvents,
+    where: {
+      effectiveAt: {
+        gte: view === 'overview' || view === 'sellers' ? period.previousFrom : period.from,
+        lte: period.to,
+      },
     },
-  });
+  };
+  const select = {
+    ...contractMetricSelect,
+    reportingEvents: reportEvents,
+    contractNumber: needsAccountingRegistered,
+    contractData: full,
+    customer: needsCustomer && { select: customerSelect },
+    responsibleSeller: needsSellerRows && { select: sellerSelect },
+    realizedSeller: needsAccountingRegistered && { select: sellerSelect },
+    wonCrmPotentialProject: full && { select: { title: true } },
+    items: needsProductIds && { where: { retiredAt: null }, select: reportItemSelect },
+    deliveries: needsLoading && { select: { deliveryDate: true, status: true, customerConfirmation: true } },
+    payments: needsFinance && { select: { status: true, totalAmount: true } },
+  } as const satisfies Prisma.SalesContractSelect;
+  const partitions = buildSalesReportContractPartitions(where);
+  const [ordinaryContracts, partnerRows] = await Promise.all([
+    prisma.salesContract.findMany({ where: partitions.ordinary, select }),
+    prisma.salesContract.findMany({
+      where: partitions.partner,
+      select: {
+        ...select,
+        partnerCase: { select: { id: true, internalRecordId: true, events: { orderBy: { sequence: 'asc' },
+          select: { id: true, type: true, caseRevision: true, integrityHash: true, evidence: true } } } },
+      },
+    }),
+  ]);
   const capturedAt = new Date().toISOString();
-  const contracts: typeof ordinaryContracts = [...ordinaryContracts, ...partnerRows.flatMap(row => {
+  // A view can omit the items relation. When selected, Prisma returns reportItemSelect.
+  type ReportContract = Omit<typeof ordinaryContracts[number], 'items'> & { items?: ReportItemRow[] };
+  const contracts: ReportContract[] = [...ordinaryContracts, ...partnerRows.flatMap(row => {
     if (!row.partnerCase?.internalRecordId) throw new Error('Partner sales reporting root integrity conflict');
     if (row.commercialFlowVersion === 2) {
       if (!row.realizedAt) return [];
@@ -440,12 +575,70 @@ export const buildSalesReport = async (access: SalesReportAccess, query: SalesRe
       realizedAmount: new Prisma.Decimal(projected.amount),
       reportingEvents: projected.events.map(entry => ({ id: entry.sourceKey, contractId: row.id,
         eventType: entry.type, amount: new Prisma.Decimal(entry.amount), effectiveAt: new Date(`${entry.effectiveDate}T00:00:00.000Z`),
-        sellerId: entry.sellerId, sourceKey: entry.sourceKey, reason: null, metadata: null,
-        createdBy: null, createdAt: new Date(entry.recordedAt) })) }];
+        sellerId: entry.sellerId })) }];
   })];
 
   if (allTime) {
     period = resolveAllTimeSalesReportPeriod(contracts);
+  }
+
+  const metricContracts = scope.sellerId
+    ? contracts.filter((contract) => contract.responsibleSellerId === scope.sellerId || contract.realizedSellerId === scope.sellerId || contract.createdBy === scope.sellerId)
+    : contracts;
+  const eventInScope = (event: ContractMetric['reportingEvents'][number]) => !scope.sellerId || event.sellerId === scope.sellerId;
+  const dateInPeriod = (date: Date | null) => inRange(date, period.from, period.to);
+  const isReportDetail = (contract: ContractMetric) => isSalesPipelineContract(contract)
+    || contract.reportingEvents.some((event) => eventInScope(event) && dateInPeriod(event.effectiveAt))
+    || dateInPeriod(contract.createdAt) || dateInPeriod(contract.lostAt);
+  const monthly = (period.to.getTime() - period.from.getTime()) / DAY > 62;
+
+  if (typeof view === 'object' && !accountingDetailsRequested) {
+    const selection = view.drilldown;
+    const trendEvents = (contract: ContractMetric, key: string) => contract.reportingEvents
+      .filter((event) => eventInScope(event) && dateInPeriod(event.effectiveAt) && bucketKey(event.effectiveAt, monthly) === key);
+    const selectedContracts = metricContracts.filter((contract) => {
+      switch (selection.kind) {
+        case 'trend':
+          return trendEvents(contract, selection.key).length > 0
+            || (isSalesPipelineContract(contract) && dateInPeriod(contract.createdAt)
+              && (!scope.sellerId || contract.responsibleSellerId === scope.sellerId)
+              && bucketKey(contract.createdAt, monthly) === selection.key);
+        case 'status':
+          return isInStatusDistribution(contract, selection.key, selection.commercialFlowVersion === 1, period);
+        case 'customer':
+          return isReportDetail(contract) && contract.customerId === selection.key;
+        case 'product':
+          return isReportDetail(contract) && Boolean(contract.items?.some((item) => item.productId === selection.key));
+        case 'seller':
+          return isReportDetail(contract) && (contract.responsibleSellerId === selection.key || contract.realizedSellerId === selection.key
+            || contract.reportingEvents.some((event) => eventInScope(event) && dateInPeriod(event.effectiveAt) && event.sellerId === selection.key));
+        case 'contracts':
+          return isReportDetail(contract);
+        default:
+          return false;
+      }
+    }).sort((a, b) => contractTime(b) - contractTime(a) || a.id.localeCompare(b.id));
+    const page = sliceReportPage(selectedContracts, view.page);
+    const display = page.rows.length ? await prisma.salesContract.findMany({
+      where: { ...where, id: { in: page.rows.map(({ id }) => id) } },
+      select: { id: true, ...contractDisplaySelect },
+    }) : [];
+    const displayById = new Map(display.map((row) => [row.id, row]));
+    return { detailPage: {
+      ...page,
+      rows: page.rows.flatMap((row) => {
+        const fields = displayById.get(row.id);
+        if (!fields) return [];
+        const detail = toContractDetail(row, fields, access, scope.sellerId, []);
+        return [{
+          ...detail,
+          ...(selection.kind === 'trend' ? {
+            trendEvents: trendEvents(row, selection.key).map(({ eventType, effectiveAt, amount }) =>
+              ({ eventType, effectiveAt, amount: n(amount) })),
+          } : {}),
+        }];
+      }),
+    } };
   }
 
   const contractIds = contracts.map((contract) => contract.id);
@@ -458,9 +651,15 @@ export const buildSalesReport = async (access: SalesReportAccess, query: SalesRe
         : {}),
   };
   const [accountingEvidence, deliveryEvidence, crmEvidence] = await Promise.allSettled([
-    contractIds.length ? Promise.all([
-      prisma.accountingPaymentStatus.findMany({ where: { contractId: { in: contractIds } } }),
-      prisma.accountingReceivable.findMany({ where: { contractId: { in: contractIds } } }),
+    needsAccounting && contractIds.length ? Promise.all([
+      needsFinance ? prisma.accountingPaymentStatus.findMany({
+        where: { contractId: { in: contractIds } },
+        select: { contractId: true, status: true, amount: true, occurredAt: true, createdAt: true },
+      }) : [],
+      needsFinance ? prisma.accountingReceivable.findMany({
+        where: { contractId: { in: contractIds } },
+        select: { contractId: true, remainingAmount: true, dueDate: true, status: true },
+      }) : [],
       prisma.accountingFinancialRecord.findMany({
         where: { contractId: { in: contractIds } },
         select: {
@@ -474,14 +673,18 @@ export const buildSalesReport = async (access: SalesReportAccess, query: SalesRe
         },
       }),
     ]) : Promise.resolve([[], [], []] as [never[], never[], never[]]),
-    contractIds.length ? prisma.logisticsLoadingLine.findMany({
+    needsLoading && contractIds.length ? prisma.logisticsLoadingLine.findMany({
       where: { sourceContractId: { in: contractIds } },
-      include: { loading: { include: { securityVehicleMovements: true } } }
+      select: { sourceContractId: true, loading: { select: { id: true, status: true, securityVehicleMovements: {
+        select: { direction: true, voidedAt: true },
+      } } } }
     }) : Promise.resolve([] as never[]),
-    prisma.crmPotentialProject.findMany({
+    needsCrm ? prisma.crmPotentialProject.findMany({
       where: crmProjectWhere,
-      include: { nextActions: true },
-    }),
+      select: { responsibleSellerId: true, status: true, wonSalesContractId: true,
+        nextActions: { select: { dueAt: true, completedAt: true, status: true } },
+      },
+    }) : [],
   ]);
   const [accountingPayments, receivables, financialRecords] = accountingEvidence.status === 'fulfilled'
     ? accountingEvidence.value
@@ -489,9 +692,6 @@ export const buildSalesReport = async (access: SalesReportAccess, query: SalesRe
   const loadingLines = deliveryEvidence.status === 'fulfilled' ? deliveryEvidence.value : [];
   const crmProjects = crmEvidence.status === 'fulfilled' ? crmEvidence.value : [];
 
-  const metricContracts = scope.sellerId
-    ? contracts.filter((contract) => contract.responsibleSellerId === scope.sellerId || contract.realizedSellerId === scope.sellerId || contract.createdBy === scope.sellerId)
-    : contracts;
   const events = metricContracts.flatMap((contract) => contract.reportingEvents)
     .filter((event) => !scope.sellerId || event.sellerId === scope.sellerId);
   const currentEvents = events.filter((event) => inRange(event.effectiveAt, period.from, period.to));
@@ -503,7 +703,7 @@ export const buildSalesReport = async (access: SalesReportAccess, query: SalesRe
     from: period.from,
     to: period.to,
   });
-  const { originalRealized, adjustments, grossRealized, adjustmentAmount, netRealized, realizedContractIds } = headline;
+  const { grossRealized, adjustmentAmount, netRealized, realizedContractIds } = headline;
   const previousNet = previousEvents.reduce((sum, event) => sum + n(event.amount), 0);
 
   const pipelineContracts = metricContracts.filter((contract) => isSalesPipelineContract(contract) && inRange(contract.createdAt, period.from, period.to) && (!scope.sellerId || contract.responsibleSellerId === scope.sellerId));
@@ -511,7 +711,6 @@ export const buildSalesReport = async (access: SalesReportAccess, query: SalesRe
   const createdContracts = metricContracts.filter((contract) => inRange(contract.createdAt, period.from, period.to) && (!scope.sellerId || contract.createdBy === scope.sellerId));
   const successRate = headline.successRate;
 
-  const monthly = (period.to.getTime() - period.from.getTime()) / DAY > 62;
   const trendMap = new Map<string, { key: string; label: string; realized: number; adjustments: number; net: number; pipeline: number }>();
   let cursor = startDay(period.from);
   while (cursor <= period.to) {
@@ -533,12 +732,7 @@ export const buildSalesReport = async (access: SalesReportAccess, query: SalesRe
 
   const statusDistribution = Object.entries(statusInfo).flatMap(([status, info]) => {
     const groups = [false, true].map(ordinary => {
-      const rows = metricContracts.filter(contract => isOrdinaryCommercialFlow(contract) === ordinary
-        && contract.status === status && (
-          !ordinary && REALIZED.has(status) ? inRange(contract.realizedAt || contract.signedAt || contract.createdAt, period.from, period.to)
-            : LOST.has(status) ? inRange(contract.lostAt || contract.updatedAt, period.from, period.to)
-              : inRange(contract.createdAt, period.from, period.to)
-        ));
+      const rows = metricContracts.filter((contract) => isInStatusDistribution(contract, status, ordinary, period));
       const presentation = ordinary ? commercialStatusInfo[status] || info : info;
       return { status, ...info, ...presentation, commercialFlowVersion: ordinary ? 1 : 0,
         count: rows.length, value: rows.reduce((sum, row) => sum + n(row.totalAmount), 0) };
@@ -557,7 +751,7 @@ export const buildSalesReport = async (access: SalesReportAccess, query: SalesRe
   ].filter(Boolean)).size;
 
   const accountingRegistered = (() => {
-    if (accountingEvidence.status !== 'fulfilled') {
+    if (!needsAccountingRegistered || accountingEvidence.status !== 'fulfilled') {
       return {
         available: false,
         rows: [],
@@ -627,6 +821,16 @@ export const buildSalesReport = async (access: SalesReportAccess, query: SalesRe
     };
   })();
 
+  if (typeof view === 'object') {
+    if (!accountingRegistered.available) throw new Error('Accounting data is unavailable');
+    const selection = view.drilldown;
+    return { detailPage: sliceReportPage(accountingRegistered.details.filter((row) =>
+      selection.kind === 'accountingConflict' ? row.hasConflict
+        : selection.kind === 'accountingUnassigned' ? !row.sellerId
+          : selection.kind === 'accountingSeller' && row.sellerId === selection.key,
+    ), view.page) };
+  }
+
   const loadingById = new Map<string, any>();
   loadingLines.forEach((line: any) => loadingById.set(line.loading.id, line.loading));
   const loadings = Array.from(loadingById.values());
@@ -640,16 +844,16 @@ export const buildSalesReport = async (access: SalesReportAccess, query: SalesRe
     n(row.remainingAmount) > 0
     && row.dueDate < now
     && !['SETTLED', 'VOIDED'].includes(row.status));
-  const overdueDeliveryRows = metricContracts.flatMap((contract) => contract.deliveries)
+  const overdueDeliveryRows = metricContracts.flatMap((contract) => (contract.deliveries || []))
     .filter((delivery) => delivery.deliveryDate < now && !['DELIVERED', 'CANCELLED'].includes(delivery.status));
   const dueSoonEnd = new Date(now.getTime() + 7 * DAY);
-  const dueSoonDeliveryRows = metricContracts.flatMap((contract) => contract.deliveries)
+  const dueSoonDeliveryRows = metricContracts.flatMap((contract) => (contract.deliveries || []))
     .filter((delivery) => delivery.deliveryDate >= now && delivery.deliveryDate <= dueSoonEnd && !['DELIVERED', 'CANCELLED'].includes(delivery.status));
-  const deliveredUnconfirmedRows = metricContracts.flatMap((contract) => contract.deliveries)
+  const deliveredUnconfirmedRows = metricContracts.flatMap((contract) => (contract.deliveries || []))
     .filter((delivery) => delivery.status === 'DELIVERED' && !delivery.customerConfirmation);
   const contractsWithLoading = new Set(loadingLines.map((line) => line.sourceContractId).filter(Boolean));
   const promisedWithoutLoading = metricContracts.filter((contract) =>
-    contract.deliveries.some((delivery) => delivery.status !== 'CANCELLED')
+    contract.deliveries?.some((delivery) => delivery.status !== 'CANCELLED')
     && !contractsWithLoading.has(contract.id));
   const finalizedWithoutExit = finalizedLoadings.filter((loading) =>
     !loading.securityVehicleMovements.some((movement: any) => movement.direction === 'EXIT' && !movement.voidedAt));
@@ -661,13 +865,17 @@ export const buildSalesReport = async (access: SalesReportAccess, query: SalesRe
   const customerMap = new Map<string, any>();
   const productMap = new Map<string, any>();
   metricContracts.filter((contract) => realizedContractIds.has(contract.id)).forEach((contract) => {
-    const customer = customerMap.get(contract.customerId) || { id: contract.customerId, name: customerName(contract.customer), value: 0, contracts: 0, firstRealizedAt: contract.realizedAt, allRealizedContracts: 0 };
-    customer.value += n(contract.realizedAmount || contract.totalAmount);
-    customer.contracts += 1;
-    customerMap.set(contract.customerId, customer);
-    contract.items.forEach((item) => {
+    if (full || view === 'customers') {
+      const customer = customerMap.get(contract.customerId) || { id: contract.customerId, name: customerName(contract.customer), value: 0, contracts: 0, firstRealizedAt: contract.realizedAt, allRealizedContracts: 0 };
+      customer.value += n(contract.realizedAmount || contract.totalAmount);
+      customer.contracts += 1;
+      customerMap.set(contract.customerId, customer);
+    }
+    contract.items?.forEach((item) => {
       const key = item.productId;
-      const product = productMap.get(key) || { id: key, name: item.product.namePersian || item.product.name, code: item.product.code, value: 0, quantity: 0, contracts: new Set<string>() };
+      const definition = item.product;
+      if (!definition) throw new Error('Sales report product integrity conflict');
+      const product = productMap.get(key) || { id: key, name: definition.namePersian || definition.name, code: definition.code, value: 0, quantity: 0, contracts: new Set<string>() };
       product.value += n(item.totalPrice);
       product.quantity += n(item.quantity);
       product.contracts.add(contract.id);
@@ -676,7 +884,7 @@ export const buildSalesReport = async (access: SalesReportAccess, query: SalesRe
   });
 
   const sellerMap = new Map<string, any>();
-  if (scope.canManage) {
+  if (needsSellerRows && scope.canManage) {
     contracts.forEach((contract) => {
       const id = contract.responsibleSellerId;
       if (!sellerMap.has(id)) sellerMap.set(id, { id, name: userName(contract.responsibleSeller), createdCount: 0, createdValue: 0, pipelineCount: 0, pipelineValue: 0, stalledPipelineCount: 0, overdueFollowUpCount: 0, realizedCount: 0, realizedValue: 0, adjustments: 0, previousNetRealized: 0, lostCount: 0, lostValue: 0, discountAmount: 0 });
@@ -705,33 +913,9 @@ export const buildSalesReport = async (access: SalesReportAccess, query: SalesRe
     });
   }
 
-  const details = metricContracts.filter((contract) => {
-    const relevantEvent = contract.reportingEvents.some((event) => inRange(event.effectiveAt, period.from, period.to) && (!scope.sellerId || event.sellerId === scope.sellerId));
-    return isSalesPipelineContract(contract) || relevantEvent || inRange(contract.createdAt, period.from, period.to) || inRange(contract.lostAt, period.from, period.to);
-  }).map((contract) => ({
-    id: contract.id,
-    customerId: contract.customerId,
-    responsibleSellerId: contract.responsibleSellerId,
-    realizedSellerId: contract.realizedSellerId,
-    productIds: contract.items.map((item) => item.productId),
-    contractNumber: contract.contractNumber,
-    customer: customerName(contract.customer),
-    project: contract.wonCrmPotentialProject?.title || (contract.contractData as any)?.project?.address || 'ثبت نشده',
-    status: contract.status,
-    commercialFlowVersion: contract.commercialFlowVersion,
-    statusLabel: (isOrdinaryCommercialFlow(contract) ? commercialStatusInfo[contract.status]?.label : undefined) || statusInfo[contract.status]?.label || contract.status,
-    statusDescription: (isOrdinaryCommercialFlow(contract) ? commercialStatusInfo[contract.status]?.description : undefined) || statusInfo[contract.status]?.description || '',
-    amount: n(contract.totalAmount),
-    responsibleSeller: userName(contract.responsibleSeller),
-    realizedSeller: contract.realizedSeller ? userName(contract.realizedSeller) : contract.realizedAt ? 'تخصیص‌نیافته قدیمی' : '—',
-    createdAt: contract.createdAt,
-    realizedAt: contract.realizedAt,
-    lostAt: contract.lostAt,
-    reportingEventDates: contract.reportingEvents
-      .filter((event) => !scope.sellerId || event.sellerId === scope.sellerId)
-      .map((event) => event.effectiveAt),
-    canOpenSource: Boolean(access.canOpenSalesSource)
-  })).sort((a, b) => new Date(b.realizedAt || b.lostAt || b.createdAt).getTime() - new Date(a.realizedAt || a.lostAt || a.createdAt).getTime());
+  const details = full ? metricContracts.filter(isReportDetail)
+    .sort((a, b) => contractTime(b) - contractTime(a))
+    .map((contract) => toContractDetail(contract, contract, access, scope.sellerId, contract.items?.map((item) => item.productId) || [])) : [];
 
   const sellers = rankBiSellers(Array.from(sellerMap.values())
     .filter((row) => row.id !== 'legacy-unassigned')
@@ -750,10 +934,8 @@ export const buildSalesReport = async (access: SalesReportAccess, query: SalesRe
       };
     }));
 
-  return {
-    generatedAt: new Date().toISOString(),
-    generatedAtLabel: faDateTime(new Date()),
-    currency: 'تومان',
+  return { report: {
+    ...buildReportMetadata(scope),
     sourceAvailability: {
       crm: crmEvidence.status === 'fulfilled',
       accounting: accountingEvidence.status === 'fulfilled',
@@ -776,13 +958,6 @@ export const buildSalesReport = async (access: SalesReportAccess, query: SalesRe
       finalizedWithoutExit: { count: finalizedWithoutExit.length },
       crmWonWithoutContract: { count: crmWonWithoutContract.length },
     },
-    permissions: { canManage: scope.canManage, canCompany: scope.canCompany, canSelectSeller: scope.canManage, canViewSellerComparisons: scope.canManage },
-    scope: {
-      mode: scope.mode,
-      departmentId: scope.departmentId === '__no_department__' ? null : scope.departmentId,
-      sellerId: scope.sellerId,
-      label: scope.mode === 'company' ? 'کل شرکت' : scope.mode === 'department' ? 'دپارتمان فروش' : 'قراردادهای خودم'
-    },
     period: {
       from: period.from.toISOString(), to: period.to.toISOString(),
       label: `${faDate(period.from)} تا ${faDate(period.to)}`,
@@ -804,7 +979,7 @@ export const buildSalesReport = async (access: SalesReportAccess, query: SalesRe
       lostCount: lostContracts.length,
       realizedCount: headline.realizedCount,
       averageRealizedValue: headline.averageRealizedValue,
-      customerCount: new Set(originalRealized.map((event) => contracts.find((contract) => contract.id === event.contractId)?.customerId).filter(Boolean)).size,
+      customerCount: new Set(contracts.filter((contract) => realizedContractIds.has(contract.id)).map((contract) => contract.customerId).filter(Boolean)).size,
       successRate
     },
     trend,
@@ -813,7 +988,7 @@ export const buildSalesReport = async (access: SalesReportAccess, query: SalesRe
     customers: Array.from(customerMap.values()).sort((a, b) => b.value - a.value),
     products: Array.from(productMap.values()).map((row) => ({ ...row, contracts: row.contracts.size })).sort((a, b) => b.value - a.value),
     finance: {
-      plannedPaymentAmount: metricContracts.filter((contract) => realizedContractIds.has(contract.id)).flatMap((contract) => contract.payments).filter((payment) => payment.status !== 'CANCELLED').reduce((sum, payment) => sum + n(payment.totalAmount), 0),
+      plannedPaymentAmount: metricContracts.filter((contract) => realizedContractIds.has(contract.id)).flatMap((contract) => contract.payments || []).filter((payment) => payment.status !== 'CANCELLED').reduce((sum, payment) => sum + n(payment.totalAmount), 0),
       receivedAmount,
       receivableAmount,
       overdueAmount: overdueReceivableRows.reduce((sum, row) => sum + n(row.remainingAmount), 0),
@@ -821,7 +996,7 @@ export const buildSalesReport = async (access: SalesReportAccess, query: SalesRe
       source: 'ACCOUNTING'
     },
     delivery: {
-      promisedDeliveries: metricContracts.flatMap((contract) => contract.deliveries).filter((delivery) => inRange(delivery.deliveryDate, period.from, period.to)).length,
+      promisedDeliveries: metricContracts.flatMap((contract) => (contract.deliveries || [])).filter((delivery) => inRange(delivery.deliveryDate, period.from, period.to)).length,
       dueSoonDeliveries: dueSoonDeliveryRows.length,
       overdueDeliveries: overdueDeliveryRows.length,
       deliveredUnconfirmed: deliveredUnconfirmedRows.length,
@@ -837,8 +1012,34 @@ export const buildSalesReport = async (access: SalesReportAccess, query: SalesRe
     },
     accountingRegistered,
     created: { count: createdContracts.length, value: createdContracts.reduce((sum, contract) => sum + n(contract.totalAmount), 0) }
-  };
+  } };
 };
+
+export const buildSalesReport = async (access: SalesReportAccess, query: SalesReportQuery) =>
+  (await readSalesReport(access, query, 'full')).report!;
+
+export const buildSalesReportSummary = async (access: SalesReportAccess, query: SalesReportQuery, section: SalesReportSection) => {
+  if (section === 'metadata') return buildReportMetadata(await validateSalesReportScope(access, query));
+  const report = (await readSalesReport(access, query, section)).report!;
+  const { generatedAt, generatedAtLabel, currency, permissions, scope, period } = report;
+  const base = { generatedAt, generatedAtLabel, currency, permissions, scope, period };
+  switch (section) {
+    case 'overview':
+      return { ...base, cards: report.cards, trend: report.trend, statusDistribution: report.statusDistribution };
+    case 'accountingRegistered': {
+      const { details: _details, ...accountingRegistered } = report.accountingRegistered;
+      return { ...base, accountingRegistered };
+    }
+    case 'sellers':
+      return { ...base, sellers: report.sellers, legacyUnassigned: report.legacyUnassigned };
+    default:
+      return { ...base, [section]: report[section] };
+  }
+};
+
+export const buildSalesReportPage = async (access: SalesReportAccess, query: SalesReportQuery,
+  drilldown: SalesReportDrilldown, page: SalesReportPage) =>
+  (await readSalesReport(access, query, { drilldown, page })).detailPage!;
 
 export const getSalesReportSellers = async (access: SalesReportAccess, departmentId?: string | null) => {
   if (!access.canManage) return [];

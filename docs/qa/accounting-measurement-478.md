@@ -36,3 +36,12 @@ The receipt reports sample and failure counts, nearest-rank p95, request counts,
 ## Evidence at implementation
 
 The HTTP observer regression exercised sanitized request records, public correlation and commit headers, and one record each for 503 unavailability, 409 rejection, database contention, 500 internal error and client abort. The Accounting contracts route regression preserved the Partner integrity conflict and the Persian technical-error tracking response. The architecture check passed. The browser runner passed JavaScript syntax validation and rejected missing arguments. The local backend and frontend were unavailable for an authenticated browser comparison. A native Nginx configuration and live edge test, matched browser baseline and candidate measurements, and production-scale acceptance evidence remain outstanding.
+
+The isolated HTTP fixture ran on the existing `sabalanerp-local` PostgreSQL service with the Accounting runtime at `f1bff4554`. It used 935 ordinary contracts and 30 committed Partner Cases. Each surface completed 20 sequential authenticated requests with no errors or transaction expiries. All 965 authorized IDs matched, both reads in the mutation race returned 200, and the request after revocation returned 401.
+
+| Surface | HTTP p95 | Maximum | Lock p95 | Authorization p95 | Population p95 | Page hydration p95 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Complete dashboard | 2,167 ms | 2,271 ms | 4.68 ms | 286.50 ms | 100.20 ms | 0.05 ms |
+| Reviewable contracts | 2,915 ms | 6,819 ms | 10.15 ms | 326.29 ms | 149.61 ms | 0.16 ms |
+
+The stage columns cover the instrumented operations. The HTTP time includes the complete response and additional shared work. These numbers are local fixture evidence. #448 still requires independently verified production-state measurements.

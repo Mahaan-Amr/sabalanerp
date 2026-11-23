@@ -16,6 +16,7 @@ import { validateProductionEnvironment } from './services/productionEnvironment'
 import { registerRealtimePublisher } from './services/realtimePublisher';
 import { authorizeHrUser } from './services/hrAuthorizationService';
 import { normalizeStructuredNumeralsMiddleware } from './middleware/normalizeStructuredNumerals';
+import { accountingOperationalRoute, createAccountingRequestObserver } from './middleware/accountingRequestObserver';
 import { errorHandler } from './middleware/errorHandler';
 import { notFound } from './middleware/notFound';
 import { getRecoveryRuntimeState, RECOVERY_COORDINATION_DIR, recoveryWriteGuard, withRecoveryBackgroundWrite } from './services/recoveryRuntime';
@@ -159,6 +160,7 @@ function createHttpApplication({ runtimeRole, isShuttingDown }: {
   });
 
   // Middleware
+  app.use(createAccountingRequestObserver(process.env.APP_COMMIT));
   app.use(helmet());
   app.use((req, res, next) => {
     const probe = req.path === '/api/health' || req.path === '/api/ready';
@@ -176,7 +178,7 @@ function createHttpApplication({ runtimeRole, isShuttingDown }: {
       credentials: true,
     }),
   );
-  app.use(morgan("combined"));
+  app.use(morgan("combined", { skip: req => Boolean(accountingOperationalRoute(req.url)) }));
   app.use(express.json({ limit: "10mb" }));
   app.use(express.urlencoded({ extended: true }));
   app.use(normalizeStructuredNumeralsMiddleware);

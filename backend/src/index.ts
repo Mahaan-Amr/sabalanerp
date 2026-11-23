@@ -11,6 +11,16 @@ import { getRecoveryRuntimeState, initializeRecoveryRuntime, waitForActiveWrites
 import { initializeSystemRecovery } from './services/systemRecoveryLifecycle';
 import { verifyHrRedesignCutover } from './services/hrRedesignCutover';
 
+import { accountingMeasurementCommit } from './middleware/accountingRequestObserver';
+
+const logStartup = (phase: 'starting' | 'listening' | 'blocked') => {
+  console.info(JSON.stringify({
+    kind: 'backend_startup', phase, at: new Date().toISOString(),
+    commit: accountingMeasurementCommit(process.env.APP_COMMIT), pid: process.pid,
+  }));
+};
+logStartup('starting');
+
 const runtimeRole = resolveRuntimeRole(process.env.BACKEND_RUNTIME_ROLE);
 if (runtimeRole === 'standalone') {
   assertRuntimeControlAdmission();
@@ -44,10 +54,12 @@ startRuntime(runtimeRole, {
     }
   },
   listen: () => server.listen(PORT, () => {
+    logStartup('listening');
     console.log(`? Server running on port ${PORT}`);
     console.log(`? Health check: http://localhost:${PORT}/api/health`);
   }),
 }).catch((error) => {
+  logStartup('blocked');
   console.error("Backend startup blocked:", error);
   process.exitCode = 1;
 });

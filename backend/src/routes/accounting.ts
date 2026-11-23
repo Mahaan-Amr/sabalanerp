@@ -1,5 +1,6 @@
 import { DispatchPickupVerificationError, processPickupVerification, requirePickupVerification } from '../services/dispatchPickupVerification';
 import smsService from '../services/smsService';
+import { reportAccountingRequestFailure } from '../middleware/accountingRequestObserver';
 import { prisma } from '../lib/prisma';
 import { createSalesInvoiceRouter } from '../services/salesDispatchInvoice/routes';
 import { createSalesInvoiceService } from '../services/salesDispatchInvoice/service';
@@ -314,7 +315,7 @@ const dispatchError = (res: Response, error: unknown) => {
   if (documentStatus) return res.status(documentStatus).json({ success: false, error: (error as Error).message });
   if (error instanceof PilotSafetyPauseError || error instanceof DispatchAllocationConflictError || error instanceof DispatchRecoveryConflictError) return res.status(409).json({ success: false, error: error.message });
   if (error instanceof DispatchAllocationValidationError || error instanceof DispatchRecoveryValidationError) return res.status(400).json({ success: false, error: error.message });
-  console.error('Accounting dispatch error:', error);
+  reportAccountingRequestFailure(res, error);
   return res.status(500).json({ success: false, error: 'Accounting dispatch command failed.' });
 };
 
@@ -767,6 +768,7 @@ router.post('/loadings/:loadingId/sepidar-reference', accountingDispatchEdit, as
     if (result === 'empty') return res.status(400).json({ success: false, error: 'شماره بارگیری سپیدار را وارد کنید.' });
     if (result === 'reason-required') return res.status(400).json({ success: false, code: 'SEPIDAR_REFERENCE_REASON_REQUIRED', error: 'دلیل اصلاح شماره بارگیری سپیدار الزامی است.' });
     if (result === 'unchanged') return res.status(400).json({ success: false, error: 'شماره تغییری نکرده است.' });
+    res.setHeader('X-Accounting-Commit-Acknowledged-Ms', Date.now().toString());
     return res.status(result.initial ? 201 : 200).json({ success: true, data: { value, auditEntry: result.auditEntry } });
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')
@@ -948,7 +950,7 @@ const accountingReadFailure = (res: Response, error: unknown) => {
     success: false, code: error.code, error: error.message, message: error.message, actionUrl: error.actionUrl,
   });
   const trackingId = `ACC-${Date.now().toString(36).toUpperCase()}`;
-  console.error('Accounting read technical failure:', { trackingId, error });
+  reportAccountingRequestFailure(res, error, trackingId);
   return res.status(500).json({ success: false, trackingId,
     error: 'دریافت اطلاعات حسابداری موقتاً ممکن نیست؛ دوباره تلاش کنید و در صورت تکرار، کد پیگیری را به پشتیبانی بدهید.' });
 };
@@ -970,10 +972,10 @@ export const createAccountingDashboardResponse = (
 ) => async (req: AuthRequest, res: Response) => {
   res.set('Cache-Control', 'private, no-store');
   try {
-    const dashboard = await loadDashboard(req.query, req.query.range, new Date(), { userId: req.user!.id });
+    const dashboard = await loadDashboard(req.query, req.query.range, new Date(), { userId: req.user!.id },
+      error => reportAccountingRequestFailure(res, error));
     res.json({ success: true, data: dashboard });
   } catch (error) {
-    console.error('Accounting dashboard error:', error);
     accountingReadFailure(res, error);
   }
 };
@@ -1031,7 +1033,6 @@ export const createAccountingContractsResponse = (
       items: data.items.map((record: any) => projectAccountingActions(record, capabilities)),
     } });
   } catch (error) {
-    console.error('Accounting contracts error:', error);
     accountingReadFailure(res, error);
   }
 };

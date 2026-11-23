@@ -74,6 +74,7 @@ const dispatchStatusLabels: Record<string, string> = {
   RETURNED: "برای اصلاح بازگردانده‌شده",
 };
 const quantityUnitLabels: Record<string, string> = { meter: "متر طول", squareMeter: "متر مربع", count: "عدد", ton: "تن" };
+const dispatchPageSize = 50;
 
 export default function AccountingDispatchPage() {
   const [section, setSection] = useState<DispatchSection>("candidates");
@@ -99,6 +100,12 @@ export default function AccountingDispatchPage() {
   const [detailRead, setDetailRead] = useState<{ key: string; value: DispatchDocumentCase | null }>();
   const [detailAttempt, retryDetail] = useState(0);
   const [page, setPage] = useState(1);
+  const [candidatePage, setCandidatePage] = useState<{
+    ids: Set<string>; invoiceActionIds: Set<string>; page: number; total: number;
+  }>();
+  const registryRequest = useRef(0);
+  const showTimeline = section === "cases";
+  const registrySearch = showTimeline ? "" : search.trim();
   const [dispatchReason, setDispatchReason] = useState("");
   const [reasonAction, setReasonAction] = useState<ReasonAction | null>(null);
   const [dispatchTimelineStale, setDispatchTimelineStale] = useState(false);
@@ -131,22 +138,35 @@ export default function AccountingDispatchPage() {
   }, [referenceCandidateId, referenceWaybillId]);
 
   const loadDispatch = useCallback(async () => {
+    const request = ++registryRequest.current;
     setLoading(true);
     setDispatchNotice(null);
     try {
-      const response = await accountingAPI.getDispatchCandidates();
-      setDispatchCandidates(response.data.data || []);
+      const response = showTimeline
+        ? await accountingAPI.getDispatchCandidates()
+        : await accountingAPI.getDispatchCandidatePage(page, dispatchPageSize, registrySearch);
+      if (request !== registryRequest.current) return;
+      const { data = [], relatedCandidates = [], invoiceActionCandidateIds = [], pagination } = response.data;
+      setDispatchCandidates([...data, ...relatedCandidates]);
+      setCandidatePage(pagination ? {
+        ids: new Set(data.map((row: { id: string }) => row.id)), invoiceActionIds: new Set(invoiceActionCandidateIds),
+        page: pagination.page, total: pagination.total,
+      } : undefined);
       if (response.data.capabilities) {
         setDispatchCapabilities(response.data.capabilities);
       } else {
         const capabilities = await dispatchConfirmationAPI.getCapabilities().catch(() => null);
+        if (request !== registryRequest.current) return;
         if (capabilities?.data.success) setDispatchCapabilities(capabilities.data.data);
       }
       retryDetail(attempt => attempt + 1);
     } catch (error: any) {
+      if (request !== registryRequest.current) return;
       if (dispatchCandidateAccessDenied(error)) {
         setDispatchCandidates([]);
+        setCandidatePage(undefined);
         const capabilities = await dispatchConfirmationAPI.getCapabilities().catch(() => null);
+        if (request !== registryRequest.current) return;
         setDispatchCapabilities(capabilities?.data.success ? capabilities.data.data : {
           canManageAccountingCandidates: false,
           canManageAccountingConfirmation: false,
@@ -158,9 +178,9 @@ export default function AccountingDispatchPage() {
         text: userFacingError(error, "اطلاعات ارسال حسابداری دریافت نشد."),
       });
     } finally {
-      setLoading(false);
+      if (request === registryRequest.current) setLoading(false);
     }
-  }, []);
+  }, [page, registrySearch, showTimeline]);
 
   const runDispatch = async (
     command: () => Promise<any>,
@@ -316,9 +336,10 @@ export default function AccountingDispatchPage() {
     .toLowerCase().replace(/ي/g, "ی").replace(/ك/g, "ک").trim();
   const query = normalize(search);
   const filteredCandidates = dispatchCandidates.filter(candidate => {
+    if (candidatePage) return candidatePage.ids.has(candidate.id);
     if (!query) return true;
     const values = [candidate.summary?.loadingNumber, candidate.sepidarLoadingReference, candidate.summary?.driverName, candidate.summary?.plate,
-      candidate.summary?.customerName, candidate.summary?.projectName, candidate.summary?.projectAddress,
+      candidate.summary?.customerName, candidate.summary?.projectName, candidate.summary?.projectAddress, candidate.partnerCaseNumber,
       ...(candidate.waybills || []).map((waybill: any) => waybill.number),
       ...(candidate.lines || []).map((line: any) => line.contractNumber),
       ...(candidate.contractNumbers || [])];
@@ -527,17 +548,20 @@ export default function AccountingDispatchPage() {
         );
       }
     }
-    if (waybill?.status !== "ISSUED" && candidate.currentSalesInvoice &&
-      invoiceOnlyRows.get(candidate.loadingId)?.id === candidate.id && canManageLoadingInvoices(candidate.loadingId)) {
+    const isInvoiceActionRow = candidatePage?.invoiceActionIds.has(candidate.id)
+      ?? invoiceOnlyRows.get(candidate.loadingId)?.id === candidate.id;
+    if (waybill?.status !== "ISSUED" && candidate.currentSalesInvoice && isInvoiceActionRow && canManageLoadingInvoices(candidate.loadingId)) {
       actions.push({ label: "ابطال فاکتور فروش", icon: FaBan, tone: "danger",
         onClick: () => setVoidInvoiceLoadingId(candidate.loadingId) });
     }
     return actions;
   };
 
-  const pageSize = 50;
-  const totalPages = Math.max(1, Math.ceil(filteredCandidates.length / pageSize));
-  const currentPage = Math.min(page, totalPages);
+  const totalCandidates = candidatePage?.total ?? filteredCandidates.length;
+  const totalPages = Math.max(1, Math.ceil(totalCandidates / dispatchPageSize));
+  const currentPage = candidatePage?.page ?? Math.min(page, totalPages);
+  const visibleCandidates = candidatePage ? filteredCandidates
+    : filteredCandidates.slice((currentPage - 1) * dispatchPageSize, currentPage * dispatchPageSize);
   return (
     <ErpListPage
       eyebrow="حسابداری"
@@ -564,9 +588,9 @@ export default function AccountingDispatchPage() {
       }] : []}
       isLoading={section === "candidates" && loading}
       mobileLayout="table"
-      rows={section === "candidates" ? filteredCandidates.slice((currentPage - 1) * pageSize, currentPage * pageSize) : []}
+      rows={section === "candidates" ? visibleCandidates : []}
       footer={section === "candidates" && totalPages > 1 && <ErpPagination currentPage={currentPage}
-        totalPages={totalPages} totalItems={filteredCandidates.length} itemsPerPage={pageSize}
+        totalPages={totalPages} totalItems={totalCandidates} itemsPerPage={dispatchPageSize}
         onPageChange={setPage} itemLabel="پرونده" />}
       rowKey={candidate => candidate.id}
       columns={[

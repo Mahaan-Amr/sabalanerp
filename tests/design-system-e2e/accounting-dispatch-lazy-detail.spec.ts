@@ -6,16 +6,21 @@ test('dispatch reads one list for 66 cases and isolates an unavailable case deta
   let lists = 0;
   const details: string[] = [];
   await page.route('**/api/accounting/dispatch-candidates**', async route => {
-    const path = new URL(route.request().url()).pathname;
+    const { pathname: path, searchParams } = new URL(route.request().url());
     if (path.endsWith('/dispatch-candidates')) {
       lists++;
-      return route.fulfill({ json: { success: true, capabilities: {
-        canManageAccountingCandidates: false, canManageAccountingConfirmation: false,
-      }, data: Array.from({ length: 66 }, (_, i) => ({
+      const requestedPage = Number(searchParams.get('page'));
+      const pageSize = Number(searchParams.get('pageSize'));
+      expect(pageSize).toBe(50);
+      const rows = Array.from({ length: 66 }, (_, i) => ({
         id: `case-${i}`, loadingId: `loading-${Math.floor(i / 2)}`, status: 'PENDING',
         summary: { driverName: `راننده نمونه ${i}`, loadingNumber: String(1000 + i) },
         waybills: [], canManage: false,
-      })) } });
+      }));
+      return route.fulfill({ json: { success: true, capabilities: {
+        canManageAccountingCandidates: false, canManageAccountingConfirmation: false,
+      }, data: rows.slice((requestedPage - 1) * pageSize, requestedPage * pageSize),
+      pagination: { page: requestedPage, pageSize, total: rows.length } } });
     }
     if (path.endsWith('/document-read-model')) {
       const id = path.split('/').at(-2)!;
@@ -46,4 +51,9 @@ test('dispatch reads one list for 66 cases and isolates an unavailable case deta
   await expect(page.getByText('سنگ نمونه', { exact: false })).toBeVisible();
   expect(details).toEqual(['case-0', 'case-1']);
   expect(lists).toBe(1);
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'بعدی', exact: true }).click();
+  await expect(row(65)).toBeVisible();
+  expect(lists).toBe(2);
+  expect(details).toEqual(['case-0', 'case-1']);
 });

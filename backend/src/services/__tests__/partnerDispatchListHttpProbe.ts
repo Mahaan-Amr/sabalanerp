@@ -67,6 +67,23 @@ async function main() {
     assert.equal(returnedIds.includes(expected.hidden), false, 'a different Partner Case is excluded before serialization');
     assert.equal(response.headers.get('X-Dispatch-Documents-Permission'), 'MANAGE');
     assert.equal(body.capabilities.canManageAccountingCandidates, true);
+    const partnerCaseNumber = process.env.PARTNER_TEST_ALLOWED_CASE_NUMBER!;
+    const paged = (page: number, search?: string) => fetch(`${base}/dispatch-candidates?${new URLSearchParams({
+      page: String(page), pageSize: '1', ...(search ? { search } : {}),
+    })}`, { headers });
+    const first = await paged(1);
+    assert.equal(first.status, 200);
+    const firstPage = await first.json() as any;
+    assert.deepEqual(firstPage.pagination, { page: 1, pageSize: 1, total: body.data.length });
+    assert.deepEqual(firstPage.data, body.data.slice(0, 1));
+    const second = await paged(2);
+    assert.deepEqual((await second.json() as any).data, body.data.slice(1, 2));
+    const byPartnerCaseNumber = await paged(1, partnerCaseNumber);
+    const match = await byPartnerCaseNumber.json() as any;
+    assert.deepEqual(match.data.map((row: any) => row.id), [expected.allowed]);
+    assert.deepEqual(match.data[0].contractNumbers, []);
+    assert.deepEqual(match.relatedCandidates.map((row: any) => row.id), [expected.ordinary],
+      'only authorized siblings of page results are included for group actions');
     const groupResponse = await fetchCandidates(loadingId);
     assert.equal(groupResponse.status, 200);
     assert.deepEqual((await groupResponse.json() as any).data,

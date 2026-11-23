@@ -504,7 +504,9 @@ export const recognizeCustomerSalePrisma = async (database: PrismaClient, comman
     const expected = persistedRule.exempt ? 0n : (line.netRials * BigInt(persistedRate) + 5_000n) / 10_000n;
     if (expected !== line.taxRials) throw new AccountingCustomerTreasuryError('TAX_RULE_MISMATCH', 'مالیات ردیف با قاعده مؤثر سازگار نیست.', 400);
   }
-  const sourcePayload = { policy: command.policy, evidence: authoritativeEvidence, contractId: command.contractId, contractVersion: command.contractVersion };
+  const sourcePayload = { policy: command.policy, evidence: authoritativeEvidence, contractId: command.contractId,
+    contractVersion: command.contractVersion, lineCostEvidenceIds: Object.fromEntries(command.lines
+      .filter(line => line.costEvidenceId).map(line => [line.id, line.costEvidenceId])) };
   const source = { type: 'CONTROL_TRANSFER', id: authoritativeEvidence.id, version: authoritativeEvidence.version,
     payload: sourcePayload, hash: hashAccountingEvidence(sourcePayload) };
   const evidence = lineEvidence('CONTROL_TRANSFER', authoritativeEvidence.id, authoritativeEvidence.version, sourcePayload);
@@ -533,7 +535,8 @@ export const recognizeCustomerSalePrisma = async (database: PrismaClient, comman
       productRowId: line.productRowId, quantity: line.quantity, costRials: line.costRials.toString(),
       citation: line.taxRule.citation, rawBaseAmount: line.netRials.toString(),
       rawTaxAmount: `${line.taxRials}.00000000`, roundedTaxRials: line.taxRials.toString(), exempt: line.taxRule.exempt,
-      allocationEvidence: json({ rateBasisPoints: line.taxRule.rateBasisPoints, quantity: line.quantity, rounding: 'HALF_UP_IRR' }) })) } },
+      allocationEvidence: json({ rateBasisPoints: line.taxRule.rateBasisPoints, quantity: line.quantity, rounding: 'HALF_UP_IRR',
+        ...(line.costEvidenceId && { costEvidenceId: line.costEvidenceId }) }) })) } },
   });
   const invoice = await tx.accountingCommercialCustomerInvoice.create({ data: { id: invoiceId, profileId: profile.id,
     contractId: command.contractId, contractVersion: command.contractVersion, number: command.commercialInvoiceNumber,

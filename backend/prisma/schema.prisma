@@ -13234,6 +13234,7 @@ model StoneReturnReceipt {
   product               Product                      @relation(fields: [productId], references: [id], onDelete: Restrict)
   guardReturnMovement   SecurityVehicleMovement?     @relation(fields: [guardReturnMovementId], references: [id], onDelete: Restrict)
   inventoryIdentity     AccountingInventoryIdentity? @relation(fields: [inventoryIdentityId], references: [id], onDelete: Restrict)
+  allocationDrafts      StoneReturnAllocationDraft[]
 
   @@unique([createdBy, requestId])
   @@index([createdAt, id])
@@ -13241,4 +13242,39 @@ model StoneReturnReceipt {
   @@index([productId])
   @@unique([guardReturnMovementId, productId, unit], map: "stone_return_receipts_guard_product_unit_key")
   @@map("stone_return_receipts")
+}
+
+
+model StoneReturnAllocationDraft {
+  id                String                          @id @default(cuid())
+  receiptId         String
+  version           Int
+  attributionReason String?
+  createdBy         String
+  createdAt         DateTime                        @default(now())
+  receipt           StoneReturnReceipt              @relation(fields: [receiptId], references: [id], onDelete: Restrict)
+  rows              StoneReturnAllocationDraftRow[]
+
+  @@unique([receiptId, version])
+  @@map("stone_return_allocation_drafts")
+}
+
+model StoneReturnAllocationDraftRow {
+  id                    String                     @id @default(cuid())
+  draftId               String
+  originalInvoiceId     String
+  originalInvoiceNumber String
+  originalLineId        String
+  originalTaxInvoiceId  String
+  originalTaxLineId     String
+  dispatchEvidenceId    String
+  contractId            String
+  contractNumber        String
+  contractItemId        String
+  productRowId          String
+  quantity              Decimal                    @db.Decimal(65, 30)
+  draft                 StoneReturnAllocationDraft @relation(fields: [draftId], references: [id], onDelete: Restrict)
+
+  @@unique([draftId, originalInvoiceId, originalLineId, dispatchEvidenceId], map: "stone_return_allocation_draft_source_key")
+  @@map("stone_return_allocation_draft_rows")
 }

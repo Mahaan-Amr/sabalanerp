@@ -134,6 +134,14 @@ function presentReceipt(row: StoneReturnReceipt) {
   };
 }
 
+export function findPriorGuardReturnForStone(tx: Prisma.TransactionClient, movementId: string, productId: string, unit: string) {
+  return tx.shipmentQuantityEvidence.findFirst({
+    where: { guardReturnMovementId: movementId, sourceKind: 'SALES_CONTRACT', kind: 'GUARD_RETURN_VERIFIED',
+      unit, contractItem: { productId } },
+    select: { id: true },
+  });
+}
+
 export function recordStoneReturnReceipt(db: PrismaClient | Prisma.TransactionClient, actorId: string, body: Record<string, unknown>) {
   const command = parseStoneReturnAcceptance(body);
   const record = async (tx: Prisma.TransactionClient) => {
@@ -152,13 +160,15 @@ export function recordStoneReturnReceipt(db: PrismaClient | Prisma.TransactionCl
     }
 
     if (command.guardReturnMovementId) {
-      const guardProductLock = `stone-return-guard:${command.guardReturnMovementId}:${command.productId}:${command.unit}`;
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${guardProductLock}))`;
+      const guardReturnLock = `GUARD_RETURN:${command.guardReturnMovementId}`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${guardReturnLock}))`;
       const existing = await tx.stoneReturnReceipt.findFirst({
         where: { guardReturnMovementId: command.guardReturnMovementId, productId: command.productId, unit: command.unit },
         select: { id: true },
       });
-      if (existing) throw new StoneReturnReceiptError(409, 'برای این شاهد ورود، همین سنگ و واحد قبلاً ثبت شده است.');
+      if (existing || await findPriorGuardReturnForStone(tx, command.guardReturnMovementId, command.productId, command.unit)) {
+        throw new StoneReturnReceiptError(409, 'برای این شاهد ورود، همین سنگ و واحد قبلاً ثبت شده است.');
+      }
     }
 
     const [customer, product, movement] = await Promise.all([
@@ -208,7 +218,21 @@ export function recordStoneReturnReceipt(db: PrismaClient | Prisma.TransactionCl
     const row = await tx.stoneReturnReceipt.create({ data });
     return { data: presentReceipt(row), replayed: false };
   };
-  return '$transaction' in db ? db.$transaction(record) : record(db);
+  return '$transaction' in db ? recordWithRetry(db, record) : record(db);
+}
+
+async function recordWithRetry<Result>(db: PrismaClient, record: (tx: Prisma.TransactionClient) => Promise<Result>) {
+  const attempts = 3;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await db.$transaction(record, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    } catch (error) {
+      const failure = error as { code?: string; meta?: { code?: string } } | null;
+      if (failure?.code !== 'P2034' && failure?.code !== 'P2002'
+        && !(failure?.code === 'P2010' && failure.meta?.code === '40001')) throw error;
+    }
+  }
+  throw new StoneReturnReceiptError(409, 'اطلاعات دریافت هم‌زمان تغییر کرد. همین درخواست را دوباره ثبت کنید.');
 }
 
 export async function listStoneReturnReceipts(db: PrismaClient, after?: string) {

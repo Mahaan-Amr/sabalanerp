@@ -263,6 +263,7 @@ router.post('/export.pdf', ...reportAccess, async (req: WorkspaceRequest, res: R
 type PreparedSalesWorkbook = { access: SalesReportAccess; sessionId: string | undefined; filters: SalesReportQuery; buffer: Buffer };
 
 router.post('/export.xlsx', ...reportAccess, async (req: WorkspaceRequest, res: Response, next) => {
+  if (res.destroyed) return;
   res.setHeader('Cache-Control', 'no-store, private');
   const release = tryAcquireSalesReportWorkbookSlot();
   if (!release) {

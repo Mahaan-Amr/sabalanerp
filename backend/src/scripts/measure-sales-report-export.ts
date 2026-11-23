@@ -6,7 +6,8 @@ import express from 'express';
 import { disconnectDatabase, prisma } from '../lib/prisma';
 import salesReports from '../routes/salesReports';
 import { createAuthoritativeSession, SESSION_COOKIE } from '../services/identitySessionService';
-import { buildSalesReport } from '../services/salesReportingService';
+import { buildSalesReport, type SalesReportAccess } from '../services/salesReportingService';
+import { buildSalesReportWorkbook } from '../services/salesReportWorkbookExport';
 import { encodeSalesReportWorkbook } from '../services/salesReportWorkbook';
 
 const database = new URL(process.env.DATABASE_URL || '');
@@ -43,7 +44,10 @@ async function seed(tag: string, count: number) {
   return { cookie: SESSION_COOKIE + '=' + session.token, id };
 }
 
-async function measure(base: string, reader: string, exporter: string, mode: 'quiet' | 'export') {
+async function measure(
+  base: string, reader: string, exporter: string, mode: 'quiet' | 'export' | 'report-only' | 'worker-only',
+  exercise?: () => Promise<number | undefined>,
+) {
   const loop = monitorEventLoopDelay({ resolution: 5 });
   const reads: number[] = [];
   const httpReads: number[] = [];
@@ -74,6 +78,10 @@ async function measure(base: string, reader: string, exporter: string, mode: 'qu
     if (mode === 'quiet') return null;
     await delay(100);
     const t = performance.now();
+    if (exercise) {
+      const bytes = await exercise();
+      return { elapsedMs: performance.now() - t, bytes };
+    }
     const response = await fetch(base + '/export.xlsx', {
       method: 'POST',
       headers: { cookie: exporter, 'content-type': 'application/json' },
@@ -101,6 +109,9 @@ async function measure(base: string, reader: string, exporter: string, mode: 'qu
 const contractColumns = ['contractNumber', 'customer', 'project', 'status', 'statusDescription', 'amount', 'responsibleSeller', 'realizedSeller'];
 const sections = ['overview', 'contracts', 'customers', 'products', 'finance', 'delivery', 'sellers', 'accountingRegistered'];
 const configuration = { includeTables: true, sections, contractColumns };
+const fixtureAccess = (id: string): SalesReportAccess => ({
+  userId: id, departmentId: id, role: 'MANAGER', canManage: true, canCompany: false, canOpenSalesSource: true,
+});
 
 async function verifyWorkerDownload(base: string, reader: string, exporter: Awaited<ReturnType<typeof seed>>) {
   const requestDownload = (cookie: string) => fetch(base + '/export.xlsx', {
@@ -117,7 +128,7 @@ async function verifyWorkerDownload(base: string, reader: string, exporter: Awai
     await delay(60);
     const overlapping = await requestDownload(reader);
     assert.equal(overlapping.status, 429);
-    assert.equal((await overlapping.json()).code, 'SALES_WORKBOOK_BUSY');
+    assert.deepEqual(await overlapping.json(), { success: false, code: 'SALES_WORKBOOK_BUSY' });
 
     await prisma.workspacePermission.update({
       where: { userId_workspace: { userId: exporter.id, workspace: 'sales' } },
@@ -126,7 +137,7 @@ async function verifyWorkerDownload(base: string, reader: string, exporter: Awai
     const revoked = await inProgress;
     assert.equal(revoked.status, 403);
     assert.equal(revoked.headers.get('content-disposition'), null);
-    assert.equal((await revoked.json()).code, 'SALES_WORKBOOK_ACCESS_CHANGED');
+    assert.deepEqual(await revoked.json(), { success: false, code: 'SALES_WORKBOOK_ACCESS_CHANGED' });
   } finally {
     await inProgress.catch(() => undefined);
     await prisma.workspacePermission.update({
@@ -140,8 +151,7 @@ async function verifyWorkerDownload(base: string, reader: string, exporter: Awai
   assert.equal(response.headers.get('content-disposition'), 'attachment; filename="sales-report.xlsx"');
   assert.equal(response.headers.get('cache-control'), 'no-store, private');
   const bytes = Buffer.from(await response.arrayBuffer());
-  const snapshot = await buildSalesReport({ userId: exporter.id, departmentId: exporter.id, role: 'MANAGER',
-    canManage: true, canCompany: false, canOpenSalesSource: true }, filters);
+  const snapshot = await buildSalesReport(fixtureAccess(exporter.id), filters);
   const reference = encodeSalesReportWorkbook(snapshot, configuration);
   assert.deepEqual(bytes, reference);
   console.log(JSON.stringify({ verified: ['unauthenticated', 'busy', 'in-flight-downgrade', 'authorized-retry', 'byte-parity'], bytes: bytes.length }));
@@ -158,10 +168,23 @@ async function main() {
     const base = 'http://127.0.0.1:' + address.port;
     const warmup = await fetch(base + '/overview?period=all', { headers: { cookie: reader.cookie } });
     assert.equal(warmup.status, 200);
-    const warmupReport = (await warmup.json()).data;
+    const { data: warmupReport } = await warmup.json() as { data: { scope: { departmentId: string }; contracts: unknown[] } };
     assert.equal(warmupReport.scope.departmentId, reader.id);
     assert.equal(warmupReport.contracts.length, 20);
-    if (!process.argv.includes('--verify-only')) {
+    if (process.argv.includes('--diagnose')) {
+      await measure(base, reader.cookie, exporter.cookie, 'report-only', async () => {
+        await buildSalesReport(fixtureAccess(exporter.id), filters);
+        return undefined;
+      });
+      const { cards, contracts, customers, products, finance, delivery, sellers, accountingRegistered, permissions }
+        = await buildSalesReport(fixtureAccess(exporter.id), filters);
+      await measure(base, reader.cookie, exporter.cookie, 'worker-only', async () => {
+        const workbook = await buildSalesReportWorkbook({
+          cards, contracts, customers, products, finance, delivery, sellers, accountingRegistered, permissions,
+        }, configuration, new AbortController().signal);
+        return workbook.byteLength;
+      });
+    } else if (!process.argv.includes('--verify-only')) {
       for (const mode of ['quiet', 'export', 'quiet', 'export', 'quiet', 'export'] as const) {
         global.gc?.();
         await measure(base, reader.cookie, exporter.cookie, mode);

@@ -2,12 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { AddressInfo } from 'node:net';
 import express from 'express';
-import { createPartnerLifecycleDatabase } from './partnerCaseLifecycleDatabase';
 import { seedHistoricalAccountingRead } from './partnerAccountingHistoricalReadSeed';
+import { createTemporaryConcurrencyDatabase } from './shipmentStatementConcurrency/database';
 
 test('authenticated historical balances and receipt movement pages retain exact results with bounded evidence', async () => {
-  const temporary = await createPartnerLifecycleDatabase({ repositoryRoot: process.cwd(),
-    sourceDatabaseUrl: process.env.CONTRACT_RECOVERY_TEST_DATABASE_URL ?? '' });
+  const temporary = await createTemporaryConcurrencyDatabase({ repositoryRoot: process.cwd(),
+    sourceDatabaseUrl: process.env.CONTRACT_RECOVERY_TEST_DATABASE_URL ?? '', migrateEmptySchema: true });
   const database = temporary.client();
   const originalUrl = process.env.DATABASE_URL;
   const noiseCount = 24;

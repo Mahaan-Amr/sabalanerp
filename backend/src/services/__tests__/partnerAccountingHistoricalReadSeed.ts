@@ -55,7 +55,7 @@ export async function seedHistoricalAccountingRead(database: PrismaClient, passw
       }
       await tx.accountingFinancialRecord.create({ data: { ...f.invoice, status: 'DRAFT', kind: 'INVOICE_CANDIDATE',
         sourceSnapshot: json(f.invoice.sourceSnapshot), metadata: json(f.invoice.metadata), createdBy: 'historical-admin' } });
-      await tx.effectiveAuthorizationState.create({ data: { id: 1, revision: 1 } });
+      await tx.effectiveAuthorizationState.upsert({ where: { id: 1 }, create: { id: 1, revision: 1 }, update: {} });
     });
 
     return { fixture: f, actorId: 'historical-admin', username: 'historical-admin', password };

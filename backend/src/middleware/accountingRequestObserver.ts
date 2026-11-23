@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { accountingReadTiming, type AccountingReadTimings } from '../services/accountingReadTiming';
+import { accountingReadTiming, type AccountingReadTimings, type AccountingReadWork } from '../services/accountingReadTiming';
 
 const accountingRoutes = [
   [/^\/api\/accounting\/dashboard(?:\/(?:change|workspace))?$/, '/api/accounting/dashboard'],
   [/^\/api\/accounting\/financial-trend$/, '/api/accounting/financial-trend'],
+  [/^\/api\/accounting\/receivables$/, '/api/accounting/receivables'],
+  [/^\/api\/accounting\/payments$/, '/api/accounting/payments'],
   [/^\/api\/accounting\/contracts$/, '/api/accounting/contracts'],
   [/^\/api\/accounting\/contracts\/.+$/, '/api/accounting/contracts/:path'],
   [/^\/api\/accounting\/dispatch-candidates$/, '/api/accounting/dispatch-candidates'],
@@ -66,6 +68,7 @@ type AccountingApiRecord = {
   code?: DatabaseFailure;
   trackingId?: string;
   stagesMs?: AccountingReadTimings;
+  readWork?: AccountingReadWork;
 };
 
 const requestFailures = new WeakMap<ServerResponse, Pick<AccountingApiRecord, 'code' | 'trackingId'> | undefined>();
@@ -96,7 +99,7 @@ export function createAccountingRequestObserver(
     requestFailures.set(response, undefined);
     const requestId = randomUUID();
     const started = performance.now();
-    const timings: AccountingReadTimings = {};
+    const timings: AccountingReadTimings & { readWork?: AccountingReadWork } = {};
     const method = request.method && methods.has(request.method) ? request.method : 'OTHER';
     response.setHeader('X-Accounting-Request-Id', requestId);
     response.setHeader('X-Accounting-Commit', commit);
@@ -105,7 +108,8 @@ export function createAccountingRequestObserver(
       response.off('finish', onFinish);
       response.off('close', onClose);
       const failure = requestFailures.get(response);
-      const stages = Object.entries(timings);
+      const { readWork, ...phases } = timings;
+      const stages = Object.entries(phases);
       log({
         kind: 'accounting_api_request',
         at: new Date().toISOString(),
@@ -117,6 +121,7 @@ export function createAccountingRequestObserver(
         status: completed ? response.statusCode : null,
         outcome: completed ? outcomeFor(response.statusCode, failure?.code, Boolean(failure)) : 'client_abort',
         ...(stages.length ? { stagesMs: Object.fromEntries(stages.map(([name, ms]) => [name, Math.round(ms * 100) / 100])) } : {}),
+        ...(readWork ? { readWork } : {}),
         ...failure,
       });
     };

@@ -3,7 +3,18 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 type AccountingReadPhase = 'lockWait' | 'authorization' | 'population' | 'rowHydration';
 export type AccountingReadTimings = Partial<Record<AccountingReadPhase, number>>;
 
-export const accountingReadTiming = new AsyncLocalStorage<AccountingReadTimings>();
+type AccountingReadWorkKind = 'historicalInvoices' | 'historicalPayments' | 'historicalAuditEvents'
+  | 'historicalPartnerBalances' | 'receiptCandidates' | 'receiptPageRows';
+export type AccountingReadWork = Partial<Record<AccountingReadWorkKind, number>>;
+
+export const accountingReadTiming = new AsyncLocalStorage<AccountingReadTimings & { readWork?: AccountingReadWork }>();
+
+export function countAccountingReadRows(kind: AccountingReadWorkKind, rows: number) {
+  const observation = accountingReadTiming.getStore();
+  if (!observation) return;
+  const work = observation.readWork ??= {};
+  work[kind] = (work[kind] ?? 0) + rows;
+}
 
 export function startAccountingReadPhase(phase: AccountingReadPhase): () => void {
   const timings = accountingReadTiming.getStore();

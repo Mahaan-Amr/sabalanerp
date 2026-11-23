@@ -1663,7 +1663,11 @@ export const securityAPI = {
   getVehiclePairs: (params?: any) => api.get('/security/vehicle-pairs', { params }),
   getVehiclePairPhoto: (photoId: string) => api.get(`/security/vehicle-pairs/photos/${photoId}`, { responseType: 'blob' }),
   getDriverQueue: (history = false) => api.get('/security/driver-queue', { params: { history } }),
-  getCanonicalDriverQueue: (history = false) => api.get('/security/canonical-driver-queue', { params: { history } }),
+  getCanonicalDriverQueue: () => api.get('/security/canonical-driver-queue'),
+  getCanonicalDriverQueueHistory: (page: number, signal?: AbortSignal) =>
+    api.get('/security/canonical-driver-queue', { params: { history: true, page }, signal }),
+  getCanonicalDriverQueueEvents: (id: string, signal?: AbortSignal) =>
+    api.get(`/security/canonical-driver-queue/${encodeURIComponent(id)}/events`, { signal }),
   getCanonicalQueueAdmissionOptions: () => api.get('/security/canonical-driver-queue/admission-options'),
   admitCanonicalQueueTurn: (data: { source: 'INTERNAL' | 'EXTERNAL'; driverId: string; vehicleId?: string } |
     { source: 'CUSTOMER_PICKUP'; vehicleType: string; plate: string; phone: string }) => api.post('/security/canonical-driver-queue', data),

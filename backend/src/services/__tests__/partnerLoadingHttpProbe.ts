@@ -128,18 +128,19 @@ async function main() {
       assert.notEqual(otherDraft.body.data.id, allocated.body.data.id);
       assert.equal((await request(releasePath, 'POST', { ...release, loadingId: secondLoadingId })).status, 200);
       await prisma.workspacePermission.create({ data: { userId: outsiderId, workspace: 'security', permissionLevel: 'edit' } });
-      const privateHistory = await request('/api/security/canonical-driver-queue?history=true', 'GET', undefined, outsider.token);
+      const guardHistory = () => request(`/api/security/canonical-driver-queue/${turnId}/events`, 'GET', undefined, outsider.token);
+      const privateHistory = await guardHistory();
       assert.equal(privateHistory.status, 200, JSON.stringify(privateHistory.body));
       assert.equal(JSON.stringify(privateHistory.body).includes(loadingId), false,
         'clearing the live loading link must not expose private Case IDs through retained queue history');
       assert.equal(JSON.stringify(privateHistory.body).includes(JSON.stringify(expected.caseId)), false);
-      assert.equal(privateHistory.body.data.some((turn: { id: string }) => turn.id === turnId), true,
+      const activeQueue = await request('/api/security/canonical-driver-queue', 'GET', undefined, outsider.token);
+      assert.equal(activeQueue.body.data.some((turn: { id: string }) => turn.id === turnId), true,
         'the physical driver visit remains visible to Guard independently of private Case association');
       await prisma.effectiveActionGrant.create({ data: { id: `${outsiderId}-guard-read`, principalKind: 'USER',
         principalId: outsiderId, subjectUserId: outsiderId, domain: 'PARTNER', action: 'FULFILLMENT_READ', rootKind: 'CASE',
         purpose: 'FULFILLMENT', scope: 'PURPOSE_BOUND', boundRootId: expected.caseId, effect: 'ALLOW', grantedBy: actorId,
         reason: 'isolated Guard scope fixture', correlationId: `${outsiderId}-guard-read` } });
-      const guardHistory = () => request('/api/security/canonical-driver-queue?history=true', 'GET', undefined, outsider.token);
       assert.equal(JSON.stringify((await guardHistory()).body).includes(loadingId), true, 'current Guard and Case authority permit retained association');
       let waiting: ReturnType<typeof guardHistory> | undefined;
       try {

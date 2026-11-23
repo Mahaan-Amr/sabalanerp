@@ -91,6 +91,15 @@ test('does not substitute a same-stone loading when the original dispatch eviden
   assert.equal(result.hasUnlinkedOriginals, true);
 });
 
+test('shows an unresolved origin for a delivered sale without a recognized original invoice', async () => {
+  const { tx, dispatch } = fixture();
+  Object.assign(tx.accountingCommercialCustomerInvoice, { findMany: async () => [] });
+  Object.assign(tx.shipmentQuantityEvidence, { findFirst: async () => dispatch });
+  const result = await loadStoneReturnCandidates(tx, receipt);
+  assert.equal(result.candidates.length, 0);
+  assert.equal(result.hasUnlinkedOriginals, true);
+});
+
 
 test('publishes original valuation for a physical exit with a canonical persisted quantity', async () => {
   const { dispatch } = fixture();

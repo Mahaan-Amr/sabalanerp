@@ -1,4 +1,5 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
+import { canonicalHash } from '@sabalanerp/partner-sales-contracts';
 import { assertCanonicalDispatchCommandAllowed, PilotSafetyPauseError } from '../../dispatchCutover';
 import { exactQuantityText } from '../../exactQuantity';
 import { authorizePartnerTechnicalRollout, lockPartnerOperationsControl } from '../authorization/technicalRollout';
@@ -77,20 +78,27 @@ async function preflight(tx: Tx, contractNumber: string, apply: boolean): Promis
 
   const lineages = await tx.partnerFulfillmentLineage.findMany({ where: { caseId }, orderBy: { productRowId: 'asc' } });
   for (const lineage of lineages) {
-    if (lineage.caseRevision > view.owner.revision || lineage.internalRecordId !== view.recordId ||
+    if (lineage.caseRevision > view.owner.revision || lineage.internalRecordId !== view.recordId || !lineage.quantity.isFinite() ||
         !await validatePartnerPhysicalLineage(tx, lineage)) return conflict('A stored physical lineage has invalid origin evidence');
   }
 
-  const projection = await readPartnerRepairQuantityProjection(tx, view);
-  if (projection.rows.some(line => line.health !== 'CURRENT' || !line.quantities ||
-      new Prisma.Decimal(line.quantities.availableToLoad).lt(0))) {
-    return conflict('Shipment movements, baseline evidence or the reserved and dispatched floor conflict');
-  }
+  const expected = [...view.products, ...lineages.filter(lineage => !view.products.some(product => product.productRowId === lineage.productRowId))
+    .map(lineage => ({ productRowId: lineage.productRowId, unit: lineage.unit, quantity: '0' }))];
+  if (!expected.length) return ineligible('There are no physical rows to repair');
+  const projection = await readPartnerRepairQuantityProjection(tx, view).catch(error => {
+    if (error instanceof PartnerQuantityEvidenceConflictError) return null;
+    throw error;
+  });
+  if (!projection || projection.rows.length !== expected.length || projection.rows.some(line => {
+    const binding = expected.find(product => product.productRowId === line.productRowId);
+    return line.health !== 'CURRENT' || !line.quantities || !binding || binding.unit !== line.unit ||
+      !new Prisma.Decimal(line.quantities.contracted).equals(binding.quantity) ||
+      new Prisma.Decimal(line.quantities.physicallyDispatched).lt(0) || new Prisma.Decimal(line.quantities.availableToLoad).lt(0);
+  })) return conflict('Shipment movements, baseline evidence or the reserved and dispatched floor conflict');
+
   const baselines = await tx.shipmentQuantityEvidence.findMany({ where: {
     partnerCaseId: caseId, partnerCaseRevision: view.owner.revision, kind: 'CONTRACTED_SET',
   }, select: { productRowId: true } });
-  const expected = [...view.products, ...lineages.filter(lineage => !view.products.some(product => product.productRowId === lineage.productRowId))
-    .map(lineage => ({ productRowId: lineage.productRowId, unit: lineage.unit, quantity: '0' }))];
   if (baselines.some(baseline => !expected.some(product => product.productRowId === baseline.productRowId))) {
     return conflict('The effective ledger contains an unexpected contracted row');
   }
@@ -98,6 +106,16 @@ async function preflight(tx: Tx, contractNumber: string, apply: boolean): Promis
     .map(product => product.productRowId);
   const missingBaselines = expected.filter(product => !baselines.some(baseline => baseline.productRowId === product.productRowId))
     .map(({ productRowId, unit, quantity }) => ({ productRowId, unit, quantity: exactQuantityText(quantity) }));
+  const sourceIds = new Map(await Promise.all(missingBaselines.map(async ({ productRowId }) =>
+    [productRowId, `partner-fulfillment:${(await canonicalHash(`${caseId}:${productRowId}`)).slice(10)}`] as const)));
+  const missingSourceIds = [...sourceIds.values()];
+  if (missingLineages.length && await tx.partnerFulfillmentLineage.count({ where: {
+    id: { in: missingLineages.map(rowId => sourceIds.get(rowId)!) },
+  } })) return conflict('A stable physical lineage identity is occupied by unrelated evidence');
+  if (missingSourceIds.length && await tx.shipmentQuantityEvidence.count({ where: { OR: [
+    { sourceType: 'PARTNER_CASE_CONTRACTED_QUANTITY', sourceVersion: view.owner.revision, sourceId: { in: missingSourceIds } },
+    { id: { in: missingSourceIds.map(id => `partner-quantity:${id}:${view.owner.revision}`) } },
+  ] } })) return conflict('An immutable baseline identity is occupied by unrelated evidence');
   return { ...target, revision: view.owner.revision, status: missingBaselines.length ? 'missing' : 'already-present',
     missingLineages, missingBaselines };
 }

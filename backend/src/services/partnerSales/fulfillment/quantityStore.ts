@@ -147,6 +147,7 @@ async function readQuantityProjection(tx: Prisma.TransactionClient, caseId: stri
     orderBy: [{ effectiveAt: 'asc' }, { recordedAt: 'asc' }, { id: 'asc' }] });
   const evidence: PartnerShipmentQuantityEvidence[] = [];
   for (const row of rows) {
+    if (repairView && !row.quantity.isFinite()) return conflict();
     const identity = shipmentQuantitySourceFields(row);
     if (!('sourceKind' in identity) || identity.sourceKind !== 'PARTNER_CASE' || !row.partnerLineage ||
         row.partnerLineage.caseId !== caseId || row.partnerLineage.productRowId !== row.productRowId ||
@@ -171,13 +172,16 @@ async function readQuantityProjection(tx: Prisma.TransactionClient, caseId: stri
     type: { in: ['CASE_COMMITTED', 'CORRECTION_EFFECTIVE', 'CASE_RECOMMITTED'] },
     ...(options.mode === 'AUDIT_KNOWN_AT' ? { recordedAt: { lte: new Date(cutoff) } } : {}) },
     orderBy: [{ caseRevision: 'desc' }, { sequence: 'desc' }],
-    include: { revision: { include: { rowBindings: true } }, case: { select: { internalRecordId: true, committedAt: true } } } });
+    include: { revision: { include: { rowBindings: true } }, case: { select: { internalRecordId: true, committedAt: true, committedRevision: true } } } });
   // Operational quantities become effective at the same instant used by the
   // contracted ledger writer, not at midnight of the commercial reporting day.
   const effective = candidates.find(event =>
     (event.type === 'CASE_COMMITTED' ? event.case.committedAt : event.recordedAt)?.getTime()! <= Date.parse(cutoff));
   if (repairView && (effective?.caseRevision !== repairView.owner.revision || effective.integrityHash !== repairView.owner.integrityHash)) return conflict();
   if (effective?.case.internalRecordId) {
+    const contractedAt = (repairView
+      ? effective.case.committedRevision === effective.caseRevision
+      : effective.type === 'CASE_COMMITTED') ? effective.case.committedAt! : effective.recordedAt;
     const lineages = await tx.partnerFulfillmentLineage.findMany({ where: { caseId, caseRevision: { lte: effective.caseRevision } } });
     const expected = [...effective.revision.rowBindings.map(row => ({ productRowId: row.productRowId, unit: row.unit, quantity: row.quantity })),
       ...lineages.filter(lineage => !effective.revision.rowBindings.some(row => row.productRowId === lineage.productRowId))
@@ -221,7 +225,7 @@ async function readQuantityProjection(tx: Prisma.TransactionClient, caseId: stri
       if (repairView && rowBaselines.length && (rowBaselines.length !== 1 || !baseline || !lineage ||
           baseline.sourceType !== 'PARTNER_CASE_CONTRACTED_QUANTITY' || baseline.sourceId !== lineage.id ||
           baseline.sourceVersion !== repairView.owner.revision ||
-          baseline.effectiveAt.getTime() !== (effective.type === 'CASE_COMMITTED' ? effective.case.committedAt! : effective.recordedAt).getTime())) return conflict();
+          baseline.effectiveAt.getTime() !== contractedAt.getTime())) return conflict();
       if (lineage && baseline) continue;
       const lineageId = `partner-fulfillment:${(await canonicalHash(`${caseId}:${binding.productRowId}`)).slice(10)}`;
       const canonical = correctionBindings?.get(binding.productRowId);
@@ -230,10 +234,10 @@ async function readQuantityProjection(tx: Prisma.TransactionClient, caseId: stri
             lineage.internalRecordId === effective.case.internalRecordId))) {
         evidence.push({ sourceKind: 'PARTNER_CASE', caseId, internalRecordId: effective.case.internalRecordId,
           lineageId, productRowId: binding.productRowId, unit: binding.unit, kind: 'CONTRACTED_SET',
-          quantity: exactQuantityText(binding.quantity), id: effective.id, sourceType: 'PARTNER_CASE_EFFECTIVE_BINDING',
-          sourceId: caseId, sourceVersion: effective.caseRevision, integrityHash: effective.integrityHash,
-          effectiveAt: (effective.type === 'CASE_COMMITTED' ? effective.case.committedAt! : effective.recordedAt).toISOString(),
-          recordedAt: effective.recordedAt.toISOString() });
+          quantity: exactQuantityText(binding.quantity), id: repairView ? `partner-quantity:${lineageId}:${effective.caseRevision}` : effective.id,
+          sourceType: 'PARTNER_CASE_EFFECTIVE_BINDING', sourceId: caseId,
+          sourceVersion: effective.caseRevision, integrityHash: effective.integrityHash,
+          effectiveAt: contractedAt.toISOString(), recordedAt: repairView ? cutoff : effective.recordedAt.toISOString() });
         continue;
       }
       evidence.push({ sourceKind: 'PARTNER_CASE', caseId, internalRecordId: effective.case.internalRecordId,

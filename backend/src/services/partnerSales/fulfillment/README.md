@@ -51,3 +51,27 @@ Both methods validate the exact Case revision/hash, the resolved canonical graph
 hash and row identities, direct-to-final-customer mode, Delivery destinations,
 and Delivery totals before exposing a result. Unknown retail fields and invalid
 projections are rejected by the strict public schema.
+
+## Repairing a missing Logistics baseline
+
+Use the customer contract number to preview one Case at a time. For an isolated
+local fixture, set `DATABASE_URL` to the test database and run from the
+repository root.
+
+```sh
+backend/node_modules/.bin/tsx backend/src/scripts/repair-partner-loading-baseline.ts --contract='CUSTOMER_CONTRACT_NUMBER'
+```
+
+The JSON report identifies the Case and effective revision when verified.
+`missing` lists the exact missing quantities and identifies missing lineages by product
+row ID. `already-present` means the baseline passed validation and has full
+coverage. `conflict`, `ineligible`, and `not-found` each include a reason for
+follow-up. The database enforces the preview transaction as read-only.
+
+With separate operational authorization for the target environment, rerun the
+same command with `--apply`. It repeats the preflight under the Operations,
+Case, Contract and dispatch locks, and writes only missing lineage and baseline
+evidence. A successful write returns `repaired`. Existing reservations,
+dispatch movements and financial approval remain intact. Verify the same
+customer and delivery in New Loading after the repair. If competing work
+already completed the repair, the command returns `already-present`.

@@ -86,8 +86,12 @@ async function main() {
         assert.equal((await logistics('/loadings', anticipated, 'old-case-missing-baseline')).status, 409);
         const plan = await runRepair();
         assert.equal(plan.status, 'missing');
-        assert.deepEqual(plan.missingBaselines.map((row: { quantity: string }) => row.quantity), ['2']);
+        assert.deepEqual(plan.missingBaselines.map((row: { quantity: string }) => row.quantity), ['2.000']);
         await assertHidden();
+        await prisma.dispatchCutoverControl.create({ data: { id: 'dispatch', phase: 'PILOT_SAFETY_PAUSE', legacyWritesEnabled: false } });
+        assert.equal((await runRepair()).status, 'ineligible');
+        assert.equal((await runRepair(true)).status, 'ineligible');
+        await prisma.dispatchCutoverControl.delete({ where: { id: 'dispatch' } });
         const outcomes = await Promise.all([runRepair(true), runRepair(true)]);
         assert.deepEqual(outcomes.map(report => report.status).sort(), ['already-present', 'repaired']);
         assert.equal((await runRepair()).status, 'already-present');
@@ -107,6 +111,28 @@ async function main() {
         assert.deepEqual(await prisma.accountingFinancialRecord.findUnique({ where: { id: invoiceId } }), approvedInvoice);
         assert.equal(await prisma.shipmentQuantityEvidence.count({ where: quantityWhere }), 1);
         const repaired = await prisma.shipmentQuantityEvidence.findFirstOrThrow({ where: quantityWhere });
+        const lineage = await prisma.partnerFulfillmentLineage.findUniqueOrThrow({ where: { id: repaired.partnerLineageId! } });
+        const reservedAt = new Date();
+        const reservation = { id: 'preserved-reservation', sourceKind: 'PARTNER_CASE' as const,
+          contractId: null, contractItemId: null, partnerCaseId: sale.id, partnerLineageId: lineage.id,
+          partnerCaseRevision: expected.revision, partnerIntegrityHash: expected.integrityHash,
+          productRowId: repaired.productRowId, unit: repaired.unit, kind: 'ALLOCATION_FINALIZED' as const,
+          quantity: '0.500', effectiveAt: reservedAt.toISOString(), recordedAt: reservedAt.toISOString(),
+          sourceType: 'PARTNER_LOGISTICS_ALLOCATION_REVISION', sourceId: 'preserved-reservation', sourceVersion: 1,
+          integrityHash: '', metadata: {} };
+        const preserved = await prisma.shipmentQuantityEvidence.create({ data: { ...reservation,
+          effectiveAt: reservedAt, recordedAt: reservedAt, integrityHash: shipmentQuantityEvidenceIntegrityHash(reservation) } });
+        await prisma.$transaction(async tx => {
+          await tx.$executeRawUnsafe("SET LOCAL session_replication_role = 'replica'");
+          await tx.shipmentQuantityEvidence.delete({ where: { id: repaired.id } });
+        });
+        await assertHidden();
+        const partialPlan = await runRepair();
+        assert.equal(partialPlan.status, 'missing', JSON.stringify(partialPlan));
+        assert.deepEqual(partialPlan.missingLineages, []);
+        assert.equal((await runRepair(true)).status, 'repaired');
+        assert.deepEqual(await prisma.partnerFulfillmentLineage.findUnique({ where: { id: lineage.id } }), lineage);
+        assert.deepEqual(await prisma.shipmentQuantityEvidence.findUnique({ where: { id: preserved.id } }), preserved);
         await prisma.$transaction(async tx => {
           await tx.$executeRawUnsafe("SET LOCAL session_replication_role = 'replica'");
           await tx.shipmentQuantityEvidence.update({ where: { id: repaired.id }, data: { integrityHash: 'corrupt-fixture' } });

@@ -63,6 +63,7 @@ export interface Product {
   basePrice?: number;
   currency: string;
   isAvailable: boolean;
+  availableReturnStock?: { unit: string; quantity: string }[];
   leadTime?: number;
   description?: string;
   images?: string[];

@@ -1,3 +1,4 @@
+import { readStoneReturnAvailability } from '../services/stoneReturnAvailability';
 import { prisma } from '../lib/prisma';
 import express, { Response } from 'express';
 import { body, query, validationResult } from 'express-validator';
@@ -364,12 +365,13 @@ router.get('/', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERM
       prisma.product.count({ where: whereClause })
     ]);
 
+    const returnStock = await readStoneReturnAvailability(prisma, products.filter(product => product.isActive && !product.deletedAt).map(product => product.id));
     console.log('Products found:', products.length, 'Total:', total);
     console.log('Sample product isActive values:', products.slice(0, 3).map(p => ({ id: p.id, name: p.namePersian, isActive: p.isActive })));
 
     return res.json({
       success: true,
-      data: products,
+      data: products.map(product => ({ ...product, availableReturnStock: returnStock.get(product.id) ?? [] })),
       pagination: {
         page,
         limit,

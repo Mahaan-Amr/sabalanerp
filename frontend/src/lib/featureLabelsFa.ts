@@ -103,6 +103,7 @@ const tokens: Record<string, string> = {
   cutting: 'برش',
   types: 'انواع',
   stone: 'سنگ',
+  returns: 'مرجوعی‌ها',
   materials: 'مواد',
   widths: 'عرض‌ها',
   thicknesses: 'ضخامت‌ها',

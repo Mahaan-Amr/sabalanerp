@@ -291,3 +291,73 @@ test('contracted quantity follows the financially approved version effective at 
   assert.equal(projectShipmentQuantities(versions, { cutoff: '2026-08-04T00:00:00.000Z' }).rows[0]?.quantities?.contracted, '10.000');
   assert.equal(projectShipmentQuantities(versions, { cutoff: '2026-08-07T00:00:00.000Z' }).rows[0]?.quantities?.contracted, '8.000');
 });
+
+const excessReturnEvidence = (id: string, quantity: string, overrides: Partial<ShipmentQuantityEvidence> = {}) =>
+  evidence(id, 'EXCESS_RETURN_FINALIZED', quantity, {
+    dispatchEvidenceId: 'exit-main',
+    effectiveAt: '2026-08-02T08:00:00.000Z',
+    recordedAt: '2026-08-03T08:00:00.000Z',
+    sourceType: 'STONE_EXCESS_RETURN_ALLOCATION',
+    metadata: { returnCaseId: 'case', actorId: 'accountant' },
+    ...overrides,
+  });
+
+const excessReturnShipment = [
+  evidence('approved-gross', 'CONTRACTED_SET', '100.000'),
+  evidence('allocation', 'ALLOCATION_FINALIZED', '90.000'),
+  evidence('exit-main', 'PHYSICAL_EXIT', '80.000'),
+];
+
+test('finalized excess returns retire the obligation and net dispatch without reopening loadable quantity', () => {
+  const events = [...excessReturnShipment, excessReturnEvidence('share-1', '20.1255')];
+
+  const asOf = projectShipmentQuantities(events, { cutoff: '2026-08-02T12:00:00.000Z' });
+  assert.equal(asOf.rows[0]?.health, 'CURRENT');
+  assert.deepEqual(asOf.rows[0]?.quantities, {
+    contracted: '79.8745', finalizedReserved: '10.000', physicallyDispatched: '59.8745', availableToLoad: '10.000',
+    approvedGrossContracted: '100.000', excessRetired: '20.1255',
+  });
+  assert.ok(asOf.rows[0]?.sourceEvidenceIds.includes('exit-main'));
+  assert.ok(asOf.rows[0]?.sourceEvidenceIds.includes('approved-gross'));
+  const knownAt = projectShipmentQuantities(events, { cutoff: asOf.cutoff, mode: 'AUDIT_KNOWN_AT' });
+  assert.equal(knownAt.rows[0]?.quantities?.contracted, '100.000');
+  assert.equal(knownAt.rows[0]?.quantities?.physicallyDispatched, '80.000');
+  assert.equal(knownAt.rows[0]?.quantities?.availableToLoad, '10.000');
+  assert.ok(!knownAt.rows[0]?.sourceEvidenceIds.includes('share-1'));
+});
+
+const replacementReturn = [
+  evidence('guard-replacement', 'GUARD_RETURN_VERIFIED', '5.000', {
+    guardReturnValidated: true, dispatchEvidenceId: 'exit-main',
+    effectiveAt: '2026-08-05T08:00:00.000Z', recordedAt: '2026-08-05T08:00:00.000Z',
+  }),
+  evidence('posted-replacement', 'DISPATCH_CORRECTION_POSTED', '-5.000', {
+    returnEvidenceId: 'guard-replacement',
+    effectiveAt: '2026-08-06T08:00:00.000Z', recordedAt: '2026-08-06T08:00:00.000Z',
+  }),
+];
+
+test('ordinary replacements share the physical dispatch cap with finalized excess returns', () => {
+  const published = [
+    ...excessReturnShipment, ...replacementReturn,
+    evidence('another-exit', 'PHYSICAL_EXIT', '3.000'),
+    evidence('new-approval', 'CONTRACTED_SET', '110.000', {
+      effectiveAt: '2026-08-04T08:00:00.000Z', recordedAt: '2026-08-04T08:00:00.000Z',
+    }),
+  ];
+  const validEvents = [...published, excessReturnEvidence('share-first', '20.000')];
+  const valid = projectShipmentQuantities(validEvents).rows[0];
+  assert.equal(valid?.health, 'CURRENT');
+  assert.deepEqual(valid?.quantities, {
+    contracted: '90.000', finalizedReserved: '7.000', physicallyDispatched: '58.000', availableToLoad: '25.000',
+    approvedGrossContracted: '110.000', excessRetired: '20.000',
+  });
+
+  const exceededEvents = [...validEvents, excessReturnEvidence('share-late', '55.001', {
+    effectiveAt: '2026-08-07T08:00:00.000Z', recordedAt: '2026-08-07T08:00:00.000Z',
+  })];
+  const exceeded = projectShipmentQuantities(exceededEvents).rows[0];
+  assert.equal(exceeded?.health, 'EVIDENCE_CONFLICT');
+  assert.equal(exceeded?.canAuthorizeLoading, false);
+  assert.deepEqual(exceeded?.quantities, valid?.quantities);
+});

@@ -177,6 +177,7 @@ export const FEATURES = {
   INVENTORY_COST_EVIDENCE_MANAGE: 'inventory_cost_evidence_manage',
 
   // Accounting Features
+  ACCOUNTING_STONE_RETURNS: 'accounting_stone_returns',
   ACCOUNTING_DASHBOARD_VIEW: 'accounting_dashboard_view',
   ACCOUNTING_CONTRACTS_VIEW: 'accounting_contracts_view',
   ACCOUNTING_INVOICE_CANDIDATES_MANAGE: 'accounting_invoice_candidates_manage',
@@ -206,6 +207,7 @@ export const FEATURES = {
   BI_PARTNER_REPORTS_VIEW: 'bi_partner_reports_view',
 
   // Logistics Features
+  LOGISTICS_STONE_RETURNS: 'logistics_stone_returns',
   LOGISTICS_DASHBOARD_VIEW: 'logistics_dashboard_view',
   LOGISTICS_LOADINGS_VIEW: 'logistics_loadings_view',
   LOGISTICS_LOADINGS_CREATE: 'logistics_loadings_create',
@@ -456,6 +458,7 @@ export const FEATURE_WORKSPACE_MAP: Record<Feature, string> = {
   [FEATURES.INVENTORY_COST_EVIDENCE_MANAGE]: 'inventory',
 
   // Accounting Features
+  [FEATURES.ACCOUNTING_STONE_RETURNS]: 'accounting',
   [FEATURES.ACCOUNTING_DASHBOARD_VIEW]: 'accounting',
   [FEATURES.ACCOUNTING_CONTRACTS_VIEW]: 'accounting',
   [FEATURES.ACCOUNTING_INVOICE_CANDIDATES_MANAGE]: 'accounting',
@@ -485,6 +488,7 @@ export const FEATURE_WORKSPACE_MAP: Record<Feature, string> = {
   [FEATURES.BI_PARTNER_REPORTS_VIEW]: 'bi',
 
   // Logistics Features
+  [FEATURES.LOGISTICS_STONE_RETURNS]: 'logistics',
   [FEATURES.LOGISTICS_DASHBOARD_VIEW]: 'logistics',
   [FEATURES.LOGISTICS_LOADINGS_VIEW]: 'logistics',
   [FEATURES.LOGISTICS_LOADINGS_CREATE]: 'logistics',
@@ -708,6 +712,8 @@ const FEATURE_ACTION_LABELS_FA: ReadonlyArray<readonly [string, string]> = [
 ];
 
 const featureLabelFa = (feature: Feature): string => {
+  if (feature === FEATURES.ACCOUNTING_STONE_RETURNS) return 'رسیدگی به مرجوعی سنگ';
+  if (feature === FEATURES.LOGISTICS_STONE_RETURNS) return 'ثبت دریافت سنگ مرجوعی';
   if (feature === FEATURES.INVENTORY_OPERATION_MINIMUM_EDIT) return 'تغییر حداقل مقدار ابزار و فرآوری سنگ';
   if (feature === FEATURES.CRM_CUSTOMERS_VIEW_ALL) return 'مشاهده همه مشتریان داخلی و همکار';
   if (feature === FEATURES.CRM_CUSTOMERS_DELETE) return 'حذف دائمی مشتری بدون سابقه';

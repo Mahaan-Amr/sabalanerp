@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import express from 'express';
 import type { AddressInfo } from 'node:net';
 import { prisma } from '../../lib/prisma';
@@ -59,6 +61,62 @@ async function main() {
       };
 
       const anticipated = { sourceKind: 'PARTNER_CASE', expected, deliveryId: 'separate-delivery' };
+      if (process.env.PARTNER_TEST_BASELINE_REPAIR === '1') {
+        const runRepair = async (apply = false) => {
+          const { stdout } = await promisify(execFile)(process.execPath, ['backend/node_modules/tsx/dist/cli.mjs',
+            'backend/src/scripts/repair-partner-loading-baseline.ts', `--contract=${sale.customerContract!.contractNumber}`,
+            ...(apply ? ['--apply'] : [])], { timeout: 20_000 });
+          return JSON.parse(stdout.trim().split('\n').at(-1)!);
+        };
+        const beforeApproval = await runRepair();
+        assert.equal(beforeApproval.status, 'ineligible', JSON.stringify(beforeApproval));
+        assert.equal((await runRepair(true)).status, 'ineligible');
+        const approved = await approve('1600', 'existing-financial-approval');
+        assert.equal(approved.status, 200, JSON.stringify(approved.body));
+        const approvedInvoice = await prisma.accountingFinancialRecord.findUniqueOrThrow({ where: { id: invoiceId } });
+        const quantityWhere = { partnerCaseId: sale.id };
+        const historicalBaseline = await prisma.shipmentQuantityEvidence.findFirstOrThrow({ where: quantityWhere });
+        await prisma.$transaction(async tx => {
+          await tx.$executeRawUnsafe("SET LOCAL session_replication_role = 'replica'");
+          await tx.shipmentQuantityEvidence.delete({ where: { id: historicalBaseline.id } });
+          await tx.partnerFulfillmentLineage.deleteMany({ where: { caseId: sale.id } });
+        });
+
+        await assertHidden();
+        assert.equal((await logistics('/loadings', anticipated, 'old-case-missing-baseline')).status, 409);
+        const plan = await runRepair();
+        assert.equal(plan.status, 'missing');
+        assert.deepEqual(plan.missingBaselines.map((row: { quantity: string }) => row.quantity), ['2']);
+        await assertHidden();
+        const outcomes = await Promise.all([runRepair(true), runRepair(true)]);
+        assert.deepEqual(outcomes.map(report => report.status).sort(), ['already-present', 'repaired']);
+        assert.equal((await runRepair()).status, 'already-present');
+        const customers = await logistics(customersPath);
+        assert.ok(customers.body.data.some((row: { id: string }) => row.id === sale.customerId));
+        const projects = await logistics(projectsPath);
+        const delivery = projects.body.data.find((row: { deliveryId: string }) => row.deliveryId === anticipated.deliveryId);
+        assert.ok(delivery);
+        assert.equal(delivery.contractNumber, sale.customerContract?.contractNumber);
+        assert.deepEqual(delivery.owner, expected);
+        const draft = await logistics('/loadings', { ...anticipated, expected: delivery.owner }, 'repaired-case-draft');
+        assert.equal(draft.status, 201, JSON.stringify(draft.body));
+        const reopened = await logistics(`/loadings/${draft.body.data.loadingId}`);
+        assert.equal(reopened.body.data.source.deliveryId, anticipated.deliveryId);
+        assert.equal(reopened.body.data.source.recipient.customerId, sale.customerId);
+        assert.equal(reopened.body.data.source.rows[0].plannedQuantity, '0.750');
+        assert.deepEqual(await prisma.accountingFinancialRecord.findUnique({ where: { id: invoiceId } }), approvedInvoice);
+        assert.equal(await prisma.shipmentQuantityEvidence.count({ where: quantityWhere }), 1);
+        const repaired = await prisma.shipmentQuantityEvidence.findFirstOrThrow({ where: quantityWhere });
+        await prisma.$transaction(async tx => {
+          await tx.$executeRawUnsafe("SET LOCAL session_replication_role = 'replica'");
+          await tx.shipmentQuantityEvidence.update({ where: { id: repaired.id }, data: { integrityHash: 'corrupt-fixture' } });
+        });
+        assert.equal((await runRepair()).status, 'conflict');
+        assert.equal((await runRepair(true)).status, 'conflict');
+        assert.equal((await prisma.shipmentQuantityEvidence.findUniqueOrThrow({ where: { id: repaired.id } })).integrityHash, 'corrupt-fixture');
+        return;
+      }
+
       await assertHidden();
       assert.equal((await logistics('/loadings', anticipated, 'before-approval')).status, 409);
       assert.equal((await approve('1600', 'unprivileged-approval', loader.token)).status, 403);

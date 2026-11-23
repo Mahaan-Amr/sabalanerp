@@ -487,8 +487,8 @@ export const resumeDispatchPilot = (prisma: PrismaClient, input: { actorId: stri
     return updated;
   });
 
-export const assertCanonicalDispatchCommandAllowed = async (tx: Tx) => {
-  await lock(tx);
+export const assertCanonicalDispatchCommandAllowed = async (tx: Tx, options: { readOnly?: boolean } = {}) => {
+  if (!options.readOnly) await lock(tx);
   const state = await tx.dispatchCutoverControl.findUnique({ where: { id: CONTROL_ID } });
   if (state?.phase === DispatchCutoverPhase.PILOT_SAFETY_PAUSE) throw new PilotSafetyPauseError('Pilot Safety Pause blocks new canonical dispatch work.');
   if (state?.phase === DispatchCutoverPhase.ROLLED_BACK) throw new PilotSafetyPauseError('Canonical dispatch writes are disabled while legacy writes are restored.');

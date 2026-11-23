@@ -121,18 +121,25 @@ type QuantityReadOptions = { cutoff?: string; mode?: 'OPERATIONAL_AS_OF' | 'AUDI
 
 /** The existing immutable shipment ledger governs Logistics selection and reporting. */
 export function readPartnerShipmentQuantityProjection(tx: Prisma.TransactionClient, caseId: string, options: QuantityReadOptions = {}) {
-  return readQuantityProjection(tx, caseId, options, false);
+  return readQuantityProjection(tx, caseId, options);
 }
 
 /** Corrections may use the effective Case binding to assess the physical floor
  * when its shipment baseline is absent. All physical movements still come from
  * the immutable ledger, and normal shipment readers still require a baseline. */
 export function readPartnerCorrectionQuantityProjection(tx: Prisma.TransactionClient, caseId: string) {
-  return readQuantityProjection(tx, caseId, {}, true);
+  return readQuantityProjection(tx, caseId, {}, 'CORRECTION');
+}
+
+/** Preview the immutable ledger with only the missing effective baselines
+ * supplied by the validated Case. This does not persist projection evidence. */
+export function readPartnerRepairQuantityProjection(tx: Prisma.TransactionClient, view: FulfillmentView) {
+  return readQuantityProjection(tx, view.owner.caseId, {}, view);
 }
 
 async function readQuantityProjection(tx: Prisma.TransactionClient, caseId: string,
-  options: QuantityReadOptions, forCorrection: boolean) {
+  options: QuantityReadOptions, missingBaselineSource?: 'CORRECTION' | FulfillmentView) {
+  const repairView = typeof missingBaselineSource === 'object' ? missingBaselineSource : undefined;
   const rows = await tx.shipmentQuantityEvidence.findMany({ where: { sourceKind: 'PARTNER_CASE', partnerCaseId: caseId },
     include: { partnerLineage: true, guardReturnMovement: true, dispatchEvidence: true },
     orderBy: [{ effectiveAt: 'asc' }, { recordedAt: 'asc' }, { id: 'asc' }] });
@@ -150,6 +157,7 @@ async function readQuantityProjection(tx: Prisma.TransactionClient, caseId: stri
       dispatchEvidenceId: row.dispatchEvidenceId ?? undefined };
     const returnFailure = guardReturnValidationFailure(row, rows);
     const invalid = !matchesPartnerEvidenceHash(fact) || returnFailure;
+    if (repairView && invalid) return conflict();
     const { contractId: _contract, contractItemId: _item, partnerCaseId, partnerLineageId,
       partnerCaseRevision: _revision, partnerIntegrityHash: _hash, ...common } = fact;
     evidence.push({ ...common, caseId: partnerCaseId, lineageId: partnerLineageId,
@@ -166,6 +174,7 @@ async function readQuantityProjection(tx: Prisma.TransactionClient, caseId: stri
   // contracted ledger writer, not at midnight of the commercial reporting day.
   const effective = candidates.find(event =>
     (event.type === 'CASE_COMMITTED' ? event.case.committedAt : event.recordedAt)?.getTime()! <= Date.parse(cutoff));
+  if (repairView && (effective?.caseRevision !== repairView.owner.revision || effective.integrityHash !== repairView.owner.integrityHash)) return conflict();
   if (effective?.case.internalRecordId) {
     const lineages = await tx.partnerFulfillmentLineage.findMany({ where: { caseId, caseRevision: { lte: effective.caseRevision } } });
     const expected = [...effective.revision.rowBindings.map(row => ({ productRowId: row.productRowId, unit: row.unit, quantity: row.quantity })),
@@ -174,7 +183,7 @@ async function readQuantityProjection(tx: Prisma.TransactionClient, caseId: stri
     const sameRevisionBaselines = rows.filter(row => row.kind === 'CONTRACTED_SET' && row.partnerCaseRevision === effective.caseRevision);
     const missing = expected.filter(binding => !sameRevisionBaselines.some(row => row.productRowId === binding.productRowId));
     let correctionBindings: Map<string, { quantity: string; unit: string }> | undefined;
-    if (forCorrection && missing.length) {
+    if (missingBaselineSource && (missing.length || repairView)) {
       const owner = { caseId, revision: effective.caseRevision, integrityHash: effective.integrityHash };
       const event = PartnerEventSchema.safeParse(object(effective.evidence).publicEvent);
       if (event.success && event.data.eventId === effective.id && event.data.type === effective.type &&
@@ -191,16 +200,26 @@ async function readQuantityProjection(tx: Prisma.TransactionClient, caseId: stri
               row.quantity.equals(line.quantity)))) {
             correctionBindings = new Map(view.accounting.products.filter(product => product.productType !== 'service')
               .map(product => [product.productRowId, product]));
+            if (repairView) for (const lineage of lineages) {
+              if (!correctionBindings.has(lineage.productRowId)) {
+                correctionBindings.set(lineage.productRowId, { quantity: '0', unit: lineage.unit });
+              }
+            }
           }
         }
       }
     }
+    if (repairView && !correctionBindings) return conflict();
     for (const binding of expected) {
       const lineage = lineages.find(row => row.productRowId === binding.productRowId);
       const rowBaselines = sameRevisionBaselines.filter(row => row.productRowId === binding.productRowId);
       const baseline = rowBaselines.find(row => row.partnerIntegrityHash === effective.integrityHash &&
         row.unit === binding.unit && row.quantity.equals(binding.quantity) && row.effectiveAt <= new Date(cutoff) &&
         (options.mode !== 'AUDIT_KNOWN_AT' || row.recordedAt <= new Date(cutoff)));
+      if (repairView && rowBaselines.length && (rowBaselines.length !== 1 || !baseline || !lineage ||
+          baseline.sourceType !== 'PARTNER_CASE_CONTRACTED_QUANTITY' || baseline.sourceId !== lineage.id ||
+          baseline.sourceVersion !== repairView.owner.revision ||
+          baseline.effectiveAt.getTime() !== (effective.type === 'CASE_COMMITTED' ? effective.case.committedAt! : effective.recordedAt).getTime())) return conflict();
       if (lineage && baseline) continue;
       const lineageId = `partner-fulfillment:${(await canonicalHash(`${caseId}:${binding.productRowId}`)).slice(10)}`;
       const canonical = correctionBindings?.get(binding.productRowId);

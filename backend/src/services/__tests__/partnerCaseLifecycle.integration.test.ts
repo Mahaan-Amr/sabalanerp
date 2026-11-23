@@ -1942,6 +1942,24 @@ test('realized Partner wholesale settlement opens Logistics selection and draft 
   } finally { await database.$disconnect(); await temporary.cleanup(); }
 });
 
+test('existing approved Partner Contract returns to the Logistics picker after targeted baseline repair', async () => {
+  const temporary = await createPartnerLifecycleDatabase({ repositoryRoot: path.resolve(process.cwd()), sourceDatabaseUrl: databaseUrl() });
+  const database = temporary.client();
+  const ids = idsFor(`partner-repair-loading-${temporary.runId}`);
+  const accountantId = `${ids.caseId}-accountant`;
+  try {
+    await database.effectiveAuthorizationState.create({ data: { id: 1, revision: 1 } });
+    await seedCommittedDraftCase(database, ids);
+    const logisticsId = await seedDraftLogisticsActor(database, ids);
+    const invoice = await seedDraftInvoice(database, ids, accountantId);
+    await promisify(execFile)(process.execPath, ['backend/node_modules/tsx/dist/cli.mjs',
+      'backend/src/services/__tests__/partnerFinancialLoadingHttpProbe.ts'], { timeout: 120_000, env: { ...process.env,
+      DATABASE_URL: temporary.databaseUrl, PARTNER_TEST_INVOICE_ID: invoice.id, PARTNER_TEST_ACTOR_ID: accountantId,
+      PARTNER_TEST_LOADING_ACTOR_ID: logisticsId, PARTNER_TEST_BASELINE_REPAIR: '1',
+    } });
+  } finally { await database.$disconnect(); await temporary.cleanup(); }
+});
+
 test('effective Partner financial approval opens Logistics selection and draft creation', async () => {
   const temporary = await createPartnerLifecycleDatabase({ repositoryRoot: path.resolve(process.cwd()), sourceDatabaseUrl: databaseUrl() });
   const database = temporary.client();

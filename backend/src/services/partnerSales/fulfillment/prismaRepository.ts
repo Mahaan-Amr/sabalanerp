@@ -37,6 +37,23 @@ function decodeLineage(row: { id: string; caseId: string; caseRevision: number; 
     recipient: recipient as PartnerPhysicalLineage['recipient'], deliveryIds: row.deliveryIds as string[] };
 }
 
+/** Prove the immutable origin before using a stored lineage. */
+export async function validatePartnerPhysicalLineage(tx: Prisma.TransactionClient, row: Parameters<typeof decodeLineage>[0]) {
+  const lineage = decodeLineage(row);
+  if (!lineage || !await readPartnerRevisionProjections(tx, lineage.createdFrom)) return null;
+  const origin = await tx.partnerCaseRevision.findUniqueOrThrow({ where: { caseId_revision: {
+    caseId: row.caseId, revision: lineage.createdFrom.revision } }, include: { case: { select: { customerId: true } } } });
+  const view = FulfillmentViewSchema.safeParse(object(origin.internalProjection)?.fulfillment);
+  const recipient = object(object(origin.partySnapshots)?.customer);
+  if (!view.success || !recipient || typeof recipient.displayName !== 'string' || typeof recipient.phone !== 'string') return null;
+  const destination = view.data.deliveries[0]?.destination ?? recipient.address;
+  const product = view.data.products.find(item => item.productRowId === row.productRowId);
+  if (!product || !canonicalPartnerQuantity(product.quantity) || typeof destination !== 'string') return null;
+  const expected = await buildPartnerPhysicalLineage({ view: view.data, customer: {
+    customerId: origin.case.customerId, displayName: recipient.displayName, phone: recipient.phone, destination } }, product);
+  return await canonicalHash(lineage) === await canonicalHash(expected) ? lineage : null;
+}
+
 export function createPrismaPartnerFulfillmentRepository(input: {
   database: PrismaClient | Prisma.TransactionClient;
   actorId: string;
@@ -117,20 +134,7 @@ export function createPrismaPartnerFulfillmentRepository(input: {
           findLineage: async (caseId, productRowId) => {
             const row = await tx.partnerFulfillmentLineage.findUnique({ where: {
               caseId_productRowId: { caseId, productRowId } } });
-            if (!row) return null;
-            const lineage = decodeLineage(row);
-            if (!lineage || !await readPartnerRevisionProjections(tx, lineage.createdFrom)) return null;
-            const origin = await tx.partnerCaseRevision.findUniqueOrThrow({ where: { caseId_revision: {
-              caseId, revision: lineage.createdFrom.revision } }, include: { case: { select: { customerId: true } } } });
-            const view = FulfillmentViewSchema.safeParse(object(origin.internalProjection)?.fulfillment);
-            const recipient = object(object(origin.partySnapshots)?.customer);
-            if (!view.success || !recipient || typeof recipient.displayName !== 'string' || typeof recipient.phone !== 'string') return null;
-            const destination = view.data.deliveries[0]?.destination ?? recipient.address;
-            const product = view.data.products.find(item => item.productRowId === productRowId);
-            if (!product || !canonicalPartnerQuantity(product.quantity) || typeof destination !== 'string') return null;
-            const expected = await buildPartnerPhysicalLineage({ view: view.data, customer: {
-              customerId: origin.case.customerId, displayName: recipient.displayName, phone: recipient.phone, destination } }, product);
-            return await canonicalHash(lineage) === await canonicalHash(expected) ? lineage : null;
+            return row ? validatePartnerPhysicalLineage(tx, row) : null;
           },
           commitLineages: async ({ command, intentHash, lineages }) => {
             mutating = true;

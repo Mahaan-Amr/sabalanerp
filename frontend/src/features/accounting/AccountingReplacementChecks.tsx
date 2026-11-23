@@ -1,9 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, type ReactNode } from 'react';
 import { ErpButton, ErpInlineState, ErpSection, ErpSkeleton } from '@/components/erp';
 import { accountingAPI } from '@/lib/api';
-import { accountingFailureMessage } from './accountingUi';
+import { useAccountingPanelRead } from './useAccountingPanelRead';
 
 export type ReplacementVerificationTiming = { completedAt: string; durationMs: number };
 
@@ -43,40 +43,10 @@ export const readReplacementSnapshots = async (bookId: string, signal: AbortSign
     tables: Array<{ exact_rows: number; table_name: string }>;
   }>;
 
-export function useReplacementRead<T>(key: string, read: (key: string, signal: AbortSignal) => Promise<T>, failureMessage: string, refresh = 0) {
-  const [retryCount, setAttempt] = useState(0);
-  const attempt = retryCount + refresh;
-  const retry = useCallback(() => setAttempt(previous => previous + 1), []);
-  const activeRequest = useRef<AbortController>();
-  const [settled, setSettled] = useState<{
-    key: string; attempt: number; data?: T; error?: string; status?: number;
-  }>();
-
-  useEffect(() => {
-    if (!key) return;
-    const request = new AbortController();
-    activeRequest.current = request;
-    void read(key, request.signal).then(data => {
-      if (!request.signal.aborted) setSettled({ key, attempt, data });
-    }).catch((reason: { response?: { status?: number } }) => {
-      if (request.signal.aborted) return;
-      const status = reason?.response?.status;
-      setSettled(previous => ({
-        key, attempt, status, error: accountingFailureMessage(reason,
-          reason instanceof Error && /^[\u0600-\u06ff]/.test(reason.message) ? reason.message : failureMessage),
-        data: status !== 401 && status !== 403 && previous?.key === key ? previous.data : undefined,
-      }));
-    });
-    return () => request.abort();
-  }, [key, attempt, read, failureMessage]);
-
-  const discard = useCallback(() => {
-    activeRequest.current?.abort();
-    setSettled(undefined);
-  }, []);
-  const previous = key !== '' && settled?.key === key ? settled : undefined;
-  const pending = Boolean(key) && previous?.attempt !== attempt;
-  return { data: previous?.data, error: pending ? undefined : previous?.error, status: previous?.status, pending, retry, discard };
+export function useReplacementRead<T>(key: string, read: (key: string, signal: AbortSignal) => Promise<T>, failureMessage: string, refreshKey?: number) {
+  const load = useCallback((signal: AbortSignal) => read(key, signal), [key, read]);
+  const { loading: pending, refresh: retry, ...state } = useAccountingPanelRead(key, load, failureMessage, refreshKey);
+  return { ...state, pending, retry };
 }
 
 export function ReplacementCheckTiming({ completedAt, durationMs }: ReplacementVerificationTiming) {

@@ -9,7 +9,7 @@ test('the independent replacement audit API uses current authentication and retu
   await loginAsAdmin(page);
   const context = await page.request.get('/api/accounting/ledger/context');
   expect(context.ok()).toBeTruthy();
-  const bookId = (await context.json()).data.books[0].id;
+  const bookId = (await context.json()).data.books[0]?.id ?? 'replacement-488-uninitialized-book';
   const [legacy, independent, audit, wrongSnapshot] = await Promise.all([
     page.request.get(`${replacement}/overview`, { params: { bookId } }),
     page.request.get(`${replacement}/overview`, { params: { bookId, includeAudit: 'false' } }),

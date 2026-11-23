@@ -15,15 +15,38 @@ const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(valu
 
 test('independent native posting compares against archived source, retains disagreements and replays without duplicate report or audit', { skip: !databaseUrl }, async () => {
   const db = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
-  const bookId = 'cmub2hd63007zrqlphrzi5eey'; const tag = `QA-PARALLEL-${randomUUID()}`;
+  const tag = `QA-PARALLEL-${randomUUID()}`;
   try {
     await assert.rejects(db.$transaction(async (tx) => {
-      const year = await tx.accountingFiscalYear.findUniqueOrThrow({ where: { bookId_code: { bookId, code: '1405' } }, include: { periods: true } });
       const date = parseSepidarLocalDateTime('2026-03-21T00:00:00');
-      const period = year.periods.find((item) => item.status === 'OPEN' && item.startsAt <= date && item.endsAt >= date); assert.ok(period);
-      const accounts = await tx.accountingLedgerAccount.findMany({ where: { bookId, level: 'MOIN', retiredAt: null,
-        effectiveFrom: { lte: date }, effectiveTo: null, partyRequirement: { not: 'REQUIRED' }, financialAccountRequirement: { not: 'REQUIRED' },
-        dimensionRules: { none: { requirement: 'REQUIRED' } } }, orderBy: { code: 'asc' }, take: 2 }); assert.equal(accounts.length, 2);
+      const entity = await tx.accountingLegalEntity.create({ data: {
+        code: tag, namePersian: 'شرکت آزمون اجرای موازی', activeFrom: date, createdBy: tag,
+      } });
+      const { id: bookId } = await tx.accountingBook.create({ data: {
+        legalEntityId: entity.id, code: 'primary', namePersian: 'دفتر آزمون اجرای موازی', createdBy: tag,
+      } });
+      const year = await tx.accountingFiscalYear.create({ data: {
+        bookId, code: '1405', titlePersian: 'سال مالی آزمون', startsAt: date,
+        endsAt: parseSepidarLocalDateTime('2027-03-20T23:59:59'), status: 'ACTIVE', createdBy: tag,
+      } });
+      const period = await tx.accountingPostingPeriod.create({ data: {
+        fiscalYearId: year.id, code: '01', titlePersian: 'فروردین آزمون', sequence: 1, startsAt: date,
+        endsAt: parseSepidarLocalDateTime('2026-04-20T23:59:59'), status: 'OPEN',
+      } });
+      const foreignPeriod = await tx.accountingPostingPeriod.create({ data: {
+        fiscalYearId: year.id, code: '02', titlePersian: 'اردیبهشت آزمون', sequence: 2,
+        startsAt: parseSepidarLocalDateTime('2026-04-21T00:00:00'),
+        endsAt: parseSepidarLocalDateTime('2026-05-21T23:59:59'), status: 'OPEN',
+      } });
+      const scheme = await tx.accountingCodeScheme.create({ data: {
+        bookId, version: 1, effectiveFrom: date, groupLength: 1, kolLength: 2, moinLength: 3, createdBy: tag,
+      } });
+      const accounts = await Promise.all([
+        tx.accountingLedgerAccount.create({ data: { bookId, codeSchemeId: scheme.id, code: '110101',
+          titlePersian: 'صندوق', level: 'MOIN', normalSide: 'DEBIT', statementRole: 'ASSET', effectiveFrom: date, createdBy: tag } }),
+        tx.accountingLedgerAccount.create({ data: { bookId, codeSchemeId: scheme.id, code: '310101',
+          titlePersian: 'سرمایه', level: 'MOIN', normalSide: 'CREDIT', statementRole: 'EQUITY', effectiveFrom: date, createdBy: tag } }),
+      ]);
       const snapshotId = randomUUID();
       const source = { Version: 1, Number: 1, Date: '2026-03-21T00:00:00', Description: tag };
       const lines = [
@@ -118,7 +141,6 @@ test('independent native posting compares against archived source, retains disag
       const resumed = await recordAccountingParallelComparison(tx, { ...command, pair: undefined });
       assert.equal(resumed.id, aAgain.id);
       assert.equal(resumed.pairs[0].targetId, draft.id);
-      const foreignPeriod = year.periods.find((item) => item.id !== period.id); assert.ok(foreignPeriod);
       await assert.rejects(recordAccountingParallelComparison(tx, { ...command, periodId: foreignPeriod.id }), (error: unknown) => (error as { code?: string }).code === 'PARALLEL_PAIR_INVALID');
       throw rollback;
     }, { timeout: 180_000, maxWait: 20_000 }), (error) => error === rollback);

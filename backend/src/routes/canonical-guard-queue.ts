@@ -9,7 +9,7 @@ import { PhysicalGateExitConflictError, PhysicalGateExitService, PhysicalGateExi
 import { approveManualOutageExit, DispatchRecoveryConflictError, DispatchRecoveryValidationError,
   registerManualOutageExit, reportMissingManualOutagePaper, spoilManualOutageExit, verifyGuardPhysicalReturn } from '../services/dispatchCorrectionOutage';
 import { PilotSafetyPauseError } from '../services/dispatchCutover';
-import { withPartnerGuardReadScope } from '../services/partnerSales/fulfillment/guardReadScope';
+import { readGuardQueueTurnEvidence } from '../services/partnerSales/fulfillment/guardReadScope';
 import { randomUUID } from 'node:crypto';
 import { PartnerLoadingCommandError } from '../services/partnerSales/fulfillment/loadingAuthority';
 
@@ -31,9 +31,6 @@ const responseTurn = (turn: any, redacted = false) => {
       plate: { plate: plate ? `${'*'.repeat(Math.max(0, plate.length - 2))}${plate.slice(-2)}` : '' },
       readiness: { status: snapshot.readiness?.status || 'UNKNOWN' },
     },
-    events: Array.isArray(turn.events) ? turn.events.map((event: any) => ({
-      id: event.id, eventType: event.eventType, fromStatus: event.fromStatus, toStatus: event.toStatus, recordedAt: event.recordedAt,
-    })) : [],
     redacted: true,
   };
 };
@@ -100,23 +97,73 @@ router.get('/dispatch-evidence-exceptions', protect, guardView, async (_req: Wor
   catch (error) { return fail(res, error, 'List dispatch evidence exceptions'); }
 });
 
+const visibleQueueTurns = { driverSource: { not: GuardDriverSource.PERSONAL_PICKUP } } satisfies Prisma.GuardDriverQueueTurnWhereInput;
+const currentQueueStatuses = ['WAITING_AT_GATE', 'AVAILABLE_FOR_LOADING', 'RESERVED_FOR_LOADING', 'LOADING_FINALIZED'] as const;
+const historicalQueueStatuses = ['CLOSED_WITHOUT_LOADING', 'VOIDED', 'EXIT_RECORDED'] as const;
+
+// Loading associations, free-text reasons and audit events require the scoped detail read.
+const queueTurnSummary = {
+  id: true, driverSource: true, status: true, admittedAt: true, admissionSnapshot: true,
+  internalDriverId: true, externalDriverId: true, companyVehicleId: true, externalVehicleId: true,
+  availableAt: true, reservedAt: true, finalizedAt: true, exitedAt: true, closedAt: true, voidedAt: true,
+} satisfies Prisma.GuardDriverQueueTurnSelect;
+
+function readPageNumber(value: unknown, fallback: number) {
+  if (value === undefined) return fallback;
+  if (typeof value !== 'string' || !/^[1-9]\d*$/.test(value)) return null;
+  const number = Number(value);
+  return Number.isSafeInteger(number) ? number : null;
+}
+
 router.get('/canonical-driver-queue', protect, guardView, async (req: WorkspaceRequest, res) => {
+  const redacted = req.workspacePermission === WORKSPACE_PERMISSIONS.VIEW;
+  const capabilities = { canEdit: !redacted };
+  res.set('Cache-Control', 'private, no-store');
   try {
-    const history = req.query.history === 'true';
-    const turns = await withPartnerGuardReadScope(prisma, { actorId: req.user!.id, correlationId: randomUUID() }, async scope => {
-    const rows = await scope.database.guardDriverQueueTurn.findMany({
-      where: { driverSource: { not: 'PERSONAL_PICKUP' }, ...(history ? {} : { status: { in: ['WAITING_AT_GATE', 'AVAILABLE_FOR_LOADING', 'RESERVED_FOR_LOADING', 'LOADING_FINALIZED'] } }) },
-      include: { events: { orderBy: [{ recordedAt: 'asc' }, { id: 'asc' }] } },
-      orderBy: history ? [{ admittedAt: 'desc' }, { id: 'desc' }] : [{ admittedAt: 'asc' }, { id: 'asc' }],
-      take: history ? 250 : undefined,
-    });
-    return rows.map(scope.present);
-    });
-    const redacted = req.workspacePermission === WORKSPACE_PERMISSIONS.VIEW;
-    return res.json({ success: true, data: turns.map((turn) => responseTurn(turn, redacted)), capabilities: { canEdit: !redacted } });
+    if (req.query.history !== 'true') {
+      const turns = await prisma.guardDriverQueueTurn.findMany({
+        where: { ...visibleQueueTurns, status: { in: [...currentQueueStatuses] } },
+        select: queueTurnSummary,
+        orderBy: [{ admittedAt: 'asc' }, { id: 'asc' }],
+      });
+      return res.json({ success: true, data: turns.map(turn => responseTurn(turn, redacted)), capabilities });
+    }
+
+    const page = readPageNumber(req.query.page, 1);
+    const pageSize = readPageNumber(req.query.pageSize, 10);
+    if (page === null || pageSize === null || pageSize > 100) {
+      return res.status(400).json({ success: false, error: 'صفحه یا اندازهٔ صفحه نامعتبر است.' });
+    }
+
+    const where = { ...visibleQueueTurns, status: { in: [...historicalQueueStatuses] } };
+    const skip = (page - 1) * pageSize;
+    const { rows, total } = await prisma.$transaction(async tx => {
+      const total = await tx.guardDriverQueueTurn.count({ where });
+      const rows = skip < total ? await tx.guardDriverQueueTurn.findMany({
+        where, skip, take: pageSize, select: queueTurnSummary,
+        orderBy: [{ admittedAt: 'desc' }, { id: 'desc' }],
+      }) : [];
+      return { rows, total };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+    return res.json({ success: true, data: rows.map(turn => responseTurn(turn, redacted)),
+      capabilities, pagination: { page, pageSize, total } });
   } catch (error) {
     console.error('Canonical Guard queue list error:', error);
     return res.status(500).json({ success: false, error: 'Canonical Guard queue could not be loaded.' });
+  }
+});
+
+router.get('/canonical-driver-queue/:id/events', protect, guardView, async (req: WorkspaceRequest, res) => {
+  res.set('Cache-Control', 'private, no-store');
+  try {
+    const redacted = req.workspacePermission === WORKSPACE_PERMISSIONS.VIEW;
+    const events = await readGuardQueueTurnEvidence(prisma, { actorId: req.user!.id, correlationId: randomUUID() }, {
+      id: req.params.id, ...visibleQueueTurns,
+    }, redacted);
+    if (!events) return res.status(404).json({ success: false, error: 'نوبت یافت نشد.' });
+    return res.json({ success: true, data: events });
+  } catch (error) {
+    return fail(res, error, 'Read canonical Guard queue events');
   }
 });
 

@@ -201,3 +201,70 @@ test('view-only Guard sees redacted queue state without mutation controls', asyn
   expect(admissionOptionRequests).toBe(0);
   await expect(workspace.getByText('بخشی از اطلاعات خودرویی دریافت نشد')).toHaveCount(0);
 });
+
+test('Guard reads historical pages and visit evidence only on demand and restores the selected row', async ({ page }) => {
+  const historyPages: string[] = [];
+  const eventTurns: string[] = [];
+  const secondaryReads: string[] = [];
+  const visit = (id: string, lastName: string, status: string) => ({
+    id, status, driverSource: 'INTERNAL', admittedAt: '2026-08-07T08:00:00.000Z',
+    admissionSnapshot: { driver: { firstName: 'راننده', lastName }, plate: { plate: 'QA' } },
+  });
+
+  await page.route('**/api/security/canonical-driver-queue**', route => {
+    const url = new URL(route.request().url());
+    if (url.pathname.endsWith('/admission-options')) {
+      return route.fulfill({ json: { success: true, data: { internalAssignments: [], externalDrivers: [], externalVehicles: [] } } });
+    }
+    if (url.pathname.endsWith('/events')) {
+      eventTurns.push(url.pathname.split('/').at(-2)!);
+      return route.fulfill({ json: { success: true, data: [{ id: 'event-1', eventType: 'VOIDED',
+        toStatus: 'VOIDED', recordedAt: '2026-08-07T10:00:00.000Z', reason: 'اصلاح پذیرش آزمایشی' }] } });
+    }
+    if (url.searchParams.get('history') === 'true') {
+      const currentPage = url.searchParams.get('page') || '';
+      historyPages.push(currentPage);
+      return route.fulfill({ json: { success: true,
+        data: [currentPage === '2' ? visit('old-visit', 'سابقه دوم', 'VOIDED') : visit('recent-visit', 'سابقه اول', 'EXIT_RECORDED')],
+        pagination: { page: Number(currentPage), pageSize: 10, total: 11 },
+      } });
+    }
+    return route.fulfill({ json: { success: true, data: [visit('active-visit', 'حاضر', 'WAITING_AT_GATE')] } });
+  });
+  await page.route('**/api/security/{driver-queue,vehicle-pairs,vehicle-movements}**', route => {
+    secondaryReads.push(new URL(route.request().url()).pathname);
+    return route.fulfill({ json: { success: true, data: [] } });
+  });
+  await page.route('**/api/security/exit-desk/authorizations**', route =>
+    route.fulfill({ json: { success: true, data: [] } }));
+
+  await login(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/dashboard/security/vehicles');
+  const workspace = page.locator('main.sds-workspace');
+  await expect(workspace.getByText('راننده حاضر · QA', { exact: true })).toBeVisible();
+  await expect(workspace.getByRole('button', { name: 'ورود برای بارگیری', exact: true })).toBeEnabled();
+  expect(historyPages).toEqual([]);
+  expect(eventTurns).toEqual([]);
+  expect(secondaryReads).toEqual([]);
+
+  await workspace.getByRole('button', { name: 'سوابق تردد', exact: true }).click();
+  await expect(workspace.getByText(/راننده سابقه اول/)).toBeVisible();
+  expect(historyPages).toEqual(['1']);
+  expect(eventTurns).toEqual([]);
+
+  await workspace.getByRole('button', { name: 'بعدی', exact: true }).click();
+  await expect(workspace.getByText(/راننده سابقه دوم/)).toBeVisible();
+  const openEvents = workspace.getByRole('button', { name: 'رویدادهای نوبت', exact: true });
+  await openEvents.click();
+  const dialog = page.getByRole('dialog', { name: 'رویدادهای نوبت' });
+  await expect(dialog.getByText('اصلاح پذیرش آزمایشی')).toBeVisible();
+  expect(eventTurns).toEqual(['old-visit']);
+
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await expect(openEvents).toBeFocused();
+  await expect(workspace.getByText(/راننده سابقه دوم/)).toBeVisible();
+  expect(historyPages).toEqual(['1', '2']);
+  await expect(workspace.getByRole('button', { name: 'قبلی', exact: true })).toBeEnabled();
+});

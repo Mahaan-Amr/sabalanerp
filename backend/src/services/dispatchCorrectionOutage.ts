@@ -406,6 +406,11 @@ export const verifyGuardPhysicalReturn = (prisma: PrismaClient, input: { movemen
   const failure = guardReturnValidationFailure(candidate, [...existingReturns, candidate]);
   if (failure) throw new DispatchRecoveryConflictError(failure);
   if (dispatchEvidence.sourceKind === 'SALES_CONTRACT') {
+    if (dispatchEvidence.contractItemId && await tx.stoneReturnReceipt.findFirst({
+      where: { guardReturnMovementId: movement.id, unit: dispatchEvidence.unit,
+        product: { contractItems: { some: { id: dispatchEvidence.contractItemId } } } },
+      select: { id: true },
+    })) throw new DispatchRecoveryConflictError('این ورود گارد برای همین سنگ و واحد در پروندهٔ مرجوعی لجستیک ثبت شده است.');
     try {
       const holding = await readPhysicalDispatchReturnHolding(tx, dispatchEvidence.id);
       if (quantity.gt(holding.remainingQuantity)) {

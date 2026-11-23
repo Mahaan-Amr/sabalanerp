@@ -1,6 +1,93 @@
 import assert from 'node:assert/strict';
+import dns from 'node:dns';
 import http from 'node:http';
+import type { LookupFunction } from 'node:net';
 import test from 'node:test';
+
+test('SMS uses system DNS first, falls back before sending, and does not replay a lost response', async t => {
+  const hostname = 'sms-provider.invalid';
+  let systemFails = false;
+  let fallbackFails = false;
+  let loseResponse = false;
+  let requests = 0;
+  const server = http.createServer((request, response) => {
+    requests += 1;
+    if (loseResponse) {
+      request.socket.destroy();
+      return;
+    }
+    response.setHeader('content-type', 'application/json');
+    response.end(JSON.stringify({ status: 1, data: { messageId: 9001 } }));
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address !== 'string');
+    const environment = {
+      SMS_IR_API_KEY: 'test-api-key',
+      SMS_IR_API_URL: `http://${hostname}:${address.port}`,
+      SMS_IR_ENVIRONMENT: 'production',
+      SMS_IR_DNS_SERVERS: '127.0.0.1',
+      NO_PROXY: hostname,
+      no_proxy: hostname,
+    };
+    const previous = Object.fromEntries(Object.keys(environment).map(key => [key, process.env[key]]));
+    Object.assign(process.env, environment);
+    const system = t.mock.method(dns, 'lookup', (host: string, options: Parameters<LookupFunction>[1], callback: Parameters<LookupFunction>[2]) => {
+      assert.equal(host, hostname);
+      if (systemFails) callback(Object.assign(new Error('lookup failed'), { code: 'EAI_AGAIN' }), '');
+      else if (options.all) callback(null, [{ address: '127.0.0.1', family: 4 }]);
+      else callback(null, '127.0.0.1', 4);
+    });
+    const ipv4Fallback = t.mock.method(dns.Resolver.prototype, 'resolve4', (host: string, callback: (error: NodeJS.ErrnoException | null, addresses: string[]) => void) => {
+      assert.equal(host, hostname);
+      if (fallbackFails) callback(Object.assign(new Error('fallback failed'), { code: 'ESERVFAIL' }), []);
+      else callback(null, ['127.0.0.1']);
+    });
+    const ipv6Fallback = t.mock.method(dns.Resolver.prototype, 'resolve6', (host: string, callback: (error: NodeJS.ErrnoException | null, addresses: string[]) => void) => {
+      assert.equal(host, hostname);
+      callback(Object.assign(new Error('fallback failed'), { code: 'ESERVFAIL' }), []);
+    });
+    try {
+      const { default: sms } = await import('../smsService');
+      const Constructor = sms.constructor as new () => typeof sms;
+      const service = new Constructor();
+      const send = () => service.sendVerificationCode('09120000001', '123456');
+
+      assert.equal((await send()).success, true);
+      assert.equal(system.mock.callCount(), 1);
+      assert.equal(ipv4Fallback.mock.callCount(), 0);
+
+      systemFails = true;
+      assert.equal((await send()).success, true);
+      assert.equal(ipv4Fallback.mock.callCount(), 1);
+      assert.equal(requests, 2);
+
+      fallbackFails = true;
+      const dnsError = await send();
+      assert.equal(dnsError.success, false);
+      assert.equal(dnsError.errorCode, 'ESERVFAIL');
+      assert.equal(ipv6Fallback.mock.callCount(), 1);
+      assert.equal(requests, 2);
+
+      systemFails = false;
+      loseResponse = true;
+      assert.equal((await send()).success, false);
+      assert.equal(ipv4Fallback.mock.callCount(), 2);
+      assert.equal(requests, 3);
+    } finally {
+      system.mock.restore();
+      ipv4Fallback.mock.restore();
+      ipv6Fallback.mock.restore();
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  }
+});
 
 test('hiring SMS methods send the approved SMS.ir template IDs and exact case-sensitive parameters', async () => {
   const requests: Array<{ method?: string; url?: string; body?: any }> = [];
@@ -29,7 +116,9 @@ test('hiring SMS methods send the approved SMS.ir template IDs and exact case-se
     process.env.SMS_IR_HIRING_INVITATION_TEMPLATE_ID = '343360';
     process.env.SMS_IR_HIRING_CORRECTION_TEMPLATE_ID = '763918';
     process.env.SMS_IR_HIRING_OFFER_TEMPLATE_ID = '894291';
-    const { default: sms } = await import('../smsService');
+    const { default: singleton } = await import('../smsService');
+    const Constructor = singleton.constructor as new () => typeof singleton;
+    const sms = new Constructor();
     const invitation = await sms.sendHiringInvitation({ phoneNumber: '09120000001', code: '123456' });
     const correction = await sms.sendHiringCorrection({ phoneNumber: '09120000001', details: 'اصلاح کد ملی', replacementCode: '123456' });
     const offer = await sms.sendHiringOfferReady({ phoneNumber: '09120000001', code: '123456' });

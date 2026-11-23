@@ -7,6 +7,7 @@ import axios from 'axios';
 import dns from 'dns';
 import http from 'http';
 import https from 'https';
+import type { LookupFunction } from 'net';
 import { resolveHiringInvitationTemplate } from './hiringSmsTemplate';
 
 interface SendVerificationCodeResponse {
@@ -153,10 +154,10 @@ class SmsService {
       .filter(Boolean);
 
     if (this.dnsServers.length > 0) {
-      const lookup = this.createCustomDnsLookup();
+      const lookup = this.createDnsLookupWithFallback();
       this.httpAgent = new http.Agent({ lookup });
       this.httpsAgent = new https.Agent({ lookup });
-      console.info('[sms.ir] using custom DNS resolvers', {
+      console.info('[sms.ir] DNS fallback configured', {
         dnsServers: this.dnsServers
       });
     }
@@ -166,70 +167,48 @@ class SmsService {
     }
   }
 
-  private createCustomDnsLookup() {
+  private createDnsLookupWithFallback(): LookupFunction {
     const resolver = new dns.Resolver();
     resolver.setServers(this.dnsServers);
 
-    return (
-      hostname: string,
-      options: dns.LookupOneOptions | dns.LookupAllOptions | ((error: NodeJS.ErrnoException | null, address: string, family: number) => void),
-      callback?: (
-        error: NodeJS.ErrnoException | null,
-        address: string | dns.LookupAddress[],
-        family?: number
-      ) => void
-    ) => {
-      const cb =
-        typeof options === 'function'
-          ? options
-          : callback;
-      const lookupOptions = typeof options === 'function' ? {} : options;
-
-      if (!cb) {
-        return;
-      }
-
-      const done = (error: NodeJS.ErrnoException | null, address?: string, family?: number) => {
-        if (error) {
-          cb(error, '', 4);
+    return (hostname, options, callback) => {
+      // Fall back while resolving the address, before the HTTP request can be sent.
+      const fallback = (systemError: NodeJS.ErrnoException) => {
+        const done = (error: NodeJS.ErrnoException | null, addresses: string[], family: number) => {
+          if (error || !addresses.length) {
+            callback(error ?? systemError, '');
+          } else if (options.all) {
+            callback(null, addresses.map(address => ({ address, family })));
+          } else {
+            callback(null, addresses[0], family);
+          }
+        };
+        if (options.family === 6 || options.family === 'IPv6') {
+          resolver.resolve6(hostname, (error, addresses) => done(error, addresses, 6));
           return;
         }
-
-        if (!address || !family) {
-          const lookupError = new Error(`No DNS address resolved for ${hostname}`) as NodeJS.ErrnoException;
-          lookupError.code = 'ENOTFOUND';
-          cb(lookupError, '', 4);
-          return;
-        }
-
-        if ('all' in lookupOptions && lookupOptions.all) {
-          (
-            cb as unknown as (
-              error: NodeJS.ErrnoException | null,
-              addresses: dns.LookupAddress[]
-            ) => void
-          )(null, [{ address, family }]);
-          return;
-        }
-
-        cb(null, address, family);
-      };
-
-      resolver.resolve4(hostname, (ipv4Error, ipv4Addresses) => {
-        if (!ipv4Error && ipv4Addresses.length > 0) {
-          done(null, ipv4Addresses[0], 4);
-          return;
-        }
-
-        resolver.resolve6(hostname, (ipv6Error, ipv6Addresses) => {
-          if (!ipv6Error && ipv6Addresses.length > 0) {
-            done(null, ipv6Addresses[0], 6);
+        resolver.resolve4(hostname, (ipv4Error, ipv4Addresses) => {
+          if ((!ipv4Error && ipv4Addresses.length) || options.family === 4 || options.family === 'IPv4') {
+            done(ipv4Error, ipv4Addresses, 4);
             return;
           }
-
-          done((ipv4Error || ipv6Error) as NodeJS.ErrnoException);
+          resolver.resolve6(hostname, (ipv6Error, ipv6Addresses) => {
+            done(ipv6Error && (ipv4Error ?? ipv6Error), ipv6Addresses, 6);
+          });
         });
-      });
+      };
+
+      if (options.all) {
+        dns.lookup(hostname, { ...options, all: true }, (error, addresses) => {
+          if (error) fallback(error);
+          else callback(null, addresses);
+        });
+      } else {
+        dns.lookup(hostname, { ...options, all: false }, (error, address, family) => {
+          if (error) fallback(error);
+          else callback(null, address, family);
+        });
+      }
     };
   }
 

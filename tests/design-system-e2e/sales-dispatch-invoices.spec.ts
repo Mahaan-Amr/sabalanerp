@@ -489,3 +489,52 @@ test("Accounting shows the OTP controls after the biometric fallback starts", as
   await code.press("Enter");
   await expect(page.getByText("رمز راننده تأیید شد. تأیید نهایی را سرپرست گارد تکمیل می‌کند.", { exact: true })).toBeVisible();
 });
+
+test("Accounting shows how to recover from an unregistered biometric workstation", async ({ page }) => {
+  await loginAsAdmin(page);
+  const waybillId = "qa-workstation-waybill";
+  const sessionId = "qa-workstation-session";
+  await page.route("**/api/accounting/dispatch-candidates", route => reply(route, [{
+    id: "qa-workstation-candidate", loadingId: "qa-workstation-loading", status: "ACCEPTED", canManage: true,
+    summary: { loadingNumber: "15", driverName: "راننده نمونه", driverSource: "INTERNAL" },
+    waybills: [{ id: waybillId, number: "23", status: "ISSUED" }],
+  }]));
+  await page.route("**/api/dispatch-confirmation/capabilities", route => reply(route, {
+    canManageAccountingCandidates: true, canManageAccountingConfirmation: true,
+  }));
+  await page.route(`**/api/dispatch-confirmation/waybills/${waybillId}/sessions`, route => reply(route, {
+    id: sessionId, waybillId, driverSource: "INTERNAL", method: "INTERNAL_BIOMETRIC", status: "ACTIVE",
+  }));
+  await page.route(`**/api/dispatch-confirmation/sessions/${sessionId}/biometric-command`, route => route.fulfill({
+    status: 409,
+    json: {
+      success: false,
+      code: "BIOMETRIC_WORKSTATION_NOT_REGISTERED",
+      error: "این ایستگاه اثر انگشت ثبت نشده است. از پشتیبانی بخواهید همین ایستگاه را ثبت کند و سپس دوباره تلاش کنید.",
+    },
+  }));
+  await page.route(`**/api/dispatch-confirmation/sessions/${sessionId}/fallback`, route => route.fulfill({
+    status: 409,
+    json: { success: false, error: "روش جایگزین فقط پس از خطای معتبر حسگر یا دو عدم تطبیق معتبر پیاپی در همین نوبت مجاز است." },
+  }));
+  await page.route("http://127.0.0.1:47631/v1/status", route => route.fulfill({
+    headers: { "Access-Control-Allow-Origin": "*" },
+    json: { workstationId: "UNREGISTERED-TEST" },
+  }));
+  const captures: string[] = [];
+  await page.route("http://127.0.0.1:47631/v1/commands", route => {
+    captures.push(route.request().url());
+    return route.abort();
+  });
+  await page.goto("/dashboard/accounting/dispatch");
+  await page.getByRole("table").getByRole("button", { name: "تأیید هویت راننده" }).click();
+
+  const scan = page.getByRole("button", { name: "بررسی انگشت اشاره راست" });
+  await scan.click();
+  await expect(page.getByText("این ایستگاه اثر انگشت ثبت نشده است. از پشتیبانی بخواهید همین ایستگاه را ثبت کند و سپس دوباره تلاش کنید.", { exact: true })).toBeVisible();
+  expect(captures).toEqual([]);
+  await expect(scan).toBeEnabled();
+  await page.getByRole("button", { name: "استفاده از روش جایگزین" }).click();
+  await expect(page.getByText(/روش جایگزین فقط پس از خطای معتبر حسگر/)).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "رمز یک‌بارمصرف راننده" })).toHaveCount(0);
+});

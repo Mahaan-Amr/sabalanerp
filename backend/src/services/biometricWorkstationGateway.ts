@@ -17,6 +17,14 @@ interface WorkstationConfig {
 }
 interface ConfigDocument { [workstationId: string]: WorkstationConfig }
 
+export class BiometricWorkstationNotRegisteredError extends DispatchConfirmationConflictError {
+  readonly code = 'BIOMETRIC_WORKSTATION_NOT_REGISTERED';
+
+  constructor() {
+    super('این ایستگاه اثر انگشت ثبت نشده است. از پشتیبانی بخواهید همین ایستگاه را ثبت کند و سپس دوباره تلاش کنید.');
+  }
+}
+
 const safeId = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const fingerId = /^[A-Z_]{3,32}$/;
 const requireSafe = (value: string, label: string) => { if (!safeId.test(value)) throw new DispatchConfirmationValidationError(`${label} معتبر نیست.`); return value; };
@@ -48,8 +56,8 @@ export class BiometricWorkstationGateway {
   constructor(private readonly prisma: PrismaClient, private readonly config: ConfigDocument, private readonly now = () => new Date()) {}
 
   private workstation(id: string) {
+    if (!Object.prototype.hasOwnProperty.call(this.config, id)) throw new BiometricWorkstationNotRegisteredError();
     const value = this.config[id];
-    if (!value) throw new Error('Biometric workstation is not registered');
     return { commandSecret: decodeKey(value.commandSecretBase64, 'Biometric workstation command secret'), activeTransportKeyId: value.activeTransportKeyId,
       transportKeys: Object.fromEntries(Object.entries(value.transportKeysBase64).map(([keyId, encoded]) => [keyId, decodeKey(encoded, `Biometric transport key ${keyId}`)])) };
   }

@@ -3,6 +3,11 @@ import express from 'express';
 import accountingRouter from '../../routes/accounting';
 import { prisma } from '../../lib/prisma';
 import { createAuthoritativeSession, SESSION_COOKIE } from '../identitySessionService';
+import { createAccountingRequestObserver } from '../../middleware/accountingRequestObserver';
+import type { AccountingReadTimings } from '../accountingReadTiming';
+
+const measuredStages = ['lockWait', 'authorization', 'population', 'rowHydration'] as const;
+const p95 = (samples: number[]) => samples.sort((a, b) => a - b)[Math.ceil(0.95 * samples.length) - 1];
 
 async function main() {
   const actorId = process.env.ACCOUNTING_447_ACTOR_ID;
@@ -15,6 +20,10 @@ async function main() {
   assert.equal(partnerRows.length, 30);
   const { token, session } = await createAuthoritativeSession(prisma, actorId, { ipAddress: '127.0.0.1' });
   const app = express();
+  const stagesByRequest = new Map<string, AccountingReadTimings>();
+  app.use(createAccountingRequestObserver(process.env.APP_COMMIT, record => {
+    if (record.stagesMs) stagesByRequest.set(record.requestId, record.stagesMs);
+  }));
   app.use('/api/accounting', accountingRouter);
   const server = app.listen(0, '127.0.0.1');
   await new Promise<void>(resolve => server.once('listening', resolve));
@@ -34,6 +43,7 @@ async function main() {
     for (const [name, path] of [['dashboard', '/dashboard?range=3m'],
       ['reviewable', '/contracts?view=reviewable&page=1&pageSize=12']] as const) {
       const samples: number[] = [];
+      const stageSamples = measuredStages.map(stage => ({ stage, samples: [] as number[] }));
       for (let index = 0; index < 20; index++) {
         const started = performance.now();
         const response = await fetch(`${base}${path}`, { headers });
@@ -41,11 +51,21 @@ async function main() {
         samples.push(Math.round(performance.now() - started));
         assert.equal(response.status, 200, `${name}: ${JSON.stringify(body).slice(0, 300)}`);
         assert.equal(body.success, true);
+        const requestId = response.headers.get('x-accounting-request-id');
+        assert.ok(requestId, `${name}: request correlation`);
+        const observedStages = stagesByRequest.get(requestId);
+        for (const sample of stageSamples) {
+          const duration = observedStages?.[sample.stage];
+          assert.ok(typeof duration === 'number' && Number.isFinite(duration) && duration >= 0, `${name}: ${sample.stage}`);
+          sample.samples.push(duration);
+        }
+        stagesByRequest.delete(requestId);
         if (name === 'reviewable') assert.equal(body.data?.total, 965);
         else assert.equal(body.data?.workspace?.commandCenter?.reviewableContracts?.count, 965);
       }
-      samples.sort((a, b) => a - b);
-      console.log(JSON.stringify({ name, samples, p95: samples[Math.ceil(.95 * samples.length) - 1] }));
+      const durationP95 = p95(samples);
+      const stageP95Ms = Object.fromEntries(stageSamples.map(sample => [sample.stage, p95(sample.samples)]));
+      console.log(JSON.stringify({ name, samples, p95: durationP95, stageP95Ms }));
     }
     for (const [sourceKind, expected] of [['SALES_CONTRACT', 935], ['PARTNER_INTERNAL_RECORD', 30]] as const) {
       const response = await fetch(`${base}/contracts?view=reviewable&sourceKind=${sourceKind}&page=1&pageSize=100`, {

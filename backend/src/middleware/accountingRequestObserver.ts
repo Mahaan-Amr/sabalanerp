@@ -15,6 +15,7 @@ const accountingRoutes = [
   [/^\/api\/accounting\/loadings\/[^/]+\/sepidar-reference$/, '/api/accounting/loadings/:id/sepidar-reference'],
   [/^\/api\/dispatch-confirmation(?:\/.*)?$/, '/api/dispatch-confirmation/:path'],
   [/^\/api\/accounting(?:\/.*)?$/, '/api/accounting/:path'],
+  [/^\/files\/accounting-contracts(?:\/.*)?$/, '/files/accounting-contracts/:path'],
 ] as const;
 
 export function accountingOperationalRoute(url: string | undefined) {

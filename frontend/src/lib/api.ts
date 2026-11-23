@@ -1385,8 +1385,10 @@ export const biAPI = {
 
 export const salesReportsAPI = {
   getOverview: (params?: any) => api.get('/sales/reports/overview', { params }),
-  getSellers: (params?: any) => api.get('/sales/reports/sellers', { params }),
-  getPresets: () => api.get('/sales/reports/presets'),
+  getSummary: (params: Record<string, string>, signal?: AbortSignal) => api.get('/sales/reports/summary', { params, signal }),
+  getDetails: (params: Record<string, string | number>, signal?: AbortSignal) => api.get('/sales/reports/details', { params, signal }),
+  getSellers: (params?: any, signal?: AbortSignal) => api.get('/sales/reports/sellers', { params, signal }),
+  getPresets: (signal?: AbortSignal) => api.get('/sales/reports/presets', { signal }),
   createPreset: (data: any) => api.post('/sales/reports/presets', data),
   deletePreset: (id: string) => api.delete(`/sales/reports/presets/${id}`),
   downloadPdf: (filters: any, configuration: any) =>
@@ -1661,7 +1663,11 @@ export const securityAPI = {
   getVehiclePairs: (params?: any) => api.get('/security/vehicle-pairs', { params }),
   getVehiclePairPhoto: (photoId: string) => api.get(`/security/vehicle-pairs/photos/${photoId}`, { responseType: 'blob' }),
   getDriverQueue: (history = false) => api.get('/security/driver-queue', { params: { history } }),
-  getCanonicalDriverQueue: (history = false) => api.get('/security/canonical-driver-queue', { params: { history } }),
+  getCanonicalDriverQueue: () => api.get('/security/canonical-driver-queue'),
+  getCanonicalDriverQueueHistory: (page: number, signal?: AbortSignal) =>
+    api.get('/security/canonical-driver-queue', { params: { history: true, page }, signal }),
+  getCanonicalDriverQueueEvents: (id: string, signal?: AbortSignal) =>
+    api.get(`/security/canonical-driver-queue/${encodeURIComponent(id)}/events`, { signal }),
   getCanonicalQueueAdmissionOptions: () => api.get('/security/canonical-driver-queue/admission-options'),
   admitCanonicalQueueTurn: (data: { source: 'INTERNAL' | 'EXTERNAL'; driverId: string; vehicleId?: string } |
     { source: 'CUSTOMER_PICKUP'; vehicleType: string; plate: string; phone: string }) => api.post('/security/canonical-driver-queue', data),

@@ -1,9 +1,10 @@
 'use client';
-import { ErpButton, ErpEmptyState, ErpInlineState, ErpInput, ErpPressable, ErpSegmentedControl, ErpSelect, ErpSheet, ErpStatus, ErpTextarea } from '@/components/erp';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ErpButton, ErpEmptyState, ErpInlineState, ErpInput, ErpLoading, ErpPagination, ErpPressable, ErpSegmentedControl, ErpSelect, ErpSheet, ErpStatus, ErpTextarea } from '@/components/erp';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import moment from 'moment-jalaali';
+import { isAxiosError } from 'axios';
 import {
   FaBoxes, FaChartLine, FaDownload, FaFileContract, FaFileInvoiceDollar, FaFilePdf, FaFilter,
   FaMoneyBillWave, FaPrint, FaSave, FaSync, FaTruck, FaUsers
@@ -17,6 +18,46 @@ import { getSalesOperationalErrorMessage } from '@/features/sales/salesOperation
 
 type Mode = 'sales' | 'bi';
 type Report = any;
+type ReportFilters = Record<string, string>;
+type DrilldownSelection = { kind: string; key?: string; commercialFlowVersion?: number; page?: number };
+type ReportPage = { rows: any[]; page: number; pageSize: number; totalPages: number; total: number };
+type DrilldownRequest = { title: string; description?: string; selection: DrilldownSelection; accounting?: boolean };
+const pageSize = 25;
+
+function PagedReportRows({ filters, selection, children }: {
+  filters: ReportFilters;
+  selection: DrilldownSelection;
+  children: (rows: any[]) => React.ReactNode;
+}) {
+  const [page, setPage] = useState(1);
+  const [attempt, retry] = useState(0);
+  const [result, setResult] = useState<{ page: number; data?: ReportPage; error?: string }>();
+  useEffect(() => {
+    const controller = new AbortController();
+    salesReportsAPI.getDetails({ ...filters, ...selection, page, pageSize }, controller.signal)
+      .then((response) => {
+        if (!controller.signal.aborted) setResult({ page, data: response.data.data });
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted) setResult({ page, error: getSalesOperationalErrorMessage(error, {
+          failedAction: 'دریافت جزئیات گزارش فروش',
+          nextStep: 'دوباره تلاش کنید.',
+        }) });
+      });
+    return () => controller.abort();
+  }, [attempt, filters, page, selection]);
+  const current = result?.page === page ? result : undefined;
+  if (current?.error) return <ErpInlineState kind="error" title={current.error} action={{ label: 'تلاش دوباره',
+    onClick: () => { setResult(undefined); retry((value) => value + 1); } }} />;
+  if (!current?.data) return <div role="status" aria-label="در حال دریافت جزئیات گزارش"><ErpLoading /></div>;
+  const data = current.data;
+  return <>
+    {children(data.rows)}
+    {data.total > data.pageSize && <ErpPagination currentPage={data.page} totalPages={data.totalPages} totalItems={data.total}
+      itemsPerPage={data.pageSize} onPageChange={setPage} itemLabel="قرارداد" />}
+  </>;
+}
+const allContracts = { kind: 'contracts' };
 type ExportConfig = {
   title: string; subtitle: string; note: string; orientation: 'portrait' | 'landscape'; pageSize: 'A4' | 'A3'; sections: string[];
   includeCharts: boolean; includeTables: boolean; contractColumns: string[];
@@ -105,33 +146,30 @@ function Metric({ label, value, hint, tone = 'teal' }: { label: string; value: R
 
 function Table({ columns, rows, onRow }: { columns: Array<{ key: string; label: string; render?: (row: any) => React.ReactNode }>; rows: any[]; onRow?: (row: any) => void }) {
   return <div className="overflow-x-auto"><table className="w-full min-w-[760px] text-right text-sm"><thead><tr className="border-b border-[var(--sds-border-default)] text-xs text-[var(--sds-text-secondary)] dark:border-[var(--sds-border-strong)] dark:text-[var(--sds-text-muted)]">{columns.map((column) => <th key={column.key} className="px-3 py-3 font-bold">{column.label}</th>)}</tr></thead><tbody>
-    {rows.length ? rows.map((row, index) => <tr key={row.id || index} onClick={() => onRow?.(row)} className={`border-b border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)] ${onRow ? 'cursor-pointer hover:bg-[var(--sds-accent-surface)] dark:hover:bg-[var(--sds-accent-surface)]' : ''}`}>{columns.map((column) => <td key={column.key} className="px-3 py-3 align-top text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{column.render ? column.render(row) : row[column.key]}</td>)}</tr>) : <tr><td colSpan={columns.length} className="px-4 py-10 text-center text-[var(--sds-text-secondary)]">داده‌ای در این دامنه وجود ندارد؛ مقدار صفر اختراع نشده است.</td></tr>}
+    {rows.length ? rows.map((row, index) => <tr key={row.id || index} className="border-b border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]">{columns.map((column, columnIndex) => <td key={column.key} className="px-3 py-3 align-top text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{onRow && columnIndex === 0 ? <ErpButton variant="ghost" tone="primary" label={String(row[column.key])} onClick={() => onRow(row)} /> : column.render ? column.render(row) : row[column.key]}</td>)}</tr>) : <tr><td colSpan={columns.length} className="px-4 py-10 text-center text-[var(--sds-text-secondary)]">داده‌ای در این دامنه وجود ندارد؛ مقدار صفر اختراع نشده است.</td></tr>}
   </tbody></table></div>;
 }
 
-function Drilldown({ title, description, rows, onClose }: { title: string; description: string; rows: any[]; onClose: () => void }) {
-  return <div className="fixed inset-0 z-50 flex items-stretch justify-end" role="dialog" aria-modal="true" aria-label={title}>
-    <ErpPressable type="button" aria-label="بستن جزئیات" className="absolute inset-0 bg-[var(--sds-surface-overlay)]" onClick={onClose} />
-    <aside dir="rtl" className="relative h-full w-full max-w-3xl overflow-y-auto bg-[var(--sds-surface-raised)] p-5 shadow-2xl">
-    <div className="mb-5 flex items-start justify-between gap-3"><div><h2 className="text-xl font-black text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{title}</h2><p className="mt-2 text-sm leading-6 text-[var(--sds-text-secondary)]">{description}</p></div><ErpPressable type="submit" onClick={onClose} className="rounded-lg border px-3 py-2 text-sm">بستن</ErpPressable></div>
-    <Table rows={rows} columns={[
-      { key: 'contractNumber', label: 'قرارداد', render: (row) => row.canOpenSource ? <Link className="font-bold text-[var(--sds-accent)] underline" href={`/dashboard/sales/contracts/${row.id}`}>{row.contractNumber}</Link> : row.contractNumber },
-      { key: 'customer', label: 'مشتری' }, { key: 'statusLabel', label: 'وضعیت' }, { key: 'amount', label: 'مبلغ', render: (row) => money(row.amount) },
-      { key: 'responsibleSeller', label: 'مسئول فروش' }, { key: 'realizedAt', label: 'تاریخ تحقق', render: (row) => dateFa(row.realizedAt) }
-    ]} />
-  </aside></div>;
+function ContractDrilldownRows({ rows, showTrendEvents = false }: { rows: any[]; showTrendEvents?: boolean }) {
+  return <Table rows={rows} columns={[
+    { key: 'contractNumber', label: 'قرارداد', render: (row) => row.canOpenSource ? <Link className="font-bold text-[var(--sds-accent)] underline" href={`/dashboard/sales/contracts/${row.id}`}>{row.contractNumber}</Link> : row.contractNumber },
+    { key: 'customer', label: 'مشتری' }, { key: 'statusLabel', label: 'وضعیت' }, { key: 'amount', label: 'مبلغ', render: (row) => money(row.amount) },
+    { key: 'responsibleSeller', label: 'مسئول فروش' },
+    showTrendEvents ? { key: 'trendEvents', label: 'رویدادهای مؤثر در بازه', render: (row) => row.trendEvents?.length
+      ? <ul>{row.trendEvents.map((event: { eventType: string; effectiveAt: string; amount: number }, index: number) =>
+        <li key={index}>{event.eventType === 'REALIZED' ? 'تحقق' : 'تعدیل'} · {dateFa(event.effectiveAt)} · {money(event.amount)}</li>)}</ul>
+      : '—' } : { key: 'realizedAt', label: 'تاریخ تحقق', render: (row) => dateFa(row.realizedAt) },
+  ]} />;
 }
 
-function AccountingDrilldown({ title, rows, onClose }: { title: string; rows: any[]; onClose: () => void }) {
-  return <ErpSheet open={true} onClose={onClose} title={title} presentation="modal" size="wide">
-    <Table rows={rows} columns={[
-      { key: 'contractNumber', label: 'شماره قرارداد', render: (row) => row.canOpenSource ? <Link className="font-bold text-[var(--sds-accent)] underline" href={`/dashboard/sales/contracts/${row.id}`}>{row.contractNumber}</Link> : row.contractNumber },
-      { key: 'customer', label: 'مشتری' },
-      { key: 'financiallyApprovedAt', label: 'تاریخ تأیید مالی', render: (row) => dateFa(row.financiallyApprovedAt) },
-      { key: 'amount', label: 'مبلغ رکورد مالی (ریال)', render: (row) => rialNumber(row.amount) },
-      { key: 'hasConflict', label: 'وضعیت', render: (row) => row.hasConflict ? <ErpStatus label="تعارض رکورد مالی" tone="warning" /> : <ErpStatus label="معتبر" tone="success" /> },
-    ]} />
-  </ErpSheet>;
+function AccountingDrilldownRows({ rows }: { rows: any[] }) {
+  return <Table rows={rows} columns={[
+    { key: 'contractNumber', label: 'شماره قرارداد', render: (row) => row.canOpenSource ? <Link className="font-bold text-[var(--sds-accent)] underline" href={`/dashboard/sales/contracts/${row.id}`}>{row.contractNumber}</Link> : row.contractNumber },
+    { key: 'customer', label: 'مشتری' },
+    { key: 'financiallyApprovedAt', label: 'تاریخ تأیید مالی', render: (row) => dateFa(row.financiallyApprovedAt) },
+    { key: 'amount', label: 'مبلغ رکورد مالی (ریال)', render: (row) => rialNumber(row.amount) },
+    { key: 'hasConflict', label: 'وضعیت', render: (row) => row.hasConflict ? <ErpStatus label="تعارض رکورد مالی" tone="warning" /> : <ErpStatus label="معتبر" tone="success" /> },
+  ]} />;
 }
 
 export default function SalesReportingDashboard({ mode = 'sales' }: { mode?: Mode }) {
@@ -141,7 +179,11 @@ export default function SalesReportingDashboard({ mode = 'sales' }: { mode?: Mod
   const requestedRange = searchParams.get('period');
   const requestedView = searchParams.get('view');
   const storageKey = `sabalan-report-filters-${mode}`;
-  const [report, setReport] = useState<Report | null>(null);
+  const [received, setReceived] = useState<{ key: string; report: Report } | null>(null);
+  const [filtersReady, setFiltersReady] = useState(false);
+  const latestReportRequest = useRef<AbortController | null>(null);
+  const latestPresetSave = useRef(0);
+  const [presetError, setPresetError] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [range, setRange] = useState(rangeOptions.some(([id]) => id === requestedRange) ? requestedRange! : 'month');
@@ -152,12 +194,12 @@ export default function SalesReportingDashboard({ mode = 'sales' }: { mode?: Mod
   const [activeTab, setActiveTab] = useState(tabs.some(([id]) => id === requestedView) ? requestedView! : 'overview');
   const [departments, setDepartments] = useState<any[]>([]);
   const [reportSellers, setReportSellers] = useState<any[]>([]);
-  const [drilldown, setDrilldown] = useState<{ title: string; description: string; rows: any[] } | null>(null);
-  const [accountingDrilldown, setAccountingDrilldown] = useState<{ title: string; rows: any[] } | null>(null);
+  const [drilldown, setDrilldown] = useState<(DrilldownRequest & { requestKey: string; rows?: any[] }) | null>(null);
   const [presets, setPresets] = useState<any[]>([]);
   const [presetName, setPresetName] = useState('');
   const [presetVisibility, setPresetVisibility] = useState('PERSONAL');
   const [exporting, setExporting] = useState(false);
+  const [exportFeedback, setExportFeedback] = useState<{ kind: 'success' | 'error'; title: string } | null>(null);
   const [config, setConfig] = useState<ExportConfig>({
     title: 'گزارش جامع فروش', subtitle: '', note: '', orientation: 'landscape', pageSize: 'A4',
     sections: sectionOptions.map(([id]) => id), includeCharts: true, includeTables: true,
@@ -165,37 +207,86 @@ export default function SalesReportingDashboard({ mode = 'sales' }: { mode?: Mod
   });
 
   useEffect(() => {
-    try { const saved = JSON.parse(localStorage.getItem(storageKey) || '{}'); if (!requestedRange && saved.range) setRange(saved.range); if (saved.customFrom) setCustomFrom(saved.customFrom); if (saved.customTo) setCustomTo(saved.customTo); if (saved.departmentId) setDepartmentId(saved.departmentId); if (saved.sellerId) setSellerId(saved.sellerId); } catch {}
-  }, [requestedRange, storageKey]);
-
-  const filters = useMemo(() => ({ ...resolveRange(range, customFrom, customTo), ...(departmentId ? { departmentId } : {}), ...(sellerId ? { sellerId } : {}) }), [range, customFrom, customTo, departmentId, sellerId]);
-
-  const load = useCallback(async () => {
-    setLoading(true); setError('');
     try {
-      const response = mode === 'bi' ? await biAPI.getSalesOverview(filters) : await salesReportsAPI.getOverview(filters);
-      setReport(response.data.data);
-      localStorage.setItem(storageKey, JSON.stringify({ range, customFrom, customTo, departmentId, sellerId }));
+      const saved = JSON.parse(localStorage.getItem(storageKey) || '{}');
+      if (!requestedRange && rangeOptions.some(([id]) => id === saved.range)) setRange(saved.range);
+      if (saved.customFrom) setCustomFrom(saved.customFrom);
+      if (saved.customTo) setCustomTo(saved.customTo);
+      if (saved.departmentId) setDepartmentId(saved.departmentId);
+      if (saved.sellerId) setSellerId(saved.sellerId);
+    } catch {}
+    setFiltersReady(true);
+    // Read saved filters once. URL replacements initiated by controls must not replay old filters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storageKey]);
+
+  const filters = useMemo<ReportFilters>(() => ({
+    ...resolveRange(range, customFrom, customTo),
+    ...(departmentId ? { departmentId } : {}),
+    ...(sellerId ? { sellerId } : {}),
+  } as ReportFilters), [range, customFrom, customTo, departmentId, sellerId]);
+  const section = activeTab === 'accounting-registered' ? 'accountingRegistered'
+    : ['contracts', 'export'].includes(activeTab) ? 'metadata' : activeTab;
+  const requestKey = JSON.stringify([mode, filters, mode === 'sales' ? section : null]);
+  const report = received?.key === requestKey ? received.report : null;
+  const permissions = received?.report.permissions;
+  const load = useCallback(async () => {
+    if (!filtersReady) return;
+    latestReportRequest.current?.abort();
+    const request = new AbortController();
+    latestReportRequest.current = request;
+    setLoading(true);
+    setError('');
+    try {
+      const response = mode === 'bi' ? await biAPI.getSalesOverview(filters)
+        : await salesReportsAPI.getSummary({ ...filters, section }, request.signal);
+      if (request.signal.aborted) return;
+      setReceived({ key: requestKey, report: response.data.data });
+      try { localStorage.setItem(storageKey, JSON.stringify({ range, customFrom, customTo, departmentId, sellerId })); } catch {}
     } catch (reason: any) {
+      if (request.signal.aborted) return;
+      if ([401, 403].includes(reason?.response?.status)) setReceived(null);
       setError(mode === 'sales'
         ? getSalesOperationalErrorMessage(reason, {
           failedAction: 'دریافت گزارش فروش',
           nextStep: 'بازه و فیلترها را بررسی کنید و دوباره تلاش کنید.'
         })
         : reason?.response?.data?.error || 'خطا در دریافت گزارش');
+    } finally {
+      if (!request.signal.aborted) setLoading(false);
     }
-    finally { setLoading(false); }
-  }, [mode, filters, storageKey, range, customFrom, customTo, departmentId, sellerId]);
+  }, [mode, filters, filtersReady, requestKey, section, storageKey, range, customFrom, customTo, departmentId, sellerId]);
 
-  useEffect(() => { load(); }, [load]);
-  useEffect(() => { if (report?.permissions?.canCompany && !departments.length) departmentsAPI.getDepartments().then((response) => setDepartments(response.data.data || response.data || [])).catch(() => undefined); }, [report?.permissions?.canCompany, departments.length]);
-  useEffect(() => { if (mode === 'sales') salesReportsAPI.getPresets().then((response) => setPresets(response.data.data || [])).catch(() => undefined); }, [mode]);
+  useLayoutEffect(() => () => latestReportRequest.current?.abort(), [load]);
+  useEffect(() => { void load(); }, [load]);
   useEffect(() => {
-    if (mode !== 'sales' || !report?.permissions?.canSelectSeller) return;
-    salesReportsAPI.getSellers(departmentId ? { departmentId } : undefined)
-      .then((response) => setReportSellers(response.data.data || []))
-      .catch(() => setReportSellers([]));
-  }, [departmentId, mode, report?.permissions?.canSelectSeller]);
+    if (!permissions?.canCompany) { setDepartments([]); return; }
+    let current = true;
+    departmentsAPI.getDepartments()
+      .then((response) => { if (current) setDepartments(response.data.data || response.data || []); })
+      .catch(() => undefined);
+    return () => { current = false; };
+  }, [permissions?.canCompany]);
+  useEffect(() => {
+    if (mode !== 'sales' || activeTab !== 'export') return;
+    const controller = new AbortController();
+    salesReportsAPI.getPresets(controller.signal).then((response) => {
+      if (!controller.signal.aborted) setPresets((current) => {
+        const byId = new Map([...(response.data.data || []), ...current].map((row) => [row.id, row]));
+        return Array.from(byId.values());
+      });
+    }).catch(() => undefined);
+    return () => controller.abort();
+  }, [mode, activeTab]);
+  useEffect(() => {
+    setReportSellers([]);
+    if (mode !== 'sales' || !permissions?.canSelectSeller) return;
+    const controller = new AbortController();
+    salesReportsAPI.getSellers(departmentId ? { departmentId } : undefined, controller.signal)
+      .then((response) => { if (!controller.signal.aborted) setReportSellers(response.data.data || []); })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [departmentId, mode, permissions?.canSelectSeller]);
 
   const updateReportUrl = useCallback((updates: { period?: string; view?: string }) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -203,7 +294,7 @@ export default function SalesReportingDashboard({ mode = 'sales' }: { mode?: Mod
     router.replace(`${pathname}?${params.toString()}`, { scroll: false });
   }, [pathname, router, searchParams]);
   const changeRange = (nextRange: string) => { setRange(nextRange); updateReportUrl({ period: nextRange }); };
-  const changeTab = (nextTab: string) => { setActiveTab(nextTab); updateReportUrl({ view: nextTab }); };
+  const changeTab = (nextTab: string) => { setDrilldown(null); setActiveTab(nextTab); updateReportUrl({ view: nextTab }); };
 
   useEffect(() => {
     if (activeTab === 'accounting-registered' && report && !report.permissions.canViewSellerComparisons) changeTab('overview');
@@ -212,25 +303,45 @@ export default function SalesReportingDashboard({ mode = 'sales' }: { mode?: Mod
   }, [activeTab, report]);
 
   const visibleTabs = tabs
-    .filter(([id]) => !['sellers', 'accounting-registered'].includes(id) || report?.permissions?.canViewSellerComparisons)
+    .filter(([id]) => !['sellers', 'accounting-registered'].includes(id) || permissions?.canViewSellerComparisons)
     .filter(([id]) => mode === 'sales' || !['export', 'accounting-registered'].includes(id));
   const sellerOptions = reportSellers.map((seller) => ({
     ...seller,
     name: `${seller.firstName || ''} ${seller.lastName || ''}`.trim() || seller.username,
   }));
-  const openRows = (title: string, description: string, rows: any[]) => setDrilldown({ title, description, rows });
+  const openRows = (title: string, description: string, selection: DrilldownSelection, legacyRows: () => any[]) =>
+    setDrilldown({ title, description, selection, requestKey, ...(mode === 'bi' ? { rows: legacyRows() } : {}) });
   const runExport = async (kind: 'pdf' | 'xlsx' | 'print') => {
+    if (mode === 'bi') return;
     setExporting(true);
+    setExportFeedback(null);
     try {
-      if (mode === 'bi') return;
       const response = kind === 'xlsx' ? await salesReportsAPI.downloadExcel(filters, config) : await salesReportsAPI.downloadPdf(filters, config);
       downloadBlob(response.data, kind === 'xlsx' ? 'sales-report.xlsx' : 'sales-report.pdf', kind === 'print');
+      if (kind !== 'print') setExportFeedback({ kind: 'success', title: 'دانلود فایل شروع شد.' });
+    } catch (error) {
+      const status = isAxiosError(error) ? error.response?.status : undefined;
+      let title = 'آماده‌سازی خروجی ناموفق بود. دوباره تلاش کنید.';
+      if (status === 429) title = 'خروجی دیگری در حال آماده‌سازی است. کمی بعد دوباره تلاش کنید.';
+      if (status === 401 || status === 403) title = 'نشست یا دسترسی شما به این خروجی معتبر نیست.';
+      setExportFeedback({ kind: 'error', title });
     } finally { setExporting(false); }
   };
   const savePreset = async () => {
-    if (!presetName.trim()) return;
-    const response = await salesReportsAPI.createPreset({ name: presetName.trim(), visibility: presetVisibility, configuration: config });
-    setPresets((rows) => [...rows, response.data.data]); setPresetName('');
+    const submittedName = presetName;
+    if (!submittedName.trim()) return;
+    const save = ++latestPresetSave.current;
+    setPresetError('');
+    try {
+      const response = await salesReportsAPI.createPreset({ name: submittedName.trim(), visibility: presetVisibility, configuration: config });
+      const preset = response.data.data;
+      setPresets((rows) => rows.some((row) => row.id === preset.id) ? rows : [...rows, preset]);
+      if (save === latestPresetSave.current) setPresetName((current) => current === submittedName ? '' : current);
+    } catch (reason) {
+      if (save === latestPresetSave.current) setPresetError(getSalesOperationalErrorMessage(reason, {
+        failedAction: 'ذخیره پیش‌تنظیم گزارش فروش', nextStep: 'دوباره تلاش کنید.',
+      }));
+    }
   };
   const moveSection = (id: string, delta: number) => setConfig((current) => {
     const sections = [...current.sections]; const index = sections.indexOf(id); const next = index + delta;
@@ -254,9 +365,18 @@ export default function SalesReportingDashboard({ mode = 'sales' }: { mode?: Mod
   ] : [];
   const openAccountingRows = (row: any) => {
     if (row.kind === 'total') return;
-    const rows = accountingReport.details.filter((detail: any) => row.kind === 'unassigned' ? !detail.sellerId : detail.sellerId === row.id);
-    setAccountingDrilldown({ title: row.name, rows });
+    const selection = row.kind === 'unassigned' ? { kind: 'accountingUnassigned' } : { kind: 'accountingSeller', key: row.id };
+    setDrilldown({ title: row.name, selection, accounting: true, requestKey });
   };
+  const activeDrilldown = drilldown?.requestKey === requestKey && report ? drilldown : null;
+  useEffect(() => { setDrilldown(null); }, [requestKey]);
+  const contractTable = (rows: any[]) => <Table rows={rows} onRow={(row) => setDrilldown({
+    title: `قرارداد ${row.contractNumber}`, description: row.statusDescription, selection: allContracts, requestKey, rows: [row],
+  })} columns={[
+    { key: 'contractNumber', label: 'شماره قرارداد' }, { key: 'customer', label: 'مشتری' }, { key: 'project', label: 'پروژه' },
+    { key: 'statusLabel', label: 'وضعیت', render: (row) => <div><strong>{row.statusLabel}</strong><p className="mt-1 max-w-xs text-xs leading-5 text-[var(--sds-text-secondary)]">{row.statusDescription}</p></div> },
+    { key: 'amount', label: 'مبلغ', render: (row) => money(row.amount) }, { key: 'responsibleSeller', label: 'مسئول فروش' }, { key: 'realizedSeller', label: 'اعتبار فروش قطعی' }
+  ]} />;
 
   return <main dir="rtl" className="sds-workspace min-h-screen text-right">
     <div className="mx-auto max-w-[1600px] space-y-5">
@@ -265,8 +385,8 @@ export default function SalesReportingDashboard({ mode = 'sales' }: { mode?: Mod
       <Panel title="فیلتر مشترک گزارش" description="این فیلترها روی همه بخش‌ها، جزئیات و خروجی‌ها اعمال می‌شوند."><div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
         <label className="text-xs font-bold text-[var(--sds-text-secondary)]">بازه<ErpSelect value={range} onChange={(event) => changeRange(event.target.value)} className="mt-1 w-full rounded-lg border bg-[var(--sds-surface-raised)] p-2.5 dark:bg-[var(--sds-surface-raised)]">{rangeOptions.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</ErpSelect></label>
         {range === 'custom' && <><label className="text-xs font-bold text-[var(--sds-text-secondary)]">از<PersianCalendarPicker value={customFrom} onChange={setCustomFrom} /></label><label className="text-xs font-bold text-[var(--sds-text-secondary)]">تا<PersianCalendarPicker value={customTo} onChange={setCustomTo} /></label></>}
-        {report?.permissions?.canCompany && <label className="text-xs font-bold text-[var(--sds-text-secondary)]">دپارتمان<ErpSelect value={departmentId} onChange={(event) => { setDepartmentId(event.target.value); setSellerId(''); }} className="mt-1 w-full rounded-lg border bg-[var(--sds-surface-raised)] p-2.5 dark:bg-[var(--sds-surface-raised)]"><option value="">کل شرکت</option>{departments.map((department) => <option key={department.id} value={department.id}>{department.namePersian || department.name}</option>)}</ErpSelect></label>}
-        {report?.permissions?.canSelectSeller && <label className="text-xs font-bold text-[var(--sds-text-secondary)]">فروشنده<ErpSelect value={sellerId} onChange={(event) => setSellerId(event.target.value)} className="mt-1 w-full rounded-lg border bg-[var(--sds-surface-raised)] p-2.5 dark:bg-[var(--sds-surface-raised)]"><option value="">همه فروشندگان مجاز</option>{sellerOptions.filter((seller: any) => seller.id !== 'legacy-unassigned').map((seller: any) => <option key={seller.id} value={seller.id}>{seller.name}</option>)}</ErpSelect></label>}
+        {permissions?.canCompany && <label className="text-xs font-bold text-[var(--sds-text-secondary)]">دپارتمان<ErpSelect value={departmentId} onChange={(event) => { setDepartmentId(event.target.value); setSellerId(''); }} className="mt-1 w-full rounded-lg border bg-[var(--sds-surface-raised)] p-2.5 dark:bg-[var(--sds-surface-raised)]"><option value="">کل شرکت</option>{departments.map((department) => <option key={department.id} value={department.id}>{department.namePersian || department.name}</option>)}</ErpSelect></label>}
+        {permissions?.canSelectSeller && <label className="text-xs font-bold text-[var(--sds-text-secondary)]">فروشنده<ErpSelect value={sellerId} onChange={(event) => setSellerId(event.target.value)} className="mt-1 w-full rounded-lg border bg-[var(--sds-surface-raised)] p-2.5 dark:bg-[var(--sds-surface-raised)]"><option value="">همه فروشندگان مجاز</option>{sellerOptions.filter((seller: any) => seller.id !== 'legacy-unassigned').map((seller: any) => <option key={seller.id} value={seller.id}>{seller.name}</option>)}</ErpSelect></label>}
       </div></Panel>
 
       <nav className="flex gap-2 overflow-x-auto rounded-xl border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] p-2 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]" aria-label="بخش‌های گزارش">{visibleTabs.map(([id, label, Icon]) => <ErpPressable type="button" key={id} onClick={() => changeTab(id)} className={`inline-flex min-h-11 shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-sm font-bold ${activeTab === id ? 'bg-[var(--sds-accent)] text-[var(--sds-text-inverse)]' : 'text-[var(--sds-text-secondary)] hover:bg-[var(--sds-surface-subtle)] dark:text-[var(--sds-text-muted)] dark:hover:bg-[var(--sds-surface-raised)]'}`}><Icon />{label}</ErpPressable>)}</nav>
@@ -282,8 +402,8 @@ export default function SalesReportingDashboard({ mode = 'sales' }: { mode?: Mod
           <Metric label="قرارداد قطعی" value={count(report.cards.realizedCount)} hint="امضا یا چاپ تجاری" />
           <Metric label="مشتری قطعی" value={count(report.cards.customerCount)} hint="مشتریان یکتا در فروش قطعی" tone="blue" />
           <Metric label="نرخ موفقیت قراردادهای تعیین‌تکلیف‌شده" value={report.cards.successRate == null ? 'نامشخص' : `${count(report.cards.successRate)}٪`} hint="پیش‌نویس و پایپ‌لاین باز حذف شده‌اند" tone="amber" />
-        </div><Panel title="روند فروش" description="قدیمی‌ترین تاریخ در سمت راست و جدیدترین تاریخ در سمت چپ قرار دارد. برای مشاهده شواهد روی نمودار کلیک کنید."><RtlTrendChart data={report.trend} onSelect={(row) => openRows(`جزئیات ${row.label}`, `فیلتر نمودار: ${row.label} در دامنه ${report.scope.label}`, contractsForTrendPoint(report.contracts, row))} /></Panel>
-        <Panel title="وضعیت واقعی قراردادها" description="هر وضعیت همراه با معنای عملیاتی خودش نمایش داده می‌شود."><RtlHorizontalBarChart data={report.statusDistribution.map((row: any) => ({ ...row, label: `${resolveChartLabel(row)} · ${count(row.count)}` }))} onSelect={(row) => openRows(resolveChartLabel(row), row.description, report.contracts.filter((contract: any) => contract.status === row.status && (row.commercialFlowVersion === undefined || (contract.commercialFlowVersion ?? 0) === row.commercialFlowVersion)))} /></Panel></div>}
+        </div><Panel title="روند فروش" description="قدیمی‌ترین تاریخ در سمت راست و جدیدترین تاریخ در سمت چپ قرار دارد. برای مشاهده شواهد روی نمودار کلیک کنید."><RtlTrendChart data={report.trend} onSelect={(row) => openRows(`جزئیات ${row.label}`, `فیلتر نمودار: ${row.label} در دامنه ${report.scope.label}`, { kind: 'trend', key: row.key }, () => contractsForTrendPoint(report.contracts, row))} /></Panel>
+        <Panel title="وضعیت واقعی قراردادها" description="هر وضعیت همراه با معنای عملیاتی خودش نمایش داده می‌شود."><RtlHorizontalBarChart data={report.statusDistribution.map((row: any) => ({ ...row, label: `${resolveChartLabel(row)} · ${count(row.count)}` }))} onSelect={(row) => openRows(resolveChartLabel(row), row.description, { kind: 'status', key: row.status, commercialFlowVersion: row.commercialFlowVersion }, () => report.contracts.filter((contract: any) => contract.status === row.status && (row.commercialFlowVersion === undefined || (contract.commercialFlowVersion ?? 0) === row.commercialFlowVersion)))} /></Panel></div>}
 
         {activeTab === 'accounting-registered' && report.permissions.canViewSellerComparisons && <div className="space-y-5">
           <Panel title="ثبت حسابداری فروشندگان" description="هر قرارداد فقط یک‌بار و بر اساس آخرین رکورد مالی معتبر در تاریخ تأیید مالی نمایش داده می‌شود.">
@@ -304,7 +424,7 @@ export default function SalesReportingDashboard({ mode = 'sales' }: { mode?: Mod
                 <Metric label="تعارض رکورد مالی" value={count(accountingReport.conflictCount)} hint="آخرین رکورد استفاده شده و تعارض پنهان نشده است" tone={accountingReport.conflictCount ? 'amber' : 'teal'} />
               </div>
               {accountingReport.unassigned && <ErpInlineState kind="stale" title={`${count(accountingReport.unassigned.contractCount)} قرارداد به مبلغ ${rial(accountingReport.unassigned.totalAmount)} فروشندهٔ قطعی تخصیص‌یافته ندارند.`} action={{ label: 'مشاهده قراردادها', onClick: () => openAccountingRows({ ...accountingReport.unassigned, kind: 'unassigned' }) }} />}
-              {accountingReport.conflictCount > 0 && <ErpInlineState kind="stale" title={`${count(accountingReport.conflictCount)} قرارداد دارای تعارض رکورد مالی است.`} action={{ label: 'مشاهده تعارض‌ها', onClick: () => setAccountingDrilldown({ title: 'تعارض‌های رکورد مالی', rows: accountingReport.details.filter((detail: any) => detail.hasConflict) }) }} />}
+              {accountingReport.conflictCount > 0 && <ErpInlineState kind="stale" title={`${count(accountingReport.conflictCount)} قرارداد دارای تعارض رکورد مالی است.`} action={{ label: 'مشاهده تعارض‌ها', onClick: () => setDrilldown({ title: 'تعارض‌های رکورد مالی', accounting: true, selection: { kind: 'accountingConflict' }, requestKey }) }} />}
               {accountingReport.contractCount === 0 ? <ErpEmptyState icon={FaFileInvoiceDollar} title="در این بازه قرارداد دارای رکورد مالی ثبت نشده است" description="جمع کل این بازه صفر ریال است." /> : <Table rows={accountingSummaryRows} columns={[
                 { key: 'name', label: 'فروشندهٔ قطعی', render: (row) => row.kind === 'total' ? <strong>{row.name}</strong> : <ErpButton label={row.name} onClick={() => openAccountingRows(row)} variant="ghost" tone={row.kind === 'unassigned' ? 'warning' : 'primary'} className="justify-start" /> },
                 { key: 'contractCount', label: 'تعداد قرارداد', render: (row) => <strong className={row.kind === 'total' ? 'text-[var(--sds-text-primary)]' : ''}>{count(row.contractCount)}</strong> },
@@ -314,24 +434,31 @@ export default function SalesReportingDashboard({ mode = 'sales' }: { mode?: Mod
           </Panel>
         </div>}
 
-        {activeTab === 'contracts' && <Panel title="قراردادها" description="برای بازکردن جزئیات و منبع روی یک ردیف کلیک کنید."><Table rows={report.contracts} onRow={(row) => openRows(`قرارداد ${row.contractNumber}`, row.statusDescription, [row])} columns={[
-          { key: 'contractNumber', label: 'شماره قرارداد' }, { key: 'customer', label: 'مشتری' }, { key: 'project', label: 'پروژه' },
-          { key: 'statusLabel', label: 'وضعیت', render: (row) => <div><strong>{row.statusLabel}</strong><p className="mt-1 max-w-xs text-xs leading-5 text-[var(--sds-text-secondary)]">{row.statusDescription}</p></div> },
-          { key: 'amount', label: 'مبلغ', render: (row) => money(row.amount) }, { key: 'responsibleSeller', label: 'مسئول فروش' }, { key: 'realizedSeller', label: 'اعتبار فروش قطعی' }
-        ]} /></Panel>}
+        {activeTab === 'contracts' && <Panel title="قراردادها">{mode === 'sales'
+          ? <PagedReportRows key={requestKey} filters={filters} selection={allContracts}>{contractTable}</PagedReportRows>
+          : contractTable(report.contracts)}</Panel>}
 
-        {activeTab === 'customers' && <div className="grid gap-5 xl:grid-cols-[.9fr_1.1fr]"><Panel title="مشتریان بر اساس فروش قطعی"><RtlHorizontalBarChart data={report.customers.slice(0, 15).map((row: any) => ({ ...row, label: row.name }))} onSelect={(row) => openRows(`مشتری: ${row.name}`, `قراردادهای مجاز مرتبط با مشتری ${row.name}`, report.contracts.filter((contract: any) => contract.customerId === row.id))} /></Panel><Panel title="جزئیات مشتریان"><Table rows={report.customers} onRow={(row) => openRows(`مشتری: ${row.name}`, 'جزئیات قراردادهای مجاز این مشتری', report.contracts.filter((contract: any) => contract.customerId === row.id))} columns={[{ key: 'name', label: 'مشتری' }, { key: 'value', label: 'فروش قطعی', render: (row) => money(row.value) }, { key: 'contracts', label: 'قرارداد', render: (row) => count(row.contracts) }]} /></Panel></div>}
+        {activeTab === 'customers' && <div className="grid gap-5 xl:grid-cols-[.9fr_1.1fr]"><Panel title="مشتریان بر اساس فروش قطعی"><RtlHorizontalBarChart data={report.customers.slice(0, 15).map((row: any) => ({ ...row, label: row.name }))} onSelect={(row) => openRows(`مشتری: ${row.name}`, `قراردادهای مجاز مرتبط با مشتری ${row.name}`, { kind: 'customer', key: row.id }, () => report.contracts.filter((contract: any) => contract.customerId === row.id))} /></Panel><Panel title="جزئیات مشتریان"><Table rows={report.customers} onRow={(row) => openRows(`مشتری: ${row.name}`, 'جزئیات قراردادهای مجاز این مشتری', { kind: 'customer', key: row.id }, () => report.contracts.filter((contract: any) => contract.customerId === row.id))} columns={[{ key: 'name', label: 'مشتری' }, { key: 'value', label: 'فروش قطعی', render: (row) => money(row.value) }, { key: 'contracts', label: 'قرارداد', render: (row) => count(row.contracts) }]} /></Panel></div>}
 
-        {activeTab === 'products' && <div className="grid gap-5 xl:grid-cols-[.9fr_1.1fr]"><Panel title="محصولات و خدمات برتر"><RtlHorizontalBarChart data={report.products.slice(0, 15).map((row: any) => ({ ...row, label: row.name }))} onSelect={(row) => openRows(`محصول: ${row.name}`, 'قراردادهای مجاز دارای این محصول', report.contracts.filter((contract: any) => contract.productIds?.includes(row.id)))} /></Panel><Panel title="ترکیب محصول"><Table rows={report.products} onRow={(row) => openRows(`محصول: ${row.name}`, 'قراردادهای مجاز دارای این محصول', report.contracts.filter((contract: any) => contract.productIds?.includes(row.id)))} columns={[{ key: 'name', label: 'محصول' }, { key: 'code', label: 'کد' }, { key: 'value', label: 'ارزش', render: (row) => money(row.value) }, { key: 'quantity', label: 'مقدار', render: (row) => count(row.quantity) }, { key: 'contracts', label: 'قرارداد', render: (row) => count(row.contracts) }]} /></Panel></div>}
+        {activeTab === 'products' && <div className="grid gap-5 xl:grid-cols-[.9fr_1.1fr]"><Panel title="محصولات و خدمات برتر"><RtlHorizontalBarChart data={report.products.slice(0, 15).map((row: any) => ({ ...row, label: row.name }))} onSelect={(row) => openRows(`محصول: ${row.name}`, 'قراردادهای مجاز دارای این محصول', { kind: 'product', key: row.id }, () => report.contracts.filter((contract: any) => contract.productIds?.includes(row.id)))} /></Panel><Panel title="ترکیب محصول"><Table rows={report.products} onRow={(row) => openRows(`محصول: ${row.name}`, 'قراردادهای مجاز دارای این محصول', { kind: 'product', key: row.id }, () => report.contracts.filter((contract: any) => contract.productIds?.includes(row.id)))} columns={[{ key: 'name', label: 'محصول' }, { key: 'code', label: 'کد' }, { key: 'value', label: 'ارزش', render: (row) => money(row.value) }, { key: 'quantity', label: 'مقدار', render: (row) => count(row.quantity) }, { key: 'contracts', label: 'قرارداد', render: (row) => count(row.contracts) }]} /></Panel></div>}
 
         {activeTab === 'finance' && <div className="space-y-5"><div className="grid gap-3 sm:grid-cols-3"><Metric label="برنامه پرداخت" value={money(report.finance.plannedPaymentAmount)} hint="منبع: فروش؛ به معنی دریافت واقعی نیست" tone="amber" /><Metric label="دریافت واقعی" value={money(report.finance.receivedAmount)} hint="منبع: حسابداری" /><Metric label="مانده دریافتنی" value={money(report.finance.receivableAmount)} hint="منبع: حسابداری" tone="red" /></div><Panel title="کامل‌بودن داده حسابداری" description="داده ناقص به‌عنوان صفر نمایش داده نمی‌شود."><p className="rounded-lg border border-[var(--sds-warning-border)] bg-[var(--sds-warning-surface)] p-4 text-sm text-[var(--sds-warning)]">{count(report.finance.coverage.coveredContracts)} قرارداد از {count(report.finance.coverage.totalContracts)} قرارداد دارای اطلاعات حسابداری هستند.</p></Panel></div>}
 
         {activeTab === 'delivery' && <div className="space-y-5"><div className="grid gap-3 sm:grid-cols-3"><Metric label="تحویل وعده‌داده‌شده" value={count(report.delivery.promisedDeliveries)} hint="منبع: فروش" tone="amber" /><Metric label="بارگیری نهایی" value={count(report.delivery.finalizedLoadings)} hint="منبع: لجستیک" /><Metric label="خروج ثبت‌شده" value={count(report.delivery.exitedLoadings)} hint="منبع: گارد" tone="blue" /></div><Panel title="کامل‌بودن داده تحویل"><p className="rounded-lg border border-[var(--sds-info-border)] bg-[var(--sds-info-surface)] p-4 text-sm text-[var(--sds-info)]">{count(report.delivery.coverage.coveredContracts)} قرارداد از {count(report.delivery.coverage.totalContracts)} قرارداد دارای رکورد بارگیری هستند.</p></Panel></div>}
 
-        {activeTab === 'sellers' && report.permissions.canViewSellerComparisons && <div className="space-y-5">{report.legacyUnassigned.count > 0 && <div className="rounded-xl border border-[var(--sds-warning-border)] bg-[var(--sds-warning-surface)] p-4 text-sm text-[var(--sds-warning)]"><strong>فروش قطعی تخصیص‌نیافته قدیمی:</strong> {count(report.legacyUnassigned.count)} قرارداد به ارزش {money(report.legacyUnassigned.value)}. این مقدار در کل فروش هست اما در رتبه فروشنده وارد نشده است.</div>}<Panel title="مقایسه فروشندگان" description="رتبه‌بندی فقط در دامنه مدیریتی مجاز نمایش داده می‌شود."><RtlHorizontalBarChart data={report.sellers.map((row: any) => ({ ...row, label: row.name, value: row.netRealized }))} onSelect={(row) => openRows(`فروشنده: ${row.name}`, 'قراردادهای مجاز مرتبط با این فروشنده', report.contracts.filter((contract: any) => contract.responsibleSellerId === row.id || contract.realizedSellerId === row.id))} /></Panel><Panel title="شاخص‌های شفاف فروشنده"><Table rows={report.sellers} onRow={(row) => openRows(`فروشنده: ${row.name}`, 'جزئیات عملکرد قابل مشاهده', report.contracts.filter((contract: any) => contract.responsibleSellerId === row.id || contract.realizedSellerId === row.id))} columns={[{ key: 'name', label: 'فروشنده' }, { key: 'createdCount', label: 'قرارداد ایجادشده', render: (row) => count(row.createdCount) }, { key: 'pipelineValue', label: 'پایپ‌لاین', render: (row) => money(row.pipelineValue) }, { key: 'realizedValue', label: 'فروش قطعی', render: (row) => money(row.realizedValue) }, { key: 'adjustments', label: 'تعدیل', render: (row) => money(row.adjustments) }, { key: 'netRealized', label: 'خالص', render: (row) => money(row.netRealized) }, { key: 'lostCount', label: 'از دست رفته', render: (row) => count(row.lostCount) }]} /></Panel></div>}
+        {activeTab === 'sellers' && report.permissions.canViewSellerComparisons && <div className="space-y-5">{report.legacyUnassigned.count > 0 && <div className="rounded-xl border border-[var(--sds-warning-border)] bg-[var(--sds-warning-surface)] p-4 text-sm text-[var(--sds-warning)]"><strong>فروش قطعی تخصیص‌نیافته قدیمی:</strong> {count(report.legacyUnassigned.count)} قرارداد به ارزش {money(report.legacyUnassigned.value)}. این مقدار در کل فروش هست اما در رتبه فروشنده وارد نشده است.</div>}<Panel title="مقایسه فروشندگان" description="رتبه‌بندی فقط در دامنه مدیریتی مجاز نمایش داده می‌شود."><RtlHorizontalBarChart data={report.sellers.map((row: any) => ({ ...row, label: row.name, value: row.netRealized }))} onSelect={(row) => openRows(`فروشنده: ${row.name}`, 'قراردادهای مجاز مرتبط با این فروشنده', { kind: 'seller', key: row.id }, () => report.contracts.filter((contract: any) => contract.responsibleSellerId === row.id || contract.realizedSellerId === row.id))} /></Panel><Panel title="شاخص‌های شفاف فروشنده"><Table rows={report.sellers} onRow={(row) => openRows(`فروشنده: ${row.name}`, 'جزئیات عملکرد قابل مشاهده', { kind: 'seller', key: row.id }, () => report.contracts.filter((contract: any) => contract.responsibleSellerId === row.id || contract.realizedSellerId === row.id))} columns={[{ key: 'name', label: 'فروشنده' }, { key: 'createdCount', label: 'قرارداد ایجادشده', render: (row) => count(row.createdCount) }, { key: 'pipelineValue', label: 'پایپ‌لاین', render: (row) => money(row.pipelineValue) }, { key: 'realizedValue', label: 'فروش قطعی', render: (row) => money(row.realizedValue) }, { key: 'adjustments', label: 'تعدیل', render: (row) => money(row.adjustments) }, { key: 'netRealized', label: 'خالص', render: (row) => money(row.netRealized) }, { key: 'lostCount', label: 'از دست رفته', render: (row) => count(row.lostCount) }]} /></Panel></div>}
 
-        {activeTab === 'export' && mode === 'sales' && <div className="grid gap-5 xl:grid-cols-[1.1fr_.9fr]"><Panel title="سازنده خروجی" description="تنها نحوه نمایش را تغییر می‌دهد؛ ارقام و دسترسی‌ها قابل ویرایش نیستند."><div className="grid gap-4 sm:grid-cols-2"><label className="text-sm font-bold">عنوان<ErpInput value={config.title} onChange={(event) => setConfig({ ...config, title: event.target.value })} className="mt-1 w-full rounded-lg border p-2.5" /></label><label className="text-sm font-bold">زیرعنوان<ErpInput value={config.subtitle} onChange={(event) => setConfig({ ...config, subtitle: event.target.value })} className="mt-1 w-full rounded-lg border p-2.5" /></label><label className="text-sm font-bold">جهت<ErpSelect value={config.orientation} onChange={(event) => setConfig({ ...config, orientation: event.target.value as any })} className="mt-1 w-full rounded-lg border p-2.5"><option value="landscape">افقی</option><option value="portrait">عمودی</option></ErpSelect></label><label className="text-sm font-bold">اندازه<ErpSelect value={config.pageSize} onChange={(event) => setConfig({ ...config, pageSize: event.target.value as any })} className="mt-1 w-full rounded-lg border p-2.5"><option>A4</option><option>A3</option></ErpSelect></label><label className="sm:col-span-2 text-sm font-bold">یادداشت اختیاری<ErpTextarea value={config.note} onChange={(event) => setConfig({ ...config, note: event.target.value })} className="mt-1 min-h-24 w-full rounded-lg border p-2.5" /></label></div><div className="mt-5 grid gap-2 sm:grid-cols-2"><label className="flex items-center gap-2 rounded-lg border p-3 text-sm font-bold"><ErpInput type="checkbox" checked={config.includeCharts} onChange={(event) => setConfig({ ...config, includeCharts: event.target.checked })} />نمودارها</label><label className="flex items-center gap-2 rounded-lg border p-3 text-sm font-bold"><ErpInput type="checkbox" checked={config.includeTables} onChange={(event) => setConfig({ ...config, includeTables: event.target.checked })} />جدول‌ها</label></div><h3 className="mt-5 font-bold">ستون‌های جدول قراردادها</h3><div className="mt-2 grid gap-2 sm:grid-cols-2">{contractColumnOptions.map(([id, label]) => <label key={id} className="flex items-center gap-2 rounded-lg border p-2 text-sm"><ErpInput type="checkbox" checked={config.contractColumns.includes(id)} onChange={() => setConfig((current) => ({ ...current, contractColumns: current.contractColumns.includes(id) ? current.contractColumns.filter((column) => column !== id) : [...current.contractColumns, id] }))} />{label}</label>)}</div><h3 className="mt-5 font-bold">بخش‌ها و ترتیب</h3><div className="mt-2 space-y-2">{sectionOptions.filter(([id]) => !['sellers', 'accountingRegistered'].includes(id) || report.permissions.canViewSellerComparisons).map(([id, label]) => { const selected = config.sections.includes(id); return <div key={id} className="flex items-center gap-2 rounded-lg border p-2"><ErpInput type="checkbox" checked={selected} onChange={() => setConfig((current) => ({ ...current, sections: selected ? current.sections.filter((section) => section !== id) : [...current.sections, id] }))} /><span className="flex-1 text-sm font-bold">{label}</span>{selected && <><ErpPressable type="submit" onClick={() => moveSection(id, -1)} className="rounded border px-2">↑</ErpPressable><ErpPressable type="submit" onClick={() => moveSection(id, 1)} className="rounded border px-2">↓</ErpPressable></>}</div>; })}</div><div className="mt-5 flex flex-wrap gap-2"><ErpPressable type="submit" disabled={exporting} onClick={() => runExport('pdf')} className="inline-flex items-center gap-2 rounded-lg bg-[var(--sds-danger)] px-4 py-2 font-bold text-[var(--sds-text-inverse)]"><FaFilePdf />PDF</ErpPressable><ErpPressable type="submit" disabled={exporting} onClick={() => runExport('xlsx')} className="inline-flex items-center gap-2 rounded-lg bg-[var(--sds-success)] px-4 py-2 font-bold text-[var(--sds-text-inverse)]"><FaDownload />Excel</ErpPressable><ErpPressable type="submit" disabled={exporting} onClick={() => runExport('print')} className="inline-flex items-center gap-2 rounded-lg bg-[var(--sds-surface-raised)] px-4 py-2 font-bold text-[var(--sds-text-primary)]"><FaPrint />چاپ</ErpPressable></div></Panel><Panel title="پیش‌تنظیم‌ها" description="هنگام استفاده، دسترسی فعلی دوباره اعمال می‌شود."><ErpSelect onChange={(event) => { const preset = presets.find((row) => row.id === event.target.value); if (preset?.configuration) applyPreset(preset.configuration); }} className="w-full rounded-lg border p-2.5"><option value="">انتخاب پیش‌تنظیم</option>{presets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name} · {preset.visibility === 'PERSONAL' ? 'شخصی' : preset.visibility === 'DEPARTMENT' ? 'دپارتمان' : 'شرکت'}</option>)}</ErpSelect><div className="mt-4 space-y-3"><ErpInput value={presetName} onChange={(event) => setPresetName(event.target.value)} placeholder="نام پیش‌تنظیم" className="w-full rounded-lg border p-2.5" /><ErpSelect value={presetVisibility} onChange={(event) => setPresetVisibility(event.target.value)} className="w-full rounded-lg border p-2.5"><option value="PERSONAL">شخصی</option>{report.permissions.canManage && <option value="DEPARTMENT">دپارتمان</option>}{report.permissions.canCompany && <option value="COMPANY">کل شرکت</option>}</ErpSelect><ErpPressable type="submit" onClick={savePreset} className="inline-flex items-center gap-2 rounded-lg bg-[var(--sds-accent)] px-4 py-2 font-bold text-[var(--sds-text-inverse)]"><FaSave />ذخیره پیش‌تنظیم</ErpPressable></div></Panel></div>}
+        {activeTab === 'export' && mode === 'sales' && <div className="grid gap-5 xl:grid-cols-[1.1fr_.9fr]"><Panel title="سازنده خروجی" description="تنها نحوه نمایش را تغییر می‌دهد؛ ارقام و دسترسی‌ها قابل ویرایش نیستند."><div className="grid gap-4 sm:grid-cols-2"><label className="text-sm font-bold">عنوان<ErpInput value={config.title} onChange={(event) => setConfig({ ...config, title: event.target.value })} className="mt-1 w-full rounded-lg border p-2.5" /></label><label className="text-sm font-bold">زیرعنوان<ErpInput value={config.subtitle} onChange={(event) => setConfig({ ...config, subtitle: event.target.value })} className="mt-1 w-full rounded-lg border p-2.5" /></label><label className="text-sm font-bold">جهت<ErpSelect value={config.orientation} onChange={(event) => setConfig({ ...config, orientation: event.target.value as any })} className="mt-1 w-full rounded-lg border p-2.5"><option value="landscape">افقی</option><option value="portrait">عمودی</option></ErpSelect></label><label className="text-sm font-bold">اندازه<ErpSelect value={config.pageSize} onChange={(event) => setConfig({ ...config, pageSize: event.target.value as any })} className="mt-1 w-full rounded-lg border p-2.5"><option>A4</option><option>A3</option></ErpSelect></label><label className="sm:col-span-2 text-sm font-bold">یادداشت اختیاری<ErpTextarea value={config.note} onChange={(event) => setConfig({ ...config, note: event.target.value })} className="mt-1 min-h-24 w-full rounded-lg border p-2.5" /></label></div><div className="mt-5 grid gap-2 sm:grid-cols-2"><label className="flex items-center gap-2 rounded-lg border p-3 text-sm font-bold"><ErpInput type="checkbox" checked={config.includeCharts} onChange={(event) => setConfig({ ...config, includeCharts: event.target.checked })} />نمودارها</label><label className="flex items-center gap-2 rounded-lg border p-3 text-sm font-bold"><ErpInput type="checkbox" checked={config.includeTables} onChange={(event) => setConfig({ ...config, includeTables: event.target.checked })} />جدول‌ها</label></div><h3 className="mt-5 font-bold">ستون‌های جدول قراردادها</h3><div className="mt-2 grid gap-2 sm:grid-cols-2">{contractColumnOptions.map(([id, label]) => <label key={id} className="flex items-center gap-2 rounded-lg border p-2 text-sm"><ErpInput type="checkbox" checked={config.contractColumns.includes(id)} onChange={() => setConfig((current) => ({ ...current, contractColumns: current.contractColumns.includes(id) ? current.contractColumns.filter((column) => column !== id) : [...current.contractColumns, id] }))} />{label}</label>)}</div><h3 className="mt-5 font-bold">بخش‌ها و ترتیب</h3><div className="mt-2 space-y-2">{sectionOptions.filter(([id]) => !['sellers', 'accountingRegistered'].includes(id) || report.permissions.canViewSellerComparisons).map(([id, label]) => { const selected = config.sections.includes(id); return <div key={id} className="flex items-center gap-2 rounded-lg border p-2"><ErpInput type="checkbox" checked={selected} onChange={() => setConfig((current) => ({ ...current, sections: selected ? current.sections.filter((section) => section !== id) : [...current.sections, id] }))} /><span className="flex-1 text-sm font-bold">{label}</span>{selected && <><ErpPressable type="submit" onClick={() => moveSection(id, -1)} className="rounded border px-2">↑</ErpPressable><ErpPressable type="submit" onClick={() => moveSection(id, 1)} className="rounded border px-2">↓</ErpPressable></>}</div>; })}</div><div className="mt-5 flex flex-wrap gap-2"><ErpPressable type="submit" disabled={exporting} onClick={() => runExport('pdf')} className="inline-flex items-center gap-2 rounded-lg bg-[var(--sds-danger)] px-4 py-2 font-bold text-[var(--sds-text-inverse)]"><FaFilePdf />PDF</ErpPressable><ErpPressable type="submit" disabled={exporting} onClick={() => runExport('xlsx')} className="inline-flex items-center gap-2 rounded-lg bg-[var(--sds-success)] px-4 py-2 font-bold text-[var(--sds-text-inverse)]"><FaDownload />Excel</ErpPressable><ErpPressable type="submit" disabled={exporting} onClick={() => runExport('print')} className="inline-flex items-center gap-2 rounded-lg bg-[var(--sds-surface-raised)] px-4 py-2 font-bold text-[var(--sds-text-primary)]"><FaPrint />چاپ</ErpPressable></div>{exporting && <ErpInlineState className="mt-3" kind="empty" title="در حال آماده‌سازی خروجی…" />}{exportFeedback && <ErpInlineState className="mt-3" {...exportFeedback} />}</Panel><Panel title="پیش‌تنظیم‌ها" description="هنگام استفاده، دسترسی فعلی دوباره اعمال می‌شود."><ErpSelect onChange={(event) => { const preset = presets.find((row) => row.id === event.target.value); if (preset?.configuration) applyPreset(preset.configuration); }} className="w-full rounded-lg border p-2.5"><option value="">انتخاب پیش‌تنظیم</option>{presets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name} · {preset.visibility === 'PERSONAL' ? 'شخصی' : preset.visibility === 'DEPARTMENT' ? 'دپارتمان' : 'شرکت'}</option>)}</ErpSelect><div className="mt-4 space-y-3"><ErpInput value={presetName} onChange={(event) => setPresetName(event.target.value)} placeholder="نام پیش‌تنظیم" className="w-full rounded-lg border p-2.5" /><ErpSelect value={presetVisibility} onChange={(event) => setPresetVisibility(event.target.value)} className="w-full rounded-lg border p-2.5"><option value="PERSONAL">شخصی</option>{report.permissions.canManage && <option value="DEPARTMENT">دپارتمان</option>}{report.permissions.canCompany && <option value="COMPANY">کل شرکت</option>}</ErpSelect><ErpPressable type="submit" onClick={savePreset} className="inline-flex items-center gap-2 rounded-lg bg-[var(--sds-accent)] px-4 py-2 font-bold text-[var(--sds-text-inverse)]"><FaSave />ذخیره پیش‌تنظیم</ErpPressable>{presetError && <ErpInlineState kind="error" title={presetError} />}</div></Panel></div>}
       </>}
-    </div>{drilldown && <Drilldown {...drilldown} onClose={() => setDrilldown(null)} />}{accountingDrilldown && <AccountingDrilldown {...accountingDrilldown} onClose={() => setAccountingDrilldown(null)} />}
+    </div>
+    {activeDrilldown && <ErpSheet open={true} onClose={() => setDrilldown(null)}
+      title={activeDrilldown.title} presentation="modal" size="wide">
+      {activeDrilldown.description && <p className="mb-3 text-sm text-[var(--sds-text-secondary)]">{activeDrilldown.description}</p>}
+      {activeDrilldown.rows ? <ContractDrilldownRows rows={activeDrilldown.rows} /> :
+        <PagedReportRows key={JSON.stringify(activeDrilldown.selection)} filters={filters} selection={activeDrilldown.selection}>
+          {(rows) => activeDrilldown.accounting ? <AccountingDrilldownRows rows={rows} />
+            : <ContractDrilldownRows rows={rows} showTrendEvents={activeDrilldown.selection.kind === 'trend'} />}
+        </PagedReportRows>}
+    </ErpSheet>}
   </main>;
 }

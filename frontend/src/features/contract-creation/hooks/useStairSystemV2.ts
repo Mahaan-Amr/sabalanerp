@@ -50,8 +50,6 @@ export const useStairSystemV2 = (options: UseStairSystemV2Options = {}) => {
 
   // Search states
   const [stoneSearchTerm, setStoneSearchTerm] = useState('');
-  const [stoneSearchResults, setStoneSearchResults] = useState<Product[]>([]);
-  const [isSearchingStones, setIsSearchingStones] = useState(false);
   
   const [toolsSearchTerm, setToolsSearchTerm] = useState('');
   const [toolsResults, setToolsResults] = useState<any[]>([]);
@@ -59,8 +57,6 @@ export const useStairSystemV2 = (options: UseStairSystemV2Options = {}) => {
   const [toolsDropdownOpen, setToolsDropdownOpen] = useState(false);
   
   const [layerStoneSearchTerm, setLayerStoneSearchTerm] = useState('');
-  const [layerStoneSearchResults, setLayerStoneSearchResults] = useState<Product[]>([]);
-  const [isSearchingLayerStones, setIsSearchingLayerStones] = useState(false);
   const [layerStoneDropdownOpen, setLayerStoneDropdownOpen] = useState(false);
 
   // Session management
@@ -283,15 +279,11 @@ export const useStairSystemV2 = (options: UseStairSystemV2Options = {}) => {
     setDraftLanding(createFreshStairPartDraft('landing'));
     setStairActivePart('tread');
     setStoneSearchTerm('');
-    setStoneSearchResults([]);
-    setIsSearchingStones(false);
     setToolsSearchTerm('');
     setToolsResults([]);
     setIsSearchingTools(false);
     setToolsDropdownOpen(false);
     setLayerStoneSearchTerm('');
-    setLayerStoneSearchResults([]);
-    setIsSearchingLayerStones(false);
     setLayerStoneDropdownOpen(false);
     setStairSessionId(null);
     setStairSessionItems([]);
@@ -317,10 +309,6 @@ export const useStairSystemV2 = (options: UseStairSystemV2Options = {}) => {
     // Search states
     stoneSearchTerm,
     setStoneSearchTerm,
-    stoneSearchResults,
-    setStoneSearchResults,
-    isSearchingStones,
-    setIsSearchingStones,
     toolsSearchTerm,
     setToolsSearchTerm,
     toolsResults,
@@ -331,10 +319,6 @@ export const useStairSystemV2 = (options: UseStairSystemV2Options = {}) => {
     setToolsDropdownOpen,
     layerStoneSearchTerm,
     setLayerStoneSearchTerm,
-    layerStoneSearchResults,
-    setLayerStoneSearchResults,
-    isSearchingLayerStones,
-    setIsSearchingLayerStones,
     layerStoneDropdownOpen,
     setLayerStoneDropdownOpen,
     

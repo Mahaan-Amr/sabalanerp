@@ -1,5 +1,5 @@
 import { scopeContractNavigationFixture } from './support/contract-navigation-fixture';
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { loginAsAdmin, seedContractNavigation, assertNoHorizontalOverflow } from './support/design-system';
 
 const stones = ['گوهره', 'تراورتن'].map((namePersian, index) => ({
@@ -10,6 +10,22 @@ const stones = ['گوهره', 'تراورتن'].map((namePersian, index) => ({
   finishNamePersian: 'صیقل', colorNamePersian: '', qualityNamePersian: '',
   availableInStairContracts: true, availableInLongitudinalContracts: true
 }));
+
+async function openStairConfiguration(page: Page) {
+  await seedContractNavigation(page, {
+    currentStep: 4, wizardData: {
+      contractKind: 'standard', contractDate: '1405/07/15', contractNumber: '',
+      customerId: '', customer: null, projectId: '', project: null,
+      selectedProductTypeForAddition: null, products: [], serviceRows: [], deliveries: [],
+      payment: { payments: [], currency: 'تومان', totalContractAmount: 0 }, discount: null, signature: null
+    }
+  });
+  await scopeContractNavigationFixture(page);
+  await page.goto('/dashboard/sales/contracts/create?fresh=1&returnTo=contract&step=4');
+  await page.getByRole('tab', { name: 'پله', exact: true }).click();
+  await page.getByRole('option', { name: /گوهره/ }).first().click();
+  return page.getByRole('dialog', { name: 'تنظیمات محصول', exact: true });
+}
 
 for (const width of [1280, 390]) {
   test(`stair selection persists across tabs and staging without rewriting summary at ${width}px`, async ({ page }) => {
@@ -23,19 +39,7 @@ for (const width of [1280, 390]) {
     await page.route('**/api/products?**', route => route.fulfill({
       status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: stones })
     }));
-    await seedContractNavigation(page, {
-      currentStep: 4, wizardData: {
-        contractKind: 'standard', contractDate: '1405/07/15', contractNumber: '',
-        customerId: '', customer: null, projectId: '', project: null,
-        selectedProductTypeForAddition: null, products: [], serviceRows: [], deliveries: [],
-        payment: { payments: [], currency: 'تومان', totalContractAmount: 0 }, discount: null, signature: null
-      }
-    });
-    await scopeContractNavigationFixture(page);
-    await page.goto('/dashboard/sales/contracts/create?fresh=1&returnTo=contract&step=4');
-    await page.getByRole('tab', { name: 'پله', exact: true }).click();
-    await page.getByRole('option', { name: /گوهره/ }).first().click();
-    const dialog = page.getByRole('dialog', { name: 'تنظیمات محصول', exact: true });
+    const dialog = await openStairConfiguration(page);
     const parts = dialog.getByRole('radiogroup', { name: 'انتخاب بخش پله', exact: true });
     const title = dialog.getByLabel('عنوان محصول', { exact: true });
     const stone = dialog.locator('input[name="stone"]');
@@ -76,3 +80,41 @@ for (const width of [1280, 390]) {
     await expect(page.locator('[data-contract-row-id]')).toContainText('گوهره');
   });
 }
+
+test('both stone selectors offer the same eligible catalog results in the same order', async ({ page }) => {
+  await loginAsAdmin(page);
+  const direct = { ...stones[0], id: 'qa-catalog-direct', fullName: 'سنگ آزمون پله' };
+  const fallback = {
+    ...stones[1], id: 'qa-catalog-fallback', code: 'QA-CATALOG-FALLBACK',
+    fullName: 'سنگ آزمون طولی', availableInStairContracts: false
+  };
+  const excluded = {
+    ...fallback, id: 'qa-catalog-excluded', fullName: 'سنگ آزمون اسلب',
+    cuttingDimensionNamePersian: 'اسلب'
+  };
+  await page.route('**/api/products?**', route => {
+    const query = new URL(route.request().url()).searchParams;
+    const products = query.get('search') === 'سنگ آزمون'
+      ? query.get('contractType') === 'stair' ? [direct] : [direct, fallback, excluded]
+      : stones;
+    return route.fulfill({ json: { success: true, data: products } });
+  });
+
+  const dialog = await openStairConfiguration(page);
+  const primary = dialog.locator('input[name="stone"]');
+  const candidates = dialog.getByRole('button', { name: /^سنگ آزمون/ });
+  await primary.fill('سنگ آزمون');
+  await expect(candidates).toHaveText(['سنگ آزمون پله', 'سنگ آزمون طولی']);
+  await primary.fill('');
+
+  const layerCount = dialog.locator('label').filter({ hasText: 'تعداد لایه برای هر پله' })
+    .locator('..').locator('input');
+  await layerCount.fill('1');
+  await dialog.getByRole('radiogroup', { name: 'منبع سنگ لایه' })
+    .getByRole('radio', { name: 'سنگ جدید', exact: true }).click();
+  await dialog.locator('input[name="layerStone"]').fill('سنگ آزمون');
+  await expect(candidates).toHaveText(['سنگ آزمون پله', 'سنگ آزمون طولی']);
+  await dialog.getByRole('button', { name: 'سنگ آزمون طولی', exact: true }).click();
+  await expect(dialog.getByText('کد: QA-CATALOG-FALLBACK')).toBeVisible();
+  await expect(dialog.locator('input[name="layerStone"]')).toHaveCount(0);
+});

@@ -1898,7 +1898,7 @@ export const getAccountingDashboardWorkspace = async (query: any = {}, actor: Ac
 /** Initial dashboard uses one authorization snapshot and one Partner read lock.
  * Range changes continue to use the independent financial-trend endpoint. */
 export const getAccountingDashboard = async (query: any = {}, requestedRange: unknown = '6m',
-  now = new Date(), actor?: AccountingReadActor) => {
+  now = new Date(), actor?: AccountingReadActor, reportFailure?: (error: unknown) => void) => {
   let workspaceCompleted = false;
   try {
     return await withAccountingReadScope(prisma, actor, async scope => {
@@ -1913,7 +1913,7 @@ export const getAccountingDashboard = async (query: any = {}, requestedRange: un
         const trend = await getAccountingFinancialTrendInScope(scope, requestedRange, now);
         return { workspace: compactDashboardWorkspace(workspace), trend, trendError: false, revisions };
       } catch (error) {
-        console.error('Accounting dashboard trend error:', error);
+        reportFailure?.(error);
         return { workspace: compactDashboardWorkspace(workspace), trend: null, trendError: true, revisions };
       }
     });
@@ -1921,7 +1921,7 @@ export const getAccountingDashboard = async (query: any = {}, requestedRange: un
     if (!workspaceCompleted) throw error;
     // A failed database statement may abort the shared transaction. Re-read
     // the workspace under fresh authority before returning partial content.
-    console.error('Accounting dashboard transaction error after workspace read:', error);
+    reportFailure?.(error);
     return { workspace: compactDashboardWorkspace(await getAccountingWorkspace(query, actor)), trend: null, trendError: true };
   }
 };

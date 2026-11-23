@@ -19,12 +19,15 @@ async function main() {
   const requesterId = process.env.PARTNER_TEST_ACTOR_ID!;
   const managerId = process.env.PARTNER_TEST_MANAGER_ID;
   const invoiceId = process.env.PARTNER_TEST_INVOICE_ID;
+  const accountantId = process.env.PARTNER_TEST_ACCOUNTANT_ID;
   const logisticsId = process.env.PARTNER_TEST_LOADING_ACTOR_ID!;
   const sale = await prisma.partnerSaleCase.findUniqueOrThrow({ where: { id: expected.caseId }, include: { customerContract: true, head: true, profile: true } });
   const issueSession = (actorId: string) => createAuthoritativeSession(prisma, actorId, {
     ipAddress: '127.0.0.1', userAgent: 'isolated-partner-alternative-loading',
   });
-  const [requester, manager, logistics] = await Promise.all([issueSession(requesterId), managerId && issueSession(managerId), issueSession(logisticsId)]);
+  const [requester, manager, logistics, accountant] = await Promise.all([
+    issueSession(requesterId), managerId && issueSession(managerId), issueSession(logisticsId), accountantId && issueSession(accountantId),
+  ]);
   const app = express();
   app.use(express.json());
   app.use('/accounting', accountingRouter);
@@ -161,7 +164,7 @@ async function main() {
     assert.equal(reopened.body.data.source.rows[0].plannedQuantity, '0.750');
     assert.equal((await baselines()).length, 1);
 
-    if (authorityId) {
+    if (authorityId && manager) {
       const audit = await prisma.accountingAuditLog.findFirstOrThrow({ where: { entityId: authorityId, action: 'DISPATCH_MANAGER_APPROVE' } });
       const { partnerCaseOwner, ...legacyDecision } = audit.afterState as Prisma.JsonObject;
       assert.deepEqual(partnerCaseOwner, expected);
@@ -179,6 +182,34 @@ async function main() {
       const authority = await prisma.contractDispatchAuthority.findUniqueOrThrow({ where: { id: authorityId } });
       await prisma.contractDispatchAuthority.update({ where: { id: authority.id }, data: { revision: authority.revision - 1 } });
       await assertHidden('stale-manager-grant');
+      await prisma.contractDispatchAuthority.update({ where: { id: authority.id }, data: { revision: authority.revision } });
+      const revoke = (id: string) => request(`/dispatch-credit/authorities/${id}/actions`, manager.token,
+        { action: 'REVOKE', reason: 'لغو مجوز مدیر در آزمون محلی' });
+      const revoked = await revoke(authorityId);
+      assert.equal(revoked.status, 200, JSON.stringify(revoked.body));
+      await assertHidden('revoked-only-authority');
+      assert.equal((await load(`/loadings/${draft.body.data.loadingId}`)).status, 200);
+      const renewed = await request(`/dispatch-credit/contracts/${sale.customerContractId}/requests`, requester.token, { kind: 'MANAGER' });
+      assert.equal(renewed.status, 200, JSON.stringify(renewed.body));
+      const renewedDecision = await request(`/dispatch-credit/authorities/${renewed.body.data.id}/actions`, manager.token,
+        { action: 'APPROVE', promisedDate: '2099-01-01' });
+      assert.equal(renewedDecision.status, 200, JSON.stringify(renewedDecision.body));
+      const renewedDraft = await load('/loadings', selection, 'renewed-manager-approval');
+      assert.equal(renewedDraft.status, 201, JSON.stringify(renewedDraft.body));
+      assert.ok(invoiceId && accountant);
+      const approvedInvoice = await request('/accounting/actions', accountant.token, {
+        kind: 'APPROVE_FINANCIAL_INVOICE', invoiceId, sepidarAmount: '1600',
+        systemInvoiceDate: new Date().toISOString().slice(0, 10), systemInvoiceNumber: 'alternate-basis-invoice',
+        note: 'تأیید مبنای مالی مستقل از مجوز مدیر',
+      }, 'alternate-financial-approval');
+      assert.equal(approvedInvoice.status, 200, JSON.stringify(approvedInvoice.body));
+      const revokedRenewed = await revoke(renewed.body.data.id);
+      assert.equal(revokedRenewed.status, 200, JSON.stringify(revokedRenewed.body));
+      const retained = await load(projectsPath);
+      assert.ok(retained.body.data.some((row: { deliveryId: string }) => row.deliveryId === selection.deliveryId));
+      const financialDraft = await load('/loadings', selection, 'retained-alternate-financial-basis');
+      assert.equal(financialDraft.status, 201, JSON.stringify(financialDraft.body));
+
     }
     if (clearedCheckId) {
       const bounced = await accounting({ kind: 'UPDATE_CHECK_STATUS', status: 'BOUNCED', paymentEventId: clearedCheckId }, 'bounced-check');

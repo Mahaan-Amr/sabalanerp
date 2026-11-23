@@ -1,10 +1,12 @@
 import { exactQuantityText } from '../../exactQuantity';
-import { Prisma } from '@prisma/client';
-import { canonicalHash, FulfillmentViewSchema, partnerError, type Result, type FulfillmentView } from '@sabalanerp/partner-sales-contracts';
+import { AccountingDispatchCandidateStatus, Prisma } from '@prisma/client';
+import { canonicalHash, FulfillmentViewSchema, PartnerEventSchema, partnerError, type Result, type FulfillmentView } from '@sabalanerp/partner-sales-contracts';
 import { projectPartnerShipmentQuantities, type PartnerShipmentQuantityEvidence } from '../../shipmentQuantityProjection';
 import { guardReturnValidationFailure, shipmentQuantityEvidenceIntegrityHash,
   shipmentQuantitySourceFields, type PartnerPersistedShipmentEvidence } from '../../shipmentQuantityProjectionStore';
 import { buildPartnerPhysicalLineage, canonicalPartnerQuantity } from './lineage';
+import { readPartnerRevisionProjections } from '../cases/lifecycle';
+import { ownsPartnerRevision } from '../events/persisted';
 
 const object = (value: unknown): Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -29,7 +31,7 @@ const matchesPartnerEvidenceHash = (fact: PartnerPersistedShipmentEvidence) => {
 export async function validatePartnerCommercialPhysicalFloor(tx: Prisma.TransactionClient, caseId: string,
   products: Array<{ productRowId: string; quantity: string; unit: string }>): Promise<Result<undefined>> {
   if (!await tx.partnerFulfillmentLineage.count({ where: { caseId } })) return { ok: true, value: undefined };
-  const projection = await readPartnerShipmentQuantityProjection(tx, caseId);
+  const projection = await readPartnerCorrectionQuantityProjection(tx, caseId);
   for (const row of projection.rows) {
     if (row.health !== 'CURRENT' || !row.quantities) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
     const successor = products.find(product => product.productRowId === row.productRowId);
@@ -115,9 +117,22 @@ export async function synchronizePartnerContractedQuantities(tx: Prisma.Transact
   await capturePartnerContractedQuantities(tx, view);
 }
 
-/** The existing immutable shipment ledger is authoritative for both source kinds. */
-export async function readPartnerShipmentQuantityProjection(tx: Prisma.TransactionClient, caseId: string,
-  options: { cutoff?: string; mode?: 'OPERATIONAL_AS_OF' | 'AUDIT_KNOWN_AT' } = {}) {
+type QuantityReadOptions = { cutoff?: string; mode?: 'OPERATIONAL_AS_OF' | 'AUDIT_KNOWN_AT' };
+
+/** The existing immutable shipment ledger governs Logistics selection and reporting. */
+export function readPartnerShipmentQuantityProjection(tx: Prisma.TransactionClient, caseId: string, options: QuantityReadOptions = {}) {
+  return readQuantityProjection(tx, caseId, options, false);
+}
+
+/** Corrections may use the effective Case binding to assess the physical floor
+ * when its shipment baseline is absent. All physical movements still come from
+ * the immutable ledger, and normal shipment readers still require a baseline. */
+export function readPartnerCorrectionQuantityProjection(tx: Prisma.TransactionClient, caseId: string) {
+  return readQuantityProjection(tx, caseId, {}, true);
+}
+
+async function readQuantityProjection(tx: Prisma.TransactionClient, caseId: string,
+  options: QuantityReadOptions, forCorrection: boolean) {
   const rows = await tx.shipmentQuantityEvidence.findMany({ where: { sourceKind: 'PARTNER_CASE', partnerCaseId: caseId },
     include: { partnerLineage: true, guardReturnMovement: true, dispatchEvidence: true },
     orderBy: [{ effectiveAt: 'asc' }, { recordedAt: 'asc' }, { id: 'asc' }] });
@@ -156,15 +171,52 @@ export async function readPartnerShipmentQuantityProjection(tx: Prisma.Transacti
     const expected = [...effective.revision.rowBindings.map(row => ({ productRowId: row.productRowId, unit: row.unit, quantity: row.quantity })),
       ...lineages.filter(lineage => !effective.revision.rowBindings.some(row => row.productRowId === lineage.productRowId))
         .map(row => ({ productRowId: row.productRowId, unit: row.unit, quantity: new Prisma.Decimal(0) }))];
+    const sameRevisionBaselines = rows.filter(row => row.kind === 'CONTRACTED_SET' && row.partnerCaseRevision === effective.caseRevision);
+    const missing = expected.filter(binding => !sameRevisionBaselines.some(row => row.productRowId === binding.productRowId));
+    let correctionBindings: Map<string, { quantity: string; unit: string }> | undefined;
+    if (forCorrection && missing.length) {
+      const owner = { caseId, revision: effective.caseRevision, integrityHash: effective.integrityHash };
+      const event = PartnerEventSchema.safeParse(object(effective.evidence).publicEvent);
+      if (event.success && event.data.eventId === effective.id && event.data.type === effective.type &&
+          ownsPartnerRevision(owner, event.data.owner)) {
+        const view = await readPartnerRevisionProjections(tx, owner);
+        if (view?.accounting) {
+          const allocationLines = await tx.logisticsAllocationRevisionLine.findMany({ where: { partnerCaseId: caseId,
+            sourceKind: 'PARTNER_CASE', revision: { candidate: { status: { in: [
+              AccountingDispatchCandidateStatus.PENDING, AccountingDispatchCandidateStatus.ACCEPTED,
+            ] } } } }, select: { id: true, productRowId: true, partnerLineageId: true, quantity: true } });
+          if (allocationLines.every(line => rows.some(row => row.kind === 'ALLOCATION_FINALIZED' &&
+              row.sourceType === 'PARTNER_LOGISTICS_ALLOCATION_REVISION' && row.sourceId === line.id &&
+              row.productRowId === line.productRowId && row.partnerLineageId === line.partnerLineageId &&
+              row.quantity.equals(line.quantity)))) {
+            correctionBindings = new Map(view.accounting.products.filter(product => product.productType !== 'service')
+              .map(product => [product.productRowId, product]));
+          }
+        }
+      }
+    }
     for (const binding of expected) {
       const lineage = lineages.find(row => row.productRowId === binding.productRowId);
-      const baseline = rows.find(row => row.kind === 'CONTRACTED_SET' && row.partnerCaseRevision === effective.caseRevision &&
-        row.partnerIntegrityHash === effective.integrityHash && row.productRowId === binding.productRowId &&
+      const rowBaselines = sameRevisionBaselines.filter(row => row.productRowId === binding.productRowId);
+      const baseline = rowBaselines.find(row => row.partnerIntegrityHash === effective.integrityHash &&
         row.unit === binding.unit && row.quantity.equals(binding.quantity) && row.effectiveAt <= new Date(cutoff) &&
         (options.mode !== 'AUDIT_KNOWN_AT' || row.recordedAt <= new Date(cutoff)));
       if (lineage && baseline) continue;
+      const lineageId = `partner-fulfillment:${(await canonicalHash(`${caseId}:${binding.productRowId}`)).slice(10)}`;
+      const canonical = correctionBindings?.get(binding.productRowId);
+      if (!rowBaselines.length && canonical?.unit === binding.unit && binding.quantity.equals(canonical.quantity) &&
+          (!lineage || (lineage.id === lineageId && lineage.unit === binding.unit &&
+            lineage.internalRecordId === effective.case.internalRecordId))) {
+        evidence.push({ sourceKind: 'PARTNER_CASE', caseId, internalRecordId: effective.case.internalRecordId,
+          lineageId, productRowId: binding.productRowId, unit: binding.unit, kind: 'CONTRACTED_SET',
+          quantity: exactQuantityText(binding.quantity), id: effective.id, sourceType: 'PARTNER_CASE_EFFECTIVE_BINDING',
+          sourceId: caseId, sourceVersion: effective.caseRevision, integrityHash: effective.integrityHash,
+          effectiveAt: (effective.type === 'CASE_COMMITTED' ? effective.case.committedAt! : effective.recordedAt).toISOString(),
+          recordedAt: effective.recordedAt.toISOString() });
+        continue;
+      }
       evidence.push({ sourceKind: 'PARTNER_CASE', caseId, internalRecordId: effective.case.internalRecordId,
-        lineageId: lineage?.id ?? `partner-fulfillment:${(await canonicalHash(`${caseId}:${binding.productRowId}`)).slice(10)}`,
+        lineageId: lineage?.id ?? lineageId,
         productRowId: binding.productRowId, unit: binding.unit, kind: 'EVIDENCE_CONFLICT', quantity: '0',
         id: `partner-quantity-coverage:${caseId}:${effective.caseRevision}:${binding.productRowId}`,
         effectiveAt: cutoff, recordedAt: cutoff, sourceType: 'PARTNER_QUANTITY_COVERAGE_CHECK', sourceId: caseId,

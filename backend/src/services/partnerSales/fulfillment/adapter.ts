@@ -54,7 +54,7 @@ export function createPartnerFulfillmentAdapter(repository: PartnerFulfillmentRe
     if (!loaded.ok) return loaded;
     const validated = validateSource(view, loaded.value);
     if (!validated.ok) return validated;
-    const dependencies = await tx.readQuantityDependencies(view.owner);
+    const dependencies = await tx.readQuantityDependencies(view.owner, mode);
     const products = new Map(validated.value.view.products.map(row => [row.productRowId, row]));
     const counts = new Map<string, number>();
     for (const row of dependencies) counts.set(row.productRowId, (counts.get(row.productRowId) || 0) + 1);

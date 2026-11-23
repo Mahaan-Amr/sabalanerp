@@ -6,7 +6,7 @@ import { hasPartnerDraftFinancialApproval } from '../accounting/draftApproval';
 import { authorizePartnerTechnicalRollout } from '../authorization/technicalRollout';
 import { readCurrentPartnerCaseViews } from '../cases/lifecycle';
 import { partnerPredecessorIsFrozen } from '../corrections/mutationFreeze';
-import { PartnerQuantityEvidenceConflictError, readPartnerShipmentQuantityProjection } from './quantityStore';
+import { PartnerQuantityEvidenceConflictError, readPartnerShipmentQuantityProjection, synchronizePartnerContractedQuantities } from './quantityStore';
 import { hasPartnerDraftManagerApproval } from './draftManagerApproval';
 import { hasEffectivePartnerLoadingRevision, isFinalPartnerLoadingContract } from './effectiveRevision';
 
@@ -27,6 +27,14 @@ export async function hasPartnerDraftAuthority(tx: Prisma.TransactionClient, dra
   return await hasPartnerDraftFinancialApproval(tx, { owner: draftCase.view.owner, internalRecordId: draftCase.view.recordId }) ||
     await hasPartnerDraftManagerApproval(tx, draftCase.contract, draftCase.view.owner) ||
     await hasPartnerDraftSettlement(tx, draftCase.accounting, draftCase.row.profile.userId);
+}
+
+/** Effective corrections carry forward existing obligations and can initialize
+ * missing logistics evidence when an independently current basis exists. */
+export async function synchronizeCorrectedPartnerDraftQuantities(tx: Prisma.TransactionClient, caseId: string) {
+  const draftCase = await readPartnerDraftCase(tx, caseId);
+  const initialize = draftCase !== null && await hasPartnerDraftAuthority(tx, draftCase);
+  await synchronizePartnerContractedQuantities(tx, caseId, { initialize });
 }
 
 /** Shared selection rule for customer search, the delivery picker and a fresh

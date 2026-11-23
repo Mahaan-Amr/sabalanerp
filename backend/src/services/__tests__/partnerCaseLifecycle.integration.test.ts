@@ -28,7 +28,7 @@ import { createPrismaPartnerConfirmationHooks } from '../partnerSales/customerOu
 import { createPrismaDispatchDocumentAccessPolicy } from '../dispatchDocuments/prismaAccessPolicy';
 import { createPrismaPartnerFulfillmentRepository } from '../partnerSales/fulfillment/prismaRepository';
 import { createPartnerFulfillmentAdapter } from '../partnerSales/fulfillment';
-import { capturePartnerContractedQuantities, readPartnerShipmentQuantityProjection } from '../partnerSales/fulfillment/quantityStore';
+import { readPartnerShipmentQuantityProjection, synchronizePartnerContractedQuantities } from '../partnerSales/fulfillment/quantityStore';
 import { validatePartnerSharedAccountingEffect, stagePartnerAccountingReplacement } from '../partnerSales/accounting/sharedCorrection';
 import { buildCaseProjections, type CaseRevisionProjectionEvidence } from '../partnerSales/cases/projections';
 import { subtract } from '../partnerSales/reporting/money';
@@ -37,7 +37,7 @@ import { createPrismaPartnerFinancialCorrectionComposition } from '../partnerSal
 import type { PartnerCorrectionDependencyInput } from '../partnerSales/corrections/dependencyChecks';
 import { prepareRetailSuccessor } from '../partnerSales/corrections/retailSuccessor';
 import { readPartnerOutstandingHistory, readPartnerAccountingTrend } from '../partnerSales/accounting/history';
-import { createPartnerCaseLoading, readPartnerCaseLoading } from '../dispatchAllocation';
+import { createPartnerCaseLoading, findLoadablePartnerDeliveries, readPartnerCaseLoading } from '../dispatchAllocation';
 import { shipmentQuantityEvidenceIntegrityHash } from '../shipmentQuantityProjectionStore';
 import { dryRunLegacyContractProductGraphMigration } from '../contractProductGraphMigration';
 
@@ -688,6 +688,9 @@ test('durable Accounting queue replay returns the original Partner record withou
         principalId: accountantId, subjectUserId: accountantId, domain: 'PARTNER', action: 'ACCOUNTING_WRITE',
         rootKind: 'CASE', purpose: 'ACCOUNTING', scope: 'COMPANY', effect: 'ALLOW', grantedBy: accountantId,
         reason: 'isolated durable Accounting replay fixture', correlationId: `${ids.caseId}-grant` } });
+      await tx.workspacePermission.create({ data: { userId: accountantId, workspace: 'accounting', permissionLevel: 'admin' } });
+      await tx.featurePermission.create({ data: { userId: accountantId, workspace: 'accounting',
+        feature: 'accounting_invoice_candidates_manage', permissionLevel: 'edit' } });
     });
     const adapter = createPartnerAccountingAdapter(createPrismaPartnerAccountingRepository({ database,
       actorId: accountantId, correlationId: `${ids.caseId}-accounting` }));
@@ -771,14 +774,10 @@ test('durable Accounting queue replay returns the original Partner record withou
         integrityHash: await canonicalHash(plan) } });
     });
     const pendingInvoice = await database.accountingFinancialRecord.findFirstOrThrow({ where: { sourceId: ids.internalId } });
-    await promisify(execFile)(process.execPath, ['backend/node_modules/tsx/dist/cli.mjs',
-      'backend/src/services/__tests__/partnerFinancialApprovalProbe.ts'], { timeout: 30_000, env: { ...process.env,
-      DATABASE_URL: temporary.databaseUrl, PARTNER_TEST_INVOICE_ID: pendingInvoice.id, PARTNER_TEST_ACTOR_ID: accountantId } });
+    await prepareDraftFixtureInvoice(temporary.databaseUrl, pendingInvoice.id, accountantId, 'APPROVE');
+    await prepareDraftFixtureInvoice(temporary.databaseUrl, pendingInvoice.id, accountantId, 'PUBLISH');
     assert.equal(await database.accountingReceivable.count({ where: { invoiceRecord: { sourceId: ids.internalId } } }), 1);
     const existingInvoice = await database.accountingFinancialRecord.findFirstOrThrow({ where: { sourceId: ids.internalId } });
-    await promisify(execFile)(process.execPath, ['backend/node_modules/tsx/dist/cli.mjs',
-      'backend/src/services/__tests__/partnerAccountingActionProbe.ts'], { timeout: 30_000, env: { ...process.env,
-      DATABASE_URL: temporary.databaseUrl, PARTNER_TEST_INVOICE_ID: existingInvoice.id, PARTNER_TEST_ACTOR_ID: accountantId } });
     const unchangedObligation = await database.$transaction(tx => validatePartnerSharedAccountingEffect(tx, {
       caseId: ids.caseId, internalRecordId: ids.internalId, partnerSellerId: ids.partnerId,
       successor: { ...view, owner: successorOwner },
@@ -795,6 +794,7 @@ test('durable Accounting queue replay returns the original Partner record withou
     assert.equal(unsupportedReplacement.ok ? null : unsupportedReplacement.error.code, 'DEPENDENCY_BLOCKED',
       'even a tax-only payable change with zero net-sales delta needs a formal Accounting replacement');
     assert.equal((await database.partnerSaleCase.findUniqueOrThrow({ where: { id: ids.caseId } })).headRevision, 2);
+    const logisticsId = await seedDraftLogisticsActor(database, ids);
     const replacementRollback = new Error('rollback isolated replacement branch');
     await database.workspacePermission.update({ where: { userId_workspace: { userId: accountantId, workspace: 'accounting' } },
       data: { permissionLevel: 'admin' } });
@@ -925,10 +925,14 @@ test('durable Accounting queue replay returns the original Partner record withou
           await tx.partnerCaseRowBinding.create({ data: { caseId: ids.caseId, revision: 3,
             productRowId: product.productRowId, configurationHash: hash, quantity: product.quantity,
             unit: product.unit, precisionPolicyVersion: 'measured-v1' } });
-          await tx.partnerFulfillmentLineage.create({ data: { id: `${product.productRowId}-lineage`, caseId: ids.caseId,
-            caseRevision: 2, integrityHash: successorOwner.integrityHash, internalRecordId: ids.internalId,
-            productRowId: product.productRowId, quantity: product.quantity, unit: product.unit,
-            recipient: { customerId: ids.customerId }, deliveryIds: [], commandId: `${product.productRowId}-lineage` } });
+        }
+        for (const delivery of projections.value.fulfillment!.deliveries) {
+          await tx.partnerCaseDelivery.create({ data: { id: delivery.deliveryId, caseId: ids.caseId,
+            revision: 3, date: new Date(delivery.date), destination: delivery.destination } });
+          await tx.partnerCaseDeliveryItem.createMany({ data: delivery.items.map(item => ({
+            caseId: ids.caseId, revision: 3, deliveryId: delivery.deliveryId,
+            productRowId: item.productRowId, quantity: item.quantity,
+          })) });
         }
         await tx.partnerCaseEvent.create({ data: { id: `${correctionId}-prior-retail-effect`, caseId: ids.caseId,
           caseRevision: 2, integrityHash: successorOwner.integrityHash, sequence: 20, type: 'CORRECTION_EFFECTIVE',
@@ -939,17 +943,24 @@ test('durable Accounting queue replay returns the original Partner record withou
               owner: successorOwner, predecessor: view.owner, correctionId: `${correctionId}-prior-retail`, scope: 'RETAIL_ONLY',
               gateEvidenceIds: [`${correctionId}-prior-customer`], recordedAt: new Date().toISOString(),
               effectiveDate: new Date().toISOString().slice(0, 10) } } } });
-        await capturePartnerContractedQuantities(tx, fulfillment);
-        const quantity = await readPartnerShipmentQuantityProjection(tx, ids.caseId);
+        assert.equal(await tx.shipmentQuantityEvidence.count({ where: { partnerCaseId: ids.caseId } }), 0);
+        const logistics = { actorId: logisticsId, correlationId: `${correctionId}-logistics` };
+        const scoped = { $transaction: async <T>(work: (inner: Prisma.TransactionClient) => Promise<T>) => {
+          await tx.$executeRaw`SAVEPOINT replacement_effect`;
+          try { const result = await work(tx); await tx.$executeRaw`RELEASE SAVEPOINT replacement_effect`; return result; }
+          catch (error) { await tx.$executeRaw`ROLLBACK TO SAVEPOINT replacement_effect`;
+            await tx.$executeRaw`RELEASE SAVEPOINT replacement_effect`; throw error; }
+        } } as PrismaClient;
+        const deliveries = () => findLoadablePartnerDeliveries(scoped, { ...logistics, customerIds: [ids.customerId] });
+        assert.deepEqual(await deliveries(), [], 'staged replacement cannot supply a Logistics baseline or selectable delivery');
         const plan = partnerContracts.PaymentPlanSchema.parse((predecessorRevision.paymentEvidence as Prisma.JsonObject).customerPaymentPlan);
-        const physicalEvidence = quantity.rows.flatMap(row => row.sourceEvidenceIds).sort();
+        const physicalEvidence = [`${correctionId}-prior-retail-effect`];
         const dependencies: PartnerCorrectionDependencyInput = {
           predecessorProducts: (await tx.partnerCaseRowBinding.findMany({ where: { caseId: ids.caseId, revision: 2 } }))
             .map(({ productRowId, quantity, unit }) => ({ productRowId, quantity: quantity.toString(), unit })),
           successorProducts: fulfillment.products.map(({ productRowId, quantity, unit }) => ({ productRowId, quantity, unit })),
-          physical: { evidenceIds: physicalEvidence, rows: quantity.rows.map(row => ({ productRowId: row.productRowId,
-            unit: row.unit!, health: 'CURRENT', reserved: row.quantities!.finalizedReserved,
-            dispatched: row.quantities!.physicallyDispatched })) },
+          physical: { evidenceIds: physicalEvidence, rows: fulfillment.products.map(row => ({ productRowId: row.productRowId,
+            unit: row.unit, health: 'CURRENT', reserved: '0.000', dispatched: '0.000' })) },
           financial: { evidenceIds: [plan.planId], health: 'CURRENT', receiptStateHash: await canonicalHash({ receipts: [] }) },
           suppliedEvidenceIds: [...physicalEvidence, plan.planId].sort(), predecessorChildren: [], successorChildren: [],
         };
@@ -968,12 +979,6 @@ test('durable Accounting queue replay returns the original Partner record withou
           principalId: accountantId, subjectUserId: accountantId, domain: 'PARTNER', action: 'FINANCIAL_VERIFY',
           rootKind: 'CASE', purpose: 'ACCOUNTING', scope: 'COMPANY', effect: 'ALLOW', grantedBy: accountantId,
           reason: 'isolated replacement Accounting verification', correlationId: `${ids.caseId}-verify-grant` } });
-        const scoped = { $transaction: async <T>(work: (inner: Prisma.TransactionClient) => Promise<T>) => {
-          await tx.$executeRaw`SAVEPOINT replacement_effect`;
-          try { const result = await work(tx); await tx.$executeRaw`RELEASE SAVEPOINT replacement_effect`; return result; }
-          catch (error) { await tx.$executeRaw`ROLLBACK TO SAVEPOINT replacement_effect`;
-            await tx.$executeRaw`RELEASE SAVEPOINT replacement_effect`; throw error; }
-        } } as PrismaClient;
         const intent = { correctionId, gate: 'ACCOUNTING_VERIFY' as const, outcome: 'APPROVE' as const,
           evidenceId: `${correctionId}-verify-evidence`, reason: 'تأیید نهایی جایگزینی تعهد مستقل همکار' };
         const command = { schemaVersion: 1, type: 'CORRECTION_GATE', commandId: `${correctionId}-verify`,
@@ -1010,10 +1015,41 @@ test('durable Accounting queue replay returns the original Partner record withou
         await tx.effectiveActionGrant.update({ where: { id: `${ids.caseId}-replacement-approval-grant` }, data: {
           revokedAt: new Date(), revokedBy: accountantId, revocationReason: 'isolated revocation regression',
           revocationCorrelationId: `${correctionId}-revoke` } });
+        await tx.workspacePermission.update({ where: { userId_workspace: { userId: accountantId, workspace: 'accounting' } },
+          data: { permissionLevel: 'edit' } });
         const revoked = await service.execute(command);
         assert.equal(revoked.ok ? null : revoked.error.code, 'FORBIDDEN');
         await tx.$executeRaw`ROLLBACK TO SAVEPOINT revoked_replacement_approver`;
         await tx.$executeRaw`RELEASE SAVEPOINT revoked_replacement_approver`;
+        await tx.$executeRaw`SAVEPOINT reservation_floor_without_baseline`;
+        await synchronizePartnerContractedQuantities(tx, ids.caseId, { initialize: true });
+        const lineage = await tx.partnerFulfillmentLineage.findFirstOrThrow({ where: { caseId: ids.caseId } });
+        const [quantityClock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
+        const reserve = { id: `${correctionId}-reservation`, sourceKind: 'PARTNER_CASE' as const,
+          contractId: null, contractItemId: null, partnerCaseId: ids.caseId, partnerLineageId: lineage.id,
+          partnerCaseRevision: successorOwner.revision, partnerIntegrityHash: successorOwner.integrityHash,
+          productRowId: lineage.productRowId, unit: lineage.unit, kind: 'ALLOCATION_FINALIZED' as const, quantity: '1.000',
+          sourceType: 'PARTNER_LOGISTICS_ALLOCATION_REVISION', sourceId: `${correctionId}-reservation`, sourceVersion: 1,
+          effectiveAt: quantityClock.now.toISOString(), recordedAt: quantityClock.now.toISOString(), integrityHash: '', metadata: {} };
+        await tx.shipmentQuantityEvidence.create({ data: { ...reserve, effectiveAt: quantityClock.now, recordedAt: quantityClock.now,
+          integrityHash: shipmentQuantityEvidenceIntegrityHash(reserve) } });
+        const belowFloor = { ...dependencies, successorProducts: dependencies.successorProducts
+          .map(product => ({ ...product, quantity: '0.5' })),
+          physical: { evidenceIds: [...physicalEvidence, reserve.id].sort(),
+            rows: dependencies.physical.rows.map(row => ({ ...row, reserved: '1.000' })) },
+          suppliedEvidenceIds: [...dependencies.suppliedEvidenceIds, reserve.id].sort() };
+        await tx.$executeRawUnsafe('SET LOCAL session_replication_role = replica');
+        await tx.shipmentQuantityEvidence.deleteMany({ where: { partnerCaseId: ids.caseId, kind: 'CONTRACTED_SET' } });
+        await tx.partnerCaseEvent.update({ where: { id: `${correctionId}-saved` },
+          data: { evidence: JSON.parse(JSON.stringify({ pricing: [], dependencies: belowFloor })) } });
+        await tx.$executeRawUnsafe('SET LOCAL session_replication_role = origin');
+        const rejectedReduction = await service.execute(command);
+        assert.equal(rejectedReduction.ok ? null : rejectedReduction.error.code, 'ROW_STALE',
+          'a validated reservation still blocks reducing the contracted quantity below the physical floor');
+        assert.equal(await tx.shipmentQuantityEvidence.count({ where: { partnerCaseId: ids.caseId, kind: 'ALLOCATION_FINALIZED' } }), 1);
+        assert.equal((await tx.partnerSaleCase.findUniqueOrThrow({ where: { id: ids.caseId } })).headRevision, 2);
+        await tx.$executeRaw`ROLLBACK TO SAVEPOINT reservation_floor_without_baseline`;
+        await tx.$executeRaw`RELEASE SAVEPOINT reservation_floor_without_baseline`;
         const beforeActivation = new Date();
         for (const administrativeDate of [earlierInvoiceDate, new Date(approvedAt.getTime() + 86_400_000)]) {
           await tx.$executeRaw`SAVEPOINT replacement_date_boundary`;
@@ -1040,6 +1076,14 @@ test('durable Accounting queue replay returns the original Partner record withou
         const effective = await service.execute(command);
         assert.equal(effective.ok, true, JSON.stringify(effective));
         assert.equal((await tx.partnerSaleCase.findUniqueOrThrow({ where: { id: ids.caseId } })).headRevision, 3);
+        const selected = (await deliveries())[0];
+        assert.ok(selected, 'the effective replacement exposes its delivery even with no predecessor baseline');
+        assert.deepEqual(selected.owner, changedTax.owner);
+        const created = await createPartnerCaseLoading(scoped, { ...logistics, expected: selected.owner,
+          deliveryId: selected.deliveryId, idempotencyKey: `${correctionId}-loading` });
+        assert.equal(created.ok, true, JSON.stringify(created));
+        assert.equal((await tx.shipmentQuantityEvidence.findFirstOrThrow({ where: { partnerCaseId: ids.caseId,
+          partnerCaseRevision: 3, kind: 'CONTRACTED_SET' } })).quantity.toString(), '2');
         assert.equal((await tx.accountingFinancialRecord.findUniqueOrThrow({ where: { id: existingInvoice.id } })).status, 'VOIDED');
         assert.equal(await tx.accountingReceivable.count({ where: { invoiceRecord: { sourceId: ids.internalId }, status: { not: 'VOIDED' } } }), 1);
         assert.equal(await tx.partnerFinancialAdjustment.count({ where: { correctionId } }), 0,
@@ -1053,6 +1097,9 @@ test('durable Accounting queue replay returns the original Partner record withou
         throw replacementRollback;
       }, { timeout: 30_000 });
     } catch (error) { if (error !== replacementRollback) throw error; }
+    await promisify(execFile)(process.execPath, ['backend/node_modules/tsx/dist/cli.mjs',
+      'backend/src/services/__tests__/partnerAccountingActionProbe.ts'], { timeout: 30_000, env: { ...process.env,
+      DATABASE_URL: temporary.databaseUrl, PARTNER_TEST_INVOICE_ID: existingInvoice.id, PARTNER_TEST_ACTOR_ID: accountantId } });
     const ownAccount = await createPartnerAccountingAdapter(createPrismaPartnerAccountingRepository({ database,
       actorId: ids.partnerId, correlationId: `${ids.caseId}-own-account` })).readOwnAccount(ids.partnerId);
     assert.equal(ownAccount.ok, true);
@@ -1863,10 +1910,15 @@ test('current Partner manager approval opens Logistics selection and draft creat
     await database.user.createMany({ data: [managerId, requesterId].map(id => ({ id, username: id,
       email: `${id}@example.invalid`, password: 'not-a-login', firstName: 'Managerial', lastName: 'Admission', role: 'ADMIN',
     })) });
+    const accountantId = `${ids.caseId}-accountant`;
+    const invoice = await seedDraftInvoice(database, ids, accountantId);
+    await database.featurePermission.create({ data: { userId: accountantId, workspace: 'accounting',
+      feature: 'accounting_records_approve_void', permissionLevel: 'edit' } });
     await promisify(execFile)(process.execPath, ['backend/node_modules/tsx/dist/cli.mjs',
       'backend/src/services/__tests__/partnerAlternativeDraftHttpProbe.ts'], { timeout: 120_000, env: { ...process.env,
       DATABASE_URL: temporary.databaseUrl, PARTNER_TEST_OWNER: JSON.stringify(expected), PARTNER_TEST_ACTOR_ID: requesterId,
-      PARTNER_TEST_MANAGER_ID: managerId, PARTNER_TEST_LOADING_ACTOR_ID: logisticsId } });
+      PARTNER_TEST_MANAGER_ID: managerId, PARTNER_TEST_LOADING_ACTOR_ID: logisticsId,
+      PARTNER_TEST_INVOICE_ID: invoice.id, PARTNER_TEST_ACCOUNTANT_ID: accountantId } });
   } finally { await database.$disconnect(); await temporary.cleanup(); }
 });
 
@@ -1950,62 +2002,51 @@ test('effective Partner financial approval opens Logistics selection and draft c
   }
 });
 
-test('Partner independent financial void keeps the commercial contract and commitment intact', async () => {
+test('Partner independent financial void removes new Logistics selection and preserves the existing draft', async () => {
   const temporary = await createPartnerLifecycleDatabase({ repositoryRoot: path.resolve(process.cwd()), sourceDatabaseUrl: databaseUrl() });
   const database = temporary.client();
   const ids = idsFor(`partner-independent-void-${temporary.runId}`);
   const accountantId = `${ids.caseId}-accountant`;
   try {
     await database.effectiveAuthorizationState.create({ data: { id: 1, revision: 1 } });
-    await database.$transaction(async tx => {
-      const seeded = await seedCase(tx, ids);
-      const lifecycle = createPartnerCaseLifecycleService(dependencies(tx, ids));
-      await lifecycle.markAwaitingCustomerConfirmation({ expected: seeded, commandId: `${ids.caseId}-send`,
-        correlationId: `${ids.caseId}-send`, snapshotId: `${ids.caseId}-snapshot` });
-      await lifecycle.markCustomerApproved({ expected: seeded, commandId: `${ids.caseId}-approve`,
-        correlationId: `${ids.caseId}-approve`, snapshotId: `${ids.caseId}-snapshot`,
-        verifiedAt: '2026-08-30T08:00:00.000Z' });
-      const committed = await lifecycle.execute(await commitCommand(ids, seeded, 'SIGNED'));
-      assert.equal(committed.ok, true);
-      await tx.partnerSaleCase.update({ where: { id: ids.caseId }, data: { commercialFlowVersion: 1, stateRevision: { increment: 1 } } });
-      await tx.salesContract.update({ where: { id: ids.contractId }, data: { commercialFlowVersion: 2,
-        commercialRevision: 1, salesApprovalRevision: 1, customerAcceptanceRevision: 1, status: 'SIGNED',
-        realizedAt: null, realizedAmount: null, realizedSellerId: null, realizedSellerSource: null } });
-      await tx.salesReportingEvent.deleteMany({ where: { contractId: ids.contractId } });
-      const { appendPartnerCommercialEvent } = await import('../partnerSales/cases/commercialEvents');
-      await appendPartnerCommercialEvent(tx, ids.caseId, ids.partnerId, 'PARTNER_FLOW_MIGRATED', { commercialFlowVersion: 2 });
-      assert.equal(await tx.partnerCaseRevision.count({ where: { caseId: ids.caseId } }), 1, 'retained revision before fixture commit');
-      await tx.$executeRawUnsafe('SET CONSTRAINTS ALL IMMEDIATE');
-      return seeded;
-    });
+    const owner = await seedCommittedDraftCase(database, ids);
+    const logisticsId = await seedDraftLogisticsActor(database, ids);
+    const invoice = await seedDraftInvoice(database, ids, accountantId);
+    const adapter = createPartnerAccountingAdapter(createPrismaPartnerAccountingRepository({ database,
+      actorId: accountantId, correlationId: `${ids.caseId}-accounting` }));
     const revision = await database.partnerCaseRevision.findUniqueOrThrow({ where: {
-      caseId_revision: { caseId: ids.caseId, revision: 1 },
+      caseId_revision: { caseId: ids.caseId, revision: owner.revision },
     }, select: { internalProjection: true } });
     const accounting = (revision.internalProjection as Prisma.JsonObject).accounting as Prisma.JsonObject;
+    const view = { ...accounting, state: 'COMMITTED' } as Parameters<typeof adapter.enqueueCommitted>[0];
     const committedEvent = await database.partnerCaseEvent.findFirstOrThrow({ where: {
       caseId: ids.caseId, type: 'CASE_COMMITTED',
     }, select: { evidence: true } });
     const commitment = PartnerEventSchema.parse((committedEvent.evidence as Prisma.JsonObject).publicEvent);
-    if (commitment.type !== 'CASE_COMMITTED') throw new Error('Invalid Accounting replay fixture');
-    await database.$transaction(async tx => {
-      await tx.user.create({ data: { id: accountantId, username: accountantId,
-        email: `${accountantId}@example.invalid`, password: 'not-a-login', firstName: 'Accounting', lastName: 'Replay' } });
-      await tx.effectiveActionGrant.create({ data: { id: `${ids.caseId}-accounting-grant`, principalKind: 'USER',
-        principalId: accountantId, subjectUserId: accountantId, domain: 'PARTNER', action: 'ACCOUNTING_WRITE',
-        rootKind: 'CASE', purpose: 'ACCOUNTING', scope: 'COMPANY', effect: 'ALLOW', grantedBy: accountantId,
-        reason: 'isolated financial void fixture', correlationId: `${ids.caseId}-grant` } });
-    });
-    const adapter = createPartnerAccountingAdapter(createPrismaPartnerAccountingRepository({ database,
-      actorId: accountantId, correlationId: `${ids.caseId}-accounting` }));
-    const view = { ...accounting, state: 'COMMITTED' } as Parameters<typeof adapter.enqueueCommitted>[0];
+    if (commitment.type !== 'CASE_COMMITTED') throw new Error('Invalid Accounting void fixture');
 
-    const queued = await adapter.enqueueCommitted(view, commitment);
-    assert.equal(queued.ok, true, JSON.stringify(queued));
-    const invoice = await database.accountingFinancialRecord.findFirstOrThrow({ where: { sourceId: ids.internalId } });
-    await promisify(execFile)(process.execPath, ['backend/node_modules/tsx/dist/cli.mjs', 'backend/src/services/__tests__/partnerFinancialApprovalProbe.ts'],
+    await prepareDraftFixtureInvoice(temporary.databaseUrl, invoice.id, accountantId, 'APPROVE');
+    await prepareDraftFixtureInvoice(temporary.databaseUrl, invoice.id, accountantId, 'PUBLISH');
+    const logistics = { actorId: logisticsId, correlationId: `${ids.caseId}-logistics` };
+    const deliveries = () => findLoadablePartnerDeliveries(database, { ...logistics, customerIds: [ids.customerId] });
+    const selected = (await deliveries()).find(delivery => delivery.deliveryId === 'separate-delivery');
+    assert.ok(selected);
+    const selection = { ...logistics, expected: selected.owner, deliveryId: selected.deliveryId };
+    const existingDraft = await createPartnerCaseLoading(database, { ...selection, idempotencyKey: `${ids.caseId}-draft` });
+    assert.ok(existingDraft.ok, JSON.stringify(existingDraft));
+
+    await promisify(execFile)(process.execPath, ['backend/node_modules/tsx/dist/cli.mjs',
+      'backend/src/services/__tests__/partnerFinancialVoidProbe.ts'],
       { timeout: 120_000, env: { ...process.env, DATABASE_URL: temporary.databaseUrl, PARTNER_TEST_INVOICE_ID: invoice.id, PARTNER_TEST_ACTOR_ID: accountantId } });
-    await promisify(execFile)(process.execPath, ['backend/node_modules/tsx/dist/cli.mjs', 'backend/src/services/__tests__/partnerFinancialVoidProbe.ts'],
-      { timeout: 120_000, env: { ...process.env, DATABASE_URL: temporary.databaseUrl, PARTNER_TEST_INVOICE_ID: invoice.id, PARTNER_TEST_ACTOR_ID: accountantId } });
+    assert.deepEqual(await deliveries(), []);
+    const stale = await createPartnerCaseLoading(database, { ...selection, idempotencyKey: `${ids.caseId}-stale` });
+    assert.equal(stale.ok ? null : stale.error.code, 'DEPENDENCY_BLOCKED');
+    if (!existingDraft.ok) throw new Error('Expected a retained Logistics draft');
+    const history = await readPartnerCaseLoading(database, { ...logistics, loadingId: existingDraft.value.loadingId });
+    assert.ok(history.ok, JSON.stringify(history));
+    if (history.ok) assert.deepEqual(history.value.source.owner, selected.owner);
+    assert.equal(await database.shipmentQuantityEvidence.count({ where: { partnerCaseId: ids.caseId } }), 1);
+
     const contract = await database.salesContract.findUniqueOrThrow({ where: { id: ids.contractId } });
     assert.ok(contract.firstFinancialRecordAt);
     const net = async () => (await database.salesReportingEvent.findMany({ where: { contractId: ids.contractId } }))

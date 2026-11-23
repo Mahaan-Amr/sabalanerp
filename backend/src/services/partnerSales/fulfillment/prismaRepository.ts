@@ -11,7 +11,7 @@ import { hasSharedOperationAuthority } from '../authorization/sharedOperationAut
 import { lockPartnerOperationsControl } from '../authorization/technicalRollout';
 import { readCurrentPartnerCaseViews, readPartnerRevisionProjections } from '../cases/lifecycle';
 import { buildPartnerPhysicalLineage, canonicalPartnerQuantity } from './lineage';
-import { capturePartnerContractedQuantities, readPartnerShipmentQuantityProjection } from './quantityStore';
+import { capturePartnerContractedQuantities, readPartnerCorrectionQuantityProjection, readPartnerShipmentQuantityProjection } from './quantityStore';
 import type {
   PartnerFulfillmentCommandReceipt, PartnerFulfillmentCommandScope, PartnerFulfillmentRepository,
   PartnerFulfillmentSource, PartnerPhysicalLineage, PartnerQuantityDependency,
@@ -166,12 +166,13 @@ export function createPrismaPartnerFulfillmentRepository(input: {
               outcome: json({ schemaVersion: 1, fulfillmentCommand: receipt }) } });
             return { ok: true, value: receipt };
           },
-          readQuantityDependencies: async expected => {
+          readQuantityDependencies: async (expected, mode) => {
             const caseRow = await tx.partnerSaleCase.findUnique({ where: { id: expected.caseId },
               select: { internalRecordId: true } });
             if (!caseRow?.internalRecordId) return [];
             const internalRecordId = caseRow.internalRecordId;
-            const projection = await readPartnerShipmentQuantityProjection(tx, expected.caseId);
+            const projection = await (mode === 'SUCCESSOR' ? readPartnerCorrectionQuantityProjection(tx, expected.caseId)
+              : readPartnerShipmentQuantityProjection(tx, expected.caseId));
             return projection.rows.map((row): PartnerQuantityDependency => ({ sourceKind: 'PARTNER_CASE', owner: expected,
               internalRecordId, productRowId: row.productRowId, unit: row.unit,
               contracted: row.quantities?.contracted ?? '', finalizedReserved: row.quantities?.finalizedReserved ?? '',

@@ -96,7 +96,7 @@ export interface PartnerFulfillmentTransaction {
     intentHash: string;
     lineages: readonly PartnerPhysicalLineage[];
   }): Promise<Result<PartnerFulfillmentCommandReceipt>>;
-  readQuantityDependencies(expected: RevisionRef): Promise<readonly PartnerQuantityDependency[]>;
+  readQuantityDependencies(expected: RevisionRef, mode: 'SUCCESSOR' | 'VOIDING'): Promise<readonly PartnerQuantityDependency[]>;
 }
 
 export interface PartnerFulfillmentRepository {

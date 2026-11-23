@@ -6,7 +6,8 @@ import { readPersistedPartnerEvents } from '../events/persisted';
 import { caseComparableAmount } from '../reporting/comparable';
 import { subtract, sum } from '../reporting/money';
 import { readCurrentPartnerCaseViews } from './lifecycle';
-import { synchronizePartnerContractedQuantities, validatePartnerCommercialPhysicalFloor } from '../fulfillment/quantityStore';
+import { synchronizeCorrectedPartnerDraftQuantities } from '../fulfillment/draftEligibility';
+import { validatePartnerCommercialPhysicalFloor } from '../fulfillment/quantityStore';
 
 const json = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value));
 
@@ -80,5 +81,5 @@ export async function recordPartnerCommercialCorrectionFinality(
       ...(index === 1 ? { stateRevision: root.stateRevision + 1, fromState: 'COMMITTED', toState: 'COMMITTED' } : {}),
       effectiveDate: new Date(`${effectiveDate}T00:00:00Z`), evidence: json({ publicEvent: event }) } });
   }
-  await synchronizePartnerContractedQuantities(tx, caseId);
+  await synchronizeCorrectedPartnerDraftQuantities(tx, caseId);
 }

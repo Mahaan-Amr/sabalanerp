@@ -159,17 +159,18 @@ export async function approvePartnerFinancialSourceWithinTransaction(
     invoiceRecord: { sourceKind: PARTNER_INTERNAL_ACCOUNTING_SOURCE, sourceId: record.sourceId } } })) {
     throw new Error('تعهد فعال قبلی باید در همان گردش اصلاح پرونده همکار تعیین تکلیف شود.');
   }
-  // Staging returns above. A real, effective approval owns the locked Case and
-  // captures quantity evidence inside the same invoice publication transaction.
-  if (row.customerContract && isFinalPartnerLoadingContract(row.customerContract) &&
-      await hasEffectivePartnerLoadingRevision(tx, view.data.owner) &&
-      record.amount.gt(0) && record.sepidarAmount?.equals(record.amount)) {
-    await synchronizePartnerContractedQuantities(tx, caseId, { initialize: true });
-  }
   if (!replacePublishedObligation) {
-    return tx.accountingFinancialRecord.update({ where: { id: record.id }, data: {
+    const updated = await tx.accountingFinancialRecord.update({ where: { id: record.id }, data: {
       metadata: json({ ...metadata, partnerApproval: approval, partnerReceivablePending: true }),
     } });
+    // Replacement effects synchronize after the complete publication, under
+    // the same Case lock. This branch also handles ordinary invoice approval.
+    if (metadata?.mode !== PARTNER_REPLACEMENT_MODE && row.customerContract &&
+        isFinalPartnerLoadingContract(row.customerContract) && await hasEffectivePartnerLoadingRevision(tx, view.data.owner) &&
+        record.amount.gt(0) && record.sepidarAmount?.equals(record.amount)) {
+      await synchronizePartnerContractedQuantities(tx, caseId, { initialize: true });
+    }
+    return updated;
   }
   const receivable = {
     id: `partner-receivable:${(await canonicalHash(record.id)).slice(10)}`,

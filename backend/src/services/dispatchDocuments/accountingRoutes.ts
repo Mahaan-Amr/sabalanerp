@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import express, { type RequestHandler, type Response } from 'express';
+import { reportAccountingRequestFailure } from '../../middleware/accountingRequestObserver';
 import type { AuthRequest } from '../../middleware/auth';
 import type { DispatchDocumentKind } from './contracts';
 import { PilotSafetyPauseError } from '../dispatchCutover';
@@ -28,7 +29,7 @@ export const dispatchDocumentHttpStatus = (error: unknown): 400 | 403 | 404 | 40
 const sendError = (res: Response, error: unknown) => {
   const status = dispatchDocumentHttpStatus(error);
   if (status) return res.status(status).json({ success: false, error: (error as Error).message });
-  console.error('Accounting dispatch document error:', error);
+  reportAccountingRequestFailure(res, error);
   return res.status(500).json({ success: false, error: 'Accounting dispatch document operation failed.' });
 };
 export const parseDispatchDocumentKinds = (value: unknown): DispatchDocumentKind[] => {

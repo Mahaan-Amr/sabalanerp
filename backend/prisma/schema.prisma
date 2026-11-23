@@ -4334,6 +4334,8 @@ model ShipmentQuantityProjection {
   finalizedReserved    Decimal?                 @db.Decimal(65, 30)
   physicallyDispatched Decimal?                 @db.Decimal(65, 30)
   availableToLoad      Decimal?                 @db.Decimal(65, 30)
+  approvedGrossContracted Decimal?              @db.Decimal(65, 30)
+  excessRetired         Decimal?                 @db.Decimal(65, 30)
   health               ShipmentProjectionHealth
   healthReasons        Json
   sourceEvidenceIds    Json
@@ -7661,6 +7663,7 @@ enum ShipmentQuantityEvidenceKind {
   DISPATCH_CORRECTION_DRAFT
   DISPATCH_CORRECTION_POSTED
   GUARD_RETURN_VERIFIED
+  EXCESS_RETURN_FINALIZED
   LEGACY_UNRECONCILED_RESERVED
   LEGACY_DISPATCHED
   LEGACY_RELEASED

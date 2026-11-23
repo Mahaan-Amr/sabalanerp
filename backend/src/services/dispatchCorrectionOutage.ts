@@ -6,7 +6,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { AccountingDispatchWaybillStatus, GuardDriverQueueTurnStatus, Prisma, PrismaClient } from '@prisma/client';
 import { isRetryableDispatchTransactionError, refreshProjectionContracts } from './dispatchAllocation';
 import { appendQueueEvent } from './guardDriverQueue';
-import { guardReturnValidationFailure, shipmentQuantityEvidenceIntegrityHash, shipmentQuantitySourceFields } from './shipmentQuantityProjectionStore';
+import { guardReturnValidationFailure, readPhysicalDispatchReturnHolding, ShipmentReturnConflictError, shipmentQuantityEvidenceIntegrityHash, shipmentQuantitySourceFields } from './shipmentQuantityProjectionStore';
 import { normalizeDispatchCorrectionDraft, StatementCorrectionPolicyError, type StatementCorrectionKind } from './dispatchCorrectionAdjustmentPolicy';
 import {
   persistStatementAdjustment,
@@ -405,6 +405,17 @@ export const verifyGuardPhysicalReturn = (prisma: PrismaClient, input: { movemen
   const candidate = { ...evidence, guardReturnMovement: movement, dispatchEvidence: validatedDispatchEvidence };
   const failure = guardReturnValidationFailure(candidate, [...existingReturns, candidate]);
   if (failure) throw new DispatchRecoveryConflictError(failure);
+  if (dispatchEvidence.sourceKind === 'SALES_CONTRACT') {
+    try {
+      const holding = await readPhysicalDispatchReturnHolding(tx, dispatchEvidence.id);
+      if (quantity.gt(holding.remainingQuantity)) {
+        throw new DispatchRecoveryConflictError('مقدار برگشت گارد از ماندهٔ قابل برگشت سند ارسال بیشتر است.');
+      }
+    } catch (error) {
+      if (error instanceof ShipmentReturnConflictError) throw new DispatchRecoveryConflictError(error.message);
+      throw error;
+    }
+  }
   evidence.integrityHash = shipmentQuantityEvidenceIntegrityHash(evidence);
   const created = await tx.shipmentQuantityEvidence.create({ data: { ...evidence, quantity, effectiveAt: movement.occurredAt,
     recordedAt: new Date(evidence.recordedAt), metadata: json(evidence.metadata) } });

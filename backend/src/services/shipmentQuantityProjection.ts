@@ -15,6 +15,7 @@ export type ShipmentQuantityEvidenceKind =
   | 'DISPATCH_CORRECTION_DRAFT'
   | 'DISPATCH_CORRECTION_POSTED'
   | 'GUARD_RETURN_VERIFIED'
+  | 'EXCESS_RETURN_FINALIZED'
   | 'LEGACY_UNRECONCILED_RESERVED'
   | 'LEGACY_DISPATCHED'
   | 'LEGACY_RELEASED'
@@ -48,6 +49,8 @@ export interface ShipmentQuantities {
   readonly finalizedReserved: string;
   readonly physicallyDispatched: string;
   readonly availableToLoad: string;
+  readonly approvedGrossContracted?: string;
+  readonly excessRetired?: string;
 }
 
 export interface LastVerifiedShipmentRow {
@@ -121,6 +124,28 @@ const eventOrder = (left: Pick<ShipmentQuantityEvidence, 'effectiveAt' | 'record
   || left.recordedAt.localeCompare(right.recordedAt)
   || left.id.localeCompare(right.id);
 
+export const EXCESS_SHIPMENT_RETURN_SOURCE = 'STONE_EXCESS_RETURN_ALLOCATION';
+
+export const isPhysicalDispatchEvidence = (item: Pick<ShipmentQuantityEvidence, 'kind'>) =>
+  item.kind === 'PHYSICAL_EXIT' || item.kind === 'MANUAL_OUTAGE_EXIT';
+
+export const excessShipmentReturnEvidenceFailure = (
+  item: Omit<ShipmentQuantityEvidence, 'contractId' | 'contractItemId'>,
+  dispatch: Pick<ShipmentQuantityEvidence, 'kind' | 'effectiveAt' | 'recordedAt'> | undefined,
+): string | null => {
+  if (!dispatch || !isPhysicalDispatchEvidence(dispatch)) return 'Excess return lacks matching physical dispatch evidence';
+  if (item.effectiveAt < dispatch.effectiveAt || item.recordedAt < dispatch.recordedAt || item.recordedAt < item.effectiveAt) {
+    return 'Excess return chronology conflicts with its physical dispatch';
+  }
+  if (item.sourceType !== EXCESS_SHIPMENT_RETURN_SOURCE || item.sourceVersion !== 1 || !item.sourceId.trim()
+    || typeof item.metadata?.returnCaseId !== 'string' || !item.metadata.returnCaseId.trim()
+    || typeof item.metadata?.actorId !== 'string' || !item.metadata.actorId.trim()
+    || item.guardReturnMovementId || item.returnEvidenceId) {
+    return 'Finalized excess return source evidence is invalid';
+  }
+  return null;
+};
+
 const healthPriority: Record<ShipmentProjectionHealth, number> = {
   CURRENT: 0,
   STALE: 1,
@@ -163,7 +188,10 @@ function projectPhysicalQuantities<T extends PhysicalRowIdentity>(
   const rows = [...grouped.entries()].map(([key, unsorted]): ProjectionRowFor<T> => {
     const events = [...unsorted].sort(eventOrder);
     const identity = events[0];
-    let contracted: bigint | null = null;
+    let grossContracted: bigint | null = null;
+    let excessRetired = 0n;
+    const dispatchById = new Map(events.filter(isPhysicalDispatchEvidence).map((item) => [item.id, item]));
+    const returnedByDispatch = new Map<string, bigint>();
     let reserved = 0n;
     let dispatched = 0n;
     let unresolvedLegacy = 0n;
@@ -183,7 +211,7 @@ function projectPhysicalQuantities<T extends PhysicalRowIdentity>(
     for (const item of events) {
       const quantity = parseShipmentQuantityToScaledInteger(item.quantity);
       switch (item.kind) {
-        case 'CONTRACTED_SET': contracted = quantity; break;
+        case 'CONTRACTED_SET': grossContracted = quantity; break;
         case 'ALLOCATION_FINALIZED': reserved += quantity; break;
         case 'ALLOCATION_RELEASED': reserved -= quantity; break;
         case 'PHYSICAL_EXIT':
@@ -209,9 +237,39 @@ function projectPhysicalQuantities<T extends PhysicalRowIdentity>(
           }
           dispatched += quantity;
           break;
-        case 'GUARD_RETURN_VERIFIED':
-          if (!item.guardReturnValidated) worsenHealth('EVIDENCE_CONFLICT', 'Guard return evidence was not validated against a completed inbound movement');
+        case 'EXCESS_RETURN_FINALIZED': {
+          const dispatchId = item.dispatchEvidenceId || '';
+          const dispatch = dispatchById.get(dispatchId);
+          const failure = excessShipmentReturnEvidenceFailure(item, dispatch);
+          if (!dispatch || failure) {
+            worsenHealth('EVIDENCE_CONFLICT', failure || 'Excess return lacks matching physical dispatch evidence');
+            break;
+          }
+          const returned = (returnedByDispatch.get(dispatchId) || 0n) + quantity;
+          if (quantity <= 0n || returned > parseShipmentQuantityToScaledInteger(dispatch.quantity)) {
+            worsenHealth('EVIDENCE_CONFLICT', 'Excess return exceeds its remaining physical dispatch quantity');
+            break;
+          }
+          returnedByDispatch.set(dispatchId, returned);
+          excessRetired += quantity;
+          dispatched -= quantity;
           break;
+        }
+        case 'GUARD_RETURN_VERIFIED': {
+          if (!item.guardReturnValidated) {
+            worsenHealth('EVIDENCE_CONFLICT', 'Guard return evidence was not validated against a completed inbound movement');
+            break;
+          }
+          const dispatch = dispatchById.get(item.dispatchEvidenceId || '');
+          if (dispatch) {
+            const returned = (returnedByDispatch.get(dispatch.id) || 0n) + quantity;
+            if (returned > parseShipmentQuantityToScaledInteger(dispatch.quantity)) {
+              worsenHealth('EVIDENCE_CONFLICT', 'Guard return exceeds its remaining physical dispatch quantity');
+            }
+            returnedByDispatch.set(dispatch.id, returned);
+          }
+          break;
+        }
         case 'LEGACY_UNRECONCILED_RESERVED':
           reserved += quantity;
           unresolvedLegacy += quantity;
@@ -234,7 +292,11 @@ function projectPhysicalQuantities<T extends PhysicalRowIdentity>(
       }
     }
 
+    const contracted = grossContracted === null ? null : grossContracted - excessRetired;
     if (contracted === null) worsenHealth('EVIDENCE_CONFLICT', 'Contracted quantity evidence is missing');
+    if (excessRetired > 0n && (dispatched < 0n || (contracted !== null && contracted < 0n))) {
+      worsenHealth('EVIDENCE_CONFLICT', 'Excess retirement conflicts with dispatched or approved gross quantity');
+    }
     if (reserved < 0n) worsenHealth('EVIDENCE_CONFLICT', 'Reserved quantity movement has no matching reservation');
     if (unresolvedLegacy > 0n) worsenHealth('LEGACY_UNRECONCILED', 'Legacy finalized loading awaits review');
     if (unresolvedLegacy < 0n) worsenHealth('EVIDENCE_CONFLICT', 'Legacy review has no matching held quantity');
@@ -247,6 +309,10 @@ function projectPhysicalQuantities<T extends PhysicalRowIdentity>(
       finalizedReserved: formatShipmentQuantity(reserved),
       physicallyDispatched: formatShipmentQuantity(dispatched),
       availableToLoad: formatShipmentQuantity(contracted - reserved - dispatched),
+      ...(excessRetired > 0n ? {
+        approvedGrossContracted: formatShipmentQuantity(contracted + excessRetired),
+        excessRetired: formatShipmentQuantity(excessRetired),
+      } : {}),
     };
     const quantities = finalHealth !== 'CURRENT' && verified ? verified.quantities : computed;
 

@@ -15,8 +15,9 @@ import {
 } from '@prisma/client';
 import { appendQueueEvent, isGuardQueueTurnCurrentlyReady } from './guardDriverQueue';
 import {
+  lockShipmentTruth,
   readShipmentQuantityProjection,
-  shipmentProjectionPersistenceData,
+  persistShipmentQuantityProjection,
   shipmentQuantityEvidenceIntegrityHash,
 } from './shipmentQuantityProjectionStore';
 import { assertCanonicalDispatchCommandAllowed } from './dispatchCutover';
@@ -109,17 +110,6 @@ const lockKeys = async (tx: Tx, keys: string[]) => {
   for (const key of [...new Set(keys)].sort()) {
     await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', key);
   }
-};
-
-const lockShipmentTruth = async (tx: Tx, contractItemIds: string[]) => {
-  const ids = [...new Set(contractItemIds)].sort();
-  if (ids.length === 0) return;
-  await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "contract_items"
-    WHERE "id" IN (${Prisma.join(ids)}) ORDER BY "id" FOR UPDATE`);
-  await tx.$queryRaw(Prisma.sql`SELECT "contractItemId" FROM "shipment_quantity_projections"
-    WHERE "contractItemId" IN (${Prisma.join(ids)}) ORDER BY "contractItemId" FOR UPDATE`);
-  await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "shipment_quantity_evidence"
-    WHERE "contractItemId" IN (${Prisma.join(ids)}) ORDER BY "contractItemId", "recordedAt", "id" FOR UPDATE`);
 };
 
 const lockQueueTurns = async (tx: Tx, queueTurnIds: string[]) => {
@@ -665,14 +655,7 @@ export const saveCanonicalAllocationDraft = async (prisma: Database, input: {
 
 export const refreshProjectionContracts = async (tx: Tx, contractIds: string[]) => {
   for (const contractId of [...new Set(contractIds)]) {
-    const projection = await readShipmentQuantityProjection(tx as unknown as PrismaClient, { contractId });
-    for (const row of projection.rows) {
-      await tx.shipmentQuantityProjection.upsert({
-        where: { contractItemId: row.contractItemId },
-        create: { contractItemId: row.contractItemId, contractId: row.contractId, ...shipmentProjectionPersistenceData(row) },
-        update: shipmentProjectionPersistenceData(row),
-      });
-    }
+    await persistShipmentQuantityProjection(tx, await readShipmentQuantityProjection(tx, { contractId }));
   }
 };
 

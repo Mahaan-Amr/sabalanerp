@@ -1251,8 +1251,37 @@ export const listTreasuryOverviewPrisma = async (database: PrismaClient, input: 
 
 export const listTaxOverviewPrisma = async (database: PrismaClient) => {
   const [invoices, channels, reconciliations, rules] = await Promise.all([
-    database.accountingTaxInvoice.findMany({ orderBy: { issuedAt: 'desc' }, take: 100,
-      include: { outboxMessages: { include: { attempts: { orderBy: { attemptNumber: 'desc' } } } } } }),
+    database.$queryRaw<Array<Prisma.AccountingTaxInvoiceGetPayload<{}> & {
+      outboxMessages: { id: string; status: string }[];
+      latestAttemptAt: Date | null;
+      latestErrorCode: string | null;
+    }>>`
+      WITH invoices AS (
+        SELECT * FROM accounting_tax_invoices ORDER BY "issuedAt" DESC LIMIT 100
+      )
+      SELECT invoice.*,
+        COALESCE((
+          SELECT json_agg(json_build_object('id', message.id, 'status', message.status)
+                          ORDER BY message."createdAt", message.id)
+          FROM accounting_tax_outbox_messages message WHERE message."taxInvoiceId" = invoice.id
+        ), '[]'::json) AS "outboxMessages",
+        (
+          SELECT max(attempt."attemptedAt")
+          FROM accounting_tax_outbox_messages message
+          JOIN accounting_tax_submission_attempts attempt ON attempt."outboxMessageId" = message.id
+          WHERE message."taxInvoiceId" = invoice.id
+        ) AS "latestAttemptAt",
+        (
+          SELECT attempt."errorCode"
+          FROM accounting_tax_outbox_messages message
+          JOIN accounting_tax_submission_attempts attempt ON attempt."outboxMessageId" = message.id
+          WHERE message."taxInvoiceId" = invoice.id AND attempt."errorCode" IS NOT NULL
+          ORDER BY attempt."attemptedAt" DESC, attempt."attemptNumber" DESC, attempt.id DESC
+          LIMIT 1
+        ) AS "latestErrorCode"
+      FROM invoices invoice
+      ORDER BY invoice."issuedAt" DESC
+    `,
     database.accountingTaxSubmissionChannel.findMany({ orderBy: { effectiveFrom: 'desc' }, take: 50,
       select: { id: true, legalEntityId: true, kind: true, providerName: true, safeKeyVersion: true,
         effectiveFrom: true, effectiveTo: true, healthStatus: true, createdAt: true } }),
@@ -1260,6 +1289,24 @@ export const listTaxOverviewPrisma = async (database: PrismaClient) => {
     database.accountingTaxRule.findMany({ orderBy: [{ effectiveFrom: 'desc' }, { version: 'desc' }], take: 100 }),
   ]);
   return { invoices, channels, reconciliations, rules };
+};
+
+export const readTaxInvoiceAttemptsPrisma = async (database: PrismaClient, id: string) => {
+  const invoice = await database.accountingTaxInvoice.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      internalSerial: true,
+      outboxMessages: {
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        include: { attempts: { orderBy: { attemptNumber: 'desc' } } },
+      },
+    },
+  });
+  if (!invoice) {
+    throw new AccountingCustomerTreasuryError('TAX_INVOICE_NOT_FOUND', 'صورتحساب مالیاتی پیدا نشد.', 404);
+  }
+  return invoice;
 };
 
 const exportCell = (value: unknown) => {

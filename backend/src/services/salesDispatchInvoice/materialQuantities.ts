@@ -58,7 +58,11 @@ export function projectLoadedMaterialRows(
     const linear = parsePrintNumber(row.linearMeasurement);
     const exactCount = count?.mul(ratio);
     const physicalCount = consumed ?? (exactCount?.isInteger() ? exactCount : undefined);
-    const sourceRatio = consumed && count?.gt(0) ? consumed.div(count) : ratio;
+    // Geometry belongs to physical mother pieces. A fractional proportional
+    // count without a recorded yield/cumulative increment proves neither area
+    // nor consumed length (the next piece may consume zero or one mother).
+    if (!physicalCount) return unknown(row);
+    const sourceRatio = count?.gt(0) ? physicalCount.div(count) : ratio;
     return { ...row, count: physicalCount ? display(physicalCount) : '—',
       linearMeasurement: linear ? display(linear.mul(sourceRatio)) : row.linearMeasurement,
       squareMeasurement: area ? display(area.mul(sourceRatio)) : row.squareMeasurement };

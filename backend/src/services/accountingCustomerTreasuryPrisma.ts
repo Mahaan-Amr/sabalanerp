@@ -17,7 +17,10 @@ import {
 import { createAccountingLedgerApplication, hashAccountingEvidence, IRR_ROUNDING_RULE_V1 } from './accountingLedgerFoundation';
 import { createAccountingLedgerPrismaRepository } from './accountingLedgerPrismaRepository';
 import { guardPhysicalExitIntegrityHash } from './physicalGateExit';
-import { shipmentQuantityEvidenceIntegrityHash } from './shipmentQuantityProjectionStore';
+import {
+  hasValidPersistedSalesShipmentEvidenceHash,
+  shipmentQuantityEvidenceIntegrityHash,
+} from './shipmentQuantityProjectionStore';
 import { generatePdfBufferFromHtml } from '../utils/pdf';
 import { collectedCustomerCheckRials, effectiveCustomerReceiptRials } from './accountingCustomerReceiptBalance';
 import { requireNewCustomerSaleAfterOpening } from './accountingCustomerSaleOpeningGuard';
@@ -547,16 +550,19 @@ export const recognizeCustomerSalePrisma = async (database: PrismaClient, comman
   return { kind: 'POSTED' as const, invoice, openItem, voucher, taxInvoice };
 }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 30_000 });
 
-export const recognizeCustomerReturnPrisma = async (database: PrismaClient, input: {
+export type CustomerReturnRecognitionInput = {
   originalInvoiceId: string; commercialCreditNumber: string; bookId: string; fiscalYearId: string; periodId: string;
   returnedAt: Date; evidenceIds: string[]; lines: Array<{ id: string; originalLineId: string; evidenceId: string; productRowId: string; quantity: string;
     netRials: bigint; taxRials: bigint; costRials: bigint; taxRule: { id: string; version: number; citation: string; rateBasisPoints: number; exempt: boolean } }>;
   postingRule: { id: string; version: number };
   idempotencyKey: string; correlationId: string; actor: CustomerTreasuryActor;
-}) => database.$transaction(async (tx) => {
+};
+
+/** The caller owns commit, rollback, and serializable isolation. */
+export const recognizeCustomerReturnWithin = async (tx: Prisma.TransactionClient, input: CustomerReturnRecognitionInput) => {
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`customer-return:${input.originalInvoiceId}`}))`;
   const original = await tx.accountingCommercialCustomerInvoice.findUnique({ where: { id: input.originalInvoiceId },
-    include: { openItems: true } });
+    include: { profile: { select: { accountingPartyId: true } } } });
   if (!original || original.status !== 'POSTED') throw new AccountingCustomerTreasuryError('ORIGINAL_INVOICE_REQUIRED', 'صورتحساب فروش قطعی مرجع پیدا نشد.', 404);
   const returnCommandHash = hashCustomerTreasuryEvidence({ originalInvoiceId: input.originalInvoiceId,
     commercialCreditNumber: input.commercialCreditNumber, bookId: input.bookId, fiscalYearId: input.fiscalYearId,
@@ -589,7 +595,7 @@ export const recognizeCustomerReturnPrisma = async (database: PrismaClient, inpu
     if (!evidenceRow || evidenceRow.kind !== 'GUARD_RETURN_VERIFIED' || evidenceRow.contractId !== original.contractId
       || !evidenceRow.dispatchEvidenceId || evidenceRow.productRowId !== line.productRowId
       || evidenceRow.quantity.toFixed(3) !== line.quantity
-      || evidenceRow.integrityHash !== shipmentQuantityEvidenceIntegrityHash(evidenceRow as never)) {
+      || !hasValidPersistedSalesShipmentEvidenceHash(evidenceRow)) {
       throw new AccountingCustomerTreasuryError('VERIFIED_RETURN_EVIDENCE_REQUIRED', 'شاهد تغییرناپذیر برگشت گارد با ردیف اصلاح فروش سازگار نیست.', 409);
     }
   }
@@ -656,7 +662,8 @@ export const recognizeCustomerReturnPrisma = async (database: PrismaClient, inpu
     actor: input.actor, lines: [
       ledgerLine({ accountId: postingRule.revenueAccountId, debitRials: netRials, evidence, description: 'برگشت درآمد فروش' }),
       ...(taxRials > 0n ? [ledgerLine({ accountId: postingRule.outputTaxAccountId, debitRials: taxRials, evidence, description: 'برگشت مالیات فروش' })] : []),
-      ledgerLine({ accountId: postingRule.receivableAccountId, creditRials: netRials + taxRials, evidence, description: 'بستانکاری مشتری بابت برگشت' }),
+      ledgerLine({ accountId: postingRule.receivableAccountId, creditRials: netRials + taxRials,
+        partyId: original.profile.accountingPartyId, evidence, description: 'بستانکاری مشتری بابت برگشت' }),
       ...(costRials > 0n ? [ledgerLine({ accountId: postingRule.inventoryAccountId, debitRials: costRials, evidence, description: 'بازگشت موجودی تأییدشده' }),
         ledgerLine({ accountId: postingRule.costAccountId, creditRials: costRials, evidence, description: 'برگشت بهای تمام‌شده' })] : []),
     ] });
@@ -693,7 +700,10 @@ export const recognizeCustomerReturnPrisma = async (database: PrismaClient, inpu
     protocolVersion: 'TAXPAYER-V1', requestIdentity: `tax-request-${taxInvoiceId}`,
     status: taxChannel ? 'PENDING' : 'NEEDS_CHANNEL', availableAt: new Date() } });
   return credit;
-}, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 30_000 });
+};
+
+export const recognizeCustomerReturnPrisma = (database: PrismaClient, input: CustomerReturnRecognitionInput) =>
+  customerTransaction(database, (tx) => recognizeCustomerReturnWithin(tx, input));
 
 export const recordCustomerReceiptPrisma = async (database: Database, input: {
   profileId: string; contractId?: string; bookId: string; fiscalYearId: string; periodId: string; amountRials: bigint;

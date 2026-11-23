@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import test from 'node:test';
+import { Prisma } from '@prisma/client';
 import { createAccountingLedgerAdministration } from '../accountingLedgerAdministration';
 import { hashCustomerTreasuryEvidence } from '../accountingCustomerTreasury';
+import { verifyGuardPhysicalReturn } from '../dispatchCorrectionOutage';
+import { shipmentQuantityEvidenceIntegrityHash } from '../shipmentQuantityProjectionStore';
 import { importBankStatementFilePrisma, resolveBankFileExceptionPrisma } from '../accountingBankFileImport';
 import { listPostedJournal, listPostedTrialBalance, verifyLedgerAuditChain } from '../accountingLedgerPrismaRepository';
 import {
@@ -22,6 +25,8 @@ import {
   proposeBankMatchesPrisma,
   confirmBankMatchPrisma,
   listTreasuryOverviewPrisma,
+  recognizeCustomerReturnPrisma,
+  recognizeCustomerReturnWithin,
   recognizeCustomerSalePrisma,
   recordCustomerReceiptPrisma,
 } from '../accountingCustomerTreasuryPrisma';
@@ -29,7 +34,7 @@ import { createTemporaryConcurrencyDatabase } from './shipmentStatementConcurren
 
 const sourceDatabaseUrl = process.env.ACCOUNTING_LEDGER_TEST_DATABASE_URL;
 
-test('customer revenue and treasury tracer bullet persists once and projects only posted evidence', { skip: !sourceDatabaseUrl, timeout: 240_000 }, async () => {
+test('customer revenue and treasury tracer bullet persists once and projects only posted evidence', { skip: !sourceDatabaseUrl, timeout: 240_000 }, async (t) => {
   const temporary = await createTemporaryConcurrencyDatabase({ repositoryRoot: path.resolve(process.cwd(), '..'),
     sourceDatabaseUrl: sourceDatabaseUrl!, migrateEmptySchema: true });
   const database = temporary.client();
@@ -363,6 +368,91 @@ test('customer revenue and treasury tracer bullet persists once and projects onl
     assert.deepEqual(attempt.safeResponse, { status: 'accepted', nested: { receipt: 'safe' } });
     assert.equal((await database.accountingTaxInvoice.findFirstOrThrow()).status, 'SUBMITTED');
     await assert.rejects(() => database.accountingCustomerOpenItem.update({ where: { id: sale.openItem.id }, data: { originalRials: '1' } }), /ACCOUNTING_IMMUTABLE_RECORD/);
+
+    await t.test('verified Guard return is atomic with its caller and can be reposted once after rollback', async () => {
+      const returnedAt = new Date('2026-09-28T08:00:00Z');
+      const customer = await database.crmCustomer.create({
+        data: { id: command.partySourceId, firstName: 'مشتری', lastName: 'نمونه' },
+      });
+      const department = await database.department.create({ data: { name: 'Return QA', namePersian: 'آزمون مرجوعی' } });
+      await database.user.create({ data: { id: actor.id, username: 'return-accountant',
+        email: 'return-accountant@example.invalid', password: 'test-only', firstName: 'حسابدار', lastName: 'آزمون' } });
+      const product = await database.product.create({ data: {
+        code: 'return-test-stone', name: 'Test stone', namePersian: 'سنگ آزمون',
+        cuttingDimensionCode: 'slab', cuttingDimensionName: 'Slab', cuttingDimensionNamePersian: 'اسلب',
+        stoneTypeCode: 'granite', stoneTypeName: 'Granite', stoneTypeNamePersian: 'گرانیت',
+        widthCode: 'w60', widthValue: 60, widthName: '۶۰',
+        thicknessCode: 't2', thicknessValue: 2, thicknessName: '۲',
+        mineCode: 'test', mineName: 'Test mine', mineNamePersian: 'معدن آزمون',
+        finishCode: 'flame', finishName: 'Flame', finishNamePersian: 'فلیم',
+        colorCode: 'gray', colorName: 'Gray', colorNamePersian: 'طوسی',
+        qualityCode: 'a', qualityName: 'A', qualityNamePersian: 'درجه یک', images: [],
+      } });
+      const originalLine = command.lines[0];
+      const contract = await database.salesContract.create({ data: {
+        id: command.contractId, contractNumber: command.contractId, title: 'Return QA', titlePersian: 'آزمون مرجوعی',
+        content: '', customerId: customer.id, departmentId: department.id, createdBy: actor.id, responsibleSellerId: actor.id,
+        contractData: { products: [{ rowId: originalLine.productRowId, productId: product.id, quantity: 2, unit: 'count' }] },
+      } });
+      const item = await database.contractItem.create({ data: {
+        contractId: contract.id, productId: product.id, productRowId: originalLine.productRowId, quantity: 2,
+        unitPrice: 500, totalPrice: 1000,
+      } });
+      const project = await database.projectAddress.create({ data: { customerId: customer.id, address: 'نشانی آزمون' } });
+      const loading = await database.logisticsLoading.create({ data: { loadingNumber: 'return-fixture-loading',
+        customerId: customer.id, projectId: project.id, createdBy: actor.id } });
+      const dispatchEvidence = {
+        id: 'return-fixture-dispatch', contractId: contract.id, contractItemId: item.id,
+        productRowId: originalLine.productRowId, unit: 'count', kind: 'PHYSICAL_EXIT' as const, quantity: '2.000',
+        effectiveAt: command.transferredAt.toISOString(), recordedAt: command.transferredAt.toISOString(),
+        sourceType: 'GUARD_PHYSICAL_EXIT', sourceId: 'return-fixture-exit', sourceVersion: 1,
+        metadata: { loadingId: loading.id },
+      };
+      await database.shipmentQuantityEvidence.create({ data: { ...dispatchEvidence,
+        integrityHash: shipmentQuantityEvidenceIntegrityHash({ ...dispatchEvidence, integrityHash: '' }),
+      } });
+      const movement = await database.securityVehicleMovement.create({ data: { movementNumber: 'return-fixture-movement',
+        direction: 'INBOUND', purpose: 'SALES_RETURN', status: 'INFO_COMPLETED',
+        customerId: customer.id, loadingId: loading.id, occurredAt: returnedAt, completedAt: returnedAt, createdBy: actor.id,
+      } });
+      const returnEvidence = await verifyGuardPhysicalReturn(database, { movementId: movement.id,
+        dispatchEvidenceId: dispatchEvidence.id, quantity: '1.000', actorId: actor.id,
+        authority: { actorRole: 'ADMIN', workspace: 'guard', workspacePermission: 'admin' },
+      });
+
+      const returnCommand = {
+        originalInvoiceId: sale.invoice.id, commercialCreditNumber: 'credit-1',
+        bookId: command.bookId, fiscalYearId: command.fiscalYearId, periodId: command.periodId,
+        returnedAt, evidenceIds: [returnEvidence.id], lines: [{
+          id: 'credit-line-1', originalLineId: originalLine.id, evidenceId: returnEvidence.id,
+          productRowId: originalLine.productRowId, quantity: '1.000', netRials: 500n, taxRials: 50n,
+          costRials: 300n, taxRule: originalLine.taxRule,
+        }], postingRule: command.postingRule, idempotencyKey: 'credit-1', correlationId: 'credit-correlation-1', actor,
+      };
+      const accountAt = { profileId: profile.id, asOf: new Date(Date.now() + 1_000) };
+      const journalScope = { bookId: book.id, fiscalYearId: year.id };
+      const journalBefore = await listPostedJournal(database, journalScope);
+      const abort = new Error('Caller rejected the return');
+      await assert.rejects(database.$transaction(async (tx) => {
+        const staged = await recognizeCustomerReturnWithin(tx, returnCommand);
+        assert.equal(staged.status, 'CREDIT_NOTE');
+        assert.equal((await projectCustomerAccountPrisma(tx, accountAt)).standaloneCreditRials, 550n);
+        throw abort;
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }), (error) => error === abort);
+      assert.equal((await projectCustomerAccountPrisma(database, accountAt)).standaloneCreditRials, 0n);
+      assert.deepEqual(await listPostedJournal(database, journalScope), journalBefore);
+
+      const credit = await recognizeCustomerReturnPrisma(database, returnCommand);
+      const replay = await recognizeCustomerReturnPrisma(database, returnCommand);
+
+      assert.equal(replay.id, credit.id);
+      assert.equal(credit.referenceInvoiceId, sale.invoice.id);
+      assert.equal((await projectCustomerAccountPrisma(database, accountAt)).standaloneCreditRials, 550n);
+      const journal = await listPostedJournal(database, journalScope);
+      const creditLine = journal.find((voucher) => voucher.id === credit.ledgerVoucherId)?.lines.find((line) => line.accountId === receivable.id);
+      assert.equal(creditLine?.partyId, profile.accountingPartyId);
+      assert.equal(creditLine.creditRials.toFixed(0), '550');
+    });
   } finally {
     await database.$disconnect();
     await temporary.cleanup();

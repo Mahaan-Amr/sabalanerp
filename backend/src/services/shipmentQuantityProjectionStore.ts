@@ -1,6 +1,6 @@
 import { exactQuantityText, ExactQuantityDecimal } from './exactQuantity';
 import { createHash } from 'node:crypto';
-import { Prisma, PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient, type ShipmentQuantityEvidence as ShipmentQuantityEvidenceRow } from '@prisma/client';
 import {
   projectShipmentQuantities,
   type ShipmentQuantityEvidence,
@@ -118,6 +118,9 @@ const persistedEvidencePayload = (item: ShipmentQuantityEvidence | PartnerPersis
 
 export const shipmentQuantityEvidenceIntegrityHash = (item: ShipmentQuantityEvidence | PartnerPersistedShipmentEvidence) =>
   hash(persistedEvidencePayload(item));
+
+export const hasValidPersistedSalesShipmentEvidenceHash = (item: ShipmentQuantityEvidenceRow) =>
+  item.sourceKind === 'SALES_CONTRACT' && item.integrityHash === shipmentQuantityEvidenceIntegrityHash(mapPersistedEvidence(item));
 
 const projectionIntegrityPayload = (row: {
   contractId: string; contractItemId: string; productRowId: string; unit: string;

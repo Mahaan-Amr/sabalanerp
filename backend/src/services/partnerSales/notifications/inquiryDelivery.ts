@@ -66,8 +66,8 @@ async function inTransaction<T>(database: PrismaClient | Prisma.TransactionClien
  * reauthorizes the current owner/assignment. Persisted notices never convey a grant. */
 export function createInquiryNotificationAccess(contract: ContractRuntime): PartnerNotificationAccess {
   const verify = async (tx: Prisma.TransactionClient, notification: SafeNotification): Promise<PartnerNotificationEvidence | null> => {
-    await tx.$queryRaw`SELECT id FROM partner_inquiries WHERE id =
-      (SELECT "inquiryId" FROM partner_inquiry_events WHERE id = ${notification.projectionEvidenceId}) FOR UPDATE`;
+    // Cause and assignment evidence are immutable. The authorization step
+    // takes the Profile and Inquiry locks before reading current authority.
     const cause = await causeFor(tx, notification.projectionEvidenceId);
     if (!cause) return null;
     const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;

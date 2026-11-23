@@ -518,6 +518,8 @@ async function run() {
         assert.equal(bytesHash(first.bytes), bytesHash(second.bytes));
         const invoiceHtml = Buffer.from(first.bytes).toString();
         assert.match(invoiceHtml, /کارشناس فروش<\/strong> آزمون فاکتور/);
+        assert.equal(invoiceHtml.match(/<strong>خریدار<\/strong>/g)?.length, 1);
+        assert.equal(invoiceHtml.match(/<h2>مشخصات پروژه · قرارداد/g)?.length, 2);
         assert.match(invoiceHtml, /بلوار دکتر حسابی/);
         assert.match(invoiceHtml, /تلفن ثابت<\/strong> <bdi dir="ltr">۰۷۱۹۱۰۱۰۹۰۰/);
         assert.match(invoiceHtml, /قیمت اقلام و نحوهٔ تسویه طبق قراردادهای شمارهٔ <bdi dir="ltr">IT-/);

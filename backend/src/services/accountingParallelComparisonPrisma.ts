@@ -116,7 +116,7 @@ export const recordAccountingParallelComparison = async (tx: Prisma.TransactionC
       lines: target.lines.map((line) => ({ accountId: line.accountId, partyId: line.partyId, financialAccountId: line.financialAccountId,
         debit: line.debitRials.toString(), credit: line.creditRials.toString(), dimensions: line.dimensions.map((dimension) => `${dimension.dimensionTypeId}:${dimension.memberId}`) })),
     })), pairs });
-  if (previous && priorPayload?.outputHash === report.outputHash) return { id: previous.id, ...report };
+  if (previous && priorPayload?.outputHash === report.outputHash) return { id: previous.id, ...report, reconciledAt: previous.reconciledAt };
   const revisionHash = hashAccountingReplacementEvidence({ outputHash: report.outputHash, predecessorComparisonId: previous?.id ?? null });
   const saved = await tx.accountingOperationalReconciliation.create({ data: {
     bookId: command.bookId, fiscalYearId: period.fiscalYearId, periodId: period.id, reconciliationCode: code, sourceSystem: snapshot.id,
@@ -128,5 +128,5 @@ export const recordAccountingParallelComparison = async (tx: Prisma.TransactionC
     actorId: command.actorId, bookId: command.bookId, periodId: period.id, comparisonId: saved.id,
     predecessorComparisonId: previous?.id ?? null, outputHash: report.outputHash, exact: report.exact,
   });
-  return { id: saved.id, ...report };
+  return { id: saved.id, ...report, reconciledAt: saved.reconciledAt };
 };

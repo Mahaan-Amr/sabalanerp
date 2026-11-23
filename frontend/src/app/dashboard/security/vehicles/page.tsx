@@ -29,7 +29,7 @@ import {
   ErpWorkspacePage,
   erpFieldLabelClassName,
 } from "@/components/erp";
-import { crmAPI, dispatchConfirmationAPI, securityAPI } from "@/lib/api";
+import { crmAPI, dispatchConfirmationAPI, securityAPI, type CrmCustomerOption } from "@/lib/api";
 import RoleAwareDispatchCases from "@/features/dispatch-case/RoleAwareDispatchCases";
 import { dispatchCaseReference } from "@/features/dispatch-case/dispatchCasePresentation";
 import {
@@ -172,7 +172,8 @@ export default function SecurityVehiclesPage() {
   } | null>(null);
   const [admissionOpen, setAdmissionOpen] = useState(false);
   const [exitTarget, setExitTarget] = useState<any>(null);
-  const [customers, setCustomers] = useState<any[]>([]);
+  const [customers, setCustomers] = useState<CrmCustomerOption[]>([]);
+  const customerSearchRequest = useRef<AbortController>();
   const [customerSearch, setCustomerSearch] = useState("");
   const [previewUrl, setPreviewUrl] = useState("");
   const [inboundForm, setInboundForm] = useState<any>(emptyInbound);
@@ -293,13 +294,23 @@ export default function SecurityVehiclesPage() {
     });
   }, [activeSection, pathname, queryReady, router]);
 
+  useEffect(() => () => customerSearchRequest.current?.abort(), []);
+
   const searchCustomers = async () => {
-    if (!customerSearch.trim()) return;
-    const response = await crmAPI.getCustomers({
-      search: customerSearch,
-      limit: 10,
-    });
-    if (response.data.success) setCustomers(response.data.data || []);
+    const search = customerSearch.trim();
+    if (!search) return;
+    customerSearchRequest.current?.abort();
+    const controller = new AbortController();
+    customerSearchRequest.current = controller;
+    try {
+      const { data } = await crmAPI.getCustomerOptions({ search, limit: 10 }, controller.signal);
+      if (!controller.signal.aborted && data.success) setCustomers(data.data);
+    } catch {
+      if (!controller.signal.aborted) {
+        setCustomers([]);
+        setError('جست‌وجوی مشتری انجام نشد.');
+      }
+    }
   };
 
   const recordInbound = async () => {
@@ -1029,9 +1040,10 @@ export default function SecurityVehiclesPage() {
                     <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
                       <ErpInput
                         value={customerSearch}
-                        onChange={(event) =>
-                          setCustomerSearch(event.target.value)
-                        }
+                        onChange={(event) => {
+                          customerSearchRequest.current?.abort();
+                          setCustomerSearch(event.target.value);
+                        }}
                       />
                       <ErpButton
                         label="جستجو"

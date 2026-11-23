@@ -14,7 +14,6 @@ import { createAccountingReplacementPrismaRepository } from '../services/account
 import { compareSepidarSnapshots } from '../services/sepidarSnapshotDelta';
 import { recordAccountingParallelComparison, runAccountingParallelTransaction } from '../services/accountingParallelComparisonPrisma';
 import { manageAccountingParallelDifference } from '../services/accountingParallelDifferences';
-import { Prisma } from '@prisma/client';
 
 const router = express.Router();
 const repository = createAccountingReplacementPrismaRepository(prisma);
@@ -41,6 +40,19 @@ const handle = (operation: (req: WorkspaceRequest) => Promise<unknown>, created 
   }
 };
 
+const measureVerification = async <T extends object>(operation: () => Promise<T>) => {
+  const started = performance.now();
+  const result = await operation();
+  return { ...result, verificationTiming: { completedAt: new Date().toISOString(), durationMs: Math.round(performance.now() - started) } };
+};
+
+const replacementAuditException = ({ valid, failedSequence }: Awaited<ReturnType<typeof application.verifyAudit>>) =>
+  valid ? null : {
+    id: `audit-${failedSequence ?? 'missing'}`, category: 'ممیزی',
+    title: 'زنجیره شواهد حسابداری آسیب دیده یا ناقص است.', owner: 'مدیر حسابداری', ageHours: 0, status: 'بحرانی',
+    source: failedSequence == null ? 'شاهد ممیزی ثبت نشده' : `ردیف ${failedSequence}`, resolutionHref: '/dashboard/accounting/audit',
+  };
+
 router.get('/overview', access('view'), handle(async (req) => {
   const bookId = String(req.query.bookId ?? '');
   if (!bookId) throw new AccountingReplacementError('BOOK_REQUIRED', 'دفتر حسابداری باید مشخص شود.', 400);
@@ -49,7 +61,7 @@ router.get('/overview', access('view'), handle(async (req) => {
     prisma.accountingReplacementParallelRun.findMany({ where: { bookId }, orderBy: { recordedAt: 'desc' }, take: 24 }),
     prisma.accountingReplacementRecoveryProof.findMany({ where: { bookId }, orderBy: { recordedAt: 'desc' }, take: 12 }),
     prisma.accountingReplacementCutoverRun.findMany({ where: { bookId }, orderBy: { authorityTransferredAt: 'desc' }, take: 10 }),
-    application.verifyAudit(),
+    req.query.includeAudit === 'false' ? null : application.verifyAudit(),
     prisma.accountingExceptionCase.findMany({ where: { status: { not: 'RESOLVED' } }, orderBy: { createdAt: 'desc' }, take: 100 }),
     prisma.accountingSupplyChainException.findMany({ where: { resolvedAt: null }, orderBy: { createdAt: 'desc' }, take: 100 }),
     prisma.accountingCloseRunStep.findMany({ where: { status: 'BLOCKED', closeRun: { bookId } }, include: { closeRun: { select: { id: true, runIdentity: true } } }, orderBy: { updatedAt: 'desc' }, take: 100 }),
@@ -57,6 +69,7 @@ router.get('/overview', access('view'), handle(async (req) => {
     prisma.accountingLedgerVoucher.groupBy({ by: ['fiscalYearId', 'status'], where: { bookId, sourceType: 'SEPIDAR_ACC_VOUCHER' }, _count: { _all: true } }),
     prisma.accountingFiscalYear.findMany({ where: { bookId }, select: { id: true, code: true } }),
   ]);
+  const auditException = auditVerification && replacementAuditException(auditVerification);
   const now = Date.now();
   const exceptions = [
     ...exceptionCases.map((item) => ({ id: item.id, category: item.code.includes('TAX') ? 'مالیات' : item.code.includes('BANK') ? 'بانک' : item.code.includes('CHECK') ? 'چک' : 'ثبت',
@@ -71,12 +84,21 @@ router.get('/overview', access('view'), handle(async (req) => {
       ageHours: Math.floor((now - item.updatedAt.getTime()) / 3_600_000), status: item.status, source: item.closeRun.runIdentity, resolutionHref: '/dashboard/accounting/period-end' })),
     ...taxQueue.map((item) => ({ id: item.id, category: 'صف و اتصال', title: 'ارسال صورتحساب مالیاتی نیازمند رسیدگی است.', owner: 'حسابدار',
       ageHours: Math.floor((now - item.createdAt.getTime()) / 3_600_000), status: item.status, source: item.requestIdentity, resolutionHref: '/dashboard/accounting/tax-center' })),
-    ...(!auditVerification.valid ? [{ id: `audit-${auditVerification.failedSequence ?? 'missing'}`, category: 'ممیزی', title: 'زنجیره شواهد حسابداری آسیب دیده یا ناقص است.', owner: 'مدیر حسابداری', ageHours: 0, status: 'بحرانی', source: auditVerification.failedSequence == null ? 'شاهد ممیزی ثبت نشده' : `ردیف ${auditVerification.failedSequence}`, resolutionHref: '/dashboard/accounting/audit' }] : []),
+    ...(auditException ? [auditException] : []),
     ...(!recoveryProofs[0]?.proven ? [{ id: 'recovery-proof-missing', category: 'پشتیبان', title: 'بازیابی کامل و تکرارشده برای آخرین نقطه هماهنگ اثبات نشده است.', owner: 'مدیر سامانه', ageHours: 0, status: 'مسدودکننده انتشار', source: 'کنترل بازیابی حسابداری', resolutionHref: '/dashboard/admin/system-recovery' }] : []),
   ];
   const yearCode = new Map(fiscalYears.map((year) => [year.id, year.code]));
   const sepidarLedger = sepidarLedgerCounts.map((row) => ({ year: yearCode.get(row.fiscalYearId) ?? row.fiscalYearId, status: row.status, count: row._count._all }));
   return { migrations, parallelRuns, recoveryProofs, cutovers, auditVerification, exceptions, sepidarLedger };
+}));
+
+router.get('/audit-verification', access('view'), handle(async (req) => {
+  if (!String(req.query.bookId ?? '')) throw new AccountingReplacementError('BOOK_REQUIRED', 'دفتر حسابداری باید مشخص شود.', 400);
+  // Replacement audit evidence is a single chain across books, as in the overview.
+  return measureVerification(async () => {
+    const auditVerification = await application.verifyAudit();
+    return { auditVerification, exception: replacementAuditException(auditVerification) };
+  });
 }));
 
 router.get('/legacy-archive', access('view'), handle((req) => application.searchLegacyArchive({ bookId: String(req.query.bookId ?? ''), query: String(req.query.query ?? '') })));
@@ -168,7 +190,7 @@ router.get('/sepidar-snapshots/:id/delta', access('admin'), handle(async (req) =
   };
 }));
 
-router.get('/sepidar-snapshots/:id/readiness', access('admin'), handle(async (req) => {
+router.get('/sepidar-snapshots/:id/readiness', access('admin'), handle((req) => measureVerification(async () => {
   const bookId = String(req.query.bookId ?? '');
   const snapshot = await prisma.accountingSepidarSourceSnapshot.findUnique({ where: { id: req.params.id }, select: { id: true, bookId: true, status: true } });
   if (!snapshot || snapshot.bookId !== bookId || snapshot.status !== 'COMPLETE') throw new AccountingReplacementError('SNAPSHOT_NOT_FOUND', 'نسخهٔ کامل سپیدار در این دفتر پیدا نشد.', 404);
@@ -196,7 +218,7 @@ router.get('/sepidar-snapshots/:id/readiness', access('admin'), handle(async (re
     targetLedger: { drafts: ledgerDraftCount, posted: postedCount },
     officialReportsBlocked: Boolean((fiscalStart && firstDate && firstDate > fiscalStart) || unvalued || negative),
   };
-}));
+})));
 
 router.get('/sepidar-snapshots/:id/records', access('admin'), handle(async (req) => {
   const snapshot = await prisma.accountingSepidarSourceSnapshot.findUnique({ where: { id: req.params.id }, select: { id: true, bookId: true, status: true, schemaManifest: true } });
@@ -289,14 +311,14 @@ router.get('/parallel-comparisons/context', access('admin'), handle(async (req) 
   return { periods: periods.map((period) => ({ id: period.id, title: `${period.fiscalYear.code} · ${period.titlePersian}` })), targets, reports,
     cases: cases.map((item) => ({ ...item, ownerName: owners.find((user) => user.id === item.assignedUserId) ? `${owners.find((user) => user.id === item.assignedUserId)!.firstName} ${owners.find((user) => user.id === item.assignedUserId)!.lastName}` : 'مدیر حسابداری' })) };
 }));
-router.post('/parallel-comparisons', access('admin'), handle((req) => {
+router.post('/parallel-comparisons', access('admin'), handle((req) => measureVerification(() => {
   const { bookId, periodId, snapshotId } = req.body;
   if (![bookId, periodId, snapshotId].every((value) => typeof value === 'string' && value.trim())) throw new AccountingReplacementError('PARALLEL_SCOPE_REQUIRED', 'دفتر، دوره و نسخهٔ سپیدار الزامی‌اند.', 400);
   const pair = req.body.pair;
   if (pair && ![pair.sourceKey, pair.targetId, pair.reason].every((value) => typeof value === 'string' && value.trim())) throw new AccountingReplacementError('PARALLEL_PAIR_INVALID', 'شناسه دو رویداد و دلیل بررسی الزامی‌اند.', 400);
   return runAccountingParallelTransaction(prisma, (tx) => recordAccountingParallelComparison(tx, { bookId, periodId, snapshotId, actorId: actor(req).id,
     pair: pair ? { sourceKey: pair.sourceKey, targetId: pair.targetId, reason: pair.reason } : undefined }));
-}, true));
+}), true));
 router.post('/parallel-differences', access('admin'), handle(async (req) => {
   const { bookId, comparisonId, differenceIdentity, action, cause, resolution } = req.body;
   if (![bookId, comparisonId, differenceIdentity].every((value) => typeof value === 'string' && value.trim())

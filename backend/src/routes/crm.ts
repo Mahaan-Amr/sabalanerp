@@ -102,10 +102,14 @@ export const ordinaryProjectSearch = (search: string) => ({ OR: [
   { customerTransferSnapshot: { path: ['companyName'], string_contains: search } },
 ] });
 
-const buildCustomerScope = async (req: any, managementDirectory = false) => {
-  const canViewAll = managementDirectory && (await customerManagementCapabilities(prisma, req.user.id)).canViewAllCustomers;
+const buildCustomerScope = async (
+  req: any,
+  managementDirectory = false,
+  knownGrants?: { canViewAll: boolean; canAssignOwner: boolean },
+): Promise<Prisma.CrmCustomerWhereInput> => {
+  const canViewAll = managementDirectory && (knownGrants?.canViewAll ?? (await customerManagementCapabilities(prisma, req.user.id)).canViewAllCustomers);
   const scope = customerScopeForActor({
-    userId: req.user.id, role: managementDirectory && !canViewAll && req.user.role === 'ADMIN' ? 'USER' : req.user.role, canAssignOwner: await canAssignCustomerOwner(req),
+    userId: req.user.id, role: managementDirectory && !canViewAll && req.user.role === 'ADMIN' ? 'USER' : req.user.role, canAssignOwner: knownGrants?.canAssignOwner ?? await canAssignCustomerOwner(req),
     canViewAll,
   });
   return managementDirectory ? { ...scope, activeCard: { isNot: null } } : { ...scope, partnerOwnerProfileId: null, activeCard: { isNot: null } };
@@ -842,19 +846,89 @@ router.post('/partner/customer-transfers/:id/decision', protect, partnerCrmEndpo
     transferId: req.params.id, correlationId }));
 }));
 
-router.get('/customers', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOMERS_VIEW, FEATURES.CRM_CUSTOMERS_VIEW_ALL, FEATURES.SALES_CUSTOMERS_VIEW], FEATURE_PERMISSIONS.VIEW), async (req: any, res: Response) => {
+const customerDirectoryAccess = requireAnyFeatureAccess(
+  [FEATURES.CRM_CUSTOMERS_VIEW, FEATURES.CRM_CUSTOMERS_VIEW_ALL, FEATURES.SALES_CUSTOMERS_VIEW],
+  FEATURE_PERMISSIONS.VIEW,
+);
+const customerPageSize = (value: unknown, fallback: number, maximum: number) =>
+  Math.max(1, Math.min(maximum, Number.parseInt(String(value), 10) || fallback));
+
+const customerSearchFilter = (search: unknown): Prisma.CrmCustomerWhereInput => ({
+  AND: normalizePersianSearchTokens(typeof search === 'string' ? search.slice(0, 150) : '')
+    .slice(0, 8)
+    .map(token => ({
+      OR: expandPersianSearchTokenVariants(token).flatMap(variant => {
+        // Prisma uses LIKE patterns for contains. Match typed percent and underscore literally.
+        const contains = { contains: variant.replace(/[\%_]/g, '\\$&'), mode: 'insensitive' as const };
+        return [
+          { firstName: contains }, { lastName: contains }, { companyName: contains },
+          { nationalCode: contains }, { projectManagerName: contains }, { homeNumber: contains },
+          { workNumber: contains }, { brandName: contains },
+          { primaryContact: { firstName: contains } }, { primaryContact: { lastName: contains } },
+          { phoneNumbers: { some: { number: contains } } },
+        ];
+      }),
+    })),
+});
+
+const customerOwnerSelect = { id: true, firstName: true, lastName: true, username: true } as const;
+const customerDisplayPhone = {
+  where: { isActive: true }, take: 1,
+  orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }, { id: 'asc' }],
+  select: { number: true, isPrimary: true },
+} satisfies Prisma.CrmCustomer$phoneNumbersArgs;
+const customerOptionSelect = {
+  id: true, firstName: true, lastName: true, companyName: true, customerType: true, status: true,
+  trustCategory: true, isBlacklisted: true, isLocked: true, ownerUserId: true,
+  ownerUser: { select: customerOwnerSelect }, phoneNumbers: customerDisplayPhone,
+} satisfies Prisma.CrmCustomerSelect;
+const customerDirectorySelect = {
+  ...customerOptionSelect, activityCategory: true, nationalCode: true, projectManagerName: true,
+  brandName: true, partnerOwnerProfileId: true,
+  primaryContact: { select: { firstName: true, lastName: true, email: true } },
+  _count: { select: { projectAddresses: { where: { isActive: true } } } },
+} satisfies Prisma.CrmCustomerSelect;
+const customerDirectoryOrder: Prisma.CrmCustomerOrderByWithRelationInput[] = [{ createdAt: 'desc' }, { id: 'desc' }];
+
+router.get('/customer-options', protect, customerDirectoryAccess, async (req: any, res: Response): Promise<void> => {
   try {
-    const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 10;
+    const scope = await buildCustomerScope(req, true);
+    const id = typeof req.query.id === 'string' ? req.query.id : undefined;
+    const customerType = typeof req.query.customerType === 'string' ? req.query.customerType : undefined;
+    const where: Prisma.CrmCustomerWhereInput = {
+      AND: [scope, id === undefined ? customerSearchFilter(req.query.search) : { id }, { customerType }],
+    };
+    const customers = await prisma.crmCustomer.findMany({
+      where, select: customerOptionSelect, orderBy: customerDirectoryOrder,
+      take: id === undefined ? customerPageSize(req.query.limit, 20, 30) : 1,
+    });
+    res.json({
+      success: true,
+      data: customers.map(({ phoneNumbers, ...customer }) => ({ ...customer, phone: phoneNumbers[0]?.number ?? null })),
+    });
+  } catch (error) {
+    console.error('Get CRM customer options error:', error);
+    res.status(500).json({ success: false, error: 'Server error' });
+  }
+});
+
+router.get('/customers', protect, customerDirectoryAccess, async (req: any, res: Response) => {
+  try {
+    const page = customerPageSize(req.query.page, 1, 21474836);
+    const limit = customerPageSize(req.query.limit, 10, 100);
     const skip = (page - 1) * limit;
-    const search = req.query.search as string;
+    const search = req.query.search;
     const status = req.query.status as string;
     const customerType = req.query.customerType as string;
 
     // Build where clause
-    let whereClause: any = await buildCustomerScope(req, true);
-    const capabilities = await customerManagementCapabilities(prisma, req.user.id);
-    const canAssign = await canAssignCustomerOwner(req);
+    const [capabilities, canAssign] = await Promise.all([
+      customerManagementCapabilities(prisma, req.user.id),
+      canAssignCustomerOwner(req),
+    ]);
+    const whereClause = await buildCustomerScope(req, true, {
+      canAssignOwner: canAssign, canViewAll: capabilities.canViewAllCustomers,
+    });
     if (req.query.ownership === 'internal') whereClause.partnerOwnerProfileId = null;
     if (req.query.ownership === 'partner') {
       if (!capabilities.canViewAllCustomers) { res.status(403).json({ success: false, error: 'مجوز مشاهده همه مشتریان لازم است.' }); return; }
@@ -863,24 +937,8 @@ router.get('/customers', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOMER
     if (['true', 'false'].includes(req.query.isBlacklisted)) whereClause.isBlacklisted = req.query.isBlacklisted === 'true';
     if (['true', 'false'].includes(req.query.isLocked)) whereClause.isLocked = req.query.isLocked === 'true';
     
-    if (search) {
-      whereClause.AND = normalizePersianSearchTokens(search).map(token => ({
-        OR: expandPersianSearchTokenVariants(token).flatMap(variant => [
-          { firstName: { contains: variant, mode: 'insensitive' } },
-          { lastName: { contains: variant, mode: 'insensitive' } },
-          { companyName: { contains: variant, mode: 'insensitive' } },
-          { nationalCode: { contains: variant, mode: 'insensitive' } },
-          { projectManagerName: { contains: variant, mode: 'insensitive' } },
-          { homeNumber: { contains: variant, mode: 'insensitive' } },
-          { workNumber: { contains: variant, mode: 'insensitive' } },
-          { brandName: { contains: variant, mode: 'insensitive' } },
-          { primaryContact: { firstName: { contains: variant, mode: 'insensitive' } } },
-          { primaryContact: { lastName: { contains: variant, mode: 'insensitive' } } },
-          { phoneNumbers: { some: { number: { contains: variant, mode: 'insensitive' } } } }
-        ])
-      }));
-    }
-    
+    if (search) Object.assign(whereClause, customerSearchFilter(search));
+
     if (status) whereClause.status = status;
     if (customerType) whereClause.customerType = customerType;
     if (req.query.trustCategory) {
@@ -889,79 +947,86 @@ router.get('/customers', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOMER
       whereClause.partnerOwnerProfileId = null;
     }
 
-    const customers = await prisma.crmCustomer.findMany({
-      where: whereClause,
-      skip,
-      take: limit,
-      include: {
-        primaryContact: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-            phone: true,
-            position: true
-          }
-        },
-        contacts: {
-          where: { isActive: true },
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-            phone: true,
-            position: true,
-            isPrimary: true,
-            isActive: true
-          }
-        },
-        projectAddresses: {
-          where: { isActive: true },
-          select: {
-            id: true,
-            customerId: true,
-            address: true,
-            city: true,
-            projectName: true,
-            projectType: true,
-            projectManagerName: true,
-            projectManagerNumber: true,
-            marketerFirstName: true,
-            marketerLastName: true,
-            marketerPhoneNumber: true
-          }
-        },
-        phoneNumbers: {
-          where: { isActive: true },
-          select: {
-            id: true,
-            number: true,
-            type: true,
-            isPrimary: true
-          }
-        },
-        ownerUser: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            username: true
-          }
-        },
-        _count: {
-          select: {
-            leads: true,
-            communications: true,
-            salesContracts: true
-          }
-        }
-      },
-      orderBy: {
-        createdAt: 'desc'
-      }
+    const directoryView = req.query.view === 'directory';
+    const managementFlags = (customer: { partnerOwnerProfileId: string | null; ownerUserId: string | null }) => ({
+      managementReadOnly: Boolean(customer.partnerOwnerProfileId || (req.user.role !== 'ADMIN' && customer.ownerUserId !== req.user.id && !canAssign)),
+      canManageCustomerCard: Boolean(customer.partnerOwnerProfileId) && req.user.role === 'ADMIN',
     });
+    const pageQuery = { where: whereClause, skip, take: limit, orderBy: customerDirectoryOrder };
+    const customers = directoryView
+      ? (await prisma.crmCustomer.findMany({ ...pageQuery, select: customerDirectorySelect }))
+        .map(({ _count, ...customer }) => ({ ...customer, projectCount: _count.projectAddresses, ...managementFlags(customer) }))
+      : (await prisma.crmCustomer.findMany({
+          ...pageQuery,
+          include: {
+            primaryContact: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                email: true,
+                phone: true,
+                position: true
+              }
+            },
+            contacts: {
+              where: { isActive: true },
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                email: true,
+                phone: true,
+                position: true,
+                isPrimary: true,
+                isActive: true
+              }
+            },
+            projectAddresses: {
+              where: { isActive: true },
+              select: {
+                id: true,
+                customerId: true,
+                address: true,
+                city: true,
+                projectName: true,
+                projectType: true,
+                projectManagerName: true,
+                projectManagerNumber: true,
+                marketerFirstName: true,
+                marketerLastName: true,
+                marketerPhoneNumber: true
+              }
+            },
+            phoneNumbers: {
+              where: { isActive: true },
+              select: {
+                id: true,
+                number: true,
+                type: true,
+                isPrimary: true
+              }
+            },
+            ownerUser: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                username: true
+              }
+            },
+            _count: {
+              select: {
+                leads: true,
+                communications: true,
+                salesContracts: true
+              }
+            }
+          },
+        })).map(customer => {
+          const flags = managementFlags(customer);
+          return flags.managementReadOnly ? managedCustomerResponse(customer, flags.canManageCustomerCard) : customer;
+        });
 
     const [total, blacklisted, locked] = await Promise.all([
       prisma.crmCustomer.count({ where: whereClause }),
@@ -971,7 +1036,7 @@ router.get('/customers', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOMER
 
     res.json({
       success: true,
-      data: customers.map(customer => customer.partnerOwnerProfileId || (req.user.role !== 'ADMIN' && customer.ownerUserId !== req.user.id && !canAssign) ? managedCustomerResponse(customer, Boolean(customer.partnerOwnerProfileId) && req.user.role === 'ADMIN') : customer),
+      data: customers,
       permissions: { canViewAllCustomers: capabilities.canViewAllCustomers, canDeleteCustomers: capabilities.canDeleteCustomers },
       summary: { blacklisted, locked },
       pagination: {

@@ -8,12 +8,14 @@ type PanelState<T> = {
   loading: boolean;
   error?: string;
   denied?: boolean;
+  status?: number;
 };
 
 export function useAccountingPanelRead<T>(
   key: string | undefined,
   load: (signal: AbortSignal) => Promise<T>,
   fallbackError: string,
+  refreshKey?: number,
 ) {
   const request = useRef<AbortController | undefined>(undefined);
   const activeKey = useRef<string | undefined>(undefined);
@@ -25,7 +27,8 @@ export function useAccountingPanelRead<T>(
     const controller = new AbortController();
     request.current = controller;
     setState((current) => ({
-      key, data: current?.key === key ? current.data : undefined, loading: true, denied: current?.denied,
+      key, data: current?.key === key ? current.data : undefined, loading: true,
+      denied: current?.key === key ? current.denied : undefined, status: current?.key === key ? current.status : undefined,
     }));
     try {
       const data = await load(controller.signal);
@@ -34,9 +37,10 @@ export function useAccountingPanelRead<T>(
       if (controller.signal.aborted) return;
       const response = (reason as { response?: { status?: number; data?: { error?: string; message?: string } } })?.response;
       const denied = response?.status === 401 || response?.status === 403;
-      const error = response?.data?.error || response?.data?.message || fallbackError;
+      const localError = reason instanceof Error && /^[\u0600-\u06ff]/.test(reason.message) ? reason.message : undefined;
+      const error = response?.data?.error || response?.data?.message || localError || fallbackError;
       setState((current) => ({
-        key, data: !denied && current?.key === key ? current.data : undefined, loading: false, error, denied,
+        key, data: !denied && current?.key === key ? current.data : undefined, loading: false, error, denied, status: response?.status,
       }));
     }
   }, [key, load, fallbackError]);
@@ -48,7 +52,12 @@ export function useAccountingPanelRead<T>(
       activeKey.current = undefined;
       request.current?.abort();
     };
-  }, [key, refresh]);
+  }, [key, refresh, refreshKey]);
+
+  const discard = useCallback(() => {
+    request.current?.abort();
+    setState(undefined);
+  }, []);
 
   const update = useCallback((apply: (data: T | undefined) => T) => {
     if (!key || activeKey.current !== key) return;
@@ -60,6 +69,6 @@ export function useAccountingPanelRead<T>(
   const active = key && state?.key === key ? state : undefined;
   return {
     data: active?.data, loading: Boolean(key) && (active?.loading ?? true),
-    error: active?.error, denied: active?.denied, refresh, update,
+    error: active?.error, denied: active?.denied, status: active?.status, refresh, discard, update,
   };
 }

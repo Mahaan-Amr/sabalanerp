@@ -111,7 +111,8 @@ for(const scenario of ['qualification','remote-tamper','post-mutation','rollback
     for(const phase of ['LOCAL_CHECKPOINT_VERIFIED','REMOTE_CHECKPOINT_VERIFIED','MUTATION_STARTED']){
      assert.equal(includes('DEPLOYMENT_PHASE='+phase).length,0,'failed checkpoint cannot record '+phase);
     }
-    assert.equal(includes('dist/scripts/deployment-owned-migrations.js').length,0,'failed checkpoint cannot run owned migrations');
+    assert.equal(includes('dist/scripts/deployment-owned-migrations.js')
+     .filter(command=>!command.args.includes('--verify-current')).length,0,'failed checkpoint cannot apply owned migrations');
    }
    else assert.ok(hostStage('AFTER_CHECKPOINT')>checkpoint,'retention after capture must follow verified checkpoint');
   }

@@ -1,16 +1,18 @@
 import { AccountingDispatchCandidateStatus, Prisma } from '@prisma/client';
 import { FulfillmentViewSchema } from '@sabalanerp/partner-sales-contracts';
 import { ExactQuantityDecimal } from '../../exactQuantity';
+import { hasPartnerDraftSettlement } from '../accounting/draftSettlement';
 import { hasPartnerDraftFinancialApproval } from '../accounting/draftApproval';
 import { authorizePartnerTechnicalRollout } from '../authorization/technicalRollout';
 import { readCurrentPartnerCaseViews } from '../cases/lifecycle';
 import { partnerPredecessorIsFrozen } from '../corrections/mutationFreeze';
 import { PartnerQuantityEvidenceConflictError, readPartnerShipmentQuantityProjection } from './quantityStore';
+import { hasPartnerDraftManagerApproval } from './draftManagerApproval';
 import { hasEffectivePartnerLoadingRevision, isFinalPartnerLoadingContract } from './effectiveRevision';
 
 export async function readPartnerDraftCase(tx: Prisma.TransactionClient, caseId: string) {
   const current = await readCurrentPartnerCaseViews(tx, caseId);
-  if (current?.row.state !== 'COMMITTED' || !current.row.customerContractId || !current.row.internalRecordId) return null;
+  if (current?.row.state !== 'COMMITTED' || !current.accounting || !current.row.customerContractId || !current.row.internalRecordId) return null;
   const projection = current.row.head.internalProjection as Prisma.JsonObject | null;
   const fulfillment = FulfillmentViewSchema.safeParse(projection?.fulfillment);
   if (!fulfillment.success) return null;
@@ -18,11 +20,13 @@ export async function readPartnerDraftCase(tx: Prisma.TransactionClient, caseId:
     include: { customer: { select: { isActive: true } } } });
   if (!contract?.customer?.isActive || contract.partnerCaseId !== caseId || !isFinalPartnerLoadingContract(contract) ||
       !await hasEffectivePartnerLoadingRevision(tx, fulfillment.data.owner)) return null;
-  return { row: current.row, contract, view: fulfillment.data };
+  return { row: current.row, contract, view: fulfillment.data, accounting: current.accounting };
 }
 
 export async function hasPartnerDraftAuthority(tx: Prisma.TransactionClient, draftCase: NonNullable<Awaited<ReturnType<typeof readPartnerDraftCase>>>) {
-  return hasPartnerDraftFinancialApproval(tx, { owner: draftCase.view.owner, internalRecordId: draftCase.view.recordId });
+  return await hasPartnerDraftFinancialApproval(tx, { owner: draftCase.view.owner, internalRecordId: draftCase.view.recordId }) ||
+    await hasPartnerDraftManagerApproval(tx, draftCase.contract, draftCase.view.owner) ||
+    await hasPartnerDraftSettlement(tx, draftCase.accounting, draftCase.row.profile.userId);
 }
 
 /** Shared selection rule for customer search, the delivery picker and a fresh

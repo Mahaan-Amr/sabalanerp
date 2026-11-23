@@ -9,13 +9,17 @@ export function isFinalPartnerLoadingContract(contract: SalesContract) {
 }
 
 /** A persisted head may advance before the successor becomes commercially effective. */
-export async function hasEffectivePartnerLoadingRevision(tx: Prisma.TransactionClient, owner: RevisionRef) {
+export async function readEffectivePartnerLoadingRevision(tx: Prisma.TransactionClient, owner: RevisionRef) {
   const event = await tx.partnerCaseEvent.findFirst({ where: { caseId: owner.caseId,
     type: { in: ['CASE_COMMITTED', 'CORRECTION_EFFECTIVE', 'CASE_RECOMMITTED'] },
-  }, orderBy: { sequence: 'desc' }, select: { id: true, type: true, caseRevision: true, integrityHash: true, evidence: true } });
-  if (event?.caseRevision !== owner.revision || event.integrityHash !== owner.integrityHash) return false;
+  }, orderBy: { sequence: 'desc' }, select: { id: true, type: true, caseRevision: true, integrityHash: true, evidence: true, recordedAt: true } });
+  if (event?.caseRevision !== owner.revision || event.integrityHash !== owner.integrityHash) return null;
   const parsed = PartnerEventSchema.safeParse((event.evidence as Prisma.JsonObject | null)?.publicEvent);
   return parsed.success && parsed.data.type === event.type && parsed.data.eventId === event.id &&
     parsed.data.owner.caseId === owner.caseId && parsed.data.owner.revision === owner.revision &&
-    parsed.data.owner.integrityHash === owner.integrityHash;
+    parsed.data.owner.integrityHash === owner.integrityHash ? event : null;
+}
+
+export async function hasEffectivePartnerLoadingRevision(tx: Prisma.TransactionClient, owner: RevisionRef) {
+  return Boolean(await readEffectivePartnerLoadingRevision(tx, owner));
 }

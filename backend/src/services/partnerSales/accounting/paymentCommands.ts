@@ -16,6 +16,9 @@ import { partnerPredecessorIsFrozen } from '../corrections/mutationFreeze';
 import { readPartnerInvoiceSource } from './invoiceSource';
 import { withCurrentSabalanPlan } from './sabalanPlan';
 import { readPartnerReceivableEvidence } from './receivableEvidence';
+import { readPartnerDraftCase } from '../fulfillment/draftEligibility';
+import { synchronizePartnerContractedQuantities } from '../fulfillment/quantityStore';
+import { hasPartnerDraftSettlement } from './draftSettlement';
 import { readPartnerCollections } from './collections';
 
 const object = (value: unknown): Record<string, unknown> | undefined =>
@@ -206,6 +209,12 @@ export async function executePartnerCollectionAction(database: PrismaClient, com
         integrityHash: event.owner.integrityHash, sequence: (maximum._max.sequence ?? 0) + 1, type: event.type,
         actorId: event.actorId, commandId: event.commandId, correlationId: event.correlationId,
         effectiveDate: new Date(`${event.effectiveDate}T00:00:00.000Z`), evidence: json({ publicEvent: event }) } });
+    }
+    if (!voiding && remainingAmount === '0' && delta !== '0' && !delta.startsWith('-')) {
+      const draftCase = await readPartnerDraftCase(tx, caseId);
+      if (draftCase && await hasPartnerDraftSettlement(tx, draftCase.accounting, draftCase.row.profile.userId)) {
+        await synchronizePartnerContractedQuantities(tx, caseId, { initialize: true });
+      }
     }
     await tx.accountingAuditLog.create({ data: { action: command.kind, actorId: actor.userId,
       entityType: 'AccountingPaymentStatus', entityId: payment.id,

@@ -7,6 +7,8 @@ import { resolveWorkspaceDutyAuthority } from './crossWorkspaceDutyAuthority';
 import { assertCommercialActionAvailable, refreshDispatchExpiryExemption } from './ordinaryContractLifecycle';
 import { hasSpecialCustomerCreditAuthorization } from './specialCustomerCreditPolicy';
 import { canManageCustomerCredit, lockCustomerCredit } from './specialCustomerCredit';
+import { readPartnerDraftCase } from './partnerSales/fulfillment/draftEligibility';
+import { synchronizePartnerContractedQuantities } from './partnerSales/fulfillment/quantityStore';
 import { publishNotificationEvent } from './notificationService';
 
 export type CreditDb = PrismaClient | Prisma.TransactionClient;
@@ -251,7 +253,11 @@ export const decideDispatchRequest = async (db: CreditDb, id: string, actorId: s
   }
   const updated = await db.contractDispatchAuthority.update({ where: { id }, data: { status: action === 'APPROVE' ? 'APPROVED' : 'REJECTED',
     decidedBy: actorId, decidedAt: new Date(), promisedDate: decisionDate, reason: reason?.trim() || request.reason } });
-  await auditDispatchCredit(db, request.contractId, actorId, `DISPATCH_${request.kind}_${action}`, id, request, updated, reason);
+  const draftCase = action === 'APPROVE' && request.kind === 'MANAGER' && request.contract.partnerCaseId
+    ? await readPartnerDraftCase(db, request.contract.partnerCaseId) : null;
+  const evidence = draftCase ? { ...updated, partnerCaseOwner: draftCase.view.owner } : updated;
+  await auditDispatchCredit(db, request.contractId, actorId, `DISPATCH_${request.kind}_${action}`, id, request, evidence, reason);
+  if (draftCase) await synchronizePartnerContractedQuantities(db, draftCase.row.id, { initialize: true });
   if (request.kind === 'MANAGER') {
     await publishNotificationEvent(db, { type: 'CONTRACT_MANAGER_DISPATCH_DECIDED',
       deduplicationKey: `manager-dispatch-decided:${id}`, recipientIds: [request.requestedBy], actorId,

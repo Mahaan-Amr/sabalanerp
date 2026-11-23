@@ -55,6 +55,9 @@ async function run() {
             isActive: true,
           },
         });
+        const historicalTool = await tx.subService.create({ data: {
+          code: `HIST-${randomUUID()}`, namePersian: "نیم لول", pricePerMeter: 70000,
+        } });
         const customer = await tx.crmCustomer.findFirstOrThrow();
         const template = await tx.salesContract.findFirstOrThrow({
           include: { items: { take: 1 } },
@@ -109,7 +112,17 @@ async function run() {
                   totalPrice: 30,
                   unitPrice: 11,
                   tools: [{ code: "TEST-TOOL", name: "ابزار نیم‌لول",
-                    computedMeters: 2, pricePerMeter: 4, totalPrice: 8 }],
+                    computedMeters: 2, pricePerMeter: 4, totalPrice: 8 },
+                    { toolId: historicalTool.id, code: "923218", computedMeters: 155,
+                      totalPrice: 7750000, edges: { front: true, left: true } },
+                    { name: "ابزار رایگان تاریخی", computedMeters: 3, pricePerMeter: 0, totalPrice: 0 },
+                    { name: "ابزار نرخ نامعلوم", computedMeters: 3 },
+                    { toolId: historicalTool.id, name: "نام تاریخی ابزار", computedMeters: 2, pricePerMeter: 6, totalPrice: 12 },
+                    { name: "ارز تاریخی ریالی", computedMeters: 2, totalPrice: 1000000, currency: "IRR" },
+                    { name: "مبنای نامنطبق", computedMeters: 3, totalPrice: 600, calculationBase: "count" },
+                    { name: "حداقل مبهم", computedMeters: 3, totalPrice: 600, minimumQuantity: 5 },
+                  ],
+                  appliedSubServices: [{ name: "خدمت شمارشی تاریخی", calculationBase: "count", meter: 4, cost: 40 }],
                   cuttingBreakdown: [{ type: "longitudinal", meters: 1, rate: 3, cost: 3 }],
                   finishingId: "test-finishing",
                   finishingName: "ساب آزمون",
@@ -502,6 +515,20 @@ async function run() {
         assert.match(invoiceHtml, /سنگ مصوب[\s\S]*ابزار نیم‌لول[\s\S]*۴۰ \/ متر طول/);
         assert.match(invoiceHtml, /برش طولی[\s\S]*۳۰ \/ متر طول/);
         assert.match(invoiceHtml, /ساب آزمون[\s\S]*۲۰ \/ متر مربع/);
+        assert.match(invoiceHtml, /۹۲۳۲۱۸[\s\S]*نیم لول \(جلو، چپ\)[\s\S]*۵۰۰٬۰۰۰ \/ متر طول/);
+        assert.match(invoiceHtml, /ابزار رایگان تاریخی[\s\S]*۰ \/ متر طول/);
+        const missingRateRow = invoiceHtml.match(/<tr[^>]*>(?:(?!<\/tr>)[\s\S])*ابزار نرخ نامعلوم(?:(?!<\/tr>)[\s\S])*<\/tr>/)?.[0];
+        assert.ok(missingRateRow);
+        assert.match(missingRateRow, /نامشخص/);
+        assert.doesNotMatch(missingRateRow, /۰ \/ متر طول/);
+        assert.match(invoiceHtml, /خدمت شمارشی تاریخی[\s\S]*۱۰۰ \/ عدد/);
+        assert.match(invoiceHtml, /نام تاریخی ابزار[\s\S]*۶۰ \/ متر طول/);
+        assert.match(invoiceHtml, /ارز تاریخی ریالی[\s\S]*۵۰۰٬۰۰۰ \/ متر طول/);
+        for (const name of ["مبنای نامنطبق", "حداقل مبهم"]) {
+          const row = invoiceHtml.match(new RegExp(`<tr[^>]*>(?:(?!<\\/tr>)[\\s\\S])*${name}(?:(?!<\\/tr>)[\\s\\S])*<\\/tr>`))?.[0];
+          assert.ok(row);
+          assert.match(row, /نامشخص/);
+        }
         assert.match(invoiceHtml, /امضای تحویل‌گیرنده/);
         const record = await tx.salesDispatchInvoice.findUniqueOrThrow({ where: { id: issued.id } });
         const { print, pdfLayoutVersion: _pdfLayoutVersion, ...legacySnapshot } = record.snapshot as Prisma.JsonObject;

@@ -1,4 +1,5 @@
 import { Prisma } from "@prisma/client";
+import { historicalServicePrintData } from "./historicalServices";
 import { createHash } from "node:crypto";
 import {
   assessBoundAllocationPricingFreshness,
@@ -413,7 +414,7 @@ async function buildInvoiceSource(
             stoneCode: product.productCode, stoneName: product.description }] },
             { currency: priced.currency, partnerDetails: product.printDetails });
         } else if (!projectRows) {
-          projectRows = createDispatchProductRows(source.contractData, { currency: priced.currency, siblingDispatchRows });
+          projectRows = createDispatchProductRows(await historicalServicePrintData(tx, source.contractData, priced.currency), { currency: priced.currency, siblingDispatchRows });
           contractRows.set(contractId, projectRows);
         }
         const approved = partner ? product.totalPrice : version?.rows?.find(

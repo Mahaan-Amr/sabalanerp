@@ -5,6 +5,9 @@ import {
   ErpButton, ErpCard, ErpEmptyState, ErpField, ErpFieldView, ErpInlineState,
   ErpInput, ErpPage, ErpSection, ErpSkeleton, ErpStatus, ErpSummaryGrid, ErpTextarea,
 } from '@/components/erp';
+import { useAuth } from '@/contexts/AuthContext';
+import { hasFeatureAccess } from '@/lib/permissions';
+import { StoneReturnPosting, StoneReturnPostingResult } from './StoneReturnPosting';
 import { userFacingError } from '@/features/dispatch/userFacingError';
 import { normalizeDigits } from '@/lib/numberFormat';
 import {
@@ -54,6 +57,7 @@ function StoneReturnCandidateFields({ candidate, quantity, editable, disabled, o
 }
 
 export function StoneReturnReviewPage({ receiptId }: { receiptId: string }) {
+  const { user } = useAuth();
   const [review, setReview] = useState<StoneReturnReview | null>(null);
   const [amounts, setAmounts] = useState<Record<string, string>>({});
   const [reason, setReason] = useState('');
@@ -88,9 +92,16 @@ export function StoneReturnReviewPage({ receiptId }: { receiptId: string }) {
   }, [receiptId, reload]);
 
   const receipt = review?.receipt;
-  const editable = review?.canAllocate === true && review.allocationStatus !== 'REJECTED' && !review.blockedReason;
+  const editable = review?.canAllocate === true && review.allocationStatus !== 'REJECTED' && review.allocationStatus !== 'FINALIZED' && !review.blockedReason;
   const candidateIds = new Set(review?.candidates.map(candidateKey));
   const unavailableRows = review?.draft?.rows.filter(row => !candidateIds.has(candidateKey(row)) && amounts[candidateKey(row)]) ?? [];
+  const draftHasUnsavedChanges = !!review?.draft && (reason !== (review.draft.attributionReason ?? '')
+    || review.draft.rows.length
+      !== Object.values(amounts).filter(amount => quantityInput(amount) && quantityInput(amount) !== '0').length
+    || review.draft.rows.some(row => quantityInput(row.quantity) !== quantityInput(amounts[candidateKey(row)] ?? '')));
+  const canPost = editable && !pending && !draftHasUnsavedChanges && !unavailableRows.length
+    && /^0(?:\.0+)?$/.test(review.unallocatedQuantity)
+    && hasFeatureAccess(user, 'accounting_customer_posting_manage', 'edit');
   const hasAllocations = Object.values(amounts).some(amount => quantityInput(amount) && quantityInput(amount) !== '0');
 
   function changeQuantity(key: string, value: string) {
@@ -141,7 +152,7 @@ export function StoneReturnReviewPage({ receiptId }: { receiptId: string }) {
             { label: 'مقدار ردشده', value: displayStoneReturnQuantity(receipt.rejectedQuantity, receipt.unit), hint: receipt.rejectionReason },
           ]} />
         </ErpSection>
-        {review.allocationStatus !== 'REJECTED' && <ErpSection title="تخصیص به فروش">
+        {review.allocationStatus !== 'REJECTED' && review.allocationStatus !== 'FINALIZED' && <ErpSection title="تخصیص به فروش">
           <form className="space-y-4" onSubmit={submit}>
             <ErpSummaryGrid items={[
               { label: 'تخصیص ذخیره‌شده', value: displayStoneReturnQuantity(review.allocatedQuantity, receipt.unit) },
@@ -172,6 +183,9 @@ export function StoneReturnReviewPage({ receiptId }: { receiptId: string }) {
             </> : review.draft?.attributionReason && <ErpFieldView label="دلیل انتخاب ردیف‌های فروش" value={review.draft.attributionReason} />}
           </form>
         </ErpSection>}
+        {canPost && review.draft && <StoneReturnPosting key={review.draft.id} receiptId={receiptId} draft={review.draft}
+          onPosted={finalization => setReview({ ...review, finalization, allocationStatus: 'FINALIZED' })} />}
+        {review.finalization && <StoneReturnPostingResult finalization={review.finalization} unit={receipt.unit} />}
       </>}
     </>}
   </ErpPage>;

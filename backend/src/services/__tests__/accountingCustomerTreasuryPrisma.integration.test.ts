@@ -1,11 +1,16 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import test from 'node:test';
 import { Prisma } from '@prisma/client';
 import { createAccountingLedgerAdministration } from '../accountingLedgerAdministration';
 import { hashCustomerTreasuryEvidence } from '../accountingCustomerTreasury';
 import { verifyGuardPhysicalReturn } from '../dispatchCorrectionOutage';
-import { shipmentQuantityEvidenceIntegrityHash } from '../shipmentQuantityProjectionStore';
+import { readStoneReturnAvailability } from '../stoneReturnAvailability';
+import { recordStoneReturnReceipt } from '../stoneReturnReceipts';
+import { readStoneReturnAllocationReview, saveStoneReturnAllocationDraft } from '../stoneReturnAllocationDraft';
+import { finalizeStoneReturn, readStoneReturnPostingContext } from '../stoneReturnFinalization';
+import { readShipmentQuantityProjection, shipmentQuantityEvidenceIntegrityHash } from '../shipmentQuantityProjectionStore';
 import { importBankStatementFilePrisma, resolveBankFileExceptionPrisma } from '../accountingBankFileImport';
 import { listPostedJournal, listPostedTrialBalance, verifyLedgerAuditChain } from '../accountingLedgerPrismaRepository';
 import {
@@ -21,6 +26,8 @@ import {
   exportCustomerStatementPrisma,
   projectCustomerAccountPrisma,
   provisionCustomerAccountingProfile,
+  publishInventoryCostEvidencePrisma,
+  publishInventoryValuationEvidencePrisma,
   importBankStatementLinePrisma,
   proposeBankMatchesPrisma,
   confirmBankMatchPrisma,
@@ -547,6 +554,155 @@ test('customer revenue and treasury tracer bullet persists once and projects onl
       const creditLine = journal.find((voucher) => voucher.id === credit.ledgerVoucherId)?.lines.find((line) => line.accountId === receivable.id);
       assert.equal(creditLine?.partyId, profile.accountingPartyId);
       assert.equal(creditLine.creditRials.toFixed(0), '550');
+
+      await returnTest.test('Logistics 40/35 receipt finalizes across two invoices, rolls back fully on a second-invoice error, and replays once', async () => {
+        const dispatchAt = new Date('2026-09-22T08:00:00Z');
+        const recognizedAt = new Date('2026-09-23T08:00:00Z');
+        const postingDate = '2026-09-24';
+        async function createOriginal(key: string, shipped: number, rate: bigint, unitCost: bigint) {
+          const contractId = `excess-return-contract-${key}`;
+          const productRowId = `excess-return-row-${key}`;
+          const commercialInvoiceNumber = `excess-original-${key}`;
+          await database.salesContract.create({ data: {
+            id: contractId, contractNumber: contractId, title: 'Return QA', titlePersian: 'آزمون مرجوعی سنگ',
+            content: '', customerId: customer.id, departmentId: department.id, createdBy: actor.id, responsibleSellerId: actor.id,
+            contractData: { products: [{ rowId: productRowId, productId: product.id, quantity: shipped + 5, unit: 'squareMeter' }] },
+          } });
+          const item = await database.contractItem.create({ data: {
+            contractId, productId: product.id, productRowId, quantity: shipped + 5,
+            unitPrice: rate.toString(), totalPrice: (BigInt(shipped + 5) * rate).toString(),
+          } });
+          await provisionCustomerAccountingProfile(database, { ...profileInput, relationshipId: contractId,
+            evidence: { contractId, version: 1, state: 'APPROVED' } });
+          const events = [
+            { kind: 'CONTRACTED_SET' as const, sourceType: 'CONTRACT_QUANTITY_VERSION', quantity: shipped + 5 },
+            { kind: 'ALLOCATION_FINALIZED' as const, sourceType: 'LOGISTICS_ALLOCATION_REVISION', quantity: shipped },
+            { kind: 'PHYSICAL_EXIT' as const, sourceType: 'GUARD_PHYSICAL_EXIT', quantity: shipped },
+          ];
+          for (const [index, event] of events.entries()) {
+            const evidence = {
+              id: `excess-return-${key}-${index}`, contractId, contractItemId: item.id, productRowId,
+              unit: 'squareMeter', kind: event.kind, quantity: `${event.quantity}.000`,
+              effectiveAt: dispatchAt.toISOString(), recordedAt: dispatchAt.toISOString(),
+              sourceType: event.sourceType, sourceId: `excess-return-${key}-${index}`, sourceVersion: 1,
+              metadata: index === 2 ? { loadingId: loading.id } : {},
+            };
+            await database.shipmentQuantityEvidence.create({ data: { ...evidence,
+              integrityHash: shipmentQuantityEvidenceIntegrityHash({ ...evidence, integrityHash: '' }),
+            } });
+          }
+          const dispatchEvidenceId = `excess-return-${key}-2`;
+          const valuation = await publishInventoryValuationEvidencePrisma(database, {
+            shipmentQuantityEvidenceId: dispatchEvidenceId, valuationVersion: 1, valuationMethod: 'SPECIFIC_IDENTIFICATION',
+            inventoryDocumentId: `valuation-${key}`, unitCostRials: unitCost, actorId: actor.id,
+          });
+          const cost = await publishInventoryCostEvidencePrisma(database, { legalEntityId: entity.id, valuationEvidenceId: valuation.id });
+          const netRials = BigInt(shipped) * rate;
+          const costRials = BigInt(shipped) * unitCost;
+          const policy = await createControlTransferPolicyPrisma(database, {
+            contractId, version: 1, carriage: 'CONTRACTUAL_EXCEPTION', recognitionPoint: 'EXPLICIT_EXCEPTION',
+            exceptionReason: 'شرط تحویل ویژه مصوب قرارداد آزمون', exceptionOccurredAt: recognizedAt,
+            effectiveFrom: dispatchAt, exceptionTerms: [{ productRowId, quantity: String(shipped),
+              netRials: netRials.toString(), costRials: costRials.toString() }], actor,
+          });
+          const baseEvidence = { id: policy.id, version: 1, type: 'CONTRACTUAL_EXCEPTION', occurredAt: recognizedAt,
+            contractId, contractVersion: 1, productRows: [{ id: productRowId, quantity: String(shipped) }] };
+          const posted = await recognizeCustomerSalePrisma(database, { ...command, contractId, commercialInvoiceNumber,
+            transferredAt: recognizedAt, idempotencyKey: commercialInvoiceNumber, correlationId: commercialInvoiceNumber,
+            policy: { ...command.policy, id: policy.id },
+            evidence: { ...baseEvidence, hash: hashCustomerTreasuryEvidence(baseEvidence) },
+            lines: [{ ...originalLine, id: key, productRowId, quantity: String(shipped), netRials, taxRials: netRials / 10n,
+              costRials, costEvidenceId: cost.id }],
+          });
+          assert.equal(posted.kind, 'POSTED');
+          if (posted.kind !== 'POSTED') throw new Error('Original sale did not post');
+          return { contractId, originalInvoiceId: posted.invoice.id, originalTaxInvoiceId: posted.invoice.taxInvoiceId,
+            originalLineId: key, dispatchEvidenceId };
+        }
+        const first = await createOriginal('a', 20, 1_200_000n, 100n);
+        const second = await createOriginal('b', 30, 2_100_000n, 200n);
+        const { data: accepted } = await recordStoneReturnReceipt(database, actor.id, {
+          requestId: randomUUID(), customerId: customer.id, productId: product.id, unit: 'squareMeter',
+          receivedQuantity: '40', acceptedQuantity: '35', rejectionReason: 'لب‌پریدگی',
+        });
+        assert.ok(accepted.inventoryIdentityId);
+        const [{ quantity: available }] = (await readStoneReturnAvailability(database, [product.id])).get(product.id)!;
+        assert.equal(available, '35');
+        const rows = [{ ...first, quantity: '15' }, { ...second, quantity: '20' }];
+        const attributionReason = 'بار ورودی فاقد شناسه بارگیری مبدأ است.';
+        const draftInput = { expectedVersion: 0, rows: [rows[0]], attributionReason };
+        const partial = await saveStoneReturnAllocationDraft(database, accepted.id, actor.id, draftInput);
+        const returnCommand = { expectedVersion: partial.draft.version, requestId: 'certify-multi-reference',
+          date: postingDate, periodId: command.periodId, postingRuleId: postingRule.id, confirmed: true };
+        const accountant = { id: actor.id, profile: 'ACCOUNTANT' as const };
+        await assert.rejects(finalizeStoneReturn(database, accepted.id, accountant, returnCommand), /کامل پوشش دهد/);
+        const complete = await saveStoneReturnAllocationDraft(database, accepted.id, actor.id,
+          { ...draftInput, expectedVersion: partial.draft.version, rows });
+        returnCommand.expectedVersion = complete.draft.version;
+        const postingContext = await readStoneReturnPostingContext(database, accepted.id, postingDate);
+        assert.deepEqual(postingContext.periods.map(item => item.id), [command.periodId]);
+        assert.deepEqual(postingContext.rules.map(item => item.id), [postingRule.id]);
+
+        const accountBefore = (await projectCustomerAccountPrisma(database, accountAt)).standaloneCreditRials;
+        const availableToLoad = async () => Promise.all([first, second].map(async ({ contractId }) =>
+          (await readShipmentQuantityProjection(database, { contractId })).rows[0].quantities?.availableToLoad));
+        assert.deepEqual(await availableToLoad(), ['5.000', '5.000']);
+
+        // Fail only the second original after shipment retirement, the first invoice and its inventory layer were staged.
+        await database.$executeRawUnsafe(`CREATE FUNCTION qa_reject_second_excess_return() RETURNS trigger AS $$
+        BEGIN
+          IF NEW."referenceInvoiceId" = (SELECT max(id) FROM "accounting_commercial_customer_invoices"
+            WHERE number IN ('excess-original-a', 'excess-original-b'))
+          THEN RAISE EXCEPTION 'QA_SECOND_EXCESS_RETURN_FAILED'; END IF;
+          RETURN NEW;
+        END; $$ LANGUAGE plpgsql`);
+        await database.$executeRawUnsafe(`CREATE TRIGGER qa_reject_second_excess_return BEFORE INSERT
+          ON "accounting_commercial_customer_invoices" FOR EACH ROW EXECUTE FUNCTION qa_reject_second_excess_return()`);
+        try {
+          await assert.rejects(finalizeStoneReturn(database, accepted.id, accountant, returnCommand), /QA_SECOND_EXCESS_RETURN_FAILED/);
+        } finally {
+          await database.$executeRawUnsafe('DROP TRIGGER qa_reject_second_excess_return ON "accounting_commercial_customer_invoices"');
+          await database.$executeRawUnsafe('DROP FUNCTION qa_reject_second_excess_return()');
+        }
+        const failed = await readStoneReturnAllocationReview(database, accepted.id);
+        assert.equal(failed.allocationStatus, 'DRAFT');
+        assert.equal(failed.finalization, null);
+        assert.equal((await projectCustomerAccountPrisma(database, accountAt)).standaloneCreditRials, accountBefore);
+        assert.deepEqual(await availableToLoad(), ['5.000', '5.000']);
+        assert.equal(await database.accountingInventoryValuationLayer.count({ where: { identityId: accepted.inventoryIdentityId } }), 0);
+        assert.equal(await database.shipmentQuantityEvidence.count({ where: { kind: 'EXCESS_RETURN_FINALIZED' } }), 0);
+
+        const outcomes = await Promise.all([
+          finalizeStoneReturn(database, accepted.id, accountant, returnCommand),
+          finalizeStoneReturn(database, accepted.id, accountant, returnCommand),
+        ]);
+        assert.equal(outcomes.filter(outcome => outcome.replayed).length, 1);
+        assert.equal(outcomes[0].data.id, outcomes[1].data.id);
+        const reviewed = await readStoneReturnAllocationReview(database, accepted.id);
+        assert.equal(reviewed.allocationStatus, 'FINALIZED');
+        assert.equal(reviewed.finalization?.draftVersion, complete.draft.version);
+        assert.equal(reviewed.unallocatedQuantity, '0.000');
+        await assert.rejects(saveStoneReturnAllocationDraft(database, accepted.id, actor.id,
+          { ...draftInput, expectedVersion: complete.draft.version, rows }), /قبلاً ثبت قطعی/);
+        await assert.rejects(finalizeStoneReturn(database, accepted.id, accountant, { ...returnCommand, date: '2026-09-25' }), /فرمان دیگری/);
+
+        assert.equal((await projectCustomerAccountPrisma(database, accountAt)).standaloneCreditRials - accountBefore, 66_000_000n);
+        assert.deepEqual(await availableToLoad(), ['5.000', '5.000']);
+        const shares = await Promise.all([first, second].map(async ({ contractId }) =>
+          (await readShipmentQuantityProjection(database, { contractId })).rows[0].quantities));
+        assert.deepEqual(shares.map(row => [row?.contracted, row?.physicallyDispatched, row?.excessRetired]),
+          [['10.000', '5.000', '15.000'], ['15.000', '10.000', '20.000']]);
+        assert.deepEqual((await readStoneReturnAvailability(database, [product.id])).get(product.id), [{ unit: 'squareMeter', quantity: '35' }]);
+        const layers = await database.accountingInventoryValuationLayer.findMany({ where: { identityId: accepted.inventoryIdentityId },
+          orderBy: { quantity: 'asc' } });
+        assert.deepEqual(layers.map(layer => [layer.quantity.toFixed(), layer.valueRials.toFixed()]), [['15', '1500'], ['20', '4000']]);
+        const returnTax = await database.accountingTaxInvoice.findMany({ where: {
+          documentKind: 'RETURN', referenceTaxInvoiceId: { in: [first.originalTaxInvoiceId!, second.originalTaxInvoiceId!] },
+        }, orderBy: { netRials: 'asc' } });
+        assert.deepEqual(returnTax.map(invoice => [invoice.referenceTaxInvoiceId, invoice.taxRials.toFixed(0)]), [
+          [first.originalTaxInvoiceId, '1800000'], [second.originalTaxInvoiceId, '4200000'],
+        ]);
+      });
     });
   } finally {
     await database.$disconnect();

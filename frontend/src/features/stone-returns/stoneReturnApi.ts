@@ -4,11 +4,12 @@ export const stoneReturnUnitLabels: Record<string, string> = {
   squareMeter: 'مترمربع', meter: 'متر طول', count: 'عدد', ton: 'تن',
 };
 
-export type StoneReturnAllocationStatus = 'REJECTED' | 'RECEIVED' | 'DRAFT';
+export type StoneReturnAllocationStatus = 'REJECTED' | 'RECEIVED' | 'DRAFT' | 'FINALIZED';
 export const stoneReturnAllocationStatuses = {
   REJECTED: { label: 'رد کامل', tone: 'neutral' },
   RECEIVED: { label: 'در انتظار تخصیص', tone: 'warning' },
   DRAFT: { label: 'پیش‌نویس تخصیص', tone: 'info' },
+  FINALIZED: { label: 'ثبت قطعی', tone: 'success' },
 } as const;
 
 export type StoneReturnReceipt = {
@@ -65,6 +66,46 @@ export type StoneReturnReview = {
   allocatedQuantity: string;
   unallocatedQuantity: string;
   canAllocate: boolean;
+  finalization: StoneReturnFinalization | null;
+};
+
+export type StoneReturnFinalization = {
+  id: string;
+  draftVersion: number;
+  finalizedAt: string;
+  documentDate: string;
+  summary: {
+    inventoryIdentityId: string;
+    receiptEventId: string;
+    receiptEvidenceHash: string;
+    credits: Array<{
+      originalInvoiceId: string;
+      originalInvoiceNumber: string;
+      creditInvoiceId: string;
+      creditNumber: string;
+      voucherId: string;
+      voucherNumber: number | null;
+      openItemId: string;
+      taxInvoiceId: string;
+      customerCreditRials: string;
+      shares: Array<{
+        draftRowId: string;
+        shipmentReturnEvidenceId: string;
+        valuationLayerId: string;
+        quantity: string;
+        originalNetRials: string;
+        originalTaxRials: string;
+        costRials: string;
+      }>;
+    }>;
+  };
+};
+
+export type StoneReturnPostingContext = {
+  draftVersion: number;
+  book: { id: string; namePersian: string };
+  periods: Array<{ id: string; titlePersian: string; fiscalYear: { titlePersian: string } }>;
+  rules: Array<{ id: string; code: string; version: number }>;
 };
 
 export type StoneReturnOption = { id: string; label: string; description?: string | null };
@@ -86,6 +127,11 @@ export const stoneReturnApi = {
   review: async (id: string) => (await api.get<Envelope<StoneReturnReview>>(reviewUrl(id))).data.data,
   saveAllocations: async (id: string, command: { expectedVersion: number; rows: StoneReturnAllocationInput[]; attributionReason: string }) =>
     (await api.put<Envelope<StoneReturnReview>>(`${reviewUrl(id)}/allocations`, command)).data.data,
+  postingContext: async (id: string, date: string) =>
+    (await api.get<Envelope<StoneReturnPostingContext>>(`${reviewUrl(id)}/posting-context`, { params: { date } })).data.data,
+  finalize: async (id: string, command: {
+    expectedVersion: number; requestId: string; date: string; periodId: string; postingRuleId: string; confirmed: true;
+  }) => (await api.post<Envelope<{ data: StoneReturnFinalization; replayed: boolean }>>(`${reviewUrl(id)}/finalize`, command)).data.data,
   customers: async (search: string) =>
     (await api.get<Envelope<StoneReturnOption[]>>(`${logistics}/customers`, { params: { search } })).data.data,
   products: async (search: string) =>

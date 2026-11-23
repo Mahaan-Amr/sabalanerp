@@ -1125,7 +1125,9 @@ export const accountingAPI = {
   getTreasuryBankLines: (page: number, signal?: AbortSignal) => api.get('/accounting/ledger/treasury/bank-lines', { params: { page }, signal }),
   searchTreasuryCustomerProfiles: (search: string, signal?: AbortSignal) => api.get('/accounting/ledger/treasury/customer-profiles', { params: { search }, signal }),
   getTreasuryCustomerBalance: (id: string, signal?: AbortSignal) => api.get(`/accounting/ledger/treasury/customer-profiles/${encodeURIComponent(id)}/balance`, { signal }),
-  getTaxOverview: () => api.get('/accounting/ledger/tax/overview'),
+  getTaxOverview: (signal?: AbortSignal) => api.get('/accounting/ledger/tax/overview', { signal }),
+  getTaxInvoiceAttempts: (id: string, signal?: AbortSignal) =>
+    api.get(`/accounting/ledger/tax/invoices/${encodeURIComponent(id)}/attempts`, { signal }),
   recordCustomerReceipt: (data: any) => api.post('/accounting/ledger/treasury/receipts', data),
   allocateCustomerReceipt: (data: any) => api.post('/accounting/ledger/treasury/allocations', data),
   reverseCustomerAllocation: (id: string, data: any) => api.post(`/accounting/ledger/treasury/allocations/${id}/reverse`, data),

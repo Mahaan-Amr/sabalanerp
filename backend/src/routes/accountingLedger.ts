@@ -32,6 +32,7 @@ import {
   issuePettyCashAdvancePrisma,
   listCustomerAccountsPrisma,
   listTaxOverviewPrisma,
+  readTaxInvoiceAttemptsPrisma,
   listTreasuryOverviewPrisma,
   listTreasuryBankLinesPrisma,
   listTreasurySummaryPrisma,
@@ -80,11 +81,11 @@ const editAccess = accountingAccess(WORKSPACE_PERMISSIONS.EDIT);
 const managerAccess = accountingAccess(WORKSPACE_PERMISSIONS.ADMIN);
 const customerPostingAccess = [...editAccess, requireFeatureAccess(FEATURES.ACCOUNTING_CUSTOMER_POSTING_MANAGE, FEATURE_PERMISSIONS.EDIT)];
 const treasuryCommandAccess = [...editAccess, requireFeatureAccess(FEATURES.ACCOUNTING_TREASURY_MANAGE, FEATURE_PERMISSIONS.EDIT)];
-const preventTreasuryReadCaching: RequestHandler = (_req, res, next) => {
+const preventPrivateReadCaching: RequestHandler = (_req, res, next) => {
   res.set('Cache-Control', 'private, no-store');
   next();
 };
-const treasuryReadAccess = [preventTreasuryReadCaching, ...viewAccess];
+const treasuryReadAccess = [preventPrivateReadCaching, ...viewAccess];
 const taxCommandAccess = [...viewAccess, requireNarrowFeatureAccess(FEATURES.ACCOUNTING_TAX_SUBMISSIONS_MANAGE, FEATURE_PERMISSIONS.EDIT)];
 const taxManagerAccess = [...managerAccess, requireNarrowFeatureAccess(FEATURES.ACCOUNTING_TAX_SUBMISSIONS_MANAGE, FEATURE_PERMISSIONS.EDIT)];
 const exportAccess = [...viewAccess, requireNarrowFeatureAccess(FEATURES.ACCOUNTING_CUSTOMER_STATEMENTS_EXPORT, FEATURE_PERMISSIONS.VIEW)];
@@ -383,7 +384,7 @@ router.get('/treasury/customer-profiles/:id/balance', ...treasuryReadAccess, run
   return { asOf, receivableRials, unallocatedCreditRials, netBalanceRials: receivableRials - unallocatedCreditRials,
     openItems: openItems.filter(item => item.kind === 'RECEIVABLE').map(({ id, invoiceNumber, remainingRials }) => ({ id, invoiceNumber, remainingRials })) };
 }));
-router.get('/tax/overview', ...viewAccess, run(async (req) => {
+router.get('/tax/overview', preventPrivateReadCaching, ...viewAccess, run(async (req) => {
   const feature = await resolveNarrowFeatureAccess(prisma, { userId: req.user!.id, role: req.user!.role,
     workspace: WORKSPACES.ACCOUNTING, feature: FEATURES.ACCOUNTING_TAX_SUBMISSIONS_MANAGE,
     requiredPermission: FEATURE_PERMISSIONS.EDIT });
@@ -392,6 +393,8 @@ router.get('/tax/overview', ...viewAccess, run(async (req) => {
     canConfigure: feature.allowed && req.workspacePermission === WORKSPACE_PERMISSIONS.ADMIN,
   } };
 }));
+router.get('/tax/invoices/:id/attempts', preventPrivateReadCaching, ...viewAccess,
+  run(req => readTaxInvoiceAttemptsPrisma(prisma, req.params.id)));
 
 router.post('/treasury/receipts', ...treasuryCommandAccess, run((req) => recordCustomerReceiptPrisma(prisma, {
   ...req.body, amountRials: wholeRials(req.body.amountRials), occurredAt: validDate(req.body.occurredAt, 'زمان دریافت'),

@@ -1,7 +1,7 @@
 "use client";
 import { ErpPersianDateField } from "@/components/erp";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { FaBalanceScale, FaSync } from "react-icons/fa";
 import {
   ErpBadge,
@@ -14,8 +14,11 @@ import {
   ErpPage,
   ErpSection,
   ErpSearchableSelect,
+  ErpSheet,
 } from "@/components/erp";
 import { accountingAPI } from "@/lib/api";
+import { isPrivateClientScopeFailure } from "@/lib/privateClientScope";
+import { formatTaxAttemptTime, TaxInvoiceHistory, taxOutboxStatusFa } from "@/features/accounting/TaxInvoiceHistory";
 import {
   accountingFailureMessage,
   dateFa,
@@ -35,12 +38,35 @@ const channelStatusFa: Record<string, string> = {
   DEGRADED: "نیازمند بررسی",
 };
 
+interface TaxInvoiceRow {
+  id: string;
+  internalSerial: string;
+  externalUniqueTaxId: string | null;
+  netRials: string;
+  taxRials: string;
+  status: string;
+  issuedAt: string;
+  latestAttemptAt: string | null;
+  latestErrorCode: string | null;
+  outboxMessages: { id: string; status: string }[];
+}
+
 export default function TaxOperationsPage() {
   const [data, setData] = useState<any>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionFeedback, setActionFeedback] = useState<{ scope: string; kind: "success" | "error"; title: string }>();
   const [actionPending, setActionPending] = useState(false);
+  const [historyInvoice, setHistoryInvoice] = useState<Pick<TaxInvoiceRow, "id" | "internalSerial">>();
+  const overviewRequest = useRef<AbortController>();
+  const clearDenied = useCallback((message: string) => {
+    overviewRequest.current?.abort();
+    setData(undefined);
+    setHistoryInvoice(undefined);
+    setActionFeedback(undefined);
+    setLoading(false);
+    setError(message);
+  }, []);
   const [channel, setChannel] = useState({
     legalEntityId: "",
     kind: "DIRECT",
@@ -76,18 +102,26 @@ export default function TaxOperationsPage() {
     finally { setActionPending(false); }
   };
   const load = useCallback(async (background = false) => {
+    overviewRequest.current?.abort();
+    const request = new AbortController();
+    overviewRequest.current = request;
     if (!background) setLoading(true);
     setError(null);
     try {
-      setData((await accountingAPI.getTaxOverview()).data.data);
+      const response = await accountingAPI.getTaxOverview(request.signal);
+      if (!request.signal.aborted) setData(response.data.data);
     } catch (reason) {
-      setError(accountingFailureMessage(reason, "عملیات مالیاتی بارگیری نشد."));
+      if (request.signal.aborted) return;
+      const message = accountingFailureMessage(reason, "عملیات مالیاتی بارگیری نشد.");
+      if (isPrivateClientScopeFailure(reason)) clearDenied(message);
+      else setError(message);
     } finally {
-      setLoading(false);
+      if (!request.signal.aborted) setLoading(false);
     }
-  }, []);
+  }, [clearDenied]);
   useEffect(() => {
-    load();
+    void load();
+    return () => overviewRequest.current?.abort();
   }, [load]);
   return (
     <ErpPage
@@ -412,7 +446,7 @@ export default function TaxOperationsPage() {
           >
             {data.invoices.length ? (
               <div className="grid gap-3">
-                {data.invoices.map((row: any) => (
+                {data.invoices.map((row: TaxInvoiceRow) => (
                   <ErpCard key={row.id} className="p-4">
                     <div className="flex flex-wrap justify-between gap-3">
                       <div>
@@ -434,21 +468,28 @@ export default function TaxOperationsPage() {
                       <span>خالص: {money(row.netRials, "IRR")}</span>
                       <span>مالیات: {money(row.taxRials, "IRR")}</span>
                       <span>{dateFa(row.issuedAt)}</span>
-                      <span>
-                        {Number(
-                          row.outboxMessages.flatMap(
-                            (message: any) => message.attempts,
-                          ).length,
-                        ).toLocaleString("fa-IR")}{" "}
-                        تلاش ارسال
-                      </span>
+                      <span>آخرین تلاش {formatTaxAttemptTime(row.latestAttemptAt)}</span>
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-x-4 gap-y-2 text-sm">
+                      {row.outboxMessages.length > 0 && <span>وضعیت ارسال{" "}
+                        {Array.from(new Set(row.outboxMessages.map(message => taxOutboxStatusFa[message.status] ?? message.status))).join("، ")}
+                      </span>}
+                      <span className="min-w-0 break-all">آخرین خطا <bdi>{row.latestErrorCode ?? "—"}</bdi></span>
+                    </div>
+                    <div className="mt-3">
+                      <ErpButton
+                        label={`تاریخچه ارسال ${row.internalSerial}`}
+                        variant="outline"
+                        className="max-w-full break-all"
+                        onClick={() => setHistoryInvoice({ id: row.id, internalSerial: row.internalSerial })}
+                      />
                     </div>
                     {data.capabilities?.canManage &&
                       row.outboxMessages
                         .filter(
-                          (message: any) => message.status === "NEEDS_CHANNEL",
+                          (message) => message.status === "NEEDS_CHANNEL",
                         )
-                        .map((message: any) => (
+                        .map((message) => (
                           <div
                             key={message.id}
                             className="mt-3 flex flex-wrap items-center gap-2"
@@ -594,6 +635,15 @@ export default function TaxOperationsPage() {
 </ErpSection>
         </>
       )}
+      <ErpSheet
+        open={Boolean(historyInvoice)}
+        onClose={() => setHistoryInvoice(undefined)}
+        title={<>تاریخچه ارسال <bdi>{historyInvoice?.internalSerial}</bdi></>}
+        presentation="modal"
+        size="wide"
+      >
+        {historyInvoice && <TaxInvoiceHistory key={historyInvoice.id} invoiceId={historyInvoice.id} onDenied={clearDenied} />}
+      </ErpSheet>
     </ErpPage>
   );
 }

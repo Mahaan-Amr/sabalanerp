@@ -426,7 +426,7 @@ export default function AccountingDispatchPage() {
           updated.delete(candidate.id);
           return row ? [row] : [];
         });
-        return [...merged, ...updated.values()];
+        return [...merged, ...Array.from(updated.values())];
       });
       setCandidatePage(current => {
         if (!current) return current;

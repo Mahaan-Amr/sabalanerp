@@ -39,6 +39,7 @@ const db = new PrismaClient(),
   rollback = Symbol("invoice-test-rollback");
 const json = (v: unknown) => v as Prisma.InputJsonValue;
 async function run() {
+  const scenario = process.env.SABALAN_MATERIAL_SCENARIO || "partial";
   const before = await db.salesDispatchInvoice.count();
   try {
     await db.$transaction(
@@ -92,7 +93,8 @@ async function run() {
             versionId = randomUUID(),
             itemId = randomUUID();
           const quantity = index === 0 ? 90 : 100;
-          const loaded = index === 0 ? "70" : "30";
+          const loaded = scenario === "full" ? String(quantity) : scenario === "successive" ? "1" : index === 0 ? "70" : "30";
+          const previouslyLoaded = scenario === "successive" ? "1" : "0";
           const sourceSnapshot = {
             customerId: customer.id,
             contractData: {
@@ -293,7 +295,7 @@ async function run() {
               batchId: batch.id,
               loadingId: loading.id,
               queueTurnId: turn.id,
-              revisionNumber: 1,
+              revisionNumber: scenario === "successive" ? 2 : 1,
               snapshot: json(snapshot),
               integrityHash: randomUUID(),
               finalizedBy: actor.id,
@@ -324,6 +326,29 @@ async function run() {
               readinessEvidenceHash: sourceHash(randomUUID()),
             },
           });
+          if (scenario === "successive") {
+            const previousRevision = await tx.logisticsAllocationRevision.create({ data: {
+              batchId: batch.id, loadingId: loading.id, queueTurnId: turn.id,
+              revisionNumber: 1, snapshot: json(snapshot), integrityHash: randomUUID(), finalizedBy: actor.id,
+            } });
+            const previousLine = await tx.logisticsAllocationRevisionLine.create({ data: {
+              revisionId: previousRevision.id, sourceContractId: contractId, sourceContractItemId: itemId,
+              productId: product.productId, productRowId: rowId, quantity: "1", unit: "count",
+              snapshot: json({}), integrityHash: randomUUID(),
+            } });
+            await tx.logisticsAllocationRevisionPricing.create({ data: {
+              allocationRevisionId: previousRevision.id, contractId, pricingVersionId: version.id,
+              expectedPricingHash: version.integrityHash, readinessEvidenceHash: sourceHash(randomUUID()),
+            } });
+            const priorPayload = {
+              allocationRevisionId: previousRevision.id, allocationRevisionLineId: previousLine.id,
+              pricingVersionId: version.id, pricingRowId: pricingRow.id, quantity: "1.000",
+              grossAmount: "0.333333333333", discountAmount: "0.066666666667", netAmount: "0.266666666666",
+              consumesFinalRemainder: false, evidence: { ledgerSequence: 1, beforeQuantity: "0", afterQuantity: "1", contractedQuantity: String(quantity) }, recordedBy: actor.id,
+            };
+            await tx.dispatchPricedAllocationEvent.create({ data: { ...priorPayload, integrityHash: pricedAllocationIntegrityHash(priorPayload) } });
+            await tx.logisticsAllocationRevision.update({ where: { id: previousRevision.id }, data: { sealedAt: new Date() } });
+          }
           const payload = {
             allocationRevisionId: revision.id,
             allocationRevisionLineId: revisionLine.id,
@@ -334,7 +359,7 @@ async function run() {
             discountAmount: "2.500000000000",
             netAmount: "10.000000000000",
             consumesFinalRemainder: false,
-            evidence: { ledgerSequence: 1, beforeQuantity: "0", afterQuantity: loaded, contractedQuantity: String(quantity) },
+            evidence: { ledgerSequence: scenario === "successive" ? 2 : 1, beforeQuantity: previouslyLoaded, afterQuantity: String(Number(previouslyLoaded) + Number(loaded)), contractedQuantity: String(quantity) },
             recordedBy: actor.id,
           };
           await tx.dispatchPricedAllocationEvent.create({
@@ -397,8 +422,16 @@ async function run() {
         const html = Buffer.from(download.bytes).toString();
         const sourceRows = [...html.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/g)].map(match => match[1]).filter(row => row.includes('سنگ مصرفی'));
         assert.equal(sourceRows.length, 2);
+        if (scenario === 'full') {
+          assert.ok(sourceRows.some(row => row.includes('۴۵') && row.includes('۲۱٫۶')));
+          assert.ok(sourceRows.some(row => row.includes('۱۰۰') && row.includes('۴۲')));
+        } else if (scenario === 'successive') {
+          assert.ok(sourceRows.some(row => /class="number"[^>]*>۰<|>۰<\//.test(row)), 'second riser uses remainder of the first source piece');
+          assert.ok(sourceRows.some(row => row.includes('۰٫۴۲')), 'next tread consumes exactly one separate source piece');
+        } else {
         assert.ok(sourceRows.some(row => row.includes('۳۵') && row.includes('۱۶٫۸')), '70 risers consume 35 mother pieces and 16.8 square metres');
         assert.ok(sourceRows.some(row => row.includes('۳۰') && row.includes('۱۲٫۶')), '30 treads consume only 12.6 square metres');
+        }
         assert.equal(download.number, issued.number);
         assert.match(html, /۲۰۰/); // Original approved net: 20 toman, displayed in rials.
         throw rollback;

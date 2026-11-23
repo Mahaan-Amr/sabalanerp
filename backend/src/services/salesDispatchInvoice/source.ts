@@ -376,6 +376,7 @@ async function buildInvoiceSource(
       }
     }
     const currentLines: InvoiceLine[] = [];
+    const materialProjection = new Map<string, { product: any; basis: typeof priced.lines[number]["quantityBasis"] }>();
     const siblingDispatchRows = new Set(priced.lines.map(line => line.productRowId));
     const contractRows = new Map<string, ReturnType<typeof createDispatchProductRows>>();
     for (const line of priced.lines) {
@@ -421,7 +422,8 @@ async function buildInvoiceSource(
           (approvedRow: { productRowId: string }) => approvedRow.productRowId === line.productRowId,
         )?.canonicalAllInTotal;
         if (approved != null) print.contractedGross[line.allocationRevisionLineId] = String(approved);
-        print.rows[line.allocationRevisionLineId] = projectLoadedMaterialRows(projectRows(line.productRowId), product, line, line.quantityBasis);
+        print.rows[line.allocationRevisionLineId] = projectRows(line.productRowId);
+        materialProjection.set(line.allocationRevisionLineId, { product, basis: line.quantityBasis });
       }
       const evidence = record(version?.sourceEvidence);
       const technical = partner
@@ -559,6 +561,12 @@ async function buildInvoiceSource(
       }
     }
     for (const line of currentLines) {
+      const projection = materialProjection.get(line.key);
+      if (print && projection) {
+        const basis = projection.basis ? { ...projection.basis,
+          afterQuantity: amount(projection.basis.beforeQuantity).plus(line.quantity).toFixed() } : undefined;
+        print.rows[line.key] = projectLoadedMaterialRows(print.rows[line.key], projection.product, line, basis);
+      }
       if (
         amount(line.quantity).lt(0) ||
         amount(line.netAmount).lt(0) ||

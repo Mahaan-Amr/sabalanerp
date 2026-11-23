@@ -708,10 +708,15 @@ test('customer revenue and treasury tracer bullet persists once and projects onl
         const posted = await listPostedJournal(database, journalScope);
         const invoiceCredits = credits.map(item => {
           const voucher = posted.find(entry => entry.id === item.voucherId);
-          const credit = voucher?.lines.find(line => line.accountId === receivable.id);
+          assert.ok(voucher);
+          const credit = voucher.lines.find(line => line.accountId === receivable.id);
           assert.ok(credit);
           assert.equal(item.customerCreditRials, credit.creditRials.toFixed(0));
-          assert.equal(voucher?.lines.filter(line => line.evidenceType === 'CUSTOMER_RETURN_COMMERCIAL_DIFFERENCE').length, 1);
+          const revenueDebits = voucher.lines.filter(line => line.accountId === revenue.id && line.debitRials.gt(0));
+          assert.deepEqual(revenueDebits.map(line => line.debitRials.toFixed(0)), [
+            item.originalNetRials,
+            (BigInt(credit.creditRials.toFixed(0)) - BigInt(String(item.originalNetRials)) - BigInt(String(item.originalTaxRials))).toString(),
+          ]);
           return credit.creditRials.toFixed(0);
         });
         assert.equal(invoiceCredits.reduce((sum, part) => sum + BigInt(part), 0n), 87_500_001n);

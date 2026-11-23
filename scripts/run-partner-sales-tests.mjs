@@ -214,6 +214,7 @@ try {
     'backend/src/services/__tests__/partnerCustomerOutput.test.ts',
     'backend/src/services/__tests__/partnerCaseLifecycle.integration.test.ts',
     'backend/src/services/__tests__/partnerResponderWorkspaceContention.integration.test.ts',
+    'backend/src/services/__tests__/partnerInquiryProfileLockOrder.integration.test.ts',
     'backend/src/services/__tests__/partnerAccounting.test.ts',
     'backend/src/services/__tests__/partnerFulfillment.test.ts',
     'backend/src/services/__tests__/partnerFinancialCorrection.integration.test.ts',

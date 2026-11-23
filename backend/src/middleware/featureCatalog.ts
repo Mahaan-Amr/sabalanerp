@@ -712,6 +712,8 @@ const FEATURE_ACTION_LABELS_FA: ReadonlyArray<readonly [string, string]> = [
 ];
 
 const featureLabelFa = (feature: Feature): string => {
+  if (feature === FEATURES.ACCOUNTING_STONE_RETURNS) return 'رسیدگی به مرجوعی سنگ';
+  if (feature === FEATURES.LOGISTICS_STONE_RETURNS) return 'ثبت دریافت سنگ مرجوعی';
   if (feature === FEATURES.INVENTORY_OPERATION_MINIMUM_EDIT) return 'تغییر حداقل مقدار ابزار و فرآوری سنگ';
   if (feature === FEATURES.CRM_CUSTOMERS_VIEW_ALL) return 'مشاهده همه مشتریان داخلی و همکار';
   if (feature === FEATURES.CRM_CUSTOMERS_DELETE) return 'حذف دائمی مشتری بدون سابقه';

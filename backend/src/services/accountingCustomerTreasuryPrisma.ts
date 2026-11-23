@@ -561,8 +561,30 @@ export type CustomerReturnRecognitionInput = {
   idempotencyKey: string; correlationId: string; actor: CustomerTreasuryActor;
 };
 
-/** The caller owns commit, rollback, and serializable isolation. */
-export const recognizeCustomerReturnWithin = async (tx: Prisma.TransactionClient, input: CustomerReturnRecognitionInput) => {
+export type NegotiatedCustomerReturnCredit = {
+  caseId: string;
+  agreedGrossRials: bigint;
+  lines: ReadonlyArray<{ lineId: string; agreedUnitRateRials: string; rateDifferenceReason?: string }>;
+};
+
+const decimalRatio = (amount: string) => {
+  const [whole, fraction = ''] = amount.split('.');
+  return { units: BigInt(whole + fraction), scale: 10n ** BigInt(fraction.length) };
+};
+
+/** The caller owns commit, rollback, serializable isolation, and apportionment of the case credit across invoices. */
+export const recognizeCustomerReturnWithin = async (
+  tx: Prisma.TransactionClient, input: CustomerReturnRecognitionInput, creditTerms?: NegotiatedCustomerReturnCredit,
+) => {
+  const negotiatedCredit = creditTerms && {
+    caseId: creditTerms.caseId.trim(),
+    agreedGrossRials: creditTerms.agreedGrossRials,
+    lines: creditTerms.lines.map((line) => ({
+      lineId: line.lineId,
+      agreedUnitRateRials: line.agreedUnitRateRials.trim(),
+      rateDifferenceReason: line.rateDifferenceReason?.trim() || null,
+    })).sort((left, right) => left.lineId.localeCompare(right.lineId)),
+  };
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`customer-return:${input.originalInvoiceId}`}))`;
   const original = await tx.accountingCommercialCustomerInvoice.findUnique({ where: { id: input.originalInvoiceId },
     include: { profile: { select: { accountingPartyId: true } } } });
@@ -570,7 +592,8 @@ export const recognizeCustomerReturnWithin = async (tx: Prisma.TransactionClient
   const returnCommandHash = hashCustomerTreasuryEvidence({ originalInvoiceId: input.originalInvoiceId,
     commercialCreditNumber: input.commercialCreditNumber, bookId: input.bookId, fiscalYearId: input.fiscalYearId,
     periodId: input.periodId, returnedAt: input.returnedAt, evidenceIds: [...input.evidenceIds].sort(),
-    lines: [...input.lines].sort((left, right) => left.id.localeCompare(right.id)), postingRule: input.postingRule });
+    lines: [...input.lines].sort((left, right) => left.id.localeCompare(right.id)), postingRule: input.postingRule,
+    ...(negotiatedCredit ? { negotiatedCredit } : {}) });
   const priorVoucher = await tx.accountingLedgerVoucher.findUnique({ where: { idempotencyKey: input.idempotencyKey } });
   if (priorVoucher) {
     const accepted = await tx.accountingCommercialCustomerInvoice.findUnique({ where: { ledgerVoucherId: priorVoucher.id } });
@@ -588,6 +611,14 @@ export const recognizeCustomerReturnWithin = async (tx: Prisma.TransactionClient
     || new Set(input.lines.map((line) => line.evidenceId)).size !== input.lines.length
     || input.lines.some((line) => !input.evidenceIds.includes(line.evidenceId))) {
     throw new AccountingCustomerTreasuryError('RETURN_LINES_REQUIRED', 'ردیف و شاهد برگشت کامل و یکتا نیست.', 400);
+  }
+  const termsByLineId = new Map(negotiatedCredit?.lines.map((line) => [line.lineId, line]));
+  if (negotiatedCredit && (!negotiatedCredit.caseId || negotiatedCredit.agreedGrossRials <= 0n
+    || negotiatedCredit.lines.length !== input.lines.length || termsByLineId.size !== input.lines.length
+    || new Set(input.lines.map((line) => line.id)).size !== input.lines.length
+    || input.lines.some((line) => !termsByLineId.has(line.id))
+    || negotiatedCredit.lines.some((line) => !/^\d+(?:\.\d+)?$/.test(line.agreedUnitRateRials)))) {
+    throw new AccountingCustomerTreasuryError('NEGOTIATED_RETURN_CREDIT_INVALID', 'مبلغ توافقی و مشخصات نرخ برای همه ردیف‌های برگشت الزامی است.', 400);
   }
   const evidenceRows = await tx.shipmentQuantityEvidence.findMany({ where: { id: { in: input.evidenceIds } } });
   const consumed = await tx.accountingReturnEvidenceConsumption.count({ where: { evidenceId: { in: input.evidenceIds } } });
@@ -628,12 +659,22 @@ export const recognizeCustomerReturnWithin = async (tx: Prisma.TransactionClient
     const netRials = proportionalWholeRials(source.rawBaseAmount, line.quantity, source.quantity);
     const taxRials = proportionalWholeRials(source.roundedTaxRials, line.quantity, source.quantity);
     const costRials = proportionalWholeRials(source.costRials, line.quantity, source.quantity);
+    const terms = termsByLineId.get(line.id);
     if (line.netRials !== netRials || line.taxRials !== taxRials || line.costRials !== costRials
       || line.taxRule.id !== source.taxRuleId || line.taxRule.version !== source.taxRuleVersion
-      || line.taxRule.citation !== source.citation || line.taxRule.exempt !== source.exempt) {
+      || line.taxRule.citation !== source.citation || line.taxRule.exempt !== source.exempt
+      || (terms && line.taxRule.rateBasisPoints !== (source.allocationEvidence as Prisma.JsonObject)?.rateBasisPoints)) {
       throw new AccountingCustomerTreasuryError('RETURN_ECONOMICS_MISMATCH', 'مبالغ برگشت باید دقیقاً از ردیف صورتحساب مرجع مشتق شوند.', 409);
     }
-    return { ...line, netRials, taxRials, costRials };
+    if (terms && !terms.rateDifferenceReason) {
+      const rate = decimalRatio(terms.agreedUnitRateRials);
+      const originalQuantity = decimalRatio(source.quantity.toFixed());
+      const originalNet = decimalRatio(source.rawBaseAmount.toFixed());
+      if (rate.units * originalQuantity.units * originalNet.scale !== originalNet.units * rate.scale * originalQuantity.scale) {
+        throw new AccountingCustomerTreasuryError('NEGOTIATED_RETURN_RATE_REASON_REQUIRED', 'دلیل تفاوت نرخ توافقی با نرخ خالص فروش اولیه الزامی است.', 400);
+      }
+    }
+    return { ...line, netRials, taxRials, costRials, originalTaxLineId: source.id };
   });
   const priorReturned = await tx.accountingReturnEvidenceConsumption.groupBy({ by: ['originalLineId'],
     where: { originalInvoiceId: original.id }, _sum: { quantity: true } });
@@ -651,11 +692,27 @@ export const recognizeCustomerReturnWithin = async (tx: Prisma.TransactionClient
   const costRials = derivedLines.reduce((total, line) => total + line.costRials, 0n);
   const priorCredits = await tx.accountingCommercialCustomerInvoice.aggregate({ where: { referenceInvoiceId: original.id,
     status: 'CREDIT_NOTE' }, _sum: { grossRials: true } });
-  if (toBigInt(priorCredits._sum.grossRials ?? 0) + netRials + taxRials > toBigInt(original.grossRials)) {
+  const standardGrossRials = netRials + taxRials;
+  if (toBigInt(priorCredits._sum.grossRials ?? 0) + standardGrossRials > toBigInt(original.grossRials)) {
     throw new AccountingCustomerTreasuryError('RETURN_EXCEEDS_INVOICE', 'جمع برگشت‌ها از صورتحساب مرجع بیشتر است.', 409);
   }
+  const customerCreditRials = negotiatedCredit?.agreedGrossRials ?? standardGrossRials;
+  const commercialDifferenceRials = customerCreditRials - standardGrossRials;
+  if (negotiatedCredit && (standardGrossRials + costRials + (commercialDifferenceRials > 0n ? commercialDifferenceRials : 0n)) >= 10n ** 20n) {
+    throw new AccountingCustomerTreasuryError('NEGOTIATED_RETURN_CREDIT_INVALID', 'جمع سند برگشت از ظرفیت مبلغ سند حسابداری بیشتر است.', 400);
+  }
+  const negotiatedEvidence = negotiatedCredit && {
+    caseId: negotiatedCredit.caseId, originalInvoiceId: original.id, originalTaxInvoiceId: originalTaxInvoice.id,
+    agreedGrossRials: customerCreditRials, standardGrossRials, commercialDifferenceRials,
+    lines: derivedLines.map((line) => ({
+      ...termsByLineId.get(line.id), originalLineId: line.originalLineId, originalTaxLineId: line.originalTaxLineId,
+      returnEvidenceId: line.evidenceId, quantity: line.quantity, netRials: line.netRials, taxRials: line.taxRials,
+      costRials: line.costRials, taxRule: line.taxRule,
+    })),
+  };
   const payload = { originalInvoiceId: original.id, evidence: evidenceRows.map((row) => ({ id: row.id,
-    sourceType: row.sourceType, sourceId: row.sourceId, sourceVersion: row.sourceVersion, integrityHash: row.integrityHash })) };
+    sourceType: row.sourceType, sourceId: row.sourceId, sourceVersion: row.sourceVersion, integrityHash: row.integrityHash })),
+    ...(negotiatedEvidence ? { negotiatedCredit: negotiatedEvidence } : {}) };
   const evidence = lineEvidence('VERIFIED_CUSTOMER_RETURN', input.idempotencyKey, 1, payload);
   const app = ledgerApp(tx, new Date());
   const draft = await app.createManualDraft({ bookId: input.bookId, fiscalYearId: input.fiscalYearId, periodId: input.periodId,
@@ -665,7 +722,14 @@ export const recognizeCustomerReturnWithin = async (tx: Prisma.TransactionClient
     actor: input.actor, lines: [
       ledgerLine({ accountId: postingRule.revenueAccountId, debitRials: netRials, evidence, description: 'برگشت درآمد فروش' }),
       ...(taxRials > 0n ? [ledgerLine({ accountId: postingRule.outputTaxAccountId, debitRials: taxRials, evidence, description: 'برگشت مالیات فروش' })] : []),
-      ledgerLine({ accountId: postingRule.receivableAccountId, creditRials: netRials + taxRials,
+      // The existing revenue account carries the separately evidenced commercial adjustment in the same voucher.
+      ...(negotiatedEvidence && commercialDifferenceRials !== 0n ? [ledgerLine({
+        accountId: postingRule.revenueAccountId,
+        ...(commercialDifferenceRials > 0n ? { debitRials: commercialDifferenceRials } : { creditRials: -commercialDifferenceRials }),
+        evidence: lineEvidence('CUSTOMER_RETURN_COMMERCIAL_DIFFERENCE', input.idempotencyKey, 1, negotiatedEvidence),
+        description: 'اختلاف مبلغ توافقی برگشت با مبلغ مرجع',
+      })] : []),
+      ledgerLine({ accountId: postingRule.receivableAccountId, creditRials: customerCreditRials,
         partyId: original.profile.accountingPartyId, evidence, description: 'بستانکاری مشتری بابت برگشت' }),
       ...(costRials > 0n ? [ledgerLine({ accountId: postingRule.inventoryAccountId, debitRials: costRials, evidence, description: 'بازگشت موجودی تأییدشده' }),
         ledgerLine({ accountId: postingRule.costAccountId, creditRials: costRials, evidence, description: 'برگشت بهای تمام‌شده' })] : []),
@@ -683,7 +747,9 @@ export const recognizeCustomerReturnWithin = async (tx: Prisma.TransactionClient
       quantity: line.quantity, costRials: line.costRials.toString(), taxRuleId: line.taxRule.id,
       taxRuleVersion: line.taxRule.version, citation: line.taxRule.citation, rawBaseAmount: line.netRials.toString(),
       rawTaxAmount: `${line.taxRials}.00000000`, roundedTaxRials: line.taxRials.toString(), exempt: line.taxRule.exempt,
-      allocationEvidence: json({ returnEvidenceId: line.evidenceId, rateBasisPoints: line.taxRule.rateBasisPoints }) })) } } });
+      allocationEvidence: json({ returnEvidenceId: line.evidenceId, rateBasisPoints: line.taxRule.rateBasisPoints,
+        ...(negotiatedCredit ? { originalLineId: line.originalLineId, originalTaxLineId: line.originalTaxLineId } : {}),
+      }) })) } } });
   const credit = await tx.accountingCommercialCustomerInvoice.create({ data: { id: invoiceId, profileId: original.profileId,
     referenceInvoiceId: original.id, contractId: original.contractId, contractVersion: original.contractVersion,
     number: input.commercialCreditNumber, ledgerVoucherId: voucher.id, taxInvoiceId, controlPolicyId: original.controlPolicyId,
@@ -691,12 +757,12 @@ export const recognizeCustomerReturnWithin = async (tx: Prisma.TransactionClient
     controlEvidenceId: input.evidenceIds.join(','), controlEvidenceVersion: 1,
     controlEvidenceHash: hashCustomerTreasuryEvidence(payload), commandHash: returnCommandHash,
     netRials: netRials.toString(), taxRials: taxRials.toString(),
-    grossRials: (netRials + taxRials).toString(), issuedAt: input.returnedAt, dueAt: input.returnedAt, status: 'CREDIT_NOTE' } });
+    grossRials: standardGrossRials.toString(), issuedAt: input.returnedAt, dueAt: input.returnedAt, status: 'CREDIT_NOTE' } });
   await tx.accountingReturnEvidenceConsumption.createMany({ data: derivedLines.map((line) => ({ evidenceId: line.evidenceId,
     creditInvoiceId: credit.id, originalInvoiceId: original.id, originalLineId: line.originalLineId,
     productRowId: line.productRowId, quantity: line.quantity })) });
   await tx.accountingCustomerOpenItem.create({ data: { profileId: original.profileId, invoiceId: credit.id,
-    contractId: original.contractId, kind: 'CREDIT', originalRials: (netRials + taxRials).toString(), dueAt: input.returnedAt,
+    contractId: original.contractId, kind: 'CREDIT', originalRials: customerCreditRials.toString(), dueAt: input.returnedAt,
     postedAt: voucher.postedAt! } });
   const payloadHash = hashCustomerTreasuryEvidence({ taxInvoiceId, originalTaxInvoiceId: original.taxInvoiceId, netRials, taxRials });
   await tx.accountingTaxOutboxMessage.create({ data: { taxInvoiceId, channelId: taxChannel?.id, payloadHash,

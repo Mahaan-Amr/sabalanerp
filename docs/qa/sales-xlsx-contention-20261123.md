@@ -34,3 +34,17 @@ Use the compiled backend and the existing local database connection to repeat th
 node --expose-gc backend/dist/scripts/measure-sales-report-export.js 12000 --verify-worker
 node --expose-gc backend/dist/scripts/measure-sales-report-export.js 12000 --diagnose
 ```
+
+
+## Compiled integration
+
+The compiled synchronous baseline predates #490. The compiled candidate includes both #490 and #491, so the differences in this comparison describe the combined implementation.
+
+| Run | Quiet HTTP read p95 (ms) | Export HTTP read p95 (ms) | Worst HTTP read during export (ms) | Worst event-loop delay during export (ms) | Export time (ms) | Main heap above start (MiB) | RSS above start (MiB) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Synchronous baseline | 32.76–38.17 | 47.53–56.33 | 353–975 | 303–334 | 1768–1906 | 217–267 | 358–391 |
+| Combined #490 and #491 | 24.88–35.75 | 33.79–52.57 | 174–188 | 148–161 | 1312–1468 | 74–80 | 174–235 |
+
+The compiled run verified the same authorization, overlap and retry cases with byte-for-byte parity. Each workbook was 6,263,911 bytes. A separate compiled diagnostic run on the combined candidate measured 879 ms to construct the canonical report, with 150 ms maximum event-loop delay and 45.55 ms read p95. Encoding a prepared report in the worker took 466 ms, with 27.66 ms maximum event-loop delay and 26.19 ms read p95. Report construction remains the larger source of blocking in this fixture.
+
+Backend typechecking, database-client ownership, Sales report foundation and views, and Design System foundation and adoption checks passed. The focused browser download scenario is in `sales-report-paging.spec.ts`. It still requires a candidate frontend runtime. The Windows checkout's frontend build stopped before compilation because its installed dependencies were missing Next.js.

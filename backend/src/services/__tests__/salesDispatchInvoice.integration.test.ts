@@ -588,8 +588,12 @@ async function run() {
         assert.match(Buffer.from(refreshed.bytes).toString(), /ابزار نیم‌لول[\s\S]*۴۰ \/ متر طول/);
         assert.match(Buffer.from(refreshed.bytes).toString(), /بلوار دکتر حسابی/);
         historicalSnapshot = { ...legacySnapshot, print: undefined };
+        await tx.salesContract.updateMany({ where: { contractNumber: { in: source.lines.map(line => line.contractNumber) } },
+          data: { contractData: json({ project: { address: 'نشانی تغییرکرده پس از صدور' }, products: [] }) } });
         const withoutPrint = await legacyService.download(ctx, loading.id, issued.id);
         assert.match(Buffer.from(withoutPrint.bytes).toString(), /ابزار نیم‌لول[\s\S]*۴۰ \/ متر طول/);
+        assert.match(Buffer.from(withoutPrint.bytes).toString(), /نشانی ذخیره‌شدهٔ قرارداد/);
+        assert.doesNotMatch(Buffer.from(withoutPrint.bytes).toString(), /نشانی تغییرکرده پس از صدور/);
         assert.equal(bytesHash((await legacyService.download(ctx, loading.id, issued.id, false, true)).bytes), bytesHash(legacyBytes));
         assert.equal((await tx.salesDispatchInvoice.findUniqueOrThrow({ where: { id: issued.id } })).pdfSha256, record.pdfSha256);
         assert.equal(

@@ -12,6 +12,18 @@ export async function overlappingAttendanceIds(db: Prisma.TransactionClient, per
           AND a."enteredAt" < COALESCE(b."exitedAt", 'infinity'::timestamp))`);
   return rows.map(r => r.id);
 }
-export function actionableAttendanceIntervals(overlapIds: string[], today: Date): Prisma.AttendanceIntervalWhereInput {
-  return { status: 'ACTIVE', OR: [{ exitUnknown: true }, { enteredAt: null }, { exitedAt: null, attendanceRecord: { date: { lt: today } } }, { id: { in: overlapIds } }] };
+export function actionableAttendanceIntervals(
+  revision: Prisma.AttendanceIntervalFieldRefs['revision'],
+  overlapIds: string[],
+  today: Date,
+): Prisma.AttendanceIntervalWhereInput {
+  return {
+    status: 'ACTIVE',
+    OR: [
+      { exitUnknown: true, OR: [{ confirmedAt: null }, { NOT: { confirmedRevision: { equals: revision } } }] },
+      { enteredAt: null },
+      { exitUnknown: false, exitedAt: null, attendanceRecord: { date: { lt: today } } },
+      { id: { in: overlapIds } },
+    ],
+  };
 }

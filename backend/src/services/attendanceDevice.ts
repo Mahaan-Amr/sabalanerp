@@ -1,4 +1,4 @@
-import { DAY_ROLLOVER_REASON, DAY_ROLLOVER_SOURCE, isDeferredDayExit } from './attendanceDayBoundary';
+import { DAY_ROLLOVER_REASON, DAY_ROLLOVER_SOURCE, isDeferredDayExit, isUnknownExitConfirmed } from './attendanceDayBoundary';
 import { unresolvedAbsenceDays } from './attendanceAbsenceDecision';
 import { createHash, randomBytes } from 'node:crypto';
 import { AttendanceIntervalStatus, AttendanceWorkScheduleStatus, Prisma } from '@prisma/client';
@@ -225,18 +225,24 @@ export async function markUnknownExit(db: DB, intervalId: string, reasonValue: u
   await refreshDeviceAttendance(db, before.attendanceRecordId);
 }
 
-export async function reviewFingerprint(db: DB) {
+export async function reviewFingerprint(db: DB, absenceDays?: Awaited<ReturnType<typeof unresolvedAbsenceDays>>) {
   const [punches, intervals] = await Promise.all([
     db.attendancePunch.findMany({ where: { status: { in: ['REVIEW', 'DUPLICATE'] } }, select: { id: true }, orderBy: { id: 'asc' } }),
-    db.attendanceInterval.findMany({ where: { status: 'ACTIVE' }, select: { id: true, revision: true, confirmedRevision: true, enteredAt: true, exitUnknown: true, exitSource: true }, orderBy: { id: 'asc' } }),
+    db.attendanceInterval.findMany({ where: { status: 'ACTIVE' }, select: { id: true, revision: true, confirmedRevision: true, enteredAt: true, exitUnknown: true, exitSource: true, confirmedAt: true }, orderBy: { id: 'asc' } }),
   ]);
-  const pending = intervals.filter(i => (!i.enteredAt || i.exitUnknown) && !isDeferredDayExit(i));
-  const missing = (await unresolvedAbsenceDays(db)).filter(c => c.handoverRequired);
+  const pending = intervals
+    .filter(i => (!i.enteredAt || (i.exitUnknown && !isUnknownExitConfirmed(i))) && !isDeferredDayExit(i))
+    .map(({ confirmedAt: _confirmedAt, ...interval }) => interval);
+  const missing = (absenceDays ?? await unresolvedAbsenceDays(db)).filter(c => c.handoverRequired);
   return { hash: tokenHash(JSON.stringify([punches, pending, missing])), count: punches.length + pending.length + missing.length };
 }
+export async function isReviewHandoverRequired(db: DB, actorId: string, absenceDays?: Awaited<ReturnType<typeof unresolvedAbsenceDays>>) {
+  const pending = await reviewFingerprint(db, absenceDays);
+  return pending.count > 0 && !await db.attendanceReviewHandover.findFirst({ where: { actorId, evidenceHash: pending.hash }, select: { id: true } });
+}
+
 export async function requireReviewHandover(db: DB, actorId: string) {
-  const pending = await reviewFingerprint(db);
-  if (pending.count && !await db.attendanceReviewHandover.findFirst({ where: { actorId, evidenceHash: pending.hash } })) {
+  if (await isReviewHandoverRequired(db, actorId)) {
     throw new AttendanceDeviceError('پیش از تحویل شیفت، حضور و غیاب را بررسی کنید یا موارد را با دلیل و مسئول پیگیری تحویل دهید.', 409);
   }
 }

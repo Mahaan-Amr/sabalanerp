@@ -4,6 +4,13 @@ export const DAY_ROLLOVER_SOURCE = 'DAY_ROLLOVER';
 export const DAY_ROLLOVER_REASON = 'ثبت سیستمی شروع روز جدید؛ ساعت خروج روز قبل نامعلوم است و نیاز به اصلاح دارد.';
 export const isDeferredDayExit = (interval: { exitUnknown?: boolean; exitSource?: string | null }) =>
   interval.exitUnknown === true && interval.exitSource === DAY_ROLLOVER_SOURCE;
+export const isUnknownExitConfirmed = (interval: {
+  exitUnknown?: boolean;
+  confirmedAt?: Date | null;
+  revision?: number;
+  confirmedRevision?: number;
+}) => interval.exitUnknown === true && Boolean(interval.confirmedAt) && interval.revision === interval.confirmedRevision;
+
 export function onlyDeferredUnknownTimes(intervals: Array<{ enteredAt: unknown; exitedAt: unknown; exitUnknown?: boolean; exitSource?: string | null }>, today?: string) {
   const unknown = intervals.filter(i => !i.enteredAt || !i.exitedAt || i.exitUnknown);
   return unknown.length > 0 && unknown.every(interval => {

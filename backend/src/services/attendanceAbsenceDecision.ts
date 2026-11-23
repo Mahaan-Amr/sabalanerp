@@ -16,8 +16,13 @@ export async function unresolvedAbsenceDays(db: Prisma.TransactionClient, now = 
     const report = await loadPersonnelAttendanceAccounting(db, options, now);
     for (const person of report.people) for (const day of person.days) {
       const a = day.accounting;
-      if (!a || a.issues.includes('OPEN_DAY') || !a.issues.some(issue => ['MISSING_PRESENCE', 'UNKNOWN_TIME', 'OVERLAPPING_ATTENDANCE', 'LEAVE_PRESENCE_CONFLICT', 'OVERLAPPING_LEAVE', 'PENDING_AUTHORITY'].includes(issue))) continue;
-      cases.push({ personnelId: person.personnelIds[0], name: person.name, date: day.date, evidenceHash: a.evidenceHash, issues: a.issues, issueLabels: a.issueLabels, requiredMinutes: a.requiredMinutes, handoverRequired: !(onlyDeferredUnknownTimes(day.intervals, securityDateKeyFromInstant(now)) && !a.issues.some(issue => ['MISSING_PRESENCE', 'OVERLAPPING_ATTENDANCE', 'LEAVE_PRESENCE_CONFLICT', 'OVERLAPPING_LEAVE', 'PENDING_AUTHORITY', 'AMBIGUOUS_DEVICE'].includes(issue))), canConfirm: a.issues.includes('MISSING_PRESENCE') && a.issues.every(issue => issue === 'MISSING_PRESENCE') });
+      if (!a || a.issues.includes('OPEN_DAY')) continue;
+      const unknown = day.intervals.filter(i => !i.enteredAt || !i.exitedAt || i.exitUnknown || i.exitedAt <= i.enteredAt);
+      const exitReviewComplete = unknown.length > 0 && unknown.every(i => i.enteredAt && i.unknownExitConfirmed);
+      const issues = a.issues.filter(issue => issue !== 'UNKNOWN_TIME' || !exitReviewComplete);
+      if (!issues.some(issue => ['MISSING_PRESENCE', 'UNKNOWN_TIME', 'OVERLAPPING_ATTENDANCE', 'LEAVE_PRESENCE_CONFLICT', 'OVERLAPPING_LEAVE', 'PENDING_AUTHORITY'].includes(issue))) continue;
+      const issueLabels = a.issueLabels.filter((_, index) => issues.includes(a.issues[index]));
+      cases.push({ personnelId: person.personnelIds[0], name: person.name, date: day.date, evidenceHash: a.evidenceHash, issues, issueLabels, requiredMinutes: a.requiredMinutes, handoverRequired: !(onlyDeferredUnknownTimes(day.intervals, securityDateKeyFromInstant(now)) && !issues.some(issue => ['MISSING_PRESENCE', 'OVERLAPPING_ATTENDANCE', 'LEAVE_PRESENCE_CONFLICT', 'OVERLAPPING_LEAVE', 'PENDING_AUTHORITY', 'AMBIGUOUS_DEVICE'].includes(issue))), canConfirm: a.issues.includes('MISSING_PRESENCE') && a.issues.every(issue => issue === 'MISSING_PRESENCE') });
     }
   }
   return cases;

@@ -179,7 +179,16 @@ test('device mapping and review handover dialogs are centered and preserve compa
   const beforeRecords = await db.attendanceRecord.count({ where: { personnelId: personId } });
   const beforeIntervals = await db.attendanceInterval.count({ where: { attendanceRecord: { personnelId: personId } } });
   await page.context().addCookies([{ name: 'sabalan_session', value: sessionToken, url: 'http://localhost:3000', httpOnly: true, sameSite: 'Lax' }]);
+  let handoverRequired = false;
+  const absenceCases = '**/api/attendance-device/absence-cases';
+  await page.route(absenceCases, route => route.fulfill({ json: { success: true, data: [], handoverRequired } }));
+  const firstStatus = page.waitForResponse(absenceCases);
   await page.goto('/dashboard/hr/attendance-devices');
+  await firstStatus;
+  const handoverButton = page.getByRole('button', { name: 'تحویل موارد به شیفت بعد', exact: true });
+  await expect(handoverButton).toHaveCount(0);
+  handoverRequired = true;
+  await page.reload();
   const terminal = page.getByText(`دستگاه آزمون ${key.slice(0,6)}`, { exact: true }).locator('../..');
   await terminal.getByRole('button', { name: 'افزودن یا تغییر اتصال فرد', exact: true }).click();
   const mapping = page.getByRole('dialog', { name: 'اتصال فرد به دستگاه', exact: true });
@@ -191,8 +200,8 @@ test('device mapping and review handover dialogs are centered and preserve compa
   await expect(mapping).toBeVisible(); await centered(mapping);
   await page.screenshot({ path: testInfo.outputPath('mapping-centered-desktop.png') });
   await page.keyboard.press('Escape');
-  await page.getByRole('button', { name: 'تحویل موارد به شیفت بعد', exact: true }).click();
-  const handover = page.getByRole('dialog', { name: 'تحویل با مسئول پیگیری', exact: true });
+  await handoverButton.click();
+  const handover = page.getByRole('dialog', { name: 'تحویل موارد به شیفت بعد', exact: true });
   await expect(handover).toBeVisible(); await centered(handover);
   await page.screenshot({ path: testInfo.outputPath('handover-centered-desktop.png') });
   await page.setViewportSize({ width: 390, height: 844 }); await centered(handover);
@@ -254,4 +263,15 @@ test('audited correction stays pending through preview and requires every fact b
   expect(after.exitUnknown).toBe(true); expect(after.exitedAt).toBeNull(); expect(after.confirmedRevision).toBe(0);
   expect(await db.attendanceIntervalAudit.count({ where: { intervalId: interval.id, action: 'UNKNOWN_EXIT' } })).toBe(1);
   expect((await db.attendanceTerminal.findUniqueOrThrow({ where: { id: terminalId } })).mode).toBe('SHADOW');
+
+  await review.getByRole('button', { name: 'نیازمند رسیدگی', exact: true }).click();
+  await review.getByRole('button', { name: 'تأیید خروج بدون ساعت', exact: true }).click();
+  const confirmDeparture = review.getByRole('button', { name: 'تأیید می‌کنم که خروج انجام شده', exact: true });
+  await confirmDeparture.click();
+  await expect(review.getByText('موردی برای رسیدگی باقی نمانده است', { exact: true })).toBeVisible();
+  await review.getByRole('button', { name: 'سوابق و شواهد', exact: true }).click();
+  await expect(review.getByText('خروج تأیید شده، ساعت نامعلوم', { exact: true })).toBeVisible();
+  const confirmed = await db.attendanceInterval.findUniqueOrThrow({ where: { id: interval.id } });
+  expect(confirmed.exitedAt).toBeNull();
+  expect(confirmed.exitUnknown).toBe(true);
 });

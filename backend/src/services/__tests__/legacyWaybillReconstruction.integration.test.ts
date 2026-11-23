@@ -21,7 +21,9 @@ import { closeGuardQueueTurnWithoutLoading, listGuardQueueAdmissionOptions, rele
 import { getDispatchCaseTimeline, listDispatchCases } from '../dispatchCaseTimeline';
 import { readShipmentQuantityProjection } from '../shipmentQuantityProjectionStore';
 
-async function run() {
+type CancellationDocuments = 'ACTIVE' | 'BUNDLE_VOIDED' | 'INVOICE_VOIDED' | 'WAYBILL_VOIDED' | 'REPLACED_INVOICE';
+
+async function run(cancellationDocuments: CancellationDocuments) {
   const sourceDatabaseUrl = process.env.DATABASE_URL;
   if (!sourceDatabaseUrl) throw new Error('DATABASE_URL must point at sabalanerp-local.');
   const root = path.resolve(process.cwd(), '..');
@@ -88,6 +90,8 @@ async function run() {
     const expectedDocumentIds = [invoice.id, waybillId];
     await assert.rejects(() => cancelFinalizedOrdinaryLoading(db, { ...cancelInput, expectedDocumentIds }), LoadingCancellationAccountingAccessError);
     await assert.rejects(() => cancelFinalizedOrdinaryLoading(db, { ...cancelInput, actorId: actor.id, expectedDocumentIds: [waybillId] }), /اسناد بارگیری تغییر کرده‌اند/);
+    await assert.rejects(() => cancelFinalizedOrdinaryLoading(db, { ...cancelInput, actorId: actor.id,
+      expectedDocumentIds: [...expectedDocumentIds, 'unrelated-document'], allowPreviouslyVoidedDocuments: true }), /اسناد بارگیری تغییر کرده‌اند/);
     const line = await db.logisticsAllocationRevisionLine.findFirstOrThrow({ where: { revisionId: revision.id } });
     const projection = () => readShipmentQuantityProjection(db, { contractId: line.sourceContractId! });
     const available = async () => (await projection()).rows.find(row => row.contractItemId === line.sourceContractItemId)?.quantities?.availableToLoad;
@@ -126,13 +130,47 @@ async function run() {
     assert.ok(renewed && renewed.id !== firstRequest.id);
     const approve = { ...response, dutyId: renewed.id, expectedSourceVersion: renewed.sourceVersion };
     await assert.rejects(() => respondToCrossWorkspaceDuty(db, { ...approve, expectedSourceVersion: firstRequest.sourceVersion }), /SOURCE_VERSION_CHANGED/);
+    if (cancellationDocuments === 'REPLACED_INVOICE') {
+      await invoices.void(invoiceContext, cancelInput.loadingId, invoice.id, 'ابطال برای صدور جایگزین');
+      await invoices.issue(invoiceContext, cancelInput.loadingId, `replacement-${database.runId}`);
+      await assert.rejects(() => respondToCrossWorkspaceDuty(db, approve), /DUTY_LOADING_CANCELLATION_CHANGED/);
+      assert.equal((await latestLoadingCancellationRequest(db, cancelInput.loadingId))?.status, 'PENDING');
+      assert.equal((await db.logisticsLoading.findUniqueOrThrow({ where: { id: cancelInput.loadingId } })).status, 'FINALIZED');
+      assert.equal((await db.accountingDispatchWaybill.findUniqueOrThrow({ where: { id: waybillId } })).status, 'ISSUED');
+      assert.equal(await db.salesDispatchInvoice.count({ where: { loadingId: cancelInput.loadingId, voidedAt: null } }), 1);
+      assert.equal(Number(await available()), 1);
+      assert.equal(await db.shipmentQuantityEvidence.count({ where: { sourceType: 'FINALIZED_LOADING_CANCELLATION', sourceId: line.id } }), 0);
+      console.log('loading cancellation rejects unreviewed replacement invoice: PASS');
+      return;
+    }
+    if (cancellationDocuments === 'INVOICE_VOIDED') {
+      await invoices.void(invoiceContext, cancelInput.loadingId, invoice.id, 'ابطال جداگانه پیش از تأیید');
+    }
+    if (cancellationDocuments === 'BUNDLE_VOIDED' || cancellationDocuments === 'WAYBILL_VOIDED') {
+      await voidAccountingDispatchWaybill(db, { waybillId, actorId: actor.id, effectiveAuthority: authority,
+        reason: 'ابطال جداگانه پیش از تأیید', idempotencyKey: `prevoid-${database.runId}`,
+        ...(cancellationDocuments === 'BUNDLE_VOIDED' ? { expectedInvoiceId: invoice.id } : {}),
+      });
+    }
+    const invoiceBeforeApproval = await db.salesDispatchInvoice.findUniqueOrThrow({ where: { id: invoice.id } });
+    const waybillBeforeApproval = await db.accountingDispatchWaybill.findUniqueOrThrow({ where: { id: waybillId } });
     const outcomes = await Promise.allSettled([respondToCrossWorkspaceDuty(db, approve), respondToCrossWorkspaceDuty(db, approve)]);
-    assert.equal(outcomes.filter(result => result.status === 'fulfilled').length, 1);
+    assert.equal(outcomes.filter(result => result.status === 'fulfilled').length, 1,
+      JSON.stringify(outcomes.map(result => result.status === 'rejected' ? String(result.reason) : 'fulfilled')));
     assert.equal((await latestLoadingCancellationRequest(db, cancelInput.loadingId))?.status, 'APPROVED');
     assert.equal(Number(await available()), 2);
     assert.ok((await db.salesDispatchInvoice.findUniqueOrThrow({ where: { id: invoice.id } })).voidedAt);
     assert.equal((await db.accountingDispatchWaybill.findUniqueOrThrow({ where: { id: waybillId } })).status, 'VOIDED');
-    assert.equal(await db.dispatchDocumentCommandResult.count({ where: { waybillId, command: 'VOID', status: 'SUCCEEDED' } }), 1);
+    assert.equal(await db.dispatchDocumentCommandResult.count({ where: { waybillId, command: 'VOID', status: 'SUCCEEDED' } }),
+      waybillBeforeApproval.status === 'VOIDED' ? 0 : 1);
+    if (invoiceBeforeApproval.voidedAt) {
+      assert.deepEqual(await db.salesDispatchInvoice.findUniqueOrThrow({ where: { id: invoice.id } }), invoiceBeforeApproval);
+    }
+    if (waybillBeforeApproval.voidedAt) {
+      assert.deepEqual(await db.accountingDispatchWaybill.findUniqueOrThrow({ where: { id: waybillId } }), waybillBeforeApproval);
+    }
+    assert.equal(await db.dispatchLifecycleAudit.count({ where: { aggregateType: 'LOGISTICS_LOADING',
+      aggregateId: cancelInput.loadingId, eventType: 'FINALIZED_LOADING_CANCELLED' } }), 1);
 
     assert.equal(await db.shipmentQuantityEvidence.count({ where: { sourceType: 'FINALIZED_LOADING_CANCELLATION', sourceId: line.id } }), 1);
     const cancelledLoading = await db.logisticsLoading.findUniqueOrThrow({ where: { id: cancelInput.loadingId } });
@@ -145,6 +183,10 @@ async function run() {
     assert.equal(readyForLoading.admittedAt.toISOString(), originalTurn.admittedAt.toISOString());
     assert.equal(readyForLoading.voidedAt, null);
     assert.ok(!(await listGuardQueueAdmissionOptions(db)).externalDrivers.some(driver => driver.id === driverId));
+    if (cancellationDocuments !== 'ACTIVE') {
+      console.log(`loading cancellation automatically completes after ${cancellationDocuments}: PASS`);
+      return;
+    }
     const guardDecision = { turnId: originalTurn.id, actorId: fixture.actorId, reason: 'رسیدگی آزمایشی گارد' };
     const nextLoading = { ...guardDecision, loadingId: fixture.loadings[1].id };
     const reservation = await reserveGuardQueueTurn(db, nextLoading);
@@ -292,4 +334,9 @@ async function run() {
     console.log('legacy waybill reconstruction local integration: PASS');
   } finally { await db.$disconnect(); await database.cleanup(); }
 }
-run().catch(error => { console.error(error); process.exitCode = 1; });
+(async () => {
+  const modes: CancellationDocuments[] = process.env.TEST_CANCEL_DOCUMENTS
+    ? [process.env.TEST_CANCEL_DOCUMENTS as CancellationDocuments]
+    : ['ACTIVE', 'BUNDLE_VOIDED', 'INVOICE_VOIDED', 'WAYBILL_VOIDED', 'REPLACED_INVOICE'];
+  for (const mode of modes) await run(mode);
+})().catch(error => { console.error(error); process.exitCode = 1; });

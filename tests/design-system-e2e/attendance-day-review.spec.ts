@@ -39,6 +39,7 @@ test.afterAll(async () => {
 test('actionable review stays clear despite 101 normal intervals; correction reuses the manual workflow', async ({ page }) => {
   await page.context().addCookies([{ name: SESSION_COOKIE, value: token, domain: 'localhost', path: '/', httpOnly: true, secure: false, sameSite: 'Lax' }]);
   await page.goto('/dashboard/security/attendance');
+  await expect(page.getByRole('button', { name: 'تحویل موارد به شیفت بعد', exact: true })).toBeVisible();
   const card = page.locator(`[data-personnel-id="${personId}"]`);
   await card.getByRole('button', { name: 'بررسی تردد', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: `بررسی تردد ${name}` });

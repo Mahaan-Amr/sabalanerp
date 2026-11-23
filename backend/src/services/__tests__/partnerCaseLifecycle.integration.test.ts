@@ -114,7 +114,7 @@ test('Partner dispatch statements require current internal Accounting authority 
     const batch = await database.logisticsAllocationBatch.create({ data: { loadingId: loading.id,
       idempotencyKey: 'policy-fixture', finalizedBy: managerId } });
     const partnerCase = await database.partnerSaleCase.findUniqueOrThrow({ where: { id: ids.caseId }, select: {
-      id: true, headRevision: true, integrityHash: true, internalRecordId: true,
+      id: true, headRevision: true, integrityHash: true, internalRecordId: true, caseNumber: true,
     } });
     const partnerDelivery = await database.partnerCaseDelivery.findFirstOrThrow({ where: {
       caseId: ids.caseId, revision: partnerCase.headRevision,
@@ -188,6 +188,7 @@ test('Partner dispatch statements require current internal Accounting authority 
         DATABASE_URL: temporary.databaseUrl, PARTNER_TEST_ACTOR_ID: managerId,
         PARTNER_TEST_ORDINARY_CANDIDATE_ID: candidates.SALES_CONTRACT,
         PARTNER_TEST_ALLOWED_CANDIDATE_ID: candidates.PARTNER_CASE,
+        PARTNER_TEST_ALLOWED_CASE_NUMBER: partnerCase.caseNumber,
         PARTNER_TEST_HIDDEN_CANDIDATE_ID: candidates.HIDDEN_PARTNER_CASE,
         PARTNER_TEST_LOADING_ID: loading.id, PARTNER_TEST_OTHER_LOADING_ID: otherLoading.id,
         PARTNER_TEST_HIDDEN_LOADING_ID: hiddenLoading.id } });

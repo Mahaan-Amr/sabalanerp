@@ -545,10 +545,27 @@ const sepidarReferenceAuditActions = ['REGISTER_SEPIDAR_LOADING_REFERENCE', 'COR
 const sepidarReferenceAuditOrder = [{ createdAt: 'desc' }, { id: 'desc' }] satisfies Prisma.AccountingAuditLogOrderByWithRelationInput[];
 const sepidarReferenceAuditFields = { id: true, beforeState: true, afterState: true, actorId: true, createdAt: true, note: true } as const;
 
+const normalizeDispatchSearch = (value: unknown) => String(value ?? '').toLowerCase().trim()
+  .replace(/[۰-۹]/g, digit => String(digit.charCodeAt(0) - 1776))
+  .replace(/[٠-٩]/g, digit => String(digit.charCodeAt(0) - 1632))
+  .replace(/ي/g, 'ی').replace(/ك/g, 'ک');
+
 router.get('/dispatch-candidates', accountingDispatchView, async (req: AuthRequest, res: Response) => {
+  const loadingId = typeof req.query.loadingId === 'string' ? req.query.loadingId.trim() : undefined;
+  if (req.query.loadingId !== undefined && !loadingId) return res.sendStatus(400);
+  const paginated = req.query.page !== undefined || req.query.pageSize !== undefined || req.query.search !== undefined;
+  const page = Number(req.query.page ?? 1);
+  const pageSize = Number(req.query.pageSize ?? 50);
+  const searchInput = req.query.search ?? '';
+  if (paginated && (loadingId || !Number.isSafeInteger(page) || page < 1
+    || !Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > 100
+    || typeof searchInput !== 'string' || searchInput.length > 200)) return res.sendStatus(400);
+  const search = normalizeDispatchSearch(searchInput);
   try {
-    const { manage, candidates } = await readPartnerSnapshot(prisma, async tx => {
-      const owners = await tx.accountingDispatchCandidate.findMany({ orderBy: { id: 'asc' }, select: {
+    const { manage, confirmation, candidates, relatedCandidates, invoiceActionCandidateIds, pagination } = await readPartnerSnapshot(prisma, async tx => {
+      const owners = await tx.accountingDispatchCandidate.findMany({
+        where: loadingId ? { allocationRevision: { loadingId } } : undefined,
+        orderBy: { id: 'asc' }, select: {
         id: true, allocationRevision: { select: { sourceKind: true, partnerCaseId: true, loadingId: true } },
       } });
       const authority = createAuditedPartnerAuthorization(tx, { actorId: req.user!.id, purpose: 'ACCOUNTING', channel: 'LIST' }, {
@@ -575,6 +592,9 @@ router.get('/dispatch-candidates', accountingDispatchView, async (req: AuthReque
       const manage = await resolveNarrowFeatureAccess(tx, { userId: req.user!.id, role: req.user!.role,
         workspace: WORKSPACES.ACCOUNTING, feature: FEATURES.ACCOUNTING_DISPATCH_CANDIDATES_MANAGE,
         requiredPermission: FEATURE_PERMISSIONS.EDIT });
+      const confirmation = await resolveNarrowFeatureAccess(tx, { userId: req.user!.id, role: req.user!.role,
+        workspace: WORKSPACES.ACCOUNTING, feature: FEATURES.ACCOUNTING_DISPATCH_CONFIRMATION_MANAGE,
+        requiredPermission: FEATURE_PERMISSIONS.EDIT });
       const canManageOwner = (owner: typeof owners[number]['allocationRevision']) => manage.allowed &&
         (owner.sourceKind === 'SALES_CONTRACT' || (owner.sourceKind === 'PARTNER_CASE' &&
           owner.partnerCaseId !== null && writablePartnerCases.has(owner.partnerCaseId)));
@@ -583,6 +603,10 @@ router.get('/dispatch-candidates', accountingDispatchView, async (req: AuthReque
       const allowedIds = owners.flatMap(owner => owner.allocationRevision.sourceKind === 'SALES_CONTRACT'
         || (owner.allocationRevision.sourceKind === 'PARTNER_CASE' && owner.allocationRevision.partnerCaseId
           && allowedPartnerCases.has(owner.allocationRevision.partnerCaseId)) ? [owner.id] : []);
+      const partnerCases = allowedPartnerCases.size ? await tx.partnerSaleCase.findMany({
+        where: { id: { in: [...allowedPartnerCases] } }, select: { id: true, caseNumber: true },
+      }) : [];
+      const partnerCaseNumbers = new Map(partnerCases.map(row => [row.id, row.caseNumber]));
       const candidates = await tx.accountingDispatchCandidate.findMany({ where: { id: { in: allowedIds } }, select: {
         id: true, status: true, createdAt: true, dispositionAt: true, dispositionReason: true,
         pickupVerification: { select: { verifiedAt: true } },
@@ -592,7 +616,8 @@ router.get('/dispatch-candidates', accountingDispatchView, async (req: AuthReque
         waybills: { orderBy: { issuedAt: 'asc' }, select: { id: true, number: true, status: true,
           issuedAt: true, voidedAt: true, replacesWaybillId: true,
           legacyReconstruction: { select: { id: true, createdAt: true } },
-          physicalExit: { select: { recordedAt: true } } } },
+          physicalExit: { select: { recordedAt: true } },
+          _count: { select: { documentArtifacts: { where: { kind: 'WAYBILL' } } } } } },
       } });
       const currentInvoices = await tx.salesDispatchInvoice.findMany({
         where: { loadingId: { in: [...new Set(candidates.map(candidate => candidate.allocationRevision.loadingId))] }, voidedAt: null },
@@ -618,9 +643,10 @@ router.get('/dispatch-candidates', accountingDispatchView, async (req: AuthReque
       }
       const time = (value?: Date | null) => value?.getTime() ?? 0;
       const ownerById = new Map(owners.map(owner => [owner.id, owner.allocationRevision]));
-      return { manage, candidates: candidates.map(candidate => {
+      const ordered = candidates.map(candidate => {
         const owner = ownerById.get(candidate.id);
-        const { allocationRevision, ...candidateData } = candidate;
+        const { allocationRevision, waybills, ...candidateData } = candidate;
+        const lines = owner?.sourceKind === 'SALES_CONTRACT' ? projectAccountingDispatchLines(allocationRevision.lines) : [];
         const invoice = invoiceActivityByLoading.get(allocationRevision.loadingId);
         const lastActivityAt = new Date(Math.max(time(candidate.createdAt), time(candidate.dispositionAt),
           time(invoice?.issuedAt), time(invoice?.voidedAt), ...candidate.waybills.map(waybill => Math.max(
@@ -633,14 +659,46 @@ router.get('/dispatch-candidates', accountingDispatchView, async (req: AuthReque
           canManageSepidarLoadingReference: allocationRevision.loading.status === 'FINALIZED' &&
             !blockedReferenceLoadingIds.has(allocationRevision.loadingId),
           summary: projectAccountingDispatchCandidateSummary(allocationRevision.snapshot),
-          lines: owner?.sourceKind === 'SALES_CONTRACT' ? projectAccountingDispatchLines(allocationRevision.lines) : [],
+          contractNumbers: [...new Set(lines.flatMap(line => line.contractNumber ? [line.contractNumber] : []))],
+          partnerCaseNumber: owner?.partnerCaseId ? partnerCaseNumbers.get(owner.partnerCaseId) ?? null : null,
+          lines,
+          waybills: waybills.map(({ _count, ...waybill }) => ({
+            ...waybill, number: waybill.number.toString(), hasWaybillArtifact: _count.documentArtifacts === 1,
+          })),
           canManage: Boolean(owner && canManageOwner(owner)) };
       }).sort((left, right) => right.lastActivityAt.getTime() - left.lastActivityAt.getTime()
-        || right.createdAt.getTime() - left.createdAt.getTime() || left.id.localeCompare(right.id)) };
+        || right.createdAt.getTime() - left.createdAt.getTime() || left.id.localeCompare(right.id));
+      if (!paginated) return { manage, confirmation, candidates: ordered };
+      const matches = search ? ordered.filter(row => [
+        row.summary.loadingNumber, row.sepidarLoadingReference, row.summary.driverName, row.summary.plate,
+        row.summary.customerName, row.summary.projectName, row.summary.projectAddress, row.partnerCaseNumber,
+        ...row.waybills.map(waybill => waybill.number), ...row.contractNumbers,
+      ].some(value => normalizeDispatchSearch(value).includes(search))) : ordered;
+      const currentPage = Math.min(page, Math.max(1, Math.ceil(matches.length / pageSize)));
+      const start = (currentPage - 1) * pageSize;
+      const selected = matches.slice(start, start + pageSize);
+      const ids = new Set(selected.map(row => row.id));
+      const loadingIds = new Set(selected.map(row => row.loadingId));
+      const invoiceCandidatesByLoading = new Map<string, string>();
+      for (const row of matches) {
+        if (!loadingIds.has(row.loadingId) || !row.currentSalesInvoice) continue;
+        const activeWaybill = row.waybills.find(waybill => waybill.status === 'ISSUED' || waybill.status === 'EXIT_RECORDED');
+        if (!invoiceCandidatesByLoading.has(row.loadingId) || activeWaybill?.status === 'ISSUED') {
+          invoiceCandidatesByLoading.set(row.loadingId, row.id);
+        }
+      }
+      return {
+        manage, confirmation, candidates: selected,
+        relatedCandidates: ordered.filter(row => loadingIds.has(row.loadingId) && !ids.has(row.id)),
+        invoiceActionCandidateIds: [...invoiceCandidatesByLoading.values()].filter(id => ids.has(id)),
+        pagination: { page: currentPage, pageSize, total: matches.length },
+      };
     });
     res.setHeader('X-Dispatch-Documents-Permission', manage.allowed ? 'MANAGE' : 'VIEW');
-    return res.json({ success: true, data: candidates.map((candidate) => ({ ...candidate,
-      waybills: candidate.waybills.map((waybill) => ({ ...waybill, number: waybill.number.toString() })) })) });
+    return res.json({ success: true, data: candidates, relatedCandidates, invoiceActionCandidateIds, pagination, capabilities: {
+      canManageAccountingCandidates: manage.allowed,
+      canManageAccountingConfirmation: confirmation.allowed,
+    } });
   } catch (error) { return dispatchError(res, error); }
 });
 

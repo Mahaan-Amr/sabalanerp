@@ -7,6 +7,7 @@ import { contractLifecycleLabel, contractLifecycleFilterOptions } from '@/featur
 import { ErpInput, ErpSearchableSelect } from "@/components/erp";
 import { useCallback, useEffect, useState, useRef, use } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { isAxiosError } from "axios";
 import {
   FaBalanceScale,
   FaCheckCircle,
@@ -29,6 +30,7 @@ import {
   ErpPage,
   ErpSection,
   ErpSheet,
+  ErpSkeleton,
   ErpSegmentedControl,
   ErpSummaryGrid,
   ErpTwoColumn,
@@ -97,10 +99,40 @@ const formatLifecycleBlockers = (blockers: any[]) =>
     })
     .join("؛ ");
 
+type ReadState<T, Failure extends string = "error"> =
+  | { status: "loading" }
+  | { status: "ready"; data: T }
+  | { status: Failure };
+
+type ContractReadFailure = "missing" | "denied" | "error";
+const lifecycleRoles = new Set(["ADMIN", "MANAGER", "USER", "MODERATOR", "SALES"]);
+type LifecycleBlocker = { code: string; label: string; count: number };
+type LifecyclePreview = {
+  deactivationEligibility: { blockers: LifecycleBlocker[] };
+  deleteEligibility: { blockers: LifecycleBlocker[] };
+};
+
+const contractReadFailure = (error: unknown): ContractReadFailure => {
+  const status = isAxiosError(error) ? error.response?.status : undefined;
+  if (status === 404) return "missing";
+  if (status === 401 || status === 403) return "denied";
+  return "error";
+};
+
+const contractFailureMessages = {
+  missing: { kind: "empty", title: "قرارداد یافت نشد", detail: "این قرارداد در رجیستر حسابداری پیدا نشد." },
+  denied: { kind: "permission", title: "دسترسی به قرارداد مجاز نیست", detail: "مجوز مشاهده این پرونده حسابداری را ندارید." },
+  error: { kind: "error", title: "پرونده حسابداری قرارداد", detail: "دریافت پرونده حسابداری قرارداد انجام نشد." },
+} as const;
+
 export default function AccountingContractDetailPage(props: {
   params: Promise<{ contractId: string }>;
 }) {
   const params = use(props.params);
+  return <AccountingContractDossier key={params.contractId} params={params} />;
+}
+
+function AccountingContractDossier({ params }: { params: { contractId: string } }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const focusKind =
@@ -111,17 +143,21 @@ export default function AccountingContractDetailPage(props: {
   const focusedRecordId = (searchParams.get("recordId") || "").trim();
   const requestedReturn = searchParams.get("returnTo") || "";
   const backHref = accountingReviewReturn(requestedReturn, "/dashboard/accounting/contracts");
-  const [data, setData] = useState<any>(null);
+  const [detail, setDetail] = useState<ReadState<any, ContractReadFailure>>({ status: "loading" });
+  const data = detail.status === "ready" ? detail.data : null;
   const [detailSection, setDetailSection] = useState<
     "summary" | "items" | "financial" | "collections" | "compliance"
   >(searchParams.get("section") === "financial" ? "financial" : "summary");
-  const [lifecycle, setLifecycle] = useState<any>(null);
-  const [userRole, setUserRole] = useState<string>("USER");
+  const [lifecycleRead, setLifecycleRead] = useState<ReadState<LifecyclePreview>>({ status: "loading" });
+  const [roleRead, setRoleRead] = useState<ReadState<string>>({ status: "loading" });
+  const detailReadVersion = useRef(0);
+  const lifecycle = lifecycleRead.status === "ready" ? lifecycleRead.data : null;
+  const userRole = roleRead.status === "ready" ? roleRead.data : null;
+  const canManageLifecycle = detail.status === "ready" && Boolean(lifecycle && userRole);
   const [lifecycleTarget, setLifecycleTarget] = useState<{
     action: "DELETE" | "DEACTIVATE" | "REACTIVATE";
     mode: "REQUEST" | "DIRECT";
   } | null>(null);
-  const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
   const [draftDirty, setDraftDirty] = useState(false);
@@ -251,28 +287,68 @@ export default function AccountingContractDetailPage(props: {
     finally { setActionLoading(false); }
   };
 
-  const loadDetail = useCallback(async () => {
+  const loadLifecycle = useCallback(async () => {
+    const version = detailReadVersion.current;
+    setLifecycleRead({ status: "loading" });
     try {
-      setLoading(true);
-      const [response, lifecycleResponse, profileResponse] = await Promise.all([
-        accountingAPI.getContract(params.contractId),
-        accountingAPI.getContractLifecycle(params.contractId),
-        dashboardAPI.getProfile(),
-      ]);
-      if (response.data.success) setData(response.data.data);
-      if (lifecycleResponse.data.success)
-        setLifecycle(lifecycleResponse.data.data);
-      if (profileResponse.data.success)
-        setUserRole(profileResponse.data.data.role || "USER");
-    } catch (error) {
-      console.error("Error loading accounting contract detail:", error);
-    } finally {
-      setLoading(false);
+      const { data: response } = await accountingAPI.getContractLifecycle(params.contractId);
+      if (version !== detailReadVersion.current) return;
+      const preview = response.data;
+      setLifecycleRead(
+        response.success &&
+          Array.isArray(preview?.deactivationEligibility?.blockers) &&
+          Array.isArray(preview?.deleteEligibility?.blockers)
+          ? { status: "ready", data: preview }
+          : { status: "error" },
+      );
+    } catch {
+      if (version === detailReadVersion.current) setLifecycleRead({ status: "error" });
     }
   }, [params.contractId]);
 
+  const loadLifecycleRole = useCallback(async () => {
+    const version = detailReadVersion.current;
+    setRoleRead({ status: "loading" });
+    try {
+      const { data: response } = await dashboardAPI.getProfile();
+      if (version !== detailReadVersion.current) return;
+      const role = response.data?.role;
+      setRoleRead(
+        response.success && lifecycleRoles.has(role)
+          ? { status: "ready", data: role }
+          : { status: "error" },
+      );
+    } catch {
+      if (version === detailReadVersion.current) setRoleRead({ status: "error" });
+    }
+  }, []);
+
+  const loadDetail = useCallback(async () => {
+    const version = ++detailReadVersion.current;
+    setDetail({ status: "loading" });
+    setLifecycleTarget(null);
+    setLifecycleRead({ status: "loading" });
+    setRoleRead({ status: "loading" });
+    try {
+      const { data: response } = await accountingAPI.getContract(params.contractId);
+      if (version !== detailReadVersion.current) return;
+      if (!response.success || response.data?.contract?.contractId !== params.contractId) {
+        setDetail({ status: "error" });
+        return;
+      }
+      setDetail({ status: "ready", data: response.data });
+      void loadLifecycle();
+      void loadLifecycleRole();
+    } catch (error) {
+      if (version === detailReadVersion.current) {
+        setDetail({ status: contractReadFailure(error) });
+      }
+    }
+  }, [loadLifecycle, loadLifecycleRole, params.contractId]);
+
   useEffect(() => {
-    loadDetail();
+    void loadDetail();
+    return () => { detailReadVersion.current += 1; };
   }, [loadDetail]);
 
   useEffect(() => {
@@ -345,7 +421,7 @@ export default function AccountingContractDetailPage(props: {
   };
 
   const submitLifecycle = async (values: Record<string, string | number>) => {
-    if (!lifecycleTarget) return;
+    if (!canManageLifecycle || !lifecycleTarget || actionLoading) return;
     const reason = String(values.reason || "").trim();
     try {
       setActionError(null);
@@ -386,6 +462,7 @@ export default function AccountingContractDetailPage(props: {
     requestId: string,
     decision: "APPROVE" | "REJECT",
   ) => {
+    if (!canManageLifecycle || actionLoading) return;
     try {
       setActionLoading(true);
       setActionError(null);
@@ -706,15 +783,20 @@ export default function AccountingContractDetailPage(props: {
     }
   };
 
-  if (loading) return <ErpLoading />;
-  if (!data?.contract) {
+  if (detail.status === "loading") return <ErpLoading />;
+  if (detail.status !== "ready") {
+    const failure = contractFailureMessages[detail.status];
     return (
       <ErpPage
         eyebrow="حسابداری"
-        title="قرارداد یافت نشد"
+        title={failure.title}
         backHref={backHref}
       >
-        <ErpSection>این قرارداد در رجیستر حسابداری پیدا نشد.</ErpSection>
+        <ErpInlineState
+          kind={failure.kind}
+          title={failure.detail}
+          action={detail.status === "error" ? { label: "تلاش دوباره", onClick: loadDetail } : undefined}
+        />
       </ErpPage>
     );
   }
@@ -841,16 +923,34 @@ export default function AccountingContractDetailPage(props: {
               className="mb-3"
             />
           )}
+          {(lifecycleRead.status === "loading" || roleRead.status === "loading") && (
+            <ErpSkeleton lines={1} label="در حال بررسی وضعیت و مجوز اقدامات قرارداد" />
+          )}
+          {lifecycleRead.status === "error" && (
+            <ErpInlineState
+              kind="error"
+              title="وضعیت مدیریت قرارداد دریافت نشد."
+              action={{ label: "تلاش دوباره برای وضعیت قرارداد", onClick: loadLifecycle }}
+            />
+          )}
+          {roleRead.status === "error" && (
+            <ErpInlineState
+              kind="error"
+              title="نقش شما برای مدیریت وضعیت قرارداد دریافت نشد."
+              action={{ label: "تلاش دوباره برای بررسی نقش", onClick: loadLifecycleRole }}
+            />
+          )}
           <div className="flex flex-wrap gap-2">
             {!contract.isInactive && (
               <ErpButton
                 label={
-                  userRole === "ADMIN" || userRole === "MANAGER"
+                  !userRole || userRole === "ADMIN" || userRole === "MANAGER"
                     ? "غیرفعال‌سازی"
                     : "درخواست غیرفعال‌سازی"
                 }
                 tone="warning"
                 variant="outline"
+                disabled={!canManageLifecycle || actionLoading}
                 onClick={() =>
                   setLifecycleTarget({
                     action: "DEACTIVATE",
@@ -865,12 +965,13 @@ export default function AccountingContractDetailPage(props: {
             {contract.isInactive && (
               <ErpButton
                 label={
-                  userRole === "ADMIN"
+                  !userRole || userRole === "ADMIN"
                     ? "فعال‌سازی مجدد"
                     : "درخواست فعال‌سازی مجدد"
                 }
                 tone="success"
                 variant="outline"
+                disabled={!canManageLifecycle || actionLoading}
                 onClick={() =>
                   setLifecycleTarget({
                     action: "REACTIVATE",
@@ -881,10 +982,11 @@ export default function AccountingContractDetailPage(props: {
             )}
             {["DRAFT", "CANCELLED"].includes(contract.status) && (
               <ErpButton
-                label={userRole === "ADMIN" ? "حذف دائمی" : "درخواست حذف دائمی"}
+                label={!userRole || userRole === "ADMIN" ? "حذف دائمی" : "درخواست حذف دائمی"}
                 icon={FaTrashAlt}
                 tone="danger"
                 variant="outline"
+                disabled={!canManageLifecycle || actionLoading}
                 onClick={() =>
                   setLifecycleTarget({
                     action: "DELETE",
@@ -903,7 +1005,7 @@ export default function AccountingContractDetailPage(props: {
                 ...(["DRAFT", "CANCELLED"].includes(contract.status)
                   ? lifecycle.deleteEligibility?.blockers || []
                   : []),
-              ].map((blocker: any) => (
+              ].map((blocker) => (
                 <ErpInlineState
                   key={blocker.code}
                   kind="stale"
@@ -942,7 +1044,7 @@ export default function AccountingContractDetailPage(props: {
                         onClick={() =>
                           void decideLifecycle(request.id, "APPROVE")
                         }
-                        disabled={actionLoading}
+                        disabled={!canManageLifecycle || actionLoading}
                       />
                       <ErpButton
                         label="رد"
@@ -951,7 +1053,7 @@ export default function AccountingContractDetailPage(props: {
                         onClick={() =>
                           void decideLifecycle(request.id, "REJECT")
                         }
-                        disabled={actionLoading}
+                        disabled={!canManageLifecycle || actionLoading}
                       />
                     </div>
                   )}
@@ -1722,7 +1824,7 @@ export default function AccountingContractDetailPage(props: {
         onSubmit={deleteDraftRecord}
       />
       <AccountingActionModal
-        open={Boolean(lifecycleTarget)}
+        open={Boolean(lifecycleTarget) && canManageLifecycle}
         title={
           lifecycleTarget?.action === "DELETE"
             ? "حذف دائمی قرارداد"

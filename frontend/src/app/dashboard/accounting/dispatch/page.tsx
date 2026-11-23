@@ -13,12 +13,14 @@ import {
   ErpInlineState,
   ErpInput,
   ErpListPage,
+  ErpLoading,
+  ErpPagination,
   ErpSegmentedControl,
   ErpSheet,
 } from "@/components/erp";
 import RoleAwareDispatchCases from "@/features/dispatch-case/RoleAwareDispatchCases";
 import SalesDispatchInvoices from "@/features/accounting/SalesDispatchInvoices";
-import { createDispatchDocumentsHttpClient, dispatchDocumentApiPaths, mapDispatchDocumentReadModel } from "@/features/accounting/dispatch-documents/dispatchDocumentsClient";
+import { dispatchDocumentApiPaths, mapDispatchDocumentReadModel } from "@/features/accounting/dispatch-documents/dispatchDocumentsClient";
 import { sepidarCheckAmount } from "@/features/accounting/dispatch-documents/sepidarCheckAmount";
 import { formatDisplayedMoney, type DispatchDocumentCase } from "@/features/accounting/dispatch-documents/dispatchDocumentsViewModel";
 import { dispatchCaseReference } from "@/features/dispatch-case/dispatchCasePresentation";
@@ -72,6 +74,7 @@ const dispatchStatusLabels: Record<string, string> = {
   RETURNED: "برای اصلاح بازگردانده‌شده",
 };
 const quantityUnitLabels: Record<string, string> = { meter: "متر طول", squareMeter: "متر مربع", count: "عدد", ton: "تن" };
+const dispatchPageSize = 50;
 
 export default function AccountingDispatchPage() {
   const [section, setSection] = useState<DispatchSection>("candidates");
@@ -94,7 +97,15 @@ export default function AccountingDispatchPage() {
     candidate => candidate.id === referenceCandidateId,
   );
   const referenceWaybillId = referenceCandidate?.waybills.at(-1)?.id;
-  const [dispatchDetails, setDispatchDetails] = useState<Record<string, DispatchDocumentCase>>({});
+  const [detailRead, setDetailRead] = useState<{ key: string; value: DispatchDocumentCase | null }>();
+  const [detailAttempt, retryDetail] = useState(0);
+  const [page, setPage] = useState(1);
+  const [candidatePage, setCandidatePage] = useState<{
+    ids: Set<string>; invoiceActionIds: Set<string>; page: number; total: number;
+  }>();
+  const registryRequest = useRef(0);
+  const showTimeline = section === "cases";
+  const registrySearch = showTimeline ? "" : search.trim();
   const [dispatchReason, setDispatchReason] = useState("");
   const [reasonAction, setReasonAction] = useState<ReasonAction | null>(null);
   const [dispatchTimelineStale, setDispatchTimelineStale] = useState(false);
@@ -127,40 +138,49 @@ export default function AccountingDispatchPage() {
   }, [referenceCandidateId, referenceWaybillId]);
 
   const loadDispatch = useCallback(async () => {
+    const request = ++registryRequest.current;
     setLoading(true);
     setDispatchNotice(null);
     try {
-      const [candidates, capabilities, details] = await Promise.allSettled([
-        accountingAPI.getDispatchCandidates(),
-        dispatchConfirmationAPI.getCapabilities(),
-        createDispatchDocumentsHttpClient().load(),
-      ]);
-      if (candidates.status === "fulfilled" && candidates.value.data.success)
-        setDispatchCandidates(candidates.value.data.data || []);
-      if (candidates.status === "rejected" && dispatchCandidateAccessDenied(candidates.reason))
-        setDispatchCandidates([]);
-      if (
-        capabilities.status === "fulfilled" &&
-        capabilities.value.data.success
-      )
-        setDispatchCapabilities(capabilities.value.data.data);
-      setDispatchDetails(details.status === "fulfilled"
-        ? Object.fromEntries(details.value.cases.map((item) => [item.id, item]))
-        : {});
-      if (
-        candidates.status === "rejected" &&
-        capabilities.status === "rejected"
-      )
-        throw candidates.reason;
+      const response = showTimeline
+        ? await accountingAPI.getDispatchCandidates()
+        : await accountingAPI.getDispatchCandidatePage(page, dispatchPageSize, registrySearch);
+      if (request !== registryRequest.current) return;
+      const { data = [], relatedCandidates = [], invoiceActionCandidateIds = [], pagination } = response.data;
+      setDispatchCandidates([...data, ...relatedCandidates]);
+      setCandidatePage(pagination ? {
+        ids: new Set(data.map((row: { id: string }) => row.id)), invoiceActionIds: new Set(invoiceActionCandidateIds),
+        page: pagination.page, total: pagination.total,
+      } : undefined);
+      if (response.data.capabilities) {
+        setDispatchCapabilities(response.data.capabilities);
+      } else {
+        const capabilities = await dispatchConfirmationAPI.getCapabilities().catch(() => null);
+        if (request !== registryRequest.current) return;
+        if (capabilities?.data.success) setDispatchCapabilities(capabilities.data.data);
+      }
+      retryDetail(attempt => attempt + 1);
     } catch (error: any) {
+      if (request !== registryRequest.current) return;
+      if (dispatchCandidateAccessDenied(error)) {
+        setDispatchCandidates([]);
+        setCandidatePage(undefined);
+        const capabilities = await dispatchConfirmationAPI.getCapabilities().catch(() => null);
+        if (request !== registryRequest.current) return;
+        setDispatchCapabilities(capabilities?.data.success ? capabilities.data.data : {
+          canManageAccountingCandidates: false,
+          canManageAccountingConfirmation: false,
+        });
+        return;
+      }
       setDispatchNotice({
         kind: "error",
         text: userFacingError(error, "اطلاعات ارسال حسابداری دریافت نشد."),
       });
     } finally {
-      setLoading(false);
+      if (request === registryRequest.current) setLoading(false);
     }
-  }, []);
+  }, [page, registrySearch, showTimeline]);
 
   const runDispatch = async (
     command: () => Promise<any>,
@@ -188,10 +208,9 @@ export default function AccountingDispatchPage() {
       try {
         const refreshed = await accountingAPI.getDispatchCandidates();
         setDispatchCandidates(refreshed.data.data || []);
-        const details = await createDispatchDocumentsHttpClient().load();
-        setDispatchDetails(Object.fromEntries(details.cases.map((item) => [item.id, item])));
-      } catch {
-        setDispatchDetails({});
+        retryDetail(attempt => attempt + 1);
+      } catch (error) {
+        if (dispatchCandidateAccessDenied(error)) setDispatchCandidates([]);
         // Confirmation-only actors may not have permission to list candidates.
       }
       return true;
@@ -317,17 +336,33 @@ export default function AccountingDispatchPage() {
     .toLowerCase().replace(/ي/g, "ی").replace(/ك/g, "ک").trim();
   const query = normalize(search);
   const filteredCandidates = dispatchCandidates.filter(candidate => {
+    if (candidatePage) return candidatePage.ids.has(candidate.id);
     if (!query) return true;
-    const detail = dispatchDetails[candidate.id];
     const values = [candidate.summary?.loadingNumber, candidate.sepidarLoadingReference, candidate.summary?.driverName, candidate.summary?.plate,
-      candidate.summary?.customerName, candidate.summary?.projectName, candidate.summary?.projectAddress,
+      candidate.summary?.customerName, candidate.summary?.projectName, candidate.summary?.projectAddress, candidate.partnerCaseNumber,
       ...(candidate.waybills || []).map((waybill: any) => waybill.number),
       ...(candidate.lines || []).map((line: any) => line.contractNumber),
-      ...(detail?.contracts || []).map(contract => contract.number)];
+      ...(candidate.contractNumbers || [])];
     return values.some(value => normalize(value).includes(query));
   });
   const selectedCandidate = dispatchCandidates.find(candidate => candidate.id === detailCandidateId);
-  const detail = detailCandidateId ? dispatchDetails[detailCandidateId] : undefined;
+  const selectedId = selectedCandidate?.id;
+  const selectedWaybillId = selectedCandidate?.waybills.at(-1)?.id;
+  const detailKey = selectedId ? JSON.stringify([selectedId, selectedWaybillId, detailAttempt]) : undefined;
+  const detail = detailKey && detailRead?.key === detailKey ? detailRead.value : undefined;
+  useEffect(() => {
+    if (!selectedId || !detailKey) return;
+    const controller = new AbortController();
+    api.get(dispatchDocumentApiPaths("/accounting").readModel(selectedId, selectedWaybillId), { signal: controller.signal })
+      .then(response => {
+        const value = mapDispatchDocumentReadModel(response.data.data);
+        if (!controller.signal.aborted) setDetailRead({ key: detailKey, value: value.id === selectedId ? value : null });
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setDetailRead({ key: detailKey, value: null });
+      });
+    return () => controller.abort();
+  }, [selectedId, selectedWaybillId, detailKey]);
   const loadingId = selectedCandidate?.loadingId;
   const group = loadingId ? dispatchCandidates.filter(candidate => candidate.loadingId === loadingId) : [];
   const pendingPickupVerification = (candidate: any) =>
@@ -335,6 +370,7 @@ export default function AccountingDispatchPage() {
   const showCandidate = (id: string) => {
     setPickupCode("");
     setDispatchNotice(null);
+    setDetailRead(undefined);
     setDetailCandidateId(id);
   };
   const pickupVerification = (id: string, command: "send" | "verify") => runDispatch(
@@ -495,7 +531,7 @@ export default function AccountingDispatchPage() {
           disabled: actionsBlocked, onClick: () => void beginConfirmation(waybill.id, pickup) });
       }
       if (canManage) {
-        if (!waybill.legacyReconstruction && dispatchDetails[candidate.id]?.bundle?.artifacts.filter(artifact => artifact.kind === "WAYBILL").length !== 1) {
+        if (!waybill.legacyReconstruction && !waybill.hasWaybillArtifact) {
           actions.push({ label: "بازسازی بارنامه قدیمی", icon: FaWrench, disabled: actionsBlocked, onClick: () => openReason("reconstruct", waybill.id) });
         }
         actions.push(
@@ -512,14 +548,20 @@ export default function AccountingDispatchPage() {
         );
       }
     }
-    if (waybill?.status !== "ISSUED" && candidate.currentSalesInvoice &&
-      invoiceOnlyRows.get(candidate.loadingId)?.id === candidate.id && canManageLoadingInvoices(candidate.loadingId)) {
+    const isInvoiceActionRow = candidatePage?.invoiceActionIds.has(candidate.id)
+      ?? invoiceOnlyRows.get(candidate.loadingId)?.id === candidate.id;
+    if (waybill?.status !== "ISSUED" && candidate.currentSalesInvoice && isInvoiceActionRow && canManageLoadingInvoices(candidate.loadingId)) {
       actions.push({ label: "ابطال فاکتور فروش", icon: FaBan, tone: "danger",
         onClick: () => setVoidInvoiceLoadingId(candidate.loadingId) });
     }
     return actions;
   };
 
+  const totalCandidates = candidatePage?.total ?? filteredCandidates.length;
+  const totalPages = Math.max(1, Math.ceil(totalCandidates / dispatchPageSize));
+  const currentPage = candidatePage?.page ?? Math.min(page, totalPages);
+  const visibleCandidates = candidatePage ? filteredCandidates
+    : filteredCandidates.slice((currentPage - 1) * dispatchPageSize, currentPage * dispatchPageSize);
   return (
     <ErpListPage
       eyebrow="حسابداری"
@@ -539,14 +581,17 @@ export default function AccountingDispatchPage() {
         />
       }
       filters={section !== "confirmation" ? [{
-        id: "dispatch-search", type: "search", label: "جست‌وجو", value: search, onChange: setSearch,
+        id: "dispatch-search", type: "search", label: "جست‌وجو", value: search, onChange: value => { setSearch(value); setPage(1); },
         placeholder: section === "candidates"
           ? "شماره بارگیری، شماره بارگیری سپیدار، مشتری، پروژه، قرارداد، راننده، پلاک یا شماره بارنامه"
           : "شماره بارگیری، شماره بارگیری سپیدار، راننده یا وضعیت",
       }] : []}
       isLoading={section === "candidates" && loading}
       mobileLayout="table"
-      rows={section === "candidates" ? filteredCandidates : []}
+      rows={section === "candidates" ? visibleCandidates : []}
+      footer={section === "candidates" && totalPages > 1 && <ErpPagination currentPage={currentPage}
+        totalPages={totalPages} totalItems={totalCandidates} itemsPerPage={dispatchPageSize}
+        onPageChange={setPage} itemLabel="پرونده" />}
       rowKey={candidate => candidate.id}
       columns={[
         { id: "loading", header: "بارگیری", priority: "primary", cell: candidate => candidate.summary?.loadingNumber ? dispatchCaseReference(candidate.summary.loadingNumber) : "—" },
@@ -795,24 +840,28 @@ export default function AccountingDispatchPage() {
               ))}
             </div>
           )}
-          {!detail && <ErpInlineState kind="stale" title="جزئیات قیمت این پرونده در دسترس نیست؛ پیش از تصمیم اطلاعات حسابداری را بررسی کنید." />}
+          {detail === undefined && <ErpLoading />}
+          {detail === null && <ErpInlineState kind="stale" title="جزئیات قیمت این پرونده در دسترس نیست؛ پیش از تصمیم اطلاعات حسابداری را بررسی کنید."
+            action={{ label: "تلاش دوباره", onClick: () => retryDetail(attempt => attempt + 1) }} />}
           {loadingId && <SalesDispatchInvoices workspace="accounting" loadingId={loadingId}
             canManage={canManageLoadingInvoices(loadingId)}
             onVoided={loadDispatch}
             issuanceBlockReason={group.some(pendingPickupVerification) ? "کد پیامکی همه راننده‌های متفرقه این بارگیری را تأیید کنید." : undefined}
             documentBlockReason={group.some(candidate => candidate.status === 'ACCEPTED' &&
-              !candidate.waybills?.some((waybill: any) => ['ISSUED', 'EXIT_RECORDED'].includes(waybill.status) && waybill.legacyReconstruction) &&
-              dispatchDetails[candidate.id]?.bundle?.artifacts.filter(artifact => artifact.kind === 'WAYBILL').length !== 1)
+              !candidate.waybills?.some((waybill: any) =>
+                ['ISSUED', 'EXIT_RECORDED'].includes(waybill.status) && (waybill.legacyReconstruction || waybill.hasWaybillArtifact)))
               ? 'فایل بارنامه موجود نیست؛ برای بارنامه قدیمی، صدور اسناد نسخه بازسازی‌شده را ایجاد می‌کند.' : undefined}
             onIssueAll={async recovery => {
               try { await accountingAPI.issueLoadingDocuments(loadingId, recovery); await loadDispatch(); }
               catch (error) {
                 setDispatchNotice({ kind: 'error', text: userFacingError(error, 'صدور همه اسناد کامل نشد؛ وضعیت راننده‌ها را بررسی کنید.') });
-                const [candidates, details] = await Promise.allSettled([
-                  accountingAPI.getDispatchCandidates(), createDispatchDocumentsHttpClient().load(),
-                ]);
-                if (candidates.status === 'fulfilled') setDispatchCandidates(candidates.value.data.data || []);
-                if (details.status === 'fulfilled') setDispatchDetails(Object.fromEntries(details.value.cases.map(item => [item.id, item])));
+                try {
+                  const candidates = await accountingAPI.getDispatchCandidates();
+                  setDispatchCandidates(candidates.data.data || []);
+                  retryDetail(attempt => attempt + 1);
+                } catch (refreshError) {
+                  if (dispatchCandidateAccessDenied(refreshError)) setDispatchCandidates([]);
+                }
                 throw error;
               }
             }}

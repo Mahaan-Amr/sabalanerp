@@ -1,5 +1,7 @@
 # Require verified zero-data-loss deployments
 
+[ADR-0144](0144-make-product-qa-and-periodic-drills-independent-of-release.md) governs product QA and the use of periodic recovery drill results for release admission.
+
 Issue #427 retired the unfinished compatible online deployment program. Releases use this protected maintenance lane. Online candidate/retained slots, serving epochs, and online migration control do not grant alternate production admission. Preserve the newest two complete healthy independently verified recovery points under the reference-aware retention and cleanup policy recorded in ADR-0131.
 
 On the production host, retain the two newest complete local checkpoint archives after each verified capture. Once both retained local archives and their independent remote objects pass full checksum and sidecar verification, retire older local copies with a durable audit record. An active operation or incident hold is reported and retained until resolved. This local disk limit does not delete independently held remote recovery points or relax their recovery-drill policy.

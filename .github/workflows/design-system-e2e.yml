@@ -4,22 +4,10 @@ permissions:
   contents: read
 
 on:
-  pull_request:
-    paths:
-      - "frontend/**"
-      - "scripts/design-system-e2e-preflight.mjs"
-      - "scripts/run-design-system-e2e.mjs"
-      - "tests/design-system-e2e/**"
-      - "playwright.design-system.config.ts"
-      - "docker-compose.local.yml"
-      - "package.json"
-      - "package-lock.json"
-      - ".github/workflows/design-system-e2e.yml"
   workflow_dispatch:
 
 jobs:
   browser-acceptance:
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
     # This runner owns the approved, long-running sabalanerp-local Compose project.
     runs-on: [self-hosted, sabalanerp-local]
     environment: design-system-e2e

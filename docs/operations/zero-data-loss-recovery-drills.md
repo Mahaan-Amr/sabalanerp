@@ -1,6 +1,6 @@
 # Zero-data-loss recovery drills
 
-The newest verified remote deployment checkpoint must be restored monthly in a non-public, isolated environment. A supervised end-to-end deployment and rollback rehearsal is required quarterly.
+Use these procedures for an independent restore or supervised deployment and rollback rehearsal. [ADR-0144](../adr/0144-make-product-qa-and-periodic-drills-independent-of-release.md) removes periodic drill results from ordinary release admission.
 
 ## Isolation requirements
 
@@ -17,8 +17,8 @@ Run the built backend command with `DEPLOYMENT_DRILL_METADATA_PATH` pointing to 
 sh scripts/with-backend-control-ownership.sh node dist/scripts/deployment-recovery-drill.js
 ```
 
-The command validates the encrypted object and checksum, restores PostgreSQL, SQLite, and protected files, applies current migrations in the isolated environment, validates database-to-file references, finalizes recovery, runs a database probe, records a durable report, and marks the remote metadata with the successful drill result. Any failure leaves a non-zero result and must be resolved before the next production deployment.
+The command validates the encrypted object and checksum, restores PostgreSQL, SQLite, and protected files, applies current migrations in the isolated environment, validates database-to-file references, finalizes recovery, runs a database probe, records a durable report, and marks the remote metadata with the successful drill result. A failure leaves a nonzero result for the recovery operator to investigate.
 
 For automatic monthly execution, install `deploy/systemd/sabalanerp-recovery-drill.service` and `.timer` on the independent drill host, install `deploy/recovery-drill.env.template` as `/etc/sabalanerp/recovery-drill.env` with mode `0600`, then enable the timer with `systemctl enable --now sabalanerp-recovery-drill.timer`. The timer finds the newest remote sidecar itself and is persistent across host downtime. The private recovery key exists only on this independent drill host; it is never mounted into the production backend or production deployment runner.
 
-The quarterly supervised rehearsal additionally executes `deploy/scripts/deploy.sh` against the isolated environment, injects one failure before mutation and one after mutation, and records acknowledged-write counts, rollback duration, gate results, and the absence of public traffic during maintenance. After one separate `COMPLETED` run and one `ROLLED_BACK` run, set `DEPLOYMENT_REHEARSAL_SUCCESS_JOURNAL`, `DEPLOYMENT_REHEARSAL_ROLLBACK_JOURNAL`, and `DEPLOYMENT_DRILL_METADATA_PATH`, then run `node dist/scripts/deployment-rehearsal-record.js`. The command accepts only checksum-valid journal chains with the two required terminal states. Missing monthly drill evidence after 35 days or quarterly rehearsal evidence after 100 days blocks production deployment automatically.
+A supervised deployment and rollback rehearsal executes `deploy/scripts/deploy.sh` against the isolated environment, injects one failure before mutation and one after mutation, and records acknowledged-write counts, rollback duration, gate results, and the absence of public traffic during maintenance. After one separate `COMPLETED` run and one `ROLLED_BACK` run, set `DEPLOYMENT_REHEARSAL_SUCCESS_JOURNAL`, `DEPLOYMENT_REHEARSAL_ROLLBACK_JOURNAL`, and `DEPLOYMENT_DRILL_METADATA_PATH`, then run `node dist/scripts/deployment-rehearsal-record.js`. The command accepts only checksum-valid journal chains with the two required terminal states.

@@ -154,7 +154,7 @@ Before public traffic opens, all of the following pass:
 - PostgreSQL, Inquiry SQLite, and protected-storage availability;
 - backend readiness and database query;
 - frontend, Inquiry, and Nginx health, plus scanner health when restoring or maintaining a legacy release;
-- contract-product-graph migration audit and every release-specific acceptance command;
+- contract-product-graph migration audit and protected checks required by an explicitly selected business cutover;
 - Partner customer contracts are audited through their canonical Case owner rather than migrated from customer display rows. The audit verifies reciprocal ownership, current revision provenance, canonical graph schema and hash, rebuilt projections, persisted customer output, currency and payable amount in one read snapshot. Missing or inconsistent evidence blocks release; valid Partner rows remain unchanged and are reported separately from migratable ordinary contracts;
 - a retained contract-by-contract financial-evidence preflight report with zero unresolved results; case resolution is atomic and is skipped entirely when any contract is unresolved;
 - while legacy Hiring onboarding rows remain, the read-only Start Preparation retirement audit proving zero open manual tasks, zero missing or duplicate system rows, and zero drift from contract, Payroll Participation, and insurance evidence;
@@ -178,9 +178,7 @@ ADMINs receive the final result. A failure or rollback generates a high-severity
 
 ## Retention and recovery proof
 
-The latest remote checkpoint is restored monthly into an isolated, non-public environment. The exercise validates PostgreSQL, SQLite, files, manifests, checksums, image compatibility, migrations, smoke tests, and database-to-file relationships. Production data is protected or sanitized according to the existing recovery policy.
-
-A full supervised rehearsal runs quarterly and measures the zero-loss recovery point and fifteen-minute normal recovery target. A failed, missing, or overdue mandatory drill removes the affected checkpoint's healthy status and blocks the next production deployment until the failure is resolved.
+The [isolated restore and rollback rehearsal procedures](zero-data-loss-recovery-drills.md) remain available to exercise recovery. [ADR-0144](../adr/0144-make-product-qa-and-periodic-drills-independent-of-release.md) removes periodic exercise results from release admission. Each deployment still needs a fresh, locally validated and independently read-back checkpoint before mutation. Retention continues to apply its own recovery-point health and reference checks.
 
 ## Implementation plan
 

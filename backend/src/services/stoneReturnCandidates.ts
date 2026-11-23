@@ -102,6 +102,19 @@ export async function loadStoneReturnCandidates(tx: Tx, receipt: Receipt): Promi
     include: { profile: { select: { legalEntityId: true, partySourceKind: true, partySourceId: true } } },
     orderBy: [{ issuedAt: 'desc' }, { id: 'desc' }],
   });
+  const recognizedContracts = new Set(invoiceRows.map(invoice => invoice.contractId));
+  const itemsWithoutInvoice = items.filter(item => !recognizedContracts.has(item.contractId)).map(item => item.id);
+  if (itemsWithoutInvoice.length) {
+    result.hasUnlinkedOriginals = Boolean(await tx.shipmentQuantityEvidence.findFirst({
+      where: {
+        sourceKind: 'SALES_CONTRACT', contractItemId: { in: itemsWithoutInvoice }, unit: receipt.unit,
+        kind: { in: ['PHYSICAL_EXIT', 'MANUAL_OUTAGE_EXIT', 'LEGACY_DISPATCHED'] },
+        effectiveAt: { lte: deliveredBefore },
+        ...(witness?.loadingId && { metadata: { path: ['loadingId'], equals: witness.loadingId } }),
+      },
+      select: { id: true },
+    }));
+  }
   if (!invoiceRows.length) return result;
 
   const [vouchers, taxes, exits, consumed] = await Promise.all([

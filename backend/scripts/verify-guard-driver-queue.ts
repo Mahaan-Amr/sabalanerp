@@ -164,7 +164,10 @@ const main = async () => {
     assert.equal(canonicalHistory.response.status, 200, JSON.stringify(canonicalHistory.body));
     assert.ok(canonicalHistory.body.data.some((turn: any) => turn.status === 'CLOSED_WITHOUT_LOADING'));
     assert.ok(canonicalHistory.body.data.some((turn: any) => turn.status === 'VOIDED'));
-    assert.ok(canonicalHistory.body.data.every((turn: any) => turn.events.length > 0));
+    assert.ok(canonicalHistory.body.data.every((turn: any) => !('events' in turn)));
+    const closedEvents = await request(token, `/api/security/canonical-driver-queue/${admitted.body.data.id}/events`);
+    assert.equal(closedEvents.response.status, 200);
+    assert.ok(closedEvents.body.data.some((event: any) => event.eventType === 'CLOSED_WITHOUT_LOADING'));
     const legacyHistory = await request(token, '/api/security/driver-queue?history=true');
     assert.equal(legacyHistory.response.status, 200, JSON.stringify(legacyHistory.body));
     assert.ok(legacyHistory.body.data.some((turn: any) => turn.id === legacyTurn.id && turn.historicalOnly === true));

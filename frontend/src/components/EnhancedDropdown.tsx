@@ -30,6 +30,7 @@ interface EnhancedDropdownProps {
   noOptionsText?: string;
   loading?: boolean;
   onSearchChange?: (query: string) => void;
+  filterLocally?: boolean;
 }
 
 export default function EnhancedDropdown({
@@ -49,7 +50,8 @@ export default function EnhancedDropdown({
   maxHeight = 260,
   noOptionsText = 'گزینه‌ای پیدا نشد',
   loading = false,
-  onSearchChange
+  onSearchChange,
+  filterLocally = true
 }: EnhancedDropdownProps) {
   const overlayPortalContainer = useErpOverlayPortalContainer();
   const presentationScope = useErpPresentationScope();
@@ -72,7 +74,7 @@ export default function EnhancedDropdown({
   const optionRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   const filteredOptions = useMemo(() => {
-    if (!searchable || !searchTerm.trim()) {
+    if (!filterLocally || !searchable || !searchTerm.trim()) {
       return options;
     }
 
@@ -80,7 +82,7 @@ export default function EnhancedDropdown({
     return options.filter(
       (option) => option.label.toLowerCase().includes(q) || option.value.toLowerCase().includes(q)
     );
-  }, [options, searchTerm, searchable]);
+  }, [filterLocally, options, searchTerm, searchable]);
 
   const groupedOptions = useMemo(() => {
     const groups: Record<string, DropdownOption[]> = {};

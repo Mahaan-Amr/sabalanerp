@@ -1,12 +1,12 @@
 'use client';
 import { CustomerActivityCategoryBadge } from '@/features/crm/customer-workflow/CustomerActivityCategory';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { FaBan, FaBuilding, FaCheckCircle, FaEdit, FaEnvelope, FaExclamationTriangle, FaEye, FaLock, FaMapMarkerAlt, FaPhone, FaPlus, FaTrash, FaUser, FaUsers } from 'react-icons/fa';
 import { ErpBadge, ErpButton, ErpEmptyState, ErpFieldView, ErpListPage, ErpInlineState, type ErpColumn, type ErpMetric, type ErpTone } from '@/components/erp';
 import { crmAPI, dashboardAPI } from '@/lib/api';
 import { CustomerPermanentDeletion } from '@/features/crm/customer-workflow/CustomerPermanentDeletion';
 import { useWorkspace } from '@/contexts/WorkspaceContext';
-import { getCrmPermissions, User as PermissionUser } from '@/lib/permissions';
+import { getCrmPermissions } from '@/lib/permissions';
 
 interface CrmCustomer {
   id: string;
@@ -22,28 +22,10 @@ interface CrmCustomer {
   brandName?: string;
   isBlacklisted: boolean;
   isLocked: boolean;
-  primaryContact?: {
-    id: string;
-    firstName: string;
-    lastName: string;
-    email?: string;
-    phone?: string;
-  };
-  projectAddresses: Array<{
-    id: string;
-    address: string;
-    city: string | null;
-    projectName?: string;
-    projectType?: string;
-    isActive: boolean;
-  }>;
-  phoneNumbers: Array<{
-    id: string;
-    number: string;
-    type: string;
-    isPrimary: boolean;
-    isActive: boolean;
-  }>;
+  primaryContact?: { firstName: string; lastName: string; email?: string };
+  projectCount?: number;
+  projectAddresses?: { id: string }[];
+  phoneNumbers: { number: string; isPrimary: boolean }[];
   trustCategory?: string;
   partnerOwnerProfileId?: string | null;
   managementReadOnly?: boolean;
@@ -69,8 +51,6 @@ interface CustomerFilters {
   isLocked: boolean | null;
 }
 
-interface User extends PermissionUser {}
-
 const statusTone: Record<string, ErpTone> = {
   Active: 'success',
   Inactive: 'neutral',
@@ -84,12 +64,9 @@ export default function CustomersPage() {
   const [management, setManagement] = useState({ canViewAllCustomers: false, canDeleteCustomers: false });
   const [summary, setSummary] = useState({ blacklisted: 0, locked: 0 });
   const [customers, setCustomers] = useState<CrmCustomer[]>([]);
-  const [crmPermissions, setCrmPermissions] = useState({
-    canViewCustomers: false,
-    canCreateCustomers: false,
-    canEditCustomers: false,
-    canDeleteCustomers: false,
-  });
+  const [canCreateCustomers, setCanCreateCustomers] = useState(false);
+  const [refresh, setRefresh] = useState(0);
+  const lastRequestedSearch = useRef<string>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filters, setFilters] = useState<CustomerFilters>({
@@ -110,80 +87,78 @@ export default function CustomersPage() {
   const { hasPermission } = useWorkspace();
 
   useEffect(() => {
-    fetchCustomers();
-    loadCurrentUser();
-  }, [filters, pagination.page]);
-
-  const loadCurrentUser = async () => {
-    try {
-      const response = await dashboardAPI.getProfile();
-      if (response.data.success) {
-        const user: User = response.data.data;
-        setCrmPermissions(getCrmPermissions(user));
+    let active = true;
+    dashboardAPI.getProfile().then(response => {
+      if (active && response.data.success) {
+        setCanCreateCustomers(getCrmPermissions(response.data.data).canCreateCustomers);
       }
-    } catch (error) {
-      console.error('Error loading user profile:', error);
-    }
-  };
+    }).catch(error => { if (active) console.error('Error loading user profile:', error); });
+    return () => { active = false; };
+  }, []);
 
-  const fetchCustomers = async () => {
-    try {
-      setLoading(true);
-      setError(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    const params = {
+      page: pagination.page,
+      limit: pagination.limit,
+      search: filters.search.trim() || undefined,
+      status: filters.status || undefined,
+      customerType: filters.customerType || undefined,
+      trustCategory: filters.trustCategory || undefined,
+      ownership: filters.ownership || undefined,
+      isBlacklisted: filters.isBlacklisted ?? undefined,
+      isLocked: filters.isLocked ?? undefined,
+      view: 'directory' as const,
+    };
 
-      const params = {
-        page: pagination.page,
-        limit: pagination.limit,
-        search: filters.search || undefined,
-        status: filters.status || undefined,
-        customerType: filters.customerType || undefined,
-        trustCategory: filters.trustCategory || undefined,
-        ownership: filters.ownership || undefined,
-        isBlacklisted: filters.isBlacklisted ?? undefined,
-        isLocked: filters.isLocked ?? undefined,
-      };
+    async function fetchCustomers() {
+      try {
+        const { data } = await crmAPI.getCustomers(params, controller.signal);
+        if (controller.signal.aborted) return;
+        if (!data.success) throw new Error('Customer directory request failed');
 
-      const response = await crmAPI.getCustomers(params);
-
-      if (response.data.success) {
-        setManagement(response.data.permissions || { canViewAllCustomers: false, canDeleteCustomers: false });
-        let filteredCustomers = response.data.data;
-
-        if (filters.isBlacklisted !== null) {
-          filteredCustomers = filteredCustomers.filter((customer: CrmCustomer) => customer.isBlacklisted === filters.isBlacklisted);
-        }
-
-        if (filters.isLocked !== null) {
-          filteredCustomers = filteredCustomers.filter((customer: CrmCustomer) => customer.isLocked === filters.isLocked);
-        }
-
-        setCustomers(filteredCustomers);
-        // Older local/API versions still expose the same scoped total through the register.
-        const summary = response.data.summary;
-        if (summary) {
-          setSummary(summary);
-        } else {
+        // Older API deployments report totals but omit the restriction summary.
+        let restrictionSummary = data.summary;
+        if (!restrictionSummary) {
           const [blacklisted, locked] = await Promise.all([
-            crmAPI.getCustomers({ ...params, page: 1, limit: 1, isBlacklisted: true }),
-            crmAPI.getCustomers({ ...params, page: 1, limit: 1, isLocked: true }),
+            crmAPI.getCustomers({ ...params, page: 1, limit: 1, isBlacklisted: true }, controller.signal),
+            crmAPI.getCustomers({ ...params, page: 1, limit: 1, isLocked: true }, controller.signal),
           ]);
-          setSummary({ blacklisted: blacklisted.data.pagination.total, locked: locked.data.pagination.total });
+          restrictionSummary = { blacklisted: blacklisted.data.pagination.total, locked: locked.data.pagination.total };
         }
-        setPagination((prev) => ({
-          ...prev,
-          total: response.data.pagination.total,
-          pages: response.data.pagination.pages,
-        }));
-      } else {
-        setError('خطا در بارگذاری مشتریان');
+        if (controller.signal.aborted) return;
+
+        setManagement(data.permissions || { canViewAllCustomers: false, canDeleteCustomers: false });
+        setSummary(restrictionSummary);
+        setCustomers((data.data as CrmCustomer[]).filter(customer =>
+          (filters.isBlacklisted === null || customer.isBlacklisted === filters.isBlacklisted)
+          && (filters.isLocked === null || customer.isLocked === filters.isLocked),
+        ));
+        setPagination(previous => ({ ...previous, total: data.pagination.total, pages: data.pagination.pages }));
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          console.error('Error fetching customers:', error);
+          setError('خطا در بارگذاری مشتریان');
+        }
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
       }
-    } catch (error: any) {
-      console.error('Error fetching customers:', error);
-      setError('خطا در بارگذاری مشتریان');
-    } finally {
-      setLoading(false);
     }
-  };
+
+    setLoading(true);
+    setError(null);
+    const delay = params.search && params.search !== lastRequestedSearch.current ? 180 : 0;
+    const timer = window.setTimeout(() => {
+      lastRequestedSearch.current = params.search;
+      void fetchCustomers();
+    }, delay);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [filters, pagination.page, pagination.limit, refresh]);
+
+  const refreshCustomers = () => setRefresh(previous => previous + 1);
 
   const handleSearch = (value: string) => {
     setFilters((prev) => ({ ...prev, search: value }));
@@ -199,7 +174,7 @@ export default function CustomersPage() {
     try {
       const response = await crmAPI.toggleBlacklist(customerId);
       if (response.data.success) {
-        fetchCustomers();
+        refreshCustomers();
       }
     } catch (error) {
       console.error('Error toggling blacklist:', error);
@@ -210,7 +185,7 @@ export default function CustomersPage() {
     try {
       const response = await crmAPI.toggleLock(customerId);
       if (response.data.success) {
-        fetchCustomers();
+        refreshCustomers();
       }
     } catch (error) {
       console.error('Error toggling lock:', error);
@@ -315,13 +290,14 @@ export default function CustomersPage() {
       header: 'پروژه',
       mobileLabel: 'پروژه',
       priority: 'meta',
-      cell: (customer) => (
-        <div className="space-y-1 text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
+      cell: (customer) => {
+        const projectCount = customer.projectCount ?? customer.projectAddresses?.length ?? 0;
+        return <div className="space-y-1 text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
           {customer.projectManagerName && <p className="flex items-center gap-1"><FaUser className="h-3 w-3" />مدیر پروژه: {customer.projectManagerName}</p>}
-          {customer.projectAddresses.length > 0 && <p className="flex items-center gap-1"><FaMapMarkerAlt className="h-3 w-3" />{customer.projectAddresses.length.toLocaleString('fa-IR')} پروژه</p>}
+          {projectCount > 0 && <p className="flex items-center gap-1"><FaMapMarkerAlt className="h-3 w-3" />{projectCount.toLocaleString('fa-IR')} پروژه</p>}
           {customer.brandName && <p className="flex items-center gap-1"><FaBuilding className="h-3 w-3" />برند: {customer.brandName}</p>}
-        </div>
-      ),
+        </div>;
+      },
     },
     {
       id: 'flags',
@@ -344,7 +320,7 @@ export default function CustomersPage() {
         icon={FaExclamationTriangle}
         title="خطا در دریافت اطلاعات"
         description={error}
-        action={{ label: 'تلاش مجدد', onClick: fetchCustomers, variant: 'solid', tone: 'primary' }}
+        action={{ label: 'تلاش مجدد', onClick: refreshCustomers, variant: 'solid', tone: 'primary' }}
       />
     );
   }
@@ -356,7 +332,7 @@ export default function CustomersPage() {
       eyebrow="ارتباط با مشتری"
       title="مدیریت مشتریان"
       metrics={metrics}
-      actions={crmPermissions.canCreateCustomers ? [{ label: 'مشتری جدید', href: '/dashboard/crm/customers/create', icon: FaPlus, tone: 'primary', variant: 'solid' }] : []}
+      actions={canCreateCustomers ? [{ label: 'مشتری جدید', href: '/dashboard/crm/customers/create', icon: FaPlus, tone: 'primary', variant: 'solid' }] : []}
       filters={[
         ...(management.canViewAllCustomers ? [{ id: 'ownership', label: 'مالکیت', type: 'select' as const, value: filters.ownership,
           onChange: (value: string) => handleFilterChange('ownership', value), options: [
@@ -460,7 +436,7 @@ export default function CustomersPage() {
           icon={FaUsers}
           title="مشتری یافت نشد"
           description={filters.search || filters.status || filters.customerType || filters.isBlacklisted !== null || filters.isLocked !== null ? 'با این فیلترها نتیجه‌ای پیدا نشد.' : 'هنوز مشتری ثبت نشده است.'}
-          action={crmPermissions.canCreateCustomers ? { label: 'افزودن مشتری جدید', href: '/dashboard/crm/customers/create', icon: FaPlus, tone: 'primary', variant: 'solid' } : undefined}
+          action={canCreateCustomers ? { label: 'افزودن مشتری جدید', href: '/dashboard/crm/customers/create', icon: FaPlus, tone: 'primary', variant: 'solid' } : undefined}
         />
       }
       footer={
@@ -489,7 +465,7 @@ export default function CustomersPage() {
         </div>
       }
     />
-    <CustomerPermanentDeletion customerId={deletionId} onClose={() => setDeletionId(null)} onDeleted={receipt => { setDeletionId(null); setReceiptId(receipt); fetchCustomers(); }} />
+    <CustomerPermanentDeletion customerId={deletionId} onClose={() => setDeletionId(null)} onDeleted={receipt => { setDeletionId(null); setReceiptId(receipt); refreshCustomers(); }} />
     </>
   );
 }

@@ -863,11 +863,29 @@ export const salesAPI = {
   deleteDiscountRange: (id: string) => api.delete(`/sales/discount-ranges/${id}`),
 };
 
+export type CrmCustomerOption = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  companyName: string | null;
+  customerType: string;
+  status: string;
+  trustCategory: 'NORMAL' | 'SPECIAL';
+  isBlacklisted: boolean;
+  isLocked: boolean;
+  ownerUserId: string | null;
+  ownerUser: { id: string; firstName: string | null; lastName: string | null; username: string } | null;
+  phone: string | null;
+};
+
 // CRM Workspace API
 export const crmAPI = {
   // Customers
-  getCustomers: (params?: { page?: number; limit?: number; search?: string; status?: string; customerType?: string; trustCategory?: string; ownership?: string; isBlacklisted?: boolean; isLocked?: boolean }) =>
-    api.get('/crm/customers', { params }),
+  getCustomers: (params?: { page?: number; limit?: number; search?: string; status?: string; customerType?: string; trustCategory?: string; ownership?: string; isBlacklisted?: boolean; isLocked?: boolean; view?: 'directory' }, signal?: AbortSignal) =>
+    api.get('/crm/customers', { params, signal }),
+
+  getCustomerOptions: (params: { search?: string; id?: string; limit?: number; customerType?: string }, signal?: AbortSignal) =>
+    api.get<{ success: boolean; data: CrmCustomerOption[] }>('/crm/customer-options', { params, signal }),
 
   getCustomerOwners: () => api.get('/crm/customer-owners'),
   getSellers: () => api.get('/crm/sellers'),

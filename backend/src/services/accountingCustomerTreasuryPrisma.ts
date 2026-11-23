@@ -1039,6 +1039,7 @@ export const reverseCustomerAllocationPrisma = async (database: Database, input:
 });
 
 export const projectCustomerAccountsPrisma = async (database: Database, input: { profileIds: string[]; asOf: Date }) => {
+  if (!input.profileIds.length) return [];
   const sourceResolutions = await database.accountingCustomerReceiptResolution.findMany({ where: { receipt: { profileId: { in: input.profileIds } }, createdAt: { lte: input.asOf }, occurredAt: { lte: input.asOf } } });
   const resolvedIds = new Set(sourceResolutions.map(row => row.receiptId));
   const reviews = await database.accountingCustomerOpeningReview.findMany({ where: { profileId: { in: input.profileIds }, createdAt: { lte: input.asOf } } });
@@ -1171,31 +1172,56 @@ export const customerStatementMovements = (account: Awaited<ReturnType<typeof pr
   });
 };
 
-export const listCustomerAccountsPrisma = async (database: PrismaClient, input: { asOf: Date; search?: string }) => {
-  const profiles = await database.accountingCustomerProfile.findMany({ where: input.search?.trim() ? { OR: [
-    { displayName: { contains: input.search.trim(), mode: 'insensitive' } },
-    { partySourceId: { contains: input.search.trim(), mode: 'insensitive' } },
-  ] } : undefined, orderBy: { displayName: 'asc' }, take: 200 });
-  return Promise.all(profiles.map(async (profile) => {
-    const projection = await projectCustomerAccountPrisma(database, { profileId: profile.id, asOf: input.asOf });
-    return { id: profile.id, displayName: profile.displayName, partySourceId: profile.partySourceId,
-      activeFrom: profile.activeFrom, receivableRials: projection.receivableRials,
-      unallocatedCreditRials: projection.unallocatedCreditRials, openItemCount: projection.openItems.length,
-      oldestDueAt: projection.openItems[0]?.dueAt ?? null };
-  }));
+const customerProfileSearch = (search?: string): Prisma.AccountingCustomerProfileWhereInput | undefined => {
+  const query = search?.trim();
+  return query ? { OR: [
+    { displayName: { contains: query, mode: 'insensitive' } },
+    { partySourceId: { contains: query, mode: 'insensitive' } },
+  ] } : undefined;
 };
 
-export const listTreasuryOverviewPrisma = async (database: PrismaClient, input: { bankLinePage?: number; checkId?: string } = {}) => {
-  const bankLinePage = input.bankLinePage ?? 1;
+export const searchTreasuryCustomerProfilesPrisma = (database: Database, search?: string) =>
+  database.accountingCustomerProfile.findMany({
+    where: customerProfileSearch(search), orderBy: [{ displayName: 'asc' }, { id: 'asc' }], take: 25,
+    select: { id: true, displayName: true },
+  });
+
+export const listCustomerAccountsPrisma = (database: PrismaClient, input: { asOf: Date; search?: string }) =>
+  database.$transaction(async tx => {
+    const profiles = await tx.accountingCustomerProfile.findMany({
+      where: customerProfileSearch(input.search), orderBy: [{ displayName: 'asc' }, { id: 'asc' }], take: 200,
+      select: { id: true },
+    });
+    const projections = await projectCustomerAccountsPrisma(tx, { profileIds: profiles.map(row => row.id), asOf: input.asOf });
+    const byId = new Map(projections.map(projection => [projection.profile.id, projection]));
+    return profiles.map(({ id }) => {
+      const { profile, receivableRials, unallocatedCreditRials, openItems } = byId.get(id)!;
+      return { id, displayName: profile.displayName, partySourceId: profile.partySourceId,
+        activeFrom: profile.activeFrom, receivableRials, unallocatedCreditRials, openItemCount: openItems.length,
+        oldestDueAt: openItems[0]?.dueAt ?? null };
+    });
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: 30_000 });
+
+const treasuryBankPageSize = 100;
+
+export const listTreasuryBankLinesPrisma = async (database: PrismaClient, bankLinePage = 1) => {
   if (!Number.isSafeInteger(bankLinePage) || bankLinePage < 1 || bankLinePage > 1_000_000) {
     throw new AccountingCustomerTreasuryError('BANK_PAGE_INVALID', 'شماره صفحه ردیف‌های بانکی معتبر نیست.', 400);
   }
-  const [transactions, bankLines, bankLineCount, bankMappings, bankFileImports, bankFileChoices, bankExceptions, checks, cashCounts, pettyCash] = await Promise.all([
+  const [bankLines, bankLineCount] = await database.$transaction([
+    database.accountingBankStatementLine.findMany({
+      orderBy: [{ bookedAt: 'desc' }, { id: 'desc' }], take: treasuryBankPageSize, skip: (bankLinePage - 1) * treasuryBankPageSize,
+      include: { matches: { orderBy: { createdAt: 'desc' } } },
+    }),
+    database.accountingBankStatementLine.count(),
+  ], { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+  return { bankLines, bankLinePage, bankLineCount, bankLinesHasMore: bankLinePage * treasuryBankPageSize < bankLineCount };
+};
+
+export const listTreasurySummaryPrisma = async (database: PrismaClient, checkId?: string) => {
+  const [transactions, bankMappings, bankFileImports, bankFileChoices, bankExceptions, checks, cashCounts, pettyCash] = await Promise.all([
     database.accountingTreasuryTransaction.findMany({ where: { sourceResolution: null, legacyRefundId: null }, orderBy: { occurredAt: 'desc' }, take: 100,
       include: { profile: { select: { displayName: true } }, allocations: { include: { lines: true } } } }),
-    database.accountingBankStatementLine.findMany({ orderBy: [{ bookedAt: 'desc' }, { id: 'desc' }], take: 100, skip: (bankLinePage - 1) * 100,
-      include: { matches: { orderBy: { createdAt: 'desc' } } } }),
-    database.accountingBankStatementLine.count(),
     database.accountingBankImportMapping.findMany({ orderBy: { createdAt: 'desc' },
       select: { id: true, financialAccountId: true, adapterType: true, version: true, effectiveFrom: true, effectiveTo: true } }),
     database.accountingBankFileImportRun.findMany({ orderBy: { createdAt: 'desc' }, take: 20,
@@ -1207,13 +1233,20 @@ export const listTreasuryOverviewPrisma = async (database: PrismaClient, input: 
       orderBy: { createdAt: 'desc' },
       select: { id: true, code: true, messagePersian: true, sourceId: true, sourceVersion: true,
         assignedProfile: true, assignedUserId: true, createdAt: true } }),
-    database.accountingCheckInstrument.findMany({ where: input.checkId ? { id: input.checkId } : undefined, orderBy: { dueAt: 'asc' }, take: 100,
+    database.accountingCheckInstrument.findMany({ where: checkId ? { id: checkId } : undefined, orderBy: { dueAt: 'asc' }, take: 100,
       include: { events: { orderBy: { sequence: 'asc' } } } }),
     database.accountingCashCount.findMany({ orderBy: { countedAt: 'desc' }, take: 50 }),
     database.accountingPettyCashAdvance.findMany({ orderBy: { settlementDueAt: 'asc' }, take: 100 }),
   ]);
-  return { transactions, bankLines, bankLinePage, bankLineCount, bankLinesHasMore: bankLinePage * 100 < bankLineCount,
-    bankMappings, bankFileImports, bankFileChoices, bankExceptions, checks, cashCounts, pettyCash };
+  return { transactions, bankMappings, bankFileImports, bankFileChoices, bankExceptions, checks, cashCounts, pettyCash };
+};
+
+export const listTreasuryOverviewPrisma = async (database: PrismaClient, input: { bankLinePage?: number; checkId?: string } = {}) => {
+  const [bank, summary] = await Promise.all([
+    listTreasuryBankLinesPrisma(database, input.bankLinePage),
+    listTreasurySummaryPrisma(database, input.checkId),
+  ]);
+  return { ...summary, ...bank };
 };
 
 export const listTaxOverviewPrisma = async (database: PrismaClient) => {

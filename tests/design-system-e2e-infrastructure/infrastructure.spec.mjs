@@ -69,10 +69,12 @@ test('shared browser helpers cover the required acceptance dimensions', () => {
   assert.match(helpers, /critical.*serious|serious.*critical/s);
 });
 
-test('CI runs on the approved local-project runner and retains failure evidence', () => {
+test('on-demand browser QA uses the approved local-project runner and retains failure evidence', () => {
   const workflow = read('.github/workflows/design-system-e2e.yml');
   assert.match(workflow, /self-hosted, sabalanerp-local/);
-  assert.match(workflow, /pull_request\.head\.repo\.full_name == github\.repository/);
+  assert.match(workflow, /^on:\r?\n  workflow_dispatch:\r?\n\r?\njobs:/m);
+  const hiringWorkflow = read('.github/workflows/hr-hiring-e2e.yml');
+  assert.match(hiringWorkflow, /^on:\r?\n  workflow_dispatch:\r?\n\r?\njobs:/m);
   assert.match(workflow, /environment: design-system-e2e/);
   assert.match(workflow, /permissions:\s+contents: read/s);
   assert.match(workflow, /npm run test:design-system:e2e/);

@@ -628,7 +628,8 @@ export const recognizeCustomerReturnWithin = async (
     throw new AccountingCustomerTreasuryError('RETURN_LINES_REQUIRED', 'ردیف و شاهد برگشت کامل و یکتا نیست.', 400);
   }
   const termsByLineId = new Map(negotiatedCredit?.lines.map((line) => [line.lineId, line]));
-  if (negotiatedCredit && (!negotiatedCredit.caseId || negotiatedCredit.agreedGrossRials <= 0n
+  if (negotiatedCredit && (!negotiatedCredit.caseId || (stoneReturn && negotiatedCredit.caseId !== stoneReturn.caseId)
+    || negotiatedCredit.agreedGrossRials <= 0n
     || negotiatedCredit.lines.length !== input.lines.length || termsByLineId.size !== input.lines.length
     || new Set(input.lines.map((line) => line.id)).size !== input.lines.length
     || input.lines.some((line) => !termsByLineId.has(line.id))

@@ -1,6 +1,6 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { formatExactQuantityAtoms, parseExactQuantityAtoms } from './exactQuantity';
-import { loadStoneReturnCandidates } from './stoneReturnCandidates';
+import { loadStoneReturnCandidates, type StoneReturnCandidates } from './stoneReturnCandidates';
 import { listStoneReturnReceipts, readStoneReturnReceipt } from './stoneReturnReceipts';
 import { StoneReturnAllocationError, validateStoneReturnAllocations, type StoneReturnAllocationInput } from './stoneReturnAllocationRules';
 
@@ -35,23 +35,31 @@ function statusOf(receipt: { acceptedQuantity: string }, revisionExists: boolean
 
 export async function listStoneReturnAllocationReviews(db: PrismaClient, after?: string) {
   const page = await listStoneReturnReceipts(db, after);
-  const drafts = page.items.length ? await db.stoneReturnAllocationDraft.findMany({
-    where: { receiptId: { in: page.items.map(row => row.id) } }, distinct: ['receiptId'], select: { receiptId: true },
-  }) : [];
+  const ids = page.items.map(row => row.id);
+  const [drafts, finalizations] = ids.length ? await Promise.all([
+    db.stoneReturnAllocationDraft.findMany({ where: { receiptId: { in: ids } }, distinct: ['receiptId'], select: { receiptId: true } }),
+    db.stoneReturnFinalization.findMany({ where: { receiptId: { in: ids } }, select: { receiptId: true } }),
+  ]) : [[], []];
   const drafted = new Set(drafts.map(row => row.receiptId));
-  return { ...page, items: page.items.map(row => ({ ...row, allocationStatus: statusOf(row, drafted.has(row.id)) })) };
+  const finalized = new Set(finalizations.map(row => row.receiptId));
+  return { ...page, items: page.items.map(row => ({
+    ...row, allocationStatus: finalized.has(row.id) ? 'FINALIZED' as const : statusOf(row, drafted.has(row.id)),
+  })) };
 }
 
 export async function readStoneReturnAllocationReview(tx: Tx, receiptId: string) {
-  const receipt = await readStoneReturnReceipt(tx, receiptId);
-  const [draft, sources] = await Promise.all([
+  const [receipt, draft, finalization] = await Promise.all([
+    readStoneReturnReceipt(tx, receiptId),
     readStoneReturnAllocationDraft(tx, receiptId),
-    loadStoneReturnCandidates(tx, receipt),
+    tx.stoneReturnFinalization.findUnique({ where: { receiptId } }),
   ]);
+  const sources: StoneReturnCandidates = finalization
+    ? { candidates: [], blockedReason: null, hasUnlinkedOriginals: false, originKnown: false }
+    : await loadStoneReturnCandidates(tx, receipt);
   const allocated = (draft?.rows ?? []).reduce((sum, row) => sum + parseExactQuantityAtoms(row.quantity), 0n);
   return {
-    receipt, ...sources, draft,
-    allocationStatus: statusOf(receipt, draft !== null),
+    receipt, ...sources, draft, finalization,
+    allocationStatus: finalization ? 'FINALIZED' as const : statusOf(receipt, draft !== null),
     allocatedQuantity: formatExactQuantityAtoms(allocated),
     unallocatedQuantity: formatExactQuantityAtoms(parseExactQuantityAtoms(receipt.acceptedQuantity) - allocated),
   };
@@ -85,6 +93,9 @@ export async function saveStoneReturnAllocationDraft(db: PrismaClient, receiptId
   try {
     return await db.$transaction(async tx => {
       await lockStoneReturnCase(tx, receiptId);
+      if (await tx.stoneReturnFinalization.findUnique({ where: { receiptId }, select: { id: true } })) {
+        throw new StoneReturnAllocationError(409, 'این مرجوعی قبلاً ثبت قطعی شده است.');
+      }
       const receipt = await readStoneReturnReceipt(tx, receiptId);
       if (parseExactQuantityAtoms(receipt.acceptedQuantity) === 0n) {
         throw new StoneReturnAllocationError(409, 'این دریافت مقدار پذیرفته‌شده‌ای برای تخصیص ندارد.');
@@ -111,7 +122,7 @@ export async function saveStoneReturnAllocationDraft(db: PrismaClient, receiptId
         }, include: includeRows,
       });
       return {
-        receipt, ...sources, draft: presentDraft(saved),
+        receipt, ...sources, draft: presentDraft(saved), finalization: null,
         allocationStatus: statusOf(receipt, true),
         allocatedQuantity: validated.allocatedQuantity, unallocatedQuantity: validated.unallocatedQuantity,
       };

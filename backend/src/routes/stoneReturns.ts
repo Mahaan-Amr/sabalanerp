@@ -1,8 +1,13 @@
+import { Prisma } from '@prisma/client';
 import express, { type RequestHandler } from 'express';
 import { prisma } from '../lib/prisma';
 import { protect, type AuthRequest } from '../middleware/auth';
 import { FEATURE_PERMISSIONS, FEATURES, requireFeatureAccess, type FeatureRequest } from '../middleware/feature';
 import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES, type WorkspaceRequest } from '../middleware/workspace';
+import { AccountingCustomerTreasuryError } from '../services/accountingCustomerTreasury';
+import { AccountingLedgerError, accountingAccessProfileFromPermission } from '../services/accountingLedgerFoundation';
+import { ShipmentReturnConflictError } from '../services/shipmentExcessReturns';
+import { finalizeStoneReturn, readStoneReturnPostingContext } from '../services/stoneReturnFinalization';
 import { SupplyChainAccountingError } from '../services/accountingSupplyChain';
 import {
   listStoneReturnReceipts, recordStoneReturnReceipt, searchStoneReturnCustomers,
@@ -19,7 +24,12 @@ export function stoneReturnEndpoint(action: (req: AuthRequest & FeatureRequest &
       const data = await action(req);
       res.status(created && !(data as { replayed?: boolean }).replayed ? 201 : 200).json({ success: true, data });
     } catch (error) {
-      if (error instanceof StoneReturnReceiptError || error instanceof StoneReturnAllocationError || error instanceof SupplyChainAccountingError) {
+      if (error instanceof ShipmentReturnConflictError) {
+        res.status(409).json({ success: false, error: error.message });
+        return;
+      }
+      if (error instanceof StoneReturnReceiptError || error instanceof StoneReturnAllocationError || error instanceof SupplyChainAccountingError
+        || error instanceof AccountingCustomerTreasuryError || error instanceof AccountingLedgerError) {
         res.status(error.status).json({ success: false, error: error.message });
         return;
       }
@@ -49,6 +59,11 @@ export const accountingStoneReturnsEdit = [
   requireFeatureAccess(FEATURES.ACCOUNTING_STONE_RETURNS, FEATURE_PERMISSIONS.EDIT),
 ];
 
+const stoneReturnPostingAccess = [
+  ...accountingStoneReturnsEdit,
+  requireFeatureAccess(FEATURES.ACCOUNTING_CUSTOMER_POSTING_MANAGE, FEATURE_PERMISSIONS.EDIT),
+];
+
 const hasEditAccess = (req: FeatureRequest & WorkspaceRequest) =>
   [req.workspacePermission, req.featurePermission].every(level => level === 'edit' || level === 'admin');
 
@@ -67,13 +82,24 @@ export const accountingStoneReturnsRouter = express.Router();
 accountingStoneReturnsRouter.get('/', ...accountingStoneReturnsView, stoneReturnEndpoint(req =>
   listStoneReturnAllocationReviews(prisma, queryText(req.query.after, 100))));
 accountingStoneReturnsRouter.get('/:id', ...accountingStoneReturnsView, stoneReturnEndpoint(async req => ({
-  ...await readStoneReturnAllocationReview(prisma, req.params.id),
+  ...await prisma.$transaction(tx => readStoneReturnAllocationReview(tx, req.params.id), {
+    isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+  }),
   canAllocate: hasEditAccess(req),
 })));
 accountingStoneReturnsRouter.put('/:id/allocations', ...accountingStoneReturnsEdit, stoneReturnEndpoint(async req => ({
   ...await saveStoneReturnAllocationDraft(prisma, req.params.id, req.user!.id, req.body),
   canAllocate: true,
 })));
+
+accountingStoneReturnsRouter.get('/:id/posting-context', ...stoneReturnPostingAccess, stoneReturnEndpoint(req =>
+  readStoneReturnPostingContext(prisma, req.params.id, req.query.date)));
+accountingStoneReturnsRouter.post('/:id/finalize', ...stoneReturnPostingAccess, stoneReturnEndpoint(req =>
+  finalizeStoneReturn(prisma, req.params.id, {
+    id: req.user!.id,
+    profile: req.featurePermission === FEATURE_PERMISSIONS.ADMIN ? 'ACCOUNTING_MANAGER' : accountingAccessProfileFromPermission(req.workspacePermission),
+    isGlobalAdmin: req.user?.role === 'ADMIN',
+  }, req.body), true));
 
 export const logisticsStoneReturnsRouter = express.Router();
 logisticsStoneReturnsRouter.get('/', ...logisticsView, stoneReturnEndpoint(async req => ({

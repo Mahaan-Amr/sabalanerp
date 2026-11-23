@@ -12,6 +12,7 @@ test('reopens the latest saved revision and rejects an older editor without disc
       receivedQuantity: new Prisma.Decimal('40'), acceptedQuantity: new Prisma.Decimal('35'), rejectedQuantity: new Prisma.Decimal('5'),
       unit: 'squareMeter', guardReturnMovementId: null, createdAt: new Date('2026-10-11T08:00:00Z'),
     }) },
+    stoneReturnFinalization: { findUnique: async () => null },
     contractItem: { findMany: async () => [] },
     stoneReturnAllocationDraft: {
       findFirst: async () => saved,

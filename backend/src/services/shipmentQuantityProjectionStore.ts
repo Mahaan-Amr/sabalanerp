@@ -167,6 +167,9 @@ export const shipmentQuantityEvidenceHashMatches = (item: ShipmentQuantityEviden
   return item.integrityHash === shipmentQuantityEvidenceIntegrityHash({ ...item, metadata });
 };
 
+export const hasValidPersistedSalesShipmentEvidenceHash = (item: PersistedShipmentQuantityEvidence) =>
+  item.sourceKind === 'SALES_CONTRACT' && !!item.contractId && !!item.contractItemId
+  && shipmentQuantityEvidenceHashMatches(mapPersistedEvidence(item));
 
 const projectionIntegrityPayload = (row: {
   contractId: string; contractItemId: string; productRowId: string; unit: string;

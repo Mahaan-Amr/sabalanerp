@@ -23,7 +23,10 @@ import { expandPersianSearchTokenVariants, normalizePersianSearchTokens } from '
 import { resolveLogisticsContractRow } from '../services/logisticsContractRow';
 import { readShipmentQuantityProjection } from '../services/shipmentQuantityProjectionStore';
 
+import { logisticsStoneReturnsRouter } from './stoneReturns';
+
 const router = express.Router();
+router.use('/stone-returns', logisticsStoneReturnsRouter);
 const respondPartnerLoading = (res: Response, result: Result<unknown>, successStatus = 200) => {
   res.setHeader('Cache-Control', 'private, no-store');
   return result.ok ? res.status(successStatus).json({ success: true, data: result.value })

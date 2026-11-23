@@ -3,7 +3,7 @@ import { createServer, get } from 'node:http';
 import { once } from 'node:events';
 import { test } from 'node:test';
 import { createAccountingRequestObserver, reportAccountingRequestFailure } from '../accountingRequestObserver';
-import { measureAccountingReadPhase } from '../../services/accountingReadTiming';
+import { countAccountingReadRows, measureAccountingReadPhase } from '../../services/accountingReadTiming';
 
 test('Accounting responses and operational records share a server-issued correlation without leaking inputs', async () => {
   const records: unknown[] = [];
@@ -17,6 +17,8 @@ test('Accounting responses and operational records share a server-issued correla
         for (const phase of ['lockWait', 'authorization', 'population', 'rowHydration'] as const) {
           await measureAccountingReadPhase(phase, async () => {});
         }
+        countAccountingReadRows('receiptCandidates', 5);
+        countAccountingReadRows('receiptPageRows', 2);
       }
       response.end('PRIVATE document');
     });
@@ -26,7 +28,7 @@ test('Accounting responses and operational records share a server-issued correla
     const address = server.address();
     assert.ok(address && typeof address !== 'string');
     const origin = 'http://127.0.0.1:' + address.port;
-    const list = await fetch(origin + '/api/accounting/contracts/?search=PRIVATE', {
+    const list = await fetch(origin + '/api/accounting/payments/?search=PRIVATE', {
       headers: { 'X-Accounting-Request-Id': 'PRIVATE', 'X-Correlation-Id': 'PRIVATE', referer: 'https://private.invalid/PRIVATE' },
     });
     await list.text();
@@ -40,16 +42,18 @@ test('Accounting responses and operational records share a server-issued correla
     assert.equal(decision.headers.get('x-accounting-outcome'), 'contention');
     assert.equal(records.length, 2);
     assert.doesNotMatch(JSON.stringify(records), /PRIVATE|private\.invalid/);
-    const [listRecord, decisionRecord] = records as Array<{ stagesMs?: Record<string, unknown> }>;
+    const [listRecord, decisionRecord] = records as Array<{ stagesMs?: Record<string, unknown>; readWork?: Record<string, number> }>;
     assert.deepEqual(Object.keys(listRecord.stagesMs ?? {}), ['lockWait', 'authorization', 'population', 'rowHydration']);
     assert.ok(Object.values(listRecord.stagesMs ?? {}).every(ms => typeof ms === 'number' && Number.isFinite(ms) && ms >= 0));
     assert.equal(decisionRecord.stagesMs, undefined);
+    assert.deepEqual(listRecord.readWork, { receiptCandidates: 5, receiptPageRows: 2 });
+    assert.equal(decisionRecord.readWork, undefined);
     assert.deepEqual(records.map(r => {
       const record = r as Record<string, unknown>;
       assert.ok(Number.isFinite(record.durationMs));
       return [record.route, record.requestId, record.status, record.outcome];
     }), [
-      ['/api/accounting/contracts', list.headers.get('x-accounting-request-id'), 200, 'success'],
+      ['/api/accounting/payments', list.headers.get('x-accounting-request-id'), 200, 'success'],
       ['/api/accounting/dispatch-candidates/:id/decision', decision.headers.get('x-accounting-request-id'), 500, 'contention'],
     ]);
   } finally {

@@ -33,7 +33,7 @@ function rate(input: { explicit: any; cost: any; quantity: any; base: any; expec
 export async function historicalServicePrintData(tx: PrismaTypes.TransactionClient, contractData: unknown, documentCurrency: string) {
   const data = obj(contractData);
   if (!Array.isArray(data.products)) return contractData;
-  const products = data.products.map((value: any) => { const product = obj(value); return { ...product, meta: { ...obj(product.meta) } }; });
+  const products: Record<string, any>[] = data.products.map((value: any) => { const product = obj(value); return { ...product, meta: { ...obj(product.meta) } }; });
   const ids = new Set<string>(), finishingIds = new Set<string>();
   for (const p of products) {
     for (const operation of [...array(p.tools), ...array(p.meta.tools), ...array(p.appliedSubServices)]) {

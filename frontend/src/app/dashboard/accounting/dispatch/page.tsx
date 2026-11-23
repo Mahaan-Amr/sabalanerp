@@ -31,12 +31,10 @@ import api, { accountingAPI, dispatchConfirmationAPI } from "@/lib/api";
 import { biometricConnectorClient } from "@/lib/biometricConnector";
 import { formatNumericInputText, normalizeDigits } from "@/lib/numberFormat";
 import { useAuth } from "@/contexts/AuthContext";
+import { clearOtherActorLoadingIssues, forgetLoadingIssue, rememberLoadingIssue, storedLoadingIssue,
+  type LoadingIssueRequest } from "@/features/accounting/pendingLoadingIssue";
 
 type DispatchNotice = { kind: "success" | "error"; text: string };
-type LoadingIssueRequest = {
-  id: string;
-  recovery?: { waybillId: string; invoiceId: string; reason: string };
-};
 type LoadingIssueScope = { actorId: string; loadingId: string; key: string };
 type LoadingIssueConclusion =
   | { status: "rejected"; text: string }
@@ -48,6 +46,7 @@ type LoadingIssueState =
 
 const errorStatus = (error: unknown) => (error as { response?: { status?: number } })?.response?.status;
 const errorCode = (error: unknown) => (error as { response?: { data?: { code?: string } } })?.response?.data?.code;
+const loadingIssueKey = (actorId: string, loadingId: string) => JSON.stringify([actorId, loadingId]);
 type DispatchSection = "candidates" | "confirmation" | "cases";
 type ReferenceAuditEntry = {
   id: string;
@@ -93,10 +92,15 @@ const quantityUnitLabels: Record<string, string> = { meter: "متر طول", squ
 const dispatchPageSize = 50;
 
 export default function AccountingDispatchPage() {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const issueActorId = useRef(user?.id);
   issueActorId.current = user?.id;
   const [loadingIssues, setLoadingIssues] = useState<Record<string, LoadingIssueState>>({});
+  useEffect(() => {
+    if (authLoading) return;
+    clearOtherActorLoadingIssues(user?.id);
+    setLoadingIssues({});
+  }, [authLoading, user?.id]);
   const groupReads = useRef(new Set<string>());
   const [section, setSection] = useState<DispatchSection>("candidates");
   const [search, setSearch] = useState("");
@@ -394,7 +398,7 @@ export default function AccountingDispatchPage() {
     groupSnapshot.current = { rows: group, version: previousGroup.version + 1 };
   }
   const issueScope: LoadingIssueScope | null = user && loadingId
-    ? { actorId: user.id, loadingId, key: JSON.stringify([user.id, loadingId]) }
+    ? { actorId: user.id, loadingId, key: loadingIssueKey(user.id, loadingId) }
     : null;
   const issue = issueScope ? loadingIssues[issueScope.key] : undefined;
   const setIssue = (scope: LoadingIssueScope, state: LoadingIssueState) => {
@@ -454,6 +458,7 @@ export default function AccountingDispatchPage() {
       throw new Error("Invalid dispatch issue receipt");
     }
     if (issueActorId.current === scope.actorId) {
+      forgetLoadingIssue(scope.actorId, scope.loadingId, command.id);
       void readIssueGroup(scope, { status: "confirmed", invoice: { id: result.invoice.id, number: result.invoice.number } });
     }
   };
@@ -463,6 +468,7 @@ export default function AccountingDispatchPage() {
       confirmIssueReceipt(scope, command, response.data.data);
     } catch (error) {
       if (dispatchCandidateAccessDenied(error)) {
+        if (issueActorId.current === scope.actorId) forgetLoadingIssue(scope.actorId, scope.loadingId, command.id);
         clearIssueGroup(scope);
         setIssue(scope, { status: "rejected", text: "مجوز دریافت رسید صدور اسناد بارگیری را ندارید." });
         return;
@@ -472,6 +478,14 @@ export default function AccountingDispatchPage() {
   };
   const handleIssue = async (scope: LoadingIssueScope, command: LoadingIssueRequest, receiptOnly = false) => {
     if (dispatchPendingRef.current || issueActorId.current !== scope.actorId) return;
+    if (!receiptOnly) {
+      const previous = storedLoadingIssue(scope.actorId, scope.loadingId);
+      if (previous && previous.id !== command.id) {
+        setIssue(scope, { status: "unknown", command: previous, receiptMissing: false });
+        return;
+      }
+      rememberLoadingIssue(scope.actorId, scope.loadingId, command);
+    }
     dispatchPendingRef.current = true;
     setDispatchPending(true);
     setIssue(scope, { status: "pending" });
@@ -486,9 +500,11 @@ export default function AccountingDispatchPage() {
       } catch (error) {
         const status = errorStatus(error);
         if (dispatchCandidateAccessDenied(error)) {
+          if (issueActorId.current === scope.actorId) forgetLoadingIssue(scope.actorId, scope.loadingId, command.id);
           clearIssueGroup(scope);
           setDispatchNotice({ kind: "error", text: userFacingError(error, "مجوز صدور اسناد بارگیری را ندارید.") });
         } else if (status && status >= 400 && status < 500 && status !== 408) {
+          if (issueActorId.current === scope.actorId) forgetLoadingIssue(scope.actorId, scope.loadingId, command.id);
           const conclusion = { status: "rejected", text: userFacingError(error, "صدور اسناد بارگیری کامل نشد.") } as const;
           if (status === 409) void readIssueGroup(scope, conclusion);
           else setIssue(scope, conclusion);
@@ -508,6 +524,16 @@ export default function AccountingDispatchPage() {
     setDispatchNotice(null);
     setDetailRead(undefined);
     setDetailCandidateId(id);
+    const selected = dispatchCandidates.find(candidate => candidate.id === id);
+    if (user && selected?.loadingId) {
+      const command = storedLoadingIssue(user.id, selected.loadingId);
+      if (command) {
+        const key = loadingIssueKey(user.id, selected.loadingId);
+        setLoadingIssues(current => current[key] ? current : {
+          ...current, [key]: { status: "unknown", command, receiptMissing: false },
+        });
+      }
+    }
   };
   const pickupVerification = (id: string, command: "send" | "verify") => runDispatch(
     () => api.post(`/accounting/dispatch-candidates/${encodeURIComponent(id)}/pickup-verification/${command}`,

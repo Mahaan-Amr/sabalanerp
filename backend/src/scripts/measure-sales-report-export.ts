@@ -40,7 +40,7 @@ async function seed(tag: string, count: number) {
     }
     return createAuthoritativeSession(tx, id, { ipAddress: '127.0.0.1' });
   }, { timeout: 30_000 });
-  return { cookie: SESSION_COOKIE + '=' + session.token, id, sessionId: session.session.id };
+  return { cookie: SESSION_COOKIE + '=' + session.token, id };
 }
 
 async function measure(base: string, reader: string, exporter: string, mode: 'quiet' | 'export') {
@@ -161,11 +161,15 @@ async function main() {
     const warmupReport = (await warmup.json()).data;
     assert.equal(warmupReport.scope.departmentId, reader.id);
     assert.equal(warmupReport.contracts.length, 20);
-    for (const mode of ['quiet', 'export', 'quiet', 'export', 'quiet', 'export'] as const) {
-      global.gc?.();
-      await measure(base, reader.cookie, exporter.cookie, mode);
+    if (!process.argv.includes('--verify-only')) {
+      for (const mode of ['quiet', 'export', 'quiet', 'export', 'quiet', 'export'] as const) {
+        global.gc?.();
+        await measure(base, reader.cookie, exporter.cookie, mode);
+      }
     }
-    if (process.argv.includes('--verify-worker')) await verifyWorkerDownload(base, reader.cookie, exporter);
+    if (process.argv.includes('--verify-worker') || process.argv.includes('--verify-only')) {
+      await verifyWorkerDownload(base, reader.cookie, exporter);
+    }
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     await prisma.$transaction(async (tx) => {

@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { historicalServicePrintData } from "./historicalServices";
+import { projectLoadedMaterialRows } from "./materialQuantities";
 import { createHash } from "node:crypto";
 import {
   assessBoundAllocationPricingFreshness,
@@ -248,7 +249,7 @@ async function buildInvoiceSource(
       throw new SalesInvoiceError(
         "قیمت تأییدشده بارگیری تغییر کرده؛ ابتدا اصلاح ارسال را تکمیل کنید.",
       );
-    const priced = await readBoundPricedAllocation(tx, revision.id);
+    const priced = await readBoundPricedAllocation(tx, revision.id, { includeQuantityBasis: includePrint });
     if (result.currency && result.currency !== priced.currency)
       throw new SalesInvoiceError("ارز اقلام فاکتور یکسان نیست.");
     result.currency = priced.currency;
@@ -376,6 +377,7 @@ async function buildInvoiceSource(
       }
     }
     const currentLines: InvoiceLine[] = [];
+    const materialProjection = new Map<string, { product: any; basis: typeof priced.lines[number]["quantityBasis"] }>();
     const siblingDispatchRows = new Set(priced.lines.map(line => line.productRowId));
     const contractRows = new Map<string, ReturnType<typeof createDispatchProductRows>>();
     for (const line of priced.lines) {
@@ -422,6 +424,7 @@ async function buildInvoiceSource(
         )?.canonicalAllInTotal;
         if (approved != null) print.contractedGross[line.allocationRevisionLineId] = String(approved);
         print.rows[line.allocationRevisionLineId] = projectRows(line.productRowId);
+        materialProjection.set(line.allocationRevisionLineId, { product, basis: line.quantityBasis });
       }
       const evidence = record(version?.sourceEvidence);
       const technical = partner
@@ -559,6 +562,12 @@ async function buildInvoiceSource(
       }
     }
     for (const line of currentLines) {
+      const projection = materialProjection.get(line.key);
+      if (print && projection) {
+        const basis = projection.basis ? { ...projection.basis,
+          afterQuantity: amount(projection.basis.beforeQuantity).plus(line.quantity).toFixed() } : undefined;
+        print.rows[line.key] = projectLoadedMaterialRows(print.rows[line.key], projection.product, line, basis);
+      }
       if (
         amount(line.quantity).lt(0) ||
         amount(line.netAmount).lt(0) ||

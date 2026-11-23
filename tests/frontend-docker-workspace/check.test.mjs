@@ -55,3 +55,18 @@ test('a production builder that does not inherit the compiled packages is reject
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Production builder must inherit/);
 });
+
+test('nested build arguments cannot stand in for frontend build fields', () => {
+  const result = check('services:\n  frontend:\n    build:\n      args:\n        context: .\n        dockerfile: frontend/Dockerfile\n');
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /build context must be the repository root/);
+});
+
+test('a commented-out copy cannot satisfy the runtime package contract', () => {
+  const result = check(compose, dockerfile.replace(
+    'COPY --from=production-builder /packages/contract-product-graph',
+    '# COPY --from=production-builder /packages/contract-product-graph'
+  ));
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Runtime image must preserve/);
+});

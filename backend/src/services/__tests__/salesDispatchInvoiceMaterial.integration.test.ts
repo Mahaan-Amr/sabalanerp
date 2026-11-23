@@ -93,8 +93,8 @@ async function run() {
             versionId = randomUUID(),
             itemId = randomUUID();
           const quantity = index === 0 ? 90 : 100;
-          const loaded = scenario === "full" ? String(quantity) : scenario === "successive" ? "1" : index === 0 ? "70" : "30";
-          const previouslyLoaded = scenario === "successive" ? "1" : "0";
+          const loaded = scenario === "full" ? String(quantity) : (scenario === "successive" || scenario === "remainder") ? "1" : index === 0 ? "70" : "30";
+          const previouslyLoaded = scenario === "remainder" ? String(quantity - 1) : scenario === "successive" ? "1" : "0";
           const sourceSnapshot = {
             customerId: customer.id,
             contractData: {
@@ -118,8 +118,8 @@ async function run() {
                   totalPrice: 30,
                   unitPrice: 11,
                   tools: [{ code: "TEST-TOOL", name: "ابزار نیم‌لول",
-                    computedMeters: 2, pricePerMeter: 4, totalPrice: 8 }],
-                  cuttingBreakdown: [{ type: "longitudinal", meters: 1, rate: 3, cost: 3 }],
+                    computedMeters: index === 1 ? 155 : 2, minimumQuantity: index === 1 ? 155 : 0, pricePerMeter: 4, totalPrice: 8 }],
+                  cuttingBreakdown: [{ type: "longitudinal", meters: index === 0 ? 108 : 1, rate: 3, cost: 3 }],
                   finishingId: "test-finishing",
                   finishingName: "ساب آزمون",
                   finishingUnitPrice: 2,
@@ -295,7 +295,7 @@ async function run() {
               batchId: batch.id,
               loadingId: loading.id,
               queueTurnId: turn.id,
-              revisionNumber: scenario === "successive" ? 2 : 1,
+              revisionNumber: (scenario === "successive" || scenario === "remainder") ? 2 : 1,
               snapshot: json(snapshot),
               integrityHash: randomUUID(),
               finalizedBy: actor.id,
@@ -326,14 +326,14 @@ async function run() {
               readinessEvidenceHash: sourceHash(randomUUID()),
             },
           });
-          if (scenario === "successive") {
+          if ((scenario === "successive" || scenario === "remainder")) {
             const previousRevision = await tx.logisticsAllocationRevision.create({ data: {
               batchId: batch.id, loadingId: loading.id, queueTurnId: turn.id,
               revisionNumber: 1, snapshot: json(snapshot), integrityHash: randomUUID(), finalizedBy: actor.id,
             } });
             const previousLine = await tx.logisticsAllocationRevisionLine.create({ data: {
               revisionId: previousRevision.id, sourceContractId: contractId, sourceContractItemId: itemId,
-              productId: product.productId, productRowId: rowId, quantity: "1", unit: "count",
+              productId: product.productId, productRowId: rowId, quantity: previouslyLoaded, unit: "count",
               snapshot: json({}), integrityHash: randomUUID(),
             } });
             await tx.logisticsAllocationRevisionPricing.create({ data: {
@@ -342,9 +342,9 @@ async function run() {
             } });
             const priorPayload = {
               allocationRevisionId: previousRevision.id, allocationRevisionLineId: previousLine.id,
-              pricingVersionId: version.id, pricingRowId: pricingRow.id, quantity: "1.000",
+              pricingVersionId: version.id, pricingRowId: pricingRow.id, quantity: previouslyLoaded,
               grossAmount: "0.333333333333", discountAmount: "0.066666666667", netAmount: "0.266666666666",
-              consumesFinalRemainder: false, evidence: { ledgerSequence: 1, beforeQuantity: "0", afterQuantity: "1", contractedQuantity: String(quantity) }, recordedBy: actor.id,
+              consumesFinalRemainder: false, evidence: { ledgerSequence: 1, beforeQuantity: "0", afterQuantity: previouslyLoaded, contractedQuantity: String(quantity) }, recordedBy: actor.id,
             };
             await tx.dispatchPricedAllocationEvent.create({ data: { ...priorPayload, integrityHash: pricedAllocationIntegrityHash(priorPayload) } });
             await tx.logisticsAllocationRevision.update({ where: { id: previousRevision.id }, data: { sealedAt: new Date() } });
@@ -359,7 +359,7 @@ async function run() {
             discountAmount: "2.500000000000",
             netAmount: "10.000000000000",
             consumesFinalRemainder: false,
-            evidence: { ledgerSequence: scenario === "successive" ? 2 : 1, beforeQuantity: previouslyLoaded, afterQuantity: String(Number(previouslyLoaded) + Number(loaded)), contractedQuantity: String(quantity) },
+            evidence: { ledgerSequence: (scenario === "successive" || scenario === "remainder") ? 2 : 1, beforeQuantity: previouslyLoaded, afterQuantity: String(Number(previouslyLoaded) + Number(loaded)), contractedQuantity: String(quantity) },
             recordedBy: actor.id,
           };
           await tx.dispatchPricedAllocationEvent.create({
@@ -425,12 +425,27 @@ async function run() {
         if (scenario === 'full') {
           assert.ok(sourceRows.some(row => row.includes('۴۵') && row.includes('۲۱٫۶')));
           assert.ok(sourceRows.some(row => row.includes('۱۰۰') && row.includes('۴۲')));
-        } else if (scenario === 'successive') {
+        } else if (scenario === 'successive' || scenario === 'remainder') {
           assert.ok(sourceRows.some(row => /class="number"[^>]*>۰<|>۰<\//.test(row)), 'second riser uses remainder of the first source piece');
           assert.ok(sourceRows.some(row => row.includes('۰٫۴۲')), 'next tread consumes exactly one separate source piece');
         } else {
         assert.ok(sourceRows.some(row => row.includes('۳۵') && row.includes('۱۶٫۸')), '70 risers consume 35 mother pieces and 16.8 square metres');
         assert.ok(sourceRows.some(row => row.includes('۳۰') && row.includes('۱۲٫۶')), '30 treads consume only 12.6 square metres');
+        }
+        const operations = [...html.matchAll(/<tr class="operation">([\s\S]*?)<\/tr>/g)].map(match => match[1]);
+        const toolRows = operations.filter(row => row.includes('ابزار نیم‌لول'));
+        const cutRows = operations.filter(row => row.includes('برش طولی'));
+        assert.equal(toolRows.length, 2);
+        assert.equal(cutRows.length, 2);
+        if (scenario === 'partial') {
+          assert.ok(toolRows.some(row => row.includes('۴۶٫۵')), '30/100 treads carry 46.5 metres of the approved 155-metre tool');
+          assert.ok(cutRows.some(row => row.includes('۸۴')), '70/90 risers carry 84 metres of the approved 108-metre cut');
+        } else if (scenario === 'full') {
+          assert.ok(toolRows.some(row => row.includes('۱۵۵')));
+          assert.ok(cutRows.some(row => row.includes('۱۰۸')));
+        } else {
+          assert.ok(toolRows.some(row => row.includes('۱٫۵۵')), 'contract minimum is not charged again per shipment');
+          assert.ok(cutRows.some(row => row.includes('۱٫۲')), 'one riser carries 1.2 metres of longitudinal cutting');
         }
         assert.equal(download.number, issued.number);
         assert.match(html, /۲۰۰/); // Original approved net: 20 toman, displayed in rials.

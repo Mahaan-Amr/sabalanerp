@@ -264,7 +264,6 @@ export async function finalizeStoneReturn(db: PrismaClient, receiptId: string, a
       })),
     });
     const shipmentIds = new Map(shipmentReturns.map(item => [item.dispatchShareId, item.evidenceId]));
-    const repository = createAccountingSupplyChainPrismaRepository(tx);
     const credits: FinalizedCredit[] = [];
     for (const [index, { originalInvoiceId, invoiceShares }] of invoiceGroups.entries()) {
       const customerCreditRials = negotiated.invoiceCredits[index];

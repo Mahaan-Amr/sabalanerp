@@ -8,6 +8,11 @@ import { PartnerEventSchema } from '@sabalanerp/partner-sales-contracts';
 import { readPartnerOfficialPurchase } from './partnerSales/accounting/officialPurchase';
 
 type Tx = Prisma.TransactionClient;
+export type AllocationQuantityBasis = { beforeQuantity: string; afterQuantity: string; contractedQuantity: string };
+const quantityBasis = (evidence: Readonly<Record<string, unknown>>): AllocationQuantityBasis | undefined =>
+  ['beforeQuantity', 'afterQuantity', 'contractedQuantity'].every(key => typeof evidence[key] === 'string')
+    ? { beforeQuantity: String(evidence.beforeQuantity), afterQuantity: String(evidence.afterQuantity), contractedQuantity: String(evidence.contractedQuantity) }
+    : undefined;
 
 const record = (value: unknown): Readonly<Record<string, unknown>> => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Priced allocation evidence is malformed.');
@@ -34,6 +39,7 @@ type OrdinaryBoundPricedAllocationReadModel = {
     discountAmount: string;
     netAmount: string;
     ledgerSequence: number;
+    quantityBasis?: AllocationQuantityBasis;
   }>;
   totals: { grossAmount: string; discountAmount: string; netAmount: string };
 };
@@ -42,7 +48,7 @@ export type PartnerBoundPricedAllocationReadModel = {
   pricingVersions: Array<{ caseId: string; internalRecordId: string; financialApprovalEvidenceId: string;
     sourceFinancialRecordId: string; integrityHash: string; readinessEvidenceHash: string }>;
   lines: Array<{ allocationRevisionLineId: string; productRowId: string; unit: string; quantity: string;
-    grossAmount: string; discountAmount: string; netAmount: string; ledgerSequence: number }>;
+    grossAmount: string; discountAmount: string; netAmount: string; ledgerSequence: number; quantityBasis?: AllocationQuantityBasis }>;
   totals: { grossAmount: string; discountAmount: string; netAmount: string };
 };
 export type BoundPricedAllocationReadModel = OrdinaryBoundPricedAllocationReadModel | PartnerBoundPricedAllocationReadModel;
@@ -105,6 +111,7 @@ export const assessBoundAllocationPricingFreshness = async (
 export const readBoundPricedAllocation = async (
   tx: Tx,
   allocationRevisionId: string,
+  options: { includeQuantityBasis?: boolean } = {},
 ): Promise<BoundPricedAllocationReadModel> => {
   const revision = await tx.logisticsAllocationRevision.findUnique({ where: { id: allocationRevisionId }, include: {
     lines: true, partnerPricing: { include: { events: { include: { allocationRevisionLine: true },
@@ -136,7 +143,7 @@ export const readBoundPricedAllocation = async (
       sequences.set(event.approvalEvidenceId, [...(sequences.get(event.approvalEvidenceId) || []), ledgerSequence]);
       return { allocationRevisionLineId: line.id, productRowId: line.productRowId, unit: line.unit,
         quantity: payload.quantity, grossAmount: payload.grossAmount, discountAmount: payload.discountAmount,
-        netAmount: payload.netAmount, ledgerSequence };
+        netAmount: payload.netAmount, ledgerSequence, ...(options.includeQuantityBasis ? { quantityBasis: quantityBasis(evidence) } : {}) };
     }).sort((left, right) => left.productRowId.localeCompare(right.productRowId) || left.ledgerSequence - right.ledgerSequence);
     for (const values of sequences.values()) if (values.sort((a, b) => a - b).some((value, index) => value !== index + 1)) {
       throw new Error('Partner priced allocation row has a non-contiguous ledger sequence.');
@@ -211,6 +218,7 @@ export const readBoundPricedAllocation = async (
       discountAmount: payload.discountAmount,
       netAmount: payload.netAmount,
       ledgerSequence,
+      ...(options.includeQuantityBasis ? { quantityBasis: quantityBasis(evidence) } : {}),
     };
   }).sort((left, right) => left.contractId.localeCompare(right.contractId)
     || left.contractItemId.localeCompare(right.contractItemId) || left.ledgerSequence - right.ledgerSequence);

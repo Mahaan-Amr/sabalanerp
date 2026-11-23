@@ -1,13 +1,27 @@
 'use client';
 
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { ErpButton, ErpCard, ErpField, ErpInlineState, ErpPersianDateField, ErpSection, ErpSelect, ErpSkeleton, ErpSummaryGrid } from '@/components/erp';
+import {
+  ErpButton, ErpCard, ErpField, ErpFieldView, ErpInlineState, ErpInput, ErpPersianDateField, ErpSection,
+  ErpSelect, ErpSkeleton, ErpSummaryGrid, ErpTextarea,
+} from '@/components/erp';
 import { userFacingError } from '@/features/dispatch/userFacingError';
-import { displayExactDecimal, displayStoneReturnQuantity, stoneReturnApi, type StoneReturnFinalization, type StoneReturnPostingContext } from './stoneReturnApi';
+import {
+  displayExactDecimal, displayStoneReturnQuantity, stoneReturnApi, stoneReturnUnitLabels,
+  type StoneReturnFinalization, type StoneReturnPostingContext,
+} from './stoneReturnApi';
+import { describeStoneReturnRate } from './stoneReturnRate';
 
-export function StoneReturnPosting({ receiptId, draft, onPosted }: {
+const displayRials = (amount: string) => `${displayExactDecimal(amount)} ریال`;
+const rateLabel = (unit: string) => `نرخ توافقی هر ${stoneReturnUnitLabels[unit] ?? unit} (ریال)`;
+
+export function StoneReturnPosting({ receiptId, draft, acceptedQuantity, unit, posting, onPostingChange, onPosted }: {
   receiptId: string;
   draft: { id: string; version: number };
+  acceptedQuantity: string;
+  unit: string;
+  posting: boolean;
+  onPostingChange: (posting: boolean) => void;
   onPosted: (finalization: StoneReturnFinalization) => void;
 }) {
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -15,7 +29,8 @@ export function StoneReturnPosting({ receiptId, draft, onPosted }: {
   const [periodId, setPeriodId] = useState('');
   const [postingRuleId, setPostingRuleId] = useState('');
   const [loading, setLoading] = useState(true);
-  const [posting, setPosting] = useState(false);
+  const [rateInput, setRateInput] = useState('');
+  const [rateDifferenceReason, setRateDifferenceReason] = useState('');
   const [error, setError] = useState('');
   const [reload, setReload] = useState(0);
   const busy = useRef(false);
@@ -46,22 +61,31 @@ export function StoneReturnPosting({ receiptId, draft, onPosted }: {
     return () => { active = false; };
   }, [date, receiptId, draft.version, reload]);
 
+  const preview = context && describeStoneReturnRate(rateInput, acceptedQuantity, context.originalRates);
+  const canPost = preview && preview.customerCreditRials !== '0' && (!preview.requiresReason || rateDifferenceReason.trim())
+    && periodId && postingRuleId && date;
+  const rateError = rateInput && !preview
+    ? 'نرخ توافقی هر واحد باید مبلغ ریالی مثبت باشد.'
+    : preview?.customerCreditRials === '0' ? 'مبلغ بستانکاری پس از گرد کردن باید دست‌کم یک ریال باشد.' : undefined;
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (busy.current || !context || !periodId || !postingRuleId || !date) return;
+    if (busy.current || !canPost || !preview) return;
     busy.current = true;
-    setPosting(true);
+    onPostingChange(true);
     setError('');
     try {
       const result = await stoneReturnApi.finalize(receiptId, {
         expectedVersion: draft.version, requestId: draft.id, date, periodId, postingRuleId, confirmed: true,
+        agreedUnitRateRials: preview.agreedUnitRateRials,
+        rateDifferenceReason: preview.requiresReason ? rateDifferenceReason.trim() : null,
       });
       onPosted(result.data);
     } catch (error) {
       setError(userFacingError(error, 'ثبت قطعی مرجوعی ممکن نشد.'));
     } finally {
       busy.current = false;
-      setPosting(false);
+      onPostingChange(false);
     }
   }
 
@@ -74,6 +98,19 @@ export function StoneReturnPosting({ receiptId, draft, onPosted }: {
         label: 'تلاش دوباره', onClick: () => setReload(value => value + 1),
       } : undefined} />}
       {context && <>
+        <ErpField label={rateLabel(unit)} error={rateError} required>
+          <ErpInput inputMode="decimal" maxLength={100} value={rateInput} disabled={posting} required
+            onChange={event => setRateInput(event.target.value)} />
+        </ErpField>
+        <ErpSummaryGrid columns={3} items={[
+          { label: 'مبلغ خالص فروش اولیه', value: displayRials(context.originalAmounts.originalNetRials) },
+          { label: 'مالیات مرجع', value: displayRials(context.originalAmounts.originalTaxRials) },
+          { label: 'بستانکاری توافقی', value: preview ? displayRials(preview.customerCreditRials) : '—', tone: 'info' },
+        ]} />
+        {preview?.requiresReason && <ErpField label="دلیل تفاوت نرخ با فروش اولیه" required>
+          <ErpTextarea maxLength={2000} value={rateDifferenceReason} disabled={posting} required
+            onChange={event => setRateDifferenceReason(event.target.value)} />
+        </ErpField>}
         {(!context.periods.length || !context.rules.length) &&
           <ErpInlineState kind="stale" title="برای این تاریخ، دوره باز و قاعده مؤثر ثبت مشتری در دفتر مرجع پیدا نشد." />}
         {context.periods.length > 1 && <ErpField label="دوره ثبت" required>
@@ -89,22 +126,28 @@ export function StoneReturnPosting({ receiptId, draft, onPosted }: {
           </ErpSelect>
         </ErpField>}
         <ErpButton type="submit" label={posting ? 'در حال ثبت…' : 'ثبت قطعی بستانکاری'} tone="primary" variant="solid"
-          disabled={posting || !periodId || !postingRuleId} />
+          disabled={posting || !canPost} />
       </>}
     </form>
   </ErpSection>;
 }
 
 export function StoneReturnPostingResult({ finalization, unit }: { finalization: StoneReturnFinalization; unit: string }) {
+  const { summary } = finalization;
   return <ErpSection title="اسناد قطعی مرجوعی">
-    <ErpSummaryGrid items={[
+    <ErpSummaryGrid columns={3} items={[
       { label: 'تاریخ سند', value: new Date(finalization.documentDate).toLocaleDateString('fa-IR', { timeZone: 'UTC' }) },
       { label: 'نسخه تخصیص', value: finalization.draftVersion.toLocaleString('fa-IR') },
+      { label: rateLabel(unit), value: displayExactDecimal(summary.agreedUnitRateRials) },
+      { label: 'مبلغ خالص فروش اولیه', value: displayRials(summary.originalNetRials) },
+      { label: 'مالیات مرجع', value: displayRials(summary.originalTaxRials) },
+      { label: 'بستانکاری توافقی', value: displayRials(summary.customerCreditRials), tone: 'success' },
     ]} />
-    {finalization.summary.credits.map(credit => <ErpCard key={credit.creditInvoiceId}>
+    {summary.rateDifferenceReason && <ErpFieldView label="دلیل تفاوت نرخ با فروش اولیه" value={summary.rateDifferenceReason} />}
+    {summary.credits.map(credit => <ErpCard key={credit.creditInvoiceId}>
       <h3 className="mb-3 font-semibold break-words">صورتحساب مرجع {credit.originalInvoiceNumber}</h3>
       <ErpSummaryGrid items={[
-        { label: 'بستانکاری مشتری', value: `${displayExactDecimal(credit.customerCreditRials)} ریال`, tone: 'success' },
+        { label: 'بستانکاری مشتری', value: displayRials(credit.customerCreditRials), tone: 'success' },
         { label: 'شماره سند حسابداری', value: credit.voucherNumber?.toLocaleString('fa-IR') ?? <bdi className="break-all">{credit.voucherId}</bdi> },
         ...credit.shares.map(share => ({ label: 'مقدار ثبت‌شده', value: displayStoneReturnQuantity(share.quantity, unit) })),
       ]} />

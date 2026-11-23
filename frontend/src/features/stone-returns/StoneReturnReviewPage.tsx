@@ -64,6 +64,7 @@ export function StoneReturnReviewPage({ receiptId }: { receiptId: string }) {
   const [reload, setReload] = useState(0);
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState(false);
+  const [posting, setPosting] = useState(false);
   const [error, setError] = useState('');
   const [stale, setStale] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -111,7 +112,7 @@ export function StoneReturnReviewPage({ receiptId }: { receiptId: string }) {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!review || busy.current || !editable || unavailableRows.length) return;
+    if (!review || busy.current || !editable || posting || unavailableRows.length) return;
     const rows: StoneReturnAllocationInput[] = review.candidates.flatMap(row => {
       const quantity = quantityInput(amounts[candidateKey(row)] ?? '');
       return quantity && quantity !== '0' ? [{
@@ -165,25 +166,26 @@ export function StoneReturnReviewPage({ receiptId }: { receiptId: string }) {
             {review.candidates.map(candidate => {
               const key = candidateKey(candidate);
               return <StoneReturnCandidateFields key={key} candidate={candidate} quantity={amounts[key] ?? ''}
-                editable={editable} disabled={pending} onChange={value => changeQuantity(key, value)} />;
+                editable={editable} disabled={pending || posting} onChange={value => changeQuantity(key, value)} />;
             })}
             {unavailableRows.map(row => <ErpCard className="space-y-3" key={row.id}>
               <ErpInlineState kind="stale" title={`قرارداد ${row.contractNumber} · صورتحساب ${row.originalInvoiceNumber} دیگر قابل تخصیص نیست.`} />
               <ErpFieldView label="مقدار ذخیره‌شده" value={displayStoneReturnQuantity(row.quantity, receipt.unit)} />
-              {editable && <ErpButton type="button" label="حذف این تخصیص" tone="danger" variant="soft" disabled={pending}
+              {editable && <ErpButton type="button" label="حذف این تخصیص" tone="danger" variant="soft" disabled={pending || posting}
                 onClick={() => changeQuantity(candidateKey(row), '')} />}
             </ErpCard>)}
             {editable && (review.candidates.length > 0 || review.draft) ? <>
               <ErpField label="دلیل انتخاب ردیف‌های فروش" required={!review.originKnown && hasAllocations}>
-                <ErpTextarea maxLength={2000} required={!review.originKnown && hasAllocations} value={reason} disabled={pending}
+                <ErpTextarea maxLength={2000} required={!review.originKnown && hasAllocations} value={reason} disabled={pending || posting}
                   onChange={event => { setReason(event.target.value); setSaved(false); }} />
               </ErpField>
-              <ErpButton type="submit" tone="primary" variant="solid" disabled={pending || unavailableRows.length > 0}
+              <ErpButton type="submit" tone="primary" variant="solid" disabled={pending || posting || unavailableRows.length > 0}
                 label={pending ? 'در حال ذخیره…' : 'ذخیره پیش‌نویس'} />
             </> : review.draft?.attributionReason && <ErpFieldView label="دلیل انتخاب ردیف‌های فروش" value={review.draft.attributionReason} />}
           </form>
         </ErpSection>}
         {canPost && review.draft && <StoneReturnPosting key={review.draft.id} receiptId={receiptId} draft={review.draft}
+          acceptedQuantity={receipt.acceptedQuantity} unit={receipt.unit} posting={posting} onPostingChange={setPosting}
           onPosted={finalization => setReview({ ...review, finalization, allocationStatus: 'FINALIZED' })} />}
         {review.finalization && <StoneReturnPostingResult finalization={review.finalization} unit={receipt.unit} />}
       </>}

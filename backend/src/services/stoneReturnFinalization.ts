@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { parseCanonicalDecimal } from '@sabalanerp/contract-product-graph';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { AccountingCustomerTreasuryError, type CustomerTreasuryActor } from './accountingCustomerTreasury';
 import { recognizeCustomerReturnWithin, type CustomerReturnRecognitionInput } from './accountingCustomerTreasuryPrisma';
@@ -13,16 +14,19 @@ import { lockStoneReturnCase, readStoneReturnAllocationDraft } from './stoneRetu
 import { StoneReturnAllocationError, stoneReturnSourceKey, validateStoneReturnAllocations } from './stoneReturnAllocationRules';
 import { loadStoneReturnCandidates } from './stoneReturnCandidates';
 import { allocateOriginalReturnAmounts } from './stoneReturnOriginalAmounts';
+import { apportionStoneReturnCredit, stoneReturnRatesDiffer } from './stoneReturnNegotiatedAmounts';
 import { readStoneReturnReceipt } from './stoneReturnReceipts';
 
 type FinalizedShare = {
   draftRowId: string; shipmentReturnEvidenceId: string; valuationLayerId: string; quantity: string;
+  originalInvoicedQuantity: string; originalLineNetRials: string;
   originalNetRials: string; originalTaxRials: string; costRials: string;
 };
 type FinalizedCredit = {
   originalInvoiceId: string; originalInvoiceNumber: string; creditInvoiceId: string;
   creditNumber: string; voucherId: string; voucherNumber: number | null; taxInvoiceId: string;
-  openItemId: string; customerCreditRials: string; shares: FinalizedShare[];
+  openItemId: string | null; customerCreditRials: string;
+  originalNetRials: string; originalTaxRials: string; shares: FinalizedShare[];
 };
 
 type Tx = Prisma.TransactionClient;
@@ -41,13 +45,24 @@ function documentDate(value: unknown) {
 
 function parseCommand(body: unknown) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) throw new StoneReturnAllocationError(400, 'فرمان ثبت قطعی معتبر نیست.');
-  const { expectedVersion, requestId, date, periodId, postingRuleId, confirmed } = body as Record<string, unknown>;
+  const { expectedVersion, requestId, date, periodId, postingRuleId, confirmed,
+    agreedUnitRateRials: rawRate, rateDifferenceReason: rawReason } = body as Record<string, unknown>;
   const id = (value: unknown): value is string => typeof value === 'string' && value.trim() === value && value.length > 0 && value.length <= 200;
   if (confirmed !== true || typeof expectedVersion !== 'number' || !Number.isSafeInteger(expectedVersion) || expectedVersion <= 0
     || !id(requestId) || !id(periodId) || !id(postingRuleId)) {
     throw new StoneReturnAllocationError(400, 'نسخه پیش‌نویس، دوره، قاعده و تأیید ثبت قطعی را بررسی کنید.');
   }
-  return { expectedVersion, requestId, date: documentDate(date), periodId, postingRuleId };
+  const invalidRate = 'نرخ توافقی هر واحد باید مبلغ ریالی مثبت باشد.';
+  if (typeof rawRate !== 'string' || rawRate.length > 100 || !/^\d+(?:\.\d+)?$/.test(rawRate)) {
+    throw new StoneReturnAllocationError(400, invalidRate);
+  }
+  const agreedUnitRateRials = parseCanonicalDecimal(rawRate);
+  if (agreedUnitRateRials === '0') throw new StoneReturnAllocationError(400, invalidRate);
+  if (rawReason != null && (typeof rawReason !== 'string' || rawReason.length > 2000)) {
+    throw new StoneReturnAllocationError(400, 'دلیل تفاوت نرخ معتبر نیست.');
+  }
+  const rateDifferenceReason = typeof rawReason === 'string' ? rawReason.trim() || null : null;
+  return { expectedVersion, requestId, date: documentDate(date), periodId, postingRuleId, agreedUnitRateRials, rateDifferenceReason };
 }
 
 async function postingOptions(tx: Tx, bookId: string, date: Date) {
@@ -103,6 +118,44 @@ async function validateDraft(tx: Tx, receipt: Awaited<ReturnType<typeof readSton
   return { bookId, shares, invoiceIds };
 }
 
+type ValidatedShare = Awaited<ReturnType<typeof validateDraft>>['shares'][number];
+
+async function readOriginalShares(tx: Tx, shares: ValidatedShare[]) {
+  const sources = await tx.accountingTaxInvoiceLine.findMany({
+    where: { id: { in: shares.map(({ candidate }) => candidate.originalTaxLineId) } },
+  });
+  const sourceById = new Map(sources.map(source => [source.id, source]));
+  const cumulativeByLine = new Map<string, string>();
+  return shares.map(share => {
+    const { candidate, quantity } = share;
+    const source = sourceById.get(candidate.originalTaxLineId);
+    const rateBasisPoints = (source?.allocationEvidence as Prisma.JsonObject)?.rateBasisPoints;
+    if (!source || source.taxInvoiceId !== candidate.originalTaxInvoiceId
+      || typeof rateBasisPoints !== 'number' || !Number.isInteger(rateBasisPoints)) {
+      throw new StoneReturnAllocationError(409, 'قاعده مالیات ثبت‌شده در ردیف صورتحساب مرجع معتبر نیست.');
+    }
+    const originalRate = { originalInvoicedQuantity: source.quantity.toFixed(), originalLineNetRials: source.rawBaseAmount.toFixed() };
+    const prior = cumulativeByLine.get(source.id) ?? candidate.linePriorReturnedQuantity;
+    const amounts = allocateOriginalReturnAmounts({
+      quantity: originalRate.originalInvoicedQuantity, netRials: originalRate.originalLineNetRials,
+      taxRials: source.roundedTaxRials.toFixed(), costRials: source.costRials.toFixed(),
+    }, prior, quantity);
+    cumulativeByLine.set(source.id, formatExactQuantityAtoms(parseExactQuantityAtoms(prior) + parseExactQuantityAtoms(quantity)));
+    const taxRule = { id: source.taxRuleId, version: source.taxRuleVersion, citation: source.citation, rateBasisPoints, exempt: source.exempt };
+    return { ...share, originalRate, amounts, taxRule };
+  });
+}
+
+function originalAmounts(shares: Awaited<ReturnType<typeof readOriginalShares>>) {
+  let netRials = 0n;
+  let taxRials = 0n;
+  for (const { amounts } of shares) {
+    netRials += amounts.netRials;
+    taxRials += amounts.taxRials;
+  }
+  return { originalNetRials: netRials.toString(), originalTaxRials: taxRials.toString() };
+}
+
 export async function readStoneReturnPostingContext(db: PrismaClient, receiptId: string, rawDate: unknown) {
   const date = documentDate(rawDate);
   return db.$transaction(async tx => {
@@ -113,8 +166,13 @@ export async function readStoneReturnPostingContext(db: PrismaClient, receiptId:
     ]);
     if (finalized) throw new StoneReturnAllocationError(409, 'این مرجوعی قبلاً ثبت قطعی شده است.');
     if (!draft) throw new StoneReturnAllocationError(409, 'پیش‌نویس تخصیص برای ثبت قطعی لازم است.');
-    const { bookId } = await validateDraft(tx, receipt, draft, date);
-    return { draftVersion: draft.version, ...await postingOptions(tx, bookId, date) };
+    const { bookId, shares } = await validateDraft(tx, receipt, draft, date);
+    const originalShares = await readOriginalShares(tx, shares);
+    return {
+      draftVersion: draft.version, ...await postingOptions(tx, bookId, date),
+      originalAmounts: originalAmounts(originalShares),
+      originalRates: originalShares.map(share => share.originalRate),
+    };
   }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
 }
 
@@ -174,6 +232,18 @@ export async function finalizeStoneReturn(db: PrismaClient, receiptId: string, a
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`SHIPMENT_EVIDENCE:${id}`}))`;
     }
     const { bookId, shares, invoiceIds } = await validateDraft(tx, receipt, draft, command.date);
+    const originalShares = await readOriginalShares(tx, shares);
+    if (!command.rateDifferenceReason && stoneReturnRatesDiffer(command.agreedUnitRateRials, originalShares.map(row => row.originalRate))) {
+      throw new StoneReturnAllocationError(400, 'دلیل تفاوت نرخ توافقی با نرخ خالص فروش اولیه الزامی است.');
+    }
+    const invoiceGroups = invoiceIds.map(originalInvoiceId => ({
+      originalInvoiceId, invoiceShares: originalShares.filter(({ candidate }) => candidate.originalInvoiceId === originalInvoiceId),
+    }));
+    const negotiated = apportionStoneReturnCredit(command.agreedUnitRateRials, invoiceGroups.map(({ invoiceShares }) =>
+      formatExactQuantityAtoms(invoiceShares.reduce((total, row) => total + parseExactQuantityAtoms(row.quantity), 0n))));
+    if (negotiated.agreedRials <= 0n) {
+      throw new StoneReturnAllocationError(400, 'مبلغ بستانکاری پس از گرد کردن باید دست‌کم یک ریال باشد.');
+    }
     const options = await postingOptions(tx, bookId, command.date);
     const period = options.periods.find(item => item.id === command.periodId);
     const rule = options.rules.find(item => item.id === command.postingRuleId);
@@ -194,39 +264,24 @@ export async function finalizeStoneReturn(db: PrismaClient, receiptId: string, a
       })),
     });
     const shipmentIds = new Map(shipmentReturns.map(item => [item.dispatchShareId, item.evidenceId]));
-    const sources = await tx.accountingTaxInvoiceLine.findMany({
-      where: { id: { in: shares.map(({ candidate }) => candidate.originalTaxLineId) } },
-    });
-    const sourceById = new Map(sources.map(source => [source.id, source]));
+    const repository = createAccountingSupplyChainPrismaRepository(tx);
     const credits: FinalizedCredit[] = [];
-    for (const originalInvoiceId of invoiceIds) {
-      const invoiceShares = shares.filter(({ candidate }) => candidate.originalInvoiceId === originalInvoiceId);
-      const cumulativeByLine = new Map<string, string>();
-      const lines: CustomerReturnRecognitionInput['lines'] = invoiceShares.map(({ id, quantity, candidate }) => {
-        const source = sourceById.get(candidate.originalTaxLineId);
-        const rateBasisPoints = (source?.allocationEvidence as Prisma.JsonObject)?.rateBasisPoints;
-        if (!source || source.taxInvoiceId !== candidate.originalTaxInvoiceId
-          || typeof rateBasisPoints !== 'number' || !Number.isInteger(rateBasisPoints)) {
-          throw new StoneReturnAllocationError(409, 'قاعده مالیات ثبت‌شده در ردیف صورتحساب مرجع معتبر نیست.');
-        }
-        const prior = cumulativeByLine.get(candidate.originalLineId) ?? candidate.linePriorReturnedQuantity;
-        const amounts = allocateOriginalReturnAmounts({
-          quantity: source.quantity.toFixed(), netRials: source.rawBaseAmount.toFixed(),
-          taxRials: source.roundedTaxRials.toFixed(), costRials: source.costRials.toFixed(),
-        }, prior, quantity);
-        cumulativeByLine.set(candidate.originalLineId, formatExactQuantityAtoms(parseExactQuantityAtoms(prior) + parseExactQuantityAtoms(quantity)));
-        return {
-          id, originalLineId: candidate.originalLineId, evidenceId: shipmentIds.get(id)!, productRowId: candidate.productRowId, quantity, ...amounts,
-          taxRule: { id: source.taxRuleId, version: source.taxRuleVersion, citation: source.citation,
-            rateBasisPoints, exempt: source.exempt },
-        };
-      });
+    for (const [index, { originalInvoiceId, invoiceShares }] of invoiceGroups.entries()) {
+      const customerCreditRials = negotiated.invoiceCredits[index];
+      const lines: CustomerReturnRecognitionInput['lines'] = invoiceShares.map(({ id, quantity, candidate, amounts, taxRule }) => ({
+        id, originalLineId: candidate.originalLineId, evidenceId: shipmentIds.get(id)!, productRowId: candidate.productRowId,
+        quantity, ...amounts, taxRule,
+      }));
       const identity = `stone-return:${receiptId}:${originalInvoiceId}`;
       const credit = await recognizeCustomerReturnWithin(tx, {
         originalInvoiceId, commercialCreditNumber: identity, bookId, fiscalYearId: period.fiscalYearId, periodId: period.id,
         returnedAt: command.date, postingRule: rule, idempotencyKey: identity, correlationId: `stone-return:${receiptId}`,
         evidenceIds: lines.map(line => line.evidenceId), lines, actor,
-      }, undefined, {
+      }, {
+        caseId: receiptId, agreedGrossRials: customerCreditRials,
+        lines: lines.map(line => ({ lineId: line.id, agreedUnitRateRials: command.agreedUnitRateRials,
+          rateDifferenceReason: command.rateDifferenceReason ?? undefined })),
+      }, {
         caseId: receiptId, customerId: receipt.customerId, unit: receipt.unit, receiptEventId: stock.event.id,
         receiptEvidenceHash: stock.evidence.hash, draftId: draft.id, draftVersion: draft.version, draftHash, attributionReason: draft.attributionReason,
         shares: invoiceShares.map(({ id, candidate }) => ({
@@ -237,11 +292,15 @@ export async function finalizeStoneReturn(db: PrismaClient, receiptId: string, a
       if (!credit.taxInvoiceId) throw new StoneReturnAllocationError(409, 'سند مالیاتی مرجوعی در زنجیره ثبت قطعی پیدا نشد.');
       const [voucher, openItem] = await Promise.all([
         tx.accountingLedgerVoucher.findUniqueOrThrow({ where: { id: credit.ledgerVoucherId }, select: { statutoryNumber: true } }),
-        tx.accountingCustomerOpenItem.findUniqueOrThrow({ where: { invoiceId_kind: { invoiceId: credit.id, kind: 'CREDIT' } },
+        tx.accountingCustomerOpenItem.findUnique({ where: { invoiceId_kind: { invoiceId: credit.id, kind: 'CREDIT' } },
           select: { id: true, originalRials: true } }),
       ]);
+      const postedCreditRials = openItem?.originalRials.toFixed(0) ?? '0';
+      if (postedCreditRials !== customerCreditRials.toString() || (customerCreditRials === 0n && openItem)) {
+        throw new StoneReturnAllocationError(409, 'بستانکاری ثبت‌شده با مبلغ توافقی مرجوعی سازگار نیست.');
+      }
       const valuedShares: FinalizedShare[] = [];
-      for (const line of lines) {
+      for (const [lineIndex, line] of lines.entries()) {
         const layerId = randomUUID();
         await repository.saveLayer({
           id: layerId, identityId: stock.identity.id, originId: receiptId, unit: receipt.unit,
@@ -251,20 +310,25 @@ export async function finalizeStoneReturn(db: PrismaClient, receiptId: string, a
         });
         valuedShares.push({
           draftRowId: line.id, shipmentReturnEvidenceId: line.evidenceId, valuationLayerId: layerId, quantity: line.quantity,
+          ...invoiceShares[lineIndex].originalRate,
           originalNetRials: line.netRials.toString(), originalTaxRials: line.taxRials.toString(), costRials: line.costRials.toString(),
         });
       }
       credits.push({
         originalInvoiceId, originalInvoiceNumber: invoiceShares[0].candidate.originalInvoiceNumber,
         creditInvoiceId: credit.id, creditNumber: credit.number, voucherId: credit.ledgerVoucherId, taxInvoiceId: credit.taxInvoiceId,
-        voucherNumber: voucher.statutoryNumber, openItemId: openItem.id,
-        customerCreditRials: openItem.originalRials.toFixed(0), shares: valuedShares,
+        voucherNumber: voucher.statutoryNumber, openItemId: openItem?.id ?? null,
+        customerCreditRials: postedCreditRials, ...originalAmounts(invoiceShares), shares: valuedShares,
       });
     }
     const data = await tx.stoneReturnFinalization.create({ data: {
       receiptId, draftId: draft.id, draftVersion: draft.version, draftHash, requestId: command.requestId, commandHash,
       finalizedBy: actor.id, finalizedAt, documentDate: command.date, bookId, periodId: period.id, postingRuleId: rule.id,
-      summary: { inventoryIdentityId: stock.identity.id, receiptEventId: stock.event.id, receiptEvidenceHash: stock.evidence.hash, credits },
+      summary: {
+        inventoryIdentityId: stock.identity.id, receiptEventId: stock.event.id, receiptEvidenceHash: stock.evidence.hash,
+        agreedUnitRateRials: command.agreedUnitRateRials, rateDifferenceReason: command.rateDifferenceReason,
+        customerCreditRials: negotiated.agreedRials.toString(), ...originalAmounts(originalShares), credits,
+      },
     } });
     return { data, replayed: false };
   };

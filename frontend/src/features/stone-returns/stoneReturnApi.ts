@@ -1,4 +1,5 @@
 import api from '@/lib/api';
+import type { StoneReturnOriginalRate } from './stoneReturnRate';
 
 export const stoneReturnUnitLabels: Record<string, string> = {
   squareMeter: 'مترمربع', meter: 'متر طول', count: 'عدد', ton: 'تن',
@@ -69,32 +70,35 @@ export type StoneReturnReview = {
   finalization: StoneReturnFinalization | null;
 };
 
+type StoneReturnOriginalAmounts = { originalNetRials: string; originalTaxRials: string };
+
 export type StoneReturnFinalization = {
   id: string;
   draftVersion: number;
   finalizedAt: string;
   documentDate: string;
-  summary: {
+  summary: StoneReturnOriginalAmounts & {
+    agreedUnitRateRials: string;
+    rateDifferenceReason: string | null;
+    customerCreditRials: string;
     inventoryIdentityId: string;
     receiptEventId: string;
     receiptEvidenceHash: string;
-    credits: Array<{
+    credits: Array<StoneReturnOriginalAmounts & {
       originalInvoiceId: string;
       originalInvoiceNumber: string;
       creditInvoiceId: string;
       creditNumber: string;
       voucherId: string;
       voucherNumber: number | null;
-      openItemId: string;
+      openItemId: string | null;
       taxInvoiceId: string;
       customerCreditRials: string;
-      shares: Array<{
+      shares: Array<StoneReturnOriginalRate & StoneReturnOriginalAmounts & {
         draftRowId: string;
         shipmentReturnEvidenceId: string;
         valuationLayerId: string;
         quantity: string;
-        originalNetRials: string;
-        originalTaxRials: string;
         costRials: string;
       }>;
     }>;
@@ -103,6 +107,8 @@ export type StoneReturnFinalization = {
 
 export type StoneReturnPostingContext = {
   draftVersion: number;
+  originalAmounts: StoneReturnOriginalAmounts;
+  originalRates: StoneReturnOriginalRate[];
   book: { id: string; namePersian: string };
   periods: Array<{ id: string; titlePersian: string; fiscalYear: { titlePersian: string } }>;
   rules: Array<{ id: string; code: string; version: number }>;
@@ -131,6 +137,7 @@ export const stoneReturnApi = {
     (await api.get<Envelope<StoneReturnPostingContext>>(`${reviewUrl(id)}/posting-context`, { params: { date } })).data.data,
   finalize: async (id: string, command: {
     expectedVersion: number; requestId: string; date: string; periodId: string; postingRuleId: string; confirmed: true;
+    agreedUnitRateRials: string; rateDifferenceReason: string | null;
   }) => (await api.post<Envelope<{ data: StoneReturnFinalization; replayed: boolean }>>(`${reviewUrl(id)}/finalize`, command)).data.data,
   customers: async (search: string) =>
     (await api.get<Envelope<StoneReturnOption[]>>(`${logistics}/customers`, { params: { search } })).data.data,

@@ -555,7 +555,7 @@ test('customer revenue and treasury tracer bullet persists once and projects onl
       assert.equal(creditLine?.partyId, profile.accountingPartyId);
       assert.equal(creditLine.creditRials.toFixed(0), '550');
 
-      await returnTest.test('Logistics 40/35 receipt finalizes across two invoices, rolls back fully on a second-invoice error, and replays once', async () => {
+      await returnTest.test('Logistics 40/35 receipt posts one negotiated credit across two invoices, rolls back fully on a second-invoice error, and replays once', async () => {
         const dispatchAt = new Date('2026-09-22T08:00:00Z');
         const recognizedAt = new Date('2026-09-23T08:00:00Z');
         const postingDate = '2026-09-24';
@@ -632,8 +632,10 @@ test('customer revenue and treasury tracer bullet persists once and projects onl
         const attributionReason = 'بار ورودی فاقد شناسه بارگیری مبدأ است.';
         const draftInput = { expectedVersion: 0, rows: [rows[0]], attributionReason };
         const partial = await saveStoneReturnAllocationDraft(database, accepted.id, actor.id, draftInput);
+        const rateDifferenceReason = 'توافق مدیر فروش و مشتری درباره نرخ سنگ مرجوعی';
         const returnCommand = { expectedVersion: partial.draft.version, requestId: 'certify-multi-reference',
-          date: postingDate, periodId: command.periodId, postingRuleId: postingRule.id, confirmed: true };
+          date: postingDate, periodId: command.periodId, postingRuleId: postingRule.id, confirmed: true,
+          agreedUnitRateRials: '2500000.024', rateDifferenceReason };
         const accountant = { id: actor.id, profile: 'ACCOUNTANT' as const };
         await assert.rejects(finalizeStoneReturn(database, accepted.id, accountant, returnCommand), /کامل پوشش دهد/);
         const complete = await saveStoneReturnAllocationDraft(database, accepted.id, actor.id,
@@ -642,6 +644,10 @@ test('customer revenue and treasury tracer bullet persists once and projects onl
         const postingContext = await readStoneReturnPostingContext(database, accepted.id, postingDate);
         assert.deepEqual(postingContext.periods.map(item => item.id), [command.periodId]);
         assert.deepEqual(postingContext.rules.map(item => item.id), [postingRule.id]);
+        assert.deepEqual(postingContext.originalAmounts, { originalNetRials: '60000000', originalTaxRials: '6000000' });
+        await assert.rejects(finalizeStoneReturn(database, accepted.id, accountant, {
+          ...returnCommand, rateDifferenceReason: '   ',
+        }), /دلیل تفاوت نرخ/);
 
         const accountBefore = (await projectCustomerAccountPrisma(database, accountAt)).standaloneCreditRials;
         const availableToLoad = async () => Promise.all([first, second].map(async ({ contractId }) =>
@@ -686,7 +692,30 @@ test('customer revenue and treasury tracer bullet persists once and projects onl
           { ...draftInput, expectedVersion: complete.draft.version, rows }), /قبلاً ثبت قطعی/);
         await assert.rejects(finalizeStoneReturn(database, accepted.id, accountant, { ...returnCommand, date: '2026-09-25' }), /فرمان دیگری/);
 
-        assert.equal((await projectCustomerAccountPrisma(database, accountAt)).standaloneCreditRials - accountBefore, 66_000_000n);
+        await assert.rejects(finalizeStoneReturn(database, accepted.id, accountant, {
+          ...returnCommand, agreedUnitRateRials: '2500000.025',
+        }), /فرمان دیگری/);
+
+        const summary = outcomes[0].data.summary as Prisma.JsonObject;
+        assert.equal(summary.agreedUnitRateRials, '2500000.024');
+        assert.equal(summary.rateDifferenceReason, rateDifferenceReason);
+        assert.equal(summary.originalNetRials, '60000000');
+        assert.equal(summary.originalTaxRials, '6000000');
+        // Rounding the two invoice shares independently would lose one rial.
+        assert.equal(summary.customerCreditRials, '87500001');
+        const credits = (summary.credits as Prisma.JsonArray) as Prisma.JsonObject[];
+        assert.equal(credits.length, 2);
+        const posted = await listPostedJournal(database, journalScope);
+        const invoiceCredits = credits.map(item => {
+          const voucher = posted.find(entry => entry.id === item.voucherId);
+          const credit = voucher?.lines.find(line => line.accountId === receivable.id);
+          assert.ok(credit);
+          assert.equal(item.customerCreditRials, credit.creditRials.toFixed(0));
+          assert.equal(voucher?.lines.filter(line => line.evidenceType === 'CUSTOMER_RETURN_COMMERCIAL_DIFFERENCE').length, 1);
+          return credit.creditRials.toFixed(0);
+        });
+        assert.equal(invoiceCredits.reduce((sum, part) => sum + BigInt(part), 0n), 87_500_001n);
+        assert.equal((await projectCustomerAccountPrisma(database, accountAt)).standaloneCreditRials - accountBefore, 87_500_001n);
         assert.deepEqual(await availableToLoad(), ['5.000', '5.000']);
         const shares = await Promise.all([first, second].map(async ({ contractId }) =>
           (await readShipmentQuantityProjection(database, { contractId })).rows[0].quantities));

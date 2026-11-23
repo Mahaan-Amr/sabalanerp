@@ -197,10 +197,17 @@ async function main() {
       });
       const confirmationSession = await confirmation.startSession({ waybillId, actorId: accountantId,
         workstationId: 'ISSUE-334-ACCOUNTING-DESK' });
-      assert.ok(otp, 'the external-driver confirmation must issue an OTP');
-      await confirmation.verifyOtp({ sessionId: confirmationSession.id, code: otp, actorId: accountantId });
-      const authorization = await confirmation.approveByGuard({ sessionId: confirmationSession.id,
-        guardActorId: actorId, reauthenticatedAt: new Date() });
+      await confirmation.recordInternalBiometricResult({
+        sessionId: confirmationSession.id, actorId: accountantId,
+        result: {
+          availability: 'UNAVAILABLE', device: { model: 'test', serial: 'test', connectorVersion: 'test', sdkVersion: 'test' },
+          captureQuality: { state: 'NOT_EVALUATED' }, liveness: { state: 'NOT_EVALUATED' },
+          match: { state: 'NOT_EVALUATED' }, errorCategory: 'DEVICE_DISCONNECTED', retryable: true,
+        },
+      });
+      await confirmation.beginInternalFallback({ sessionId: confirmationSession.id, actorId: accountantId });
+      assert.ok(otp, 'the qualifying failure sends the fallback OTP');
+      const { authorization } = await confirmation.verifyOtp({ sessionId: confirmationSession.id, code: otp, actorId: accountantId });
       await prisma.effectiveActionGrant.updateMany({ where: { principalId: accountantId, domain: 'PARTNER',
         action: 'ACCOUNTING_WRITE', revokedAt: null }, data: { revokedAt: new Date(), revokedBy: accountantId,
         revocationReason: 'آزمون لغو دسترسی نوشتن اسناد', revocationCorrelationId: `${expected.caseId}-revoke-document-write` } });

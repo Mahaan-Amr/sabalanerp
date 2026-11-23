@@ -1321,7 +1321,6 @@ export const dispatchConfirmationAPI = {
   beginFallback: (sessionId: string) => api.post(`/dispatch-confirmation/sessions/${sessionId}/fallback`, {}),
   resendOtp: (sessionId: string) => api.post(`/dispatch-confirmation/sessions/${sessionId}/otp/resend`, {}),
   verifyOtp: (sessionId: string, code: string) => api.post(`/dispatch-confirmation/sessions/${sessionId}/otp/verify`, { code }),
-  approveByGuard: (sessionId: string, data: { password: string; reason?: string }) => api.post(`/dispatch-confirmation/sessions/${sessionId}/guard-approval`, data),
   revokeAuthorization: (authorizationId: string, reason: string) => api.post(`/dispatch-confirmation/authorizations/${authorizationId}/revoke`, { reason }),
   revokeAuthorizationAsGuard: (authorizationId: string, reason: string) => api.post(`/dispatch-confirmation/guard/authorizations/${authorizationId}/revoke`, { reason }),
 };

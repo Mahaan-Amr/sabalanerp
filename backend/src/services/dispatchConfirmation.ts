@@ -282,16 +282,22 @@ export class DispatchConfirmationService {
     const id = randomUUID();
     const { phone, expiresAt, resendAfter } = await this.prisma.$transaction(async (tx) => {
       await assertCanonicalDispatchCommandAllowed(tx);
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`DISPATCH_CONFIRMATION:${sessionId}`}))`;
       const at = this.now();
+      const active = await tx.dispatchConfirmationSession.findUnique({
+        where: { id: sessionId }, select: { status: true, expiresAt: true, method: true },
+      });
+      if (active?.status !== 'ACTIVE' || active.expiresAt <= at || active.method !== `${session.driverSource}_FALLBACK`)
+        throw new DispatchConfirmationConflictError('The confirmation session is not active.');
       const subject = await this.sessionSubject(session, tx);
       const enrollment = await tx.driverBiometricEnrollment.findFirstOrThrow({ where: { ...subject.where, status: 'ACTIVE' },
         select: { confirmationPhone: true } });
       const current = await tx.dispatchOtpChallenge.findFirst({ where: { sessionId, invalidatedAt: null }, orderBy: { createdAt: 'desc' }, select: { resendAfter: true } });
       if (current && current.resendAfter > at) throw new DispatchConfirmationConflictError('OTP resend is not available yet.');
-      const expiresAt = addMinutes(at, 10);
+      const expiresAt = new Date(Math.min(addMinutes(at, 10).getTime(), active.expiresAt.getTime()));
       const resendAfter = addMinutes(at, 1);
       await tx.dispatchOtpChallenge.updateMany({ where: { sessionId, invalidatedAt: null }, data: { invalidatedAt: at } });
-      await tx.dispatchOtpChallenge.create({ data: { id, sessionId, code, digest: this.otpDigest(id, code), expiresAt, resendAfter }, select: { id: true } });
+      await tx.dispatchOtpChallenge.create({ data: { id, sessionId, digest: this.otpDigest(id, code), expiresAt, resendAfter }, select: { id: true } });
       return { phone: enrollment.confirmationPhone, expiresAt, resendAfter };
     });
     await this.dependencies.sendOtp({ phone, code, dispatchNumber: String(session.waybill.number), sessionId, expiresAt });
@@ -311,6 +317,7 @@ export class DispatchConfirmationService {
     if (!driverId) throw new DispatchConfirmationConflictError('The waybill has no immutable driver identity.');
     await this.prisma.$transaction(async (tx) => {
       await assertCanonicalDispatchCommandAllowed(tx);
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`ACCOUNTING_DISPATCH_WAYBILL:${waybill.id}`}))`;
       const staleSessions = await tx.dispatchConfirmationSession.findMany({ where: { waybillId: waybill.id, status: 'ACTIVE', expiresAt: { lte: at } } });
       for (const stale of staleSessions) {
         await tx.dispatchConfirmationSession.update({ where: { id: stale.id }, data: { status: 'EXPIRED' } });
@@ -325,7 +332,7 @@ export class DispatchConfirmationService {
     const method = personalPickup ? 'PERSONAL_PICKUP_ACCOUNTING' : customerPickup ? 'CUSTOMER_PICKUP_OTP' : turn.driverSource === 'INTERNAL' ? 'INTERNAL_BIOMETRIC' : 'EXTERNAL_BIOMETRIC';
     return this.prisma.$transaction(async (tx) => {
       await assertCanonicalDispatchCommandAllowed(tx);
-      if (customerPickup || personalPickup) await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`ACCOUNTING_DISPATCH_WAYBILL:${waybill.id}`}))`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`ACCOUNTING_DISPATCH_WAYBILL:${waybill.id}`}))`;
       const currentWaybill = await tx.accountingDispatchWaybill.findUnique({
         where: { id: waybill.id }, select: { status: true, integrityHash: true },
       });
@@ -382,8 +389,11 @@ export class DispatchConfirmationService {
     if (session.expiresAt <= this.now()) {
       const at = this.now();
       await this.prisma.$transaction(async (tx) => {
-        await tx.dispatchConfirmationSession.update({ where: { id: session.id }, data: { status: 'EXPIRED' } });
-        await appendAudit(tx, { aggregateType: 'DISPATCH_CONFIRMATION_SESSION', aggregateId: session.id, eventType: 'SESSION_EXPIRED',
+        const expired = await tx.dispatchConfirmationSession.updateMany({
+          where: { id: session.id, status: 'ACTIVE', expiresAt: { lte: at } },
+          data: { status: 'EXPIRED' },
+        });
+        if (expired.count) await appendAudit(tx, { aggregateType: 'DISPATCH_CONFIRMATION_SESSION', aggregateId: session.id, eventType: 'SESSION_EXPIRED',
           payload: {}, actorId: actorId || session.driverId, at });
       });
       throw new DispatchConfirmationConflictError('The confirmation session expired.');
@@ -398,6 +408,8 @@ export class DispatchConfirmationService {
       guardApprovals: true, attempts: true, exitAuthorization: true } });
     if (!session || session.status !== 'ACTIVE' || session.expiresAt <= at) throw new DispatchConfirmationConflictError('The confirmation session is no longer active.');
     if (session.exitAuthorization) return session.exitAuthorization;
+    if (session.method === `${session.driverSource}_FALLBACK` && !session.otpChallenges.length)
+      throw new DispatchConfirmationConflictError('ابتدا رمز پیامکی راننده را تأیید کنید.');
     const sourceLines = await tx.logisticsAllocationRevisionLine.findMany({
       where: { revision: { candidate: { waybills: { some: { id: session.waybillId } } } } }, select: { sourceContractId: true, partnerCaseId: true },
     });
@@ -525,9 +537,15 @@ export class DispatchConfirmationService {
     const method = session.driverSource === GuardDriverSource.INTERNAL ? 'INTERNAL_FALLBACK' : 'EXTERNAL_FALLBACK';
     await this.prisma.$transaction(async (tx) => {
       await assertCanonicalDispatchCommandAllowed(tx);
-      await tx.dispatchConfirmationSession.update({ where: { id: session.id }, data: { method } });
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`DISPATCH_CONFIRMATION:${session.id}`}))`;
+      const at = this.now();
+      const changed = await tx.dispatchConfirmationSession.updateMany({
+        where: { id: session.id, status: 'ACTIVE', method: session.method, expiresAt: { gt: at } },
+        data: { method },
+      });
+      if (!changed.count) throw new DispatchConfirmationConflictError('The confirmation session is not active.');
       await appendAudit(tx, { aggregateType: 'DISPATCH_CONFIRMATION_SESSION', aggregateId: session.id, eventType: 'FALLBACK_STARTED',
-        payload: { failure: session.fallbackFailure }, actorId: input.actorId, at: this.now() });
+        payload: { failure: session.fallbackFailure }, actorId: input.actorId, at });
     });
     await this.createOtp(session);
     return { sessionId: session.id, method };
@@ -539,56 +557,74 @@ export class DispatchConfirmationService {
     return this.createOtp(session);
   }
 
-  async verifyOtp(input: { sessionId: string; code: string; actorId?: string }) {
-    const session = await this.activeSession(input.sessionId, input.actorId);
-    if (session.method !== `${session.driverSource}_FALLBACK`) throw new DispatchConfirmationValidationError('This session does not accept OTP confirmation.');
-    const at = this.now();
-    const verified = await this.prisma.$transaction(async (tx) => {
+  async verifyOtp(input: { sessionId: string; code: string; actorId: string }) {
+    const code = required(input.code, 'code');
+    if (!/^\d{6}$/.test(code)) throw new DispatchConfirmationValidationError('رمز پیامکی راننده باید ۶ رقمی باشد.');
+    const sessionRef = await this.prisma.dispatchConfirmationSession.findUnique({
+      where: { id: input.sessionId }, select: { waybillId: true },
+    });
+    if (!sessionRef) throw new DispatchConfirmationConflictError('The confirmation session is not active.');
+
+    const result = await this.prisma.$transaction(async (tx) => {
       await assertCanonicalDispatchCommandAllowed(tx);
-      await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', `DISPATCH_OTP:${session.id}`);
-      const challenge = await tx.dispatchOtpChallenge.findFirst({ where: { sessionId: session.id, verifiedAt: null, invalidatedAt: null }, orderBy: { createdAt: 'desc' },
-        select: { id: true, expiresAt: true, incorrectCount: true, digest: true } });
-      if (!challenge || challenge.expiresAt <= at) throw new DispatchConfirmationConflictError('The OTP is unavailable or expired.');
-      if (challenge.incorrectCount >= 5) throw new DispatchConfirmationConflictError('The OTP challenge is terminal.');
-      const matches = this.otpDigest(challenge.id, required(input.code, 'code')) === challenge.digest;
-      if (!matches) {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`ACCOUNTING_DISPATCH_WAYBILL:${sessionRef.waybillId}`}))`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`DISPATCH_CONFIRMATION:${input.sessionId}`}))`;
+      const at = this.now();
+      const session = await tx.dispatchConfirmationSession.findUnique({
+        where: { id: input.sessionId }, include: { waybill: true, exitAuthorization: true },
+      });
+      if (!session || !['ACTIVE', 'CONFIRMED'].includes(session.status))
+        throw new DispatchConfirmationConflictError('The confirmation session is not active.');
+      if (session.accountingActorId !== input.actorId)
+        throw new DispatchConfirmationConflictError('از همان حساب کاربری حسابداری که نوبت را آغاز کرده ادامه دهید.');
+      if (session.method !== `${session.driverSource}_FALLBACK`)
+        throw new DispatchConfirmationValidationError('این نوبت برای تأیید رمز پیامکی فعال نیست.');
+      if (session.waybill.status !== 'ISSUED' || session.waybill.integrityHash !== session.waybillIntegrityHash)
+        throw new DispatchConfirmationConflictError('The bound waybill snapshot is no longer valid.');
+      if (session.status === 'ACTIVE' && session.expiresAt <= at)
+        throw new DispatchConfirmationConflictError('The confirmation session expired.');
+
+      const challenge = await tx.dispatchOtpChallenge.findFirst({
+        where: { sessionId: session.id, invalidatedAt: null }, orderBy: { createdAt: 'desc' },
+        select: { id: true, expiresAt: true, incorrectCount: true, digest: true, verifiedAt: true },
+      });
+      if (session.status === 'CONFIRMED') {
+        const authorization = session.exitAuthorization;
+        if (challenge?.verifiedAt && this.otpDigest(challenge.id, code) === challenge.digest &&
+            authorization?.status === 'ACTIVE' && authorization.validUntil > at) {
+          return { verifiedAt: challenge.verifiedAt, authorization: { id: authorization.id } };
+        }
+        throw new DispatchConfirmationConflictError('وضعیت مجوز خروج را در پرونده ارسال بررسی کنید.');
+      }
+
+      if (!challenge || challenge.expiresAt <= at)
+        throw new DispatchConfirmationConflictError('مهلت رمز پیامکی تمام شده است. در صورت اعتبار نوبت، رمز تازه بفرستید.');
+      if (challenge.incorrectCount >= 5)
+        throw new DispatchConfirmationConflictError('تعداد تلاش‌های مجاز تمام شده است. نوبت تازه‌ای آغاز کنید.');
+      if (this.otpDigest(challenge.id, code) !== challenge.digest) {
         const incorrectCount = challenge.incorrectCount + 1;
         await tx.dispatchOtpChallenge.update({ where: { id: challenge.id }, data: { incorrectCount, ...(incorrectCount >= 5 ? { invalidatedAt: at } : {}) }, select: { id: true } });
         if (incorrectCount >= 5) await tx.dispatchConfirmationSession.update({ where: { id: session.id }, data: { status: 'FAILED', failedAt: at } });
         await appendAudit(tx, { aggregateType: 'DISPATCH_CONFIRMATION_SESSION', aggregateId: session.id,
-          eventType: incorrectCount >= 5 ? 'OTP_TERMINAL_FAILURE' : 'OTP_REJECTED', payload: { incorrectCount }, actorId: input.actorId || session.driverId, at });
-        return false;
+          eventType: incorrectCount >= 5 ? 'OTP_TERMINAL_FAILURE' : 'OTP_REJECTED', payload: { incorrectCount }, actorId: input.actorId, at });
+        return null;
       }
-      await tx.dispatchOtpChallenge.update({ where: { id: challenge.id }, data: { verifiedAt: at }, select: { id: true } });
-      await appendAudit(tx, { aggregateType: 'DISPATCH_CONFIRMATION_SESSION', aggregateId: session.id, eventType: 'OTP_VERIFIED',
-        payload: { driverId: session.driverId }, actorId: input.actorId || session.driverId, at });
-      return true;
-    });
-    if (!verified) throw new DispatchConfirmationValidationError('The OTP is incorrect.');
-    return { verifiedAt: at };
-  }
 
-  async approveByGuard(input: { sessionId: string; guardActorId: string; reauthenticatedAt: Date; reason?: string }) {
-    const session = await this.activeSession(input.sessionId, input.guardActorId);
-    if (session.method !== `${session.driverSource}_FALLBACK`) throw new DispatchConfirmationValidationError('This session does not require Guard approval.');
-    const at = this.now();
-    if (at.getTime() - input.reauthenticatedAt.getTime() > 5 * 60_000 || input.reauthenticatedAt > at) throw new DispatchConfirmationValidationError('Fresh Guard reauthentication is required.');
-    if (input.guardActorId === session.accountingActorId) throw new DispatchConfirmationValidationError('Guard approval requires a different actor from Accounting.');
-    const reason = session.method.endsWith('_FALLBACK') ? required(input.reason, 'fallback reason') : (input.reason || null);
-    return this.prisma.$transaction(async (tx) => {
-      await assertCanonicalDispatchCommandAllowed(tx);
-      await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', `DISPATCH_CONFIRMATION:${session.id}`);
-      const current = await tx.dispatchConfirmationSession.findUnique({ where: { id: session.id } });
-      if (!current || current.status !== 'ACTIVE' || current.expiresAt <= at) throw new DispatchConfirmationConflictError('The confirmation session is no longer active.');
-      const otp = await tx.dispatchOtpChallenge.findFirst({ where: { sessionId: session.id, invalidatedAt: null }, orderBy: { createdAt: 'desc' }, select: { verifiedAt: true } });
-      if (!otp?.verifiedAt) throw new DispatchConfirmationConflictError('The latest driver OTP challenge must be verified first.');
-      await tx.dispatchGuardApproval.create({ data: { sessionId: current.id, guardActorId: required(input.guardActorId, 'guardActorId'), reauthenticatedAt: input.reauthenticatedAt, reason } });
-      if (current.method.endsWith('_FALLBACK')) await tx.dispatchConfirmationAlert.create({ data: { sessionId: current.id, alertType: current.driverSource === 'INTERNAL' ? 'INTERNAL_BIOMETRIC_FALLBACK' : 'EXTERNAL_BIOMETRIC_FALLBACK',
-        payload: json({ waybillId: current.waybillId, driverId: current.driverId, guardActorId: input.guardActorId, reason, failure: current.fallbackFailure }) } });
-      await appendAudit(tx, { aggregateType: 'DISPATCH_CONFIRMATION_SESSION', aggregateId: current.id, eventType: 'GUARD_APPROVED',
-        payload: { guardActorId: input.guardActorId, method: current.method, reason }, actorId: input.guardActorId, at });
-      return this.createAuthorizationLocked(tx, current.id, input.guardActorId, at);
+      if (!challenge.verifiedAt) {
+        await tx.dispatchOtpChallenge.update({ where: { id: challenge.id }, data: { verifiedAt: at }, select: { id: true } });
+        await appendAudit(tx, { aggregateType: 'DISPATCH_CONFIRMATION_SESSION', aggregateId: session.id, eventType: 'OTP_VERIFIED',
+          payload: { driverId: session.driverId }, actorId: input.actorId, at });
+      }
+      await tx.dispatchConfirmationAlert.create({ data: {
+        sessionId: session.id,
+        alertType: session.driverSource === 'INTERNAL' ? 'INTERNAL_BIOMETRIC_FALLBACK' : 'EXTERNAL_BIOMETRIC_FALLBACK',
+        payload: json({ waybillId: session.waybillId, driverId: session.driverId, accountingActorId: input.actorId, failure: session.fallbackFailure }),
+      } });
+      const authorization = await this.createAuthorizationLocked(tx, session.id, input.actorId, at);
+      return { verifiedAt: challenge.verifiedAt ?? at, authorization: { id: authorization.id } };
     });
+    if (!result) throw new DispatchConfirmationValidationError('رمز پیامکی راننده اشتباه است.');
+    return result;
   }
 
   async revokeAuthorization(input: { authorizationId: string; actorId: string; reason: string }) {

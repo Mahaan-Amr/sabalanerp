@@ -42,7 +42,7 @@ test('native Prisma histogram sees a queued checkout in an isolated one-connecti
         await baseline;
         await exercise();
         return await nextWindow;
-      } finally { clearTimeout(keepAlive); await stop(); }
+      } finally { clearTimeout(keepAlive); stop(); }
     };
 
     const quiet = await sample(() => prisma.$queryRaw`SELECT 1`);

@@ -33,7 +33,7 @@ const list = '/api/accounting/dispatch-candidates';
 const detail = /^\/api\/accounting\/dispatch-candidates\/[^/]+\/document-read-model$/;
 const reference = /^\/api\/accounting\/loadings\/[^/]+\/sepidar-reference$/;
 const scenarios = [
-  { name: 'dashboard', page: '/dashboard/accounting', api: '/api/accounting/dashboard',
+  { name: 'dashboard', page: '/dashboard/accounting', api: '/api/accounting/dashboard/workspace',
     ready: page => page.getByRole('button', { name: 'به‌روزرسانی', exact: true }) },
   { name: 'reviewable-list', page: '/dashboard/accounting/contracts', api: '/api/accounting/contracts',
     ready: page => page.getByRole('row').filter({ has: page.getByRole('cell') }).first().getByRole('link', { name: /^(مشاهده|مشاهده پرونده)$/ }) },
@@ -120,7 +120,7 @@ async function sample(browser, config, scenario, command) {
   try {
     await page.goto('/login');
     await page.getByRole('textbox', { name: 'ایمیل، نام کاربری یا شماره تماس' }).fill(env.ACCOUNTING_TIMING_IDENTIFIER);
-    await page.getByRole('textbox', { name: 'رمز عبور', exact: true }).fill(env.ACCOUNTING_TIMING_PASSWORD);
+    await page.locator('input[name="password"]').fill(env.ACCOUNTING_TIMING_PASSWORD);
     await Promise.all([page.waitForURL(/\/dashboard$/), page.getByRole('button', { name: 'ورود', exact: true }).click()]);
     stage = 'first_action';
     stop = monitor(page);

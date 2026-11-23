@@ -128,13 +128,11 @@ export function startRuntimeCapacityObservation({
   }, intervalMs);
   timer.unref();
 
-  return async () => {
-    if (!stopped) {
-      stopped = true;
-      clearInterval(timer);
-      loop.disable();
-      recordJob = undefined;
-    }
-    await pending;
+  return () => {
+    if (stopped) return;
+    stopped = true;
+    clearInterval(timer);
+    loop.disable();
+    recordJob = undefined;
   };
 }

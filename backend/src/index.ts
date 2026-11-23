@@ -79,6 +79,7 @@ const shutdown = async (signal: NodeJS.Signals) => {
   if (isShuttingDown) return;
   isShuttingDown = true;
   applicationWorkers?.stopNewTicks();
+  stopCapacityObservation?.();
   console.log(`Received ${signal}; draining connections before shutdown.`);
 
   try {
@@ -86,7 +87,6 @@ const shutdown = async (signal: NodeJS.Signals) => {
     const remaining = () => Math.max(0, deadline - performance.now());
     // Stop admission before closing sockets; callbacks already running must finish.
     await Promise.all([
-      stopCapacityObservation?.(),
       applicationWorkers?.stopAndDrain(240_000),
       waitForRecoveryOperationDrain(240_000),
       waitForActiveWrites(240_000),

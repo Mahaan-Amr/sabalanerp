@@ -44,7 +44,7 @@ test('emits bounded workload windows and counts only work admitted by the schedu
     assert.ok(jobs[0].maxMs >= 0);
     assert.doesNotMatch(JSON.stringify(window), /credential-looking-value|ignored text/);
   } finally {
-    await stopObservation();
+    stopObservation();
   }
 });
 
@@ -62,5 +62,14 @@ test('emits process measurements when native Prisma metrics are unavailable', as
     assert.ok(published[0] && typeof published[0] === 'object' && 'poolWait' in published[0]);
     assert.equal(published[0].poolWait, null);
     assert.doesNotMatch(JSON.stringify(published), /private driver detail/);
-  } finally { await stop(); }
+  } finally { stop(); }
+});
+
+test('stopping optional observation does not wait for the native metrics reader', () => {
+  const stop = startRuntimeCapacityObservation({
+    commit: 'local', poolMetrics: () => new Promise<never>(() => {}),
+    emit: () => assert.fail('Observation must stay stopped'),
+  });
+  assert.equal(stop(), undefined);
+  assert.equal(stop(), undefined);
 });

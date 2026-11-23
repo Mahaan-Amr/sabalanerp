@@ -17,6 +17,7 @@ import { attachAccountingTrendAuditState } from './accountingReadProjection';
 import { resolveAccountingWorkAttention } from './accountingWorkAttention';
 import { accountingProjectedRialCurrency } from './accountingProjectedRialCurrency';
 import { normalizePersianSearchTokens } from './crmCustomerSearch';
+import { measureAccountingReadPhase, startAccountingReadPhase } from './accountingReadTiming';
 import { createHash, randomUUID } from 'node:crypto';
 import { canonicalHash, InstantSchema, partnerTrackingCode } from '@sabalanerp/partner-sales-contracts';
 import { buildAccountingContractSourceSnapshot } from './contractSnapshotBoundary';
@@ -1337,7 +1338,7 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}, ac
     { createdAt: 'desc' };
   const stableOrderBy: Prisma.SalesContractOrderByWithRelationInput[] = [orderBy, { id: 'asc' }];
 
-  const ordinaryRead = sqlPaged ? prisma.$transaction(async tx => {
+  const ordinaryRead = measureAccountingReadPhase('population', async () => sqlPaged ? prisma.$transaction(async tx => {
     const aggregate = await aggregateActiveOrdinaryContracts(tx);
     const rows = await tx.salesContract.findMany({ where, select: accountingContractListSelect, orderBy: stableOrderBy,
       ...(aggregate.safe ? { take: skip + pageSize } : {}) });
@@ -1346,7 +1347,7 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}, ac
   }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: 30_000 })
     : (query.sourceKind === 'PARTNER_INTERNAL_RECORD' ? Promise.resolve([]) : prisma.salesContract.findMany({
       where, select: accountingContractListSelect, orderBy: stableOrderBy,
-    })).then(rows => ({ rows, prepared: null, aggregate: null }));
+    })).then(rows => ({ rows, prepared: null, aggregate: null })));
   const readPartnerSources = async (scope: AccountingReadScope, actorId: string) => {
       const records = await scope.database.accountingFinancialRecord.findMany({
         where: scope.financial({ sourceKind: PARTNER_INTERNAL_ACCOUNTING_SOURCE,
@@ -1385,6 +1386,7 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}, ac
       : withAccountingReadScope(prisma, actor, scope => readPartnerSources(scope, actor.userId)))
       : Promise.resolve({ partnerRecords: [], preparations: [], preparationOverlays: new Map() }),
   ]);
+  const finishPopulation = startAccountingReadPhase('population');
   const rawContracts = ordinary.rows;
   let ordinaryAggregate = ordinary.aggregate;
   const { partnerRecords, preparations, preparationOverlays } = partnerSources;
@@ -1573,13 +1575,14 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}, ac
   const partnerItems = sqlPaged ? items.filter(item => item.sourceKind === PARTNER_INTERNAL_ACCOUNTING_SOURCE) : [];
   const total = ordinaryAggregate ? Number(ordinaryAggregate.count) + partnerItems.length : items.length;
   const contractsById = new Map(contracts.map(contract => [contract.id, contract]));
-  const pagedItems = await Promise.all(items.slice(skip, skip + pageSize).map(async item => {
+  finishPopulation();
+  const pagedItems = await measureAccountingReadPhase('rowHydration', () => Promise.all(items.slice(skip, skip + pageSize).map(async item => {
     const contract = item.sourceKind === PARTNER_INTERNAL_ACCOUNTING_SOURCE ? undefined : contractsById.get(item.contractId);
     if (!contract) return item;
     const full = await buildContractRow(contract, settings, false, rowTime);
     // Filters, ordering and totals all refer to the same summary calculation.
     return { ...full, accounting: item.accounting };
-  }));
+  })));
 
   const totals = (ordinaryAggregate ? partnerItems : items).reduce((acc, item) => ({
     contractAmount: acc.contractAmount.plus(accountingAmountInRials(item.accounting.totalContractAmount, item.accounting.currency)),

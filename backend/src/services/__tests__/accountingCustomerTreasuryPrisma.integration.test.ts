@@ -369,7 +369,7 @@ test('customer revenue and treasury tracer bullet persists once and projects onl
     assert.equal((await database.accountingTaxInvoice.findFirstOrThrow()).status, 'SUBMITTED');
     await assert.rejects(() => database.accountingCustomerOpenItem.update({ where: { id: sale.openItem.id }, data: { originalRials: '1' } }), /ACCOUNTING_IMMUTABLE_RECORD/);
 
-    await t.test('verified Guard return is atomic with its caller and can be reposted once after rollback', async () => {
+    await t.test('verified Guard return is atomic with its caller and can be reposted once after rollback', async (returnTest) => {
       const returnedAt = new Date('2026-09-28T08:00:00Z');
       const customer = await database.crmCustomer.create({
         data: { id: command.partySourceId, firstName: 'مشتری', lastName: 'نمونه' },
@@ -434,7 +434,7 @@ test('customer revenue and treasury tracer bullet persists once and projects onl
       const journalBefore = await listPostedJournal(database, journalScope);
       const abort = new Error('Caller rejected the return');
 
-      await t.test('negotiated credit above the entire original invoice preserves its original reversals and rolls back atomically', async () => {
+      await returnTest.test('negotiated credit above the entire original invoice preserves its original reversals and rolls back atomically', async () => {
         const originalTaxLine = await database.accountingTaxInvoiceLine.findUniqueOrThrow({
           where: { taxInvoiceId_sourceLineId: { taxInvoiceId: sale.taxInvoice!.id, sourceLineId: originalLine.id } },
         });
@@ -497,7 +497,7 @@ test('customer revenue and treasury tracer bullet persists once and projects onl
         assert.equal((await projectCustomerAccountPrisma(database, accountAt)).standaloneCreditRials, 0n);
         assert.deepEqual(await listPostedJournal(database, journalScope), journalBefore);
       });
-      await t.test('lower rates require a reason and equal net rates preserve the original VAT independently', async () => {
+      await returnTest.test('lower rates require a reason and equal net rates preserve the original VAT independently', async () => {
         const terms = { caseId: 'stone-return-case-1', agreedGrossRials: 400n,
           lines: [{ lineId: 'credit-line-1', agreedUnitRateRials: '400' }] };
         const transactionOptions = { isolationLevel: Prisma.TransactionIsolationLevel.Serializable };

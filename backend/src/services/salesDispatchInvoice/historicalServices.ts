@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import { legacyCutMeters } from '../../utils/printTemplate';
 import type { Prisma as PrismaTypes } from '@prisma/client';
 
 const Decimal = Prisma.Decimal.clone({ precision: 100 });
@@ -92,11 +93,26 @@ export async function historicalServicePrintData(tx: PrismaTypes.TransactionClie
           expectedBase: base === 'length' ? 'length' : base === 'count' ? 'count' : 'squareMeters', currency: f.currency,
           documentCurrency, sourceCurrency, minimum: f.minimumQuantity }) };
     });
+    if (p.productType === 'slab' && (p.slabCuttingMode === 'perSquareMeter' ||
+        (p.slabCuttingMode == null && p.slabPolicyInput?.cuttingPricingMethod === 'squareMeter'))) {
+      const explicitRate = first(p.slabCuttingPricePerSquareMeter, p.slabPolicyInput?.squareMeterCutRateToman);
+      // Recover the area charge only from the product's saved aggregate in
+      // the same source currency. Detail operations can carry other currencies.
+      const hasVerticalCuts = array(p.cutDetails).some(cut => cut.type === 'vertical');
+      const verticalCost = first(p.slabVerticalCutCost, hasVerticalCuts ? undefined : '0');
+      const cost = decimal(p.cuttingCost), vertical = decimal(verticalCost);
+      p.dispatchHistoricalSlabCuttingRate = rate({ explicit: explicitRate,
+        cost: cost && vertical ? cost.minus(vertical).toFixed() : undefined,
+        quantity: p.squareMeters, base: 'squareMeters', expectedBase: 'squareMeters',
+        currency: p.slabCuttingCurrency || (p.slabCuttingPricePerSquareMeter == null &&
+          p.slabPolicyInput?.squareMeterCutRateToman != null ? 'TOMAN' : undefined),
+        documentCurrency, sourceCurrency });
+    }
     p.cuttingBreakdown = array(p.cuttingBreakdown).map((cut: any) => ({ ...cut,
       dispatchHistoricalRate: rate({ explicit: cut.rate, cost: cut.cost, quantity: cut.meters,
         base: cut.calculationBase || 'length', expectedBase: 'length', currency: cut.currency, documentCurrency, sourceCurrency, minimum: cut.minimumQuantity }) }));
     p.cutDetails = array(p.cutDetails).map((cut: any) => ({ ...cut,
-      dispatchHistoricalRate: rate({ explicit: first(cut.rate, cut.cuttingCostPerMeter), cost: first(cut.cost, cut.cuttingCost), quantity: first(cut.meters, cut.length),
+      dispatchHistoricalRate: rate({ explicit: first(cut.rate, cut.cuttingCostPerMeter), cost: first(cut.cost, cut.cuttingCost), quantity: legacyCutMeters(p, cut),
         base: cut.calculationBase, expectedBase: 'length', currency: cut.currency, documentCurrency, sourceCurrency, minimum: cut.minimumQuantity }) }));
   }
   return { ...data, products };

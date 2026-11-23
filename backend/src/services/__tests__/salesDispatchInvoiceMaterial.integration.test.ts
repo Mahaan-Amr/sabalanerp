@@ -93,7 +93,7 @@ async function run() {
             versionId = randomUUID(),
             itemId = randomUUID();
           const quantity = index === 0 ? 90 : 100;
-          const loaded = scenario === "full" ? String(quantity) : (scenario === "successive" || scenario === "remainder") ? "1" : index === 0 ? "70" : "30";
+          const loaded = scenario === "full" ? String(quantity) : (scenario === "successive" || scenario === "remainder" || scenario === "incomplete-material") ? "1" : index === 0 ? "70" : "30";
           const previouslyLoaded = scenario === "remainder" ? String(quantity - 1) : scenario === "successive" ? "1" : "0";
           const sourceSnapshot = {
             customerId: customer.id,
@@ -136,6 +136,25 @@ async function run() {
                 (product as any)[field] *= 10;
               for (const tool of product.tools) { tool.pricePerMeter *= 10; tool.totalPrice *= 10; }
               for (const cut of product.cuttingBreakdown) { cut.rate *= 10; cut.cost *= 10; }
+            }
+          }
+          if (scenario === 'incomplete-material') {
+            for (const product of sourceSnapshot.contractData.products) delete (product.meta.stair as any).piecesPerStone;
+          }
+          if (scenario === 'slab-rates') {
+            sourceSnapshot.contractData.products.forEach((product) => {
+              Object.assign(product, { productType: 'slab', slabCuttingMode: 'perSquareMeter',
+                slabCuttingPricePerSquareMeter: 20, slabCuttingCurrency: index === 0 ? 'IRR' : 'UNPROVEN',
+                cuttingCost: 100, slabVerticalCutCost: 20, cuttingBreakdown: [],
+                cutDetails: [{ type: 'vertical', meters: 1, rate: 20, cost: 20,
+                  calculationBase: 'length', currency: index === 0 ? 'IRR' : 'UNPROVEN' }] });
+            });
+          }
+          if (scenario === 'legacy-cut') {
+            for (const product of sourceSnapshot.contractData.products) {
+              Object.assign(product, { productType: 'longitudinal', cuttingBreakdown: [],
+                cutDetails: [{ type: 'longitudinal', length: 100, cuttingCost: 100,
+                  calculationBase: 'length', currency: 'TOMAN' }] });
             }
           }
           const contract = await tx.salesContract.create({
@@ -430,8 +449,16 @@ async function run() {
         const download = await service.download(ctx, loading.id, issued.id);
         const html = Buffer.from(download.bytes).toString();
         const sourceRows = [...html.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/g)].map(match => match[1]).filter(row => row.includes('سنگ مصرفی'));
-        assert.equal(sourceRows.length, 2);
-        if (scenario === 'full') {
+        if (!['legacy-cut', 'slab-rates'].includes(scenario)) assert.equal(sourceRows.length, 2);
+        if (scenario === 'legacy-cut' || scenario === 'slab-rates') {
+          // Material geometry is outside this legacy operation regression.
+        } else if (scenario === 'incomplete-material') {
+          const riser = sourceRows.find(row => row.includes('سنگ مصوب ۰'))!;
+          const cells = [...riser.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map(match => match[1]);
+          assert.equal(cells[6], '—', 'unknown source-piece increment leaves count unknown');
+          assert.equal(cells[8], '—', 'unknown source-piece increment leaves dependent area unknown');
+          assert.ok(sourceRows.some(row => row.includes('۰٫۴۲')), 'homogeneous exact whole-piece shares retain known area');
+        } else if (scenario === 'full') {
           assert.ok(sourceRows.some(row => row.includes('۴۵') && row.includes('۲۱٫۶')));
           assert.ok(sourceRows.some(row => row.includes('۱۰۰') && row.includes('۴۲')));
         } else if (scenario === 'successive' || scenario === 'remainder') {
@@ -445,8 +472,19 @@ async function run() {
         const toolRows = operations.filter(row => row.includes('ابزار نیم‌لول'));
         const cutRows = operations.filter(row => row.includes('برش طولی'));
         assert.equal(toolRows.length, 2);
-        assert.equal(cutRows.length, 2);
-        if (scenario === 'partial' || scenario === 'currency') {
+        if (scenario !== 'slab-rates') assert.equal(cutRows.length, 2);
+        if (scenario === 'slab-rates') {
+          const area = operations.filter(row => row.includes('برش اسلب بر اساس مساحت'));
+          const vertical = operations.filter(row => row.includes('برش قائم'));
+          assert.equal(area.length, 2);
+          assert.equal(vertical.length, 2);
+          for (const rows of [area, vertical]) {
+            assert.ok(rows.some(row => row.includes('۲۰ / ')), '20 IRR is converted to 2 toman and printed as 20 IRR');
+            assert.ok(rows.some(row => row.includes('نامشخص')), 'unproven currency stays unknown through slab projection');
+          }
+        } else if (scenario === 'legacy-cut') {
+          assert.ok(cutRows.every(row => row.includes('۱٬۰۰۰ / متر طول')), '100 cm and 100 toman recover 100 toman/m, displayed as 1000 rials/m');
+        } else if (scenario === 'partial' || scenario === 'currency') {
           assert.ok(toolRows.some(row => row.includes('۴۶٫۵')), '30/100 treads carry 46.5 metres of the approved 155-metre tool');
           assert.ok(cutRows.some(row => row.includes('۸۴')), '70/90 risers carry 84 metres of the approved 108-metre cut');
         } else if (scenario === 'full') {

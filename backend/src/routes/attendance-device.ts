@@ -1,5 +1,5 @@
 import { actionableAttendanceIntervals, overlappingAttendanceIds } from '../services/attendanceReviewScope';
-import { onlyDeferredUnknownTimes } from '../services/attendanceDayBoundary';
+import { isUnknownExitConfirmed, onlyDeferredUnknownTimes } from '../services/attendanceDayBoundary';
 import { confirmFactualAbsence, unresolvedAbsenceDays } from '../services/attendanceAbsenceDecision';
 import express, { Response } from 'express';
 import { Prisma } from '@prisma/client';
@@ -8,9 +8,9 @@ import { parseSecurityBusinessDate, securityDateKeyFromInstant } from '../utils/
 import { prisma } from '../lib/prisma';
 import { AuthRequest, protect } from '../middleware/auth';
 import { attendanceCapabilities, attendanceDeviceManage, attendanceDeviceReview, attendanceDeviceView } from '../middleware/attendanceDeviceAccess';
-import { AttendanceDeviceError, confirmIntervals, deviceAudit, ingestPunch, lockAttendance, newTerminalToken, requireReason, resolvePunch, tokenHash, validatePunch, reviewFingerprint, todayMappingScans, setMappingInitialState, recordDeviceClockSample } from '../services/attendanceDevice';
+import { AttendanceDeviceError, confirmIntervals, deviceAudit, ingestPunch, lockAttendance, newTerminalToken, requireReason, resolvePunch, tokenHash, validatePunch, reviewFingerprint, isReviewHandoverRequired, todayMappingScans, setMappingInitialState, recordDeviceClockSample } from '../services/attendanceDevice';
 
-import { previewAttendanceCorrection, applyAttendanceCorrection } from '../services/attendanceCorrection';
+import { previewAttendanceCorrection, applyAttendanceCorrection, confirmUnknownExit } from '../services/attendanceCorrection';
 
 const router = express.Router();
 const run = (handler: (req: AuthRequest, db: Prisma.TransactionClient) => Promise<unknown>) => async (req: AuthRequest, res: Response) => {
@@ -48,7 +48,7 @@ router.get('/summary', protect, attendanceDeviceView, async (_req, res) => {
     const [terminals, review, pending] = await Promise.all([
       prisma.attendanceTerminal.findMany({ select: { lastSeenAt: true, lastReadAt: true } }),
       prisma.attendancePunch.count({ where: { status: { in: ['REVIEW', 'DUPLICATE'] } } }),
-      prisma.attendanceInterval.count({ where: actionableAttendanceIntervals(overlaps, parseSecurityBusinessDate()) }),
+      prisma.attendanceInterval.count({ where: actionableAttendanceIntervals(prisma.attendanceInterval.fields.revision, overlaps, parseSecurityBusinessDate()) }),
     ]);
     res.json({ success: true, data: { pending: review + pending, disconnected: terminals.some(t => !t.lastSeenAt || !t.lastReadAt || Date.now() - Math.min(t.lastSeenAt.getTime(), t.lastReadAt.getTime()) >= 10000) } });
   } catch { res.status(500).json({ success: false, error: 'دریافت خلاصه ناموفق بود.' }); }
@@ -61,7 +61,7 @@ router.get('/state', protect, attendanceDeviceView, async (req: AuthRequest, res
     const pendingOnly = req.query.status === 'pending';
     const overlaps = await overlappingAttendanceIds(prisma, req.query.personnelId ? String(req.query.personnelId) : undefined);
     const today = parseSecurityBusinessDate();
-    const actionable = actionableAttendanceIntervals(overlaps, today);
+    const actionable = actionableAttendanceIntervals(prisma.attendanceInterval.fields.revision, overlaps, today);
     const [terminals, punches, pending, reviewCount, personnel, assignees, handovers, initialReview, clockSamples] = await Promise.all([
       prisma.attendanceTerminal.findMany({ include: { mappings: { where: { effectiveTo: null } } }, orderBy: { createdAt: 'asc' } }),
       prisma.attendancePunch.findMany({ where: { ...personFilter, ...(req.query.status === 'all' ? {} : pendingOnly ? { status: { in: ['REVIEW', 'DUPLICATE', 'UNMATCHED'] } } : { status: { in: ['REVIEW', 'UNMATCHED', 'DUPLICATE', 'APPLIED', 'LINKED', 'SHADOW'] } }) }, orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }], take: 100, ...(req.query.cursor ? { skip: 1, cursor: { id: String(req.query.cursor) } } : {}) }),
@@ -100,8 +100,9 @@ router.get('/state', protect, attendanceDeviceView, async (req: AuthRequest, res
           NULLIF(concat_ws(' ', r."personnelFirstName", r."personnelLastName"), '')
         FROM attendance_intervals i JOIN attendance_records r ON r.id = i."attendanceRecordId"
         WHERE r."personnelId" IS NOT NULL AND i.status = 'ACTIVE'
-          AND (i."exitUnknown" OR i."enteredAt" IS NULL
-            OR (i."exitedAt" IS NULL AND r.date < ${today})
+          AND ((i."exitUnknown" AND (i."confirmedAt" IS NULL OR i."confirmedRevision" <> i.revision))
+            OR i."enteredAt" IS NULL
+            OR (NOT i."exitUnknown" AND i."exitedAt" IS NULL AND r.date < ${today})
             OR ${overlaps.length ? Prisma.sql`i.id IN (${Prisma.join(overlaps)})` : Prisma.sql`FALSE`})
       )
       SELECT pending."personnelId", count(*)::int AS count
@@ -118,11 +119,19 @@ router.get('/state', protect, attendanceDeviceView, async (req: AuthRequest, res
     const pendingIntervalsCount = await prisma.attendanceInterval.count({ where: actionable });
     const rosterDate = parseSecurityBusinessDate();
     const roster = capabilities.manage ? await prisma.securityAttendanceRosterMembership.findMany({ where: { effectiveFrom: { lte: rosterDate }, OR: [{ effectiveTo: null }, { effectiveTo: { gt: rosterDate } }] }, select: { personnelId: true } }) : [];
-    res.json({ success: true, data: { personPending, clockSamples, initialReview, pendingIntervalsCount, rosterIds: roster.map(r => r.personnelId), capabilities, terminals: terminals.map(safeTerminal), punches, intervals: pending.map(i => ({ ...i, hasConflict: overlaps.includes(i.id), handoverRequired: overlaps.includes(i.id) || !onlyDeferredUnknownTimes([i], securityDateKeyFromInstant(new Date())) })), reviewCount, personnel, assignees, handovers } });
+    res.json({ success: true, data: { personPending, clockSamples, initialReview, pendingIntervalsCount, rosterIds: roster.map(r => r.personnelId), capabilities, terminals: terminals.map(safeTerminal), punches, intervals: pending.map(i => ({ ...i, unknownExitConfirmed: isUnknownExitConfirmed(i), hasConflict: overlaps.includes(i.id), handoverRequired: overlaps.includes(i.id) || !onlyDeferredUnknownTimes([i], securityDateKeyFromInstant(new Date())) })), reviewCount, personnel, assignees, handovers } });
   } catch { res.status(500).json({ success: false, error: 'دریافت وضعیت دستگاه ناموفق بود.' }); }
 });
-router.get('/absence-cases', protect, attendanceDeviceReview, async (_req, res) => {
-  try { res.setHeader('Cache-Control', 'no-store'); res.json({ success: true, data: await prisma.$transaction(db => unresolvedAbsenceDays(db), { isolationLevel: 'RepeatableRead', timeout: 30000 }) }); }
+router.get('/absence-cases', protect, attendanceDeviceReview, async (req: AuthRequest, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    const snapshot = await prisma.$transaction(async db => {
+      const data = await unresolvedAbsenceDays(db);
+      const handoverRequired = await isReviewHandoverRequired(db, req.user!.id, data);
+      return { data, handoverRequired };
+    }, { isolationLevel: 'RepeatableRead', timeout: 30000 });
+    res.json({ success: true, ...snapshot });
+  }
   catch { res.status(400).json({ success: false, error: 'دریافت موارد عدم حضور ناموفق بود.' }); }
 });
 router.post('/absence-decisions', protect, attendanceDeviceReview, run((req, db) => confirmFactualAbsence(db, req.body, req.user!.id)));
@@ -179,6 +188,7 @@ router.post('/confirm', protect, attendanceDeviceReview, run((req, db) => confir
 router.post('/intervals/:id/correction-preview', protect, attendanceDeviceReview, run((req, db) => previewAttendanceCorrection(db, req.params.id, req.body, req.user!.id)));
 router.post('/intervals/:id/correction', protect, attendanceDeviceReview, run((req, db) => applyAttendanceCorrection(db, req.params.id, req.body, req.user!.id)));
 router.post('/intervals/:id/unknown-exit', protect, attendanceDeviceReview, run((req, db) => applyAttendanceCorrection(db, req.params.id, { ...req.body, action: 'UNKNOWN_EXIT' }, req.user!.id)));
+router.post('/intervals/:id/confirm-unknown-exit', protect, attendanceDeviceReview, run((req, db) => confirmUnknownExit(db, req.params.id, req.body, req.user!.id)));
 router.post('/handover', protect, attendanceDeviceReview, run(async (req, db) => {
   const reason = requireReason(req.body.reason);
   const assigneeId = String(req.body.assigneeId || '');

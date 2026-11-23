@@ -6,6 +6,7 @@ import { saveRestPolicy as saveRestPolicyAt, assignRestPolicy as assignRestPolic
 import { loadPersonnelAttendanceAccounting } from '../personnelAttendanceAccounting';
 import { parsePersonnelAttendanceReportOptions } from '../personnelAttendanceReport';
 import { confirmFactualAbsence, unresolvedAbsenceDays } from '../attendanceAbsenceDecision';
+import { confirmUnknownExit } from '../attendanceCorrection';
 import { lockAttendance } from '../attendanceDevice';
 import { assertDispatchDocumentsMigrationTarget } from './dispatchDocumentsTemporaryDatabase';
 const candidateDatabaseName = process.env.SABALAN_CANDIDATE_QA_DATABASE_NAME;
@@ -146,4 +147,9 @@ test('automatic prior-day unknown exit remains incomplete and reviewable without
   await tx.attendanceInterval.update({ where: { id: interval.id }, data: { exitSource: 'MANUAL' } });
   const manual = (await unresolvedAbsenceDays(tx, now)).find(c => c.personnelId === f.person.id && c.date === day);
   assert(manual); assert.equal(manual.handoverRequired, true, 'Unrelated unknown time retains its review requirement');
+  await confirmUnknownExit(tx, interval.id, { revision: interval.revision, departureConfirmed: true }, f.actor.id);
+  assert.equal((await unresolvedAbsenceDays(tx, now)).find(c => c.personnelId === f.person.id && c.date === day), undefined);
+  const confirmed = await f.accounting();
+  assert.equal(confirmed.shortageMinutes, null);
+  assert(confirmed.issues.includes('UNKNOWN_TIME'));
 }));

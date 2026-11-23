@@ -1,5 +1,6 @@
 import { AttendanceIntervalStatus } from '@prisma/client';
 import type { AccountingProjection } from './personnelAttendanceAccounting';
+import { isUnknownExitConfirmed } from './attendanceDayBoundary';
 
 export type PersonnelAttendanceReportOptions = {
   startDate: Date;
@@ -21,13 +22,13 @@ export type PersonnelAttendanceSourceRow = {
   personnelLastName: string | null;
   personnel?: { firstName: string; lastName: string } | null;
   employee?: { firstName: string; lastName: string; personnelId: string | null } | null;
-  intervals: Array<{ enteredAt: Date | null; exitedAt: Date | null; status: AttendanceIntervalStatus | string; exitUnknown?: boolean; exitSource?: string | null; revision?: number; confirmedRevision?: number }>;
+  intervals: Array<{ enteredAt: Date | null; exitedAt: Date | null; status: AttendanceIntervalStatus | string; exitUnknown?: boolean; exitSource?: string | null; revision?: number; confirmedRevision?: number; confirmedAt?: Date | null }>;
   accounting?: AccountingProjection;
 };
 
 export type PersonnelAttendanceDay = {
   date: string;
-  intervals: Array<{ enteredAt: string | null; exitedAt: string | null; exitUnknown?: boolean; exitSource?: string | null }>;
+  intervals: Array<{ enteredAt: string | null; exitedAt: string | null; exitUnknown?: boolean; exitSource?: string | null; unknownExitConfirmed?: boolean }>;
   physicalDurationUnknown?: boolean;
   durationUnknown?: boolean;
   provisional?: boolean;
@@ -140,7 +141,7 @@ export function buildPersonnelAttendanceReport(rows: PersonnelAttendanceSourceRo
       day.durationUnknown = row.accounting.issues.some(i => i !== 'OPEN_DAY');
       day.physicalDurationUnknown = row.accounting.issues.some(i => ['UNKNOWN_TIME', 'OVERLAPPING_ATTENDANCE'].includes(i));
       day.provisional = !row.accounting.final;
-      day.intervals.push(...valid.map(interval => ({ enteredAt: interval.enteredAt?.toISOString() || null, exitedAt: interval.exitedAt?.toISOString() || null, exitUnknown: interval.exitUnknown, exitSource: interval.exitSource })));
+      day.intervals.push(...valid.map(interval => ({ enteredAt: interval.enteredAt?.toISOString() || null, exitedAt: interval.exitedAt?.toISOString() || null, exitUnknown: interval.exitUnknown, exitSource: interval.exitSource, ...(isUnknownExitConfirmed(interval) && { unknownExitConfirmed: true }) })));
       openIntervals += valid.filter(i => !i.enteredAt || !i.exitedAt || i.exitUnknown).length;
       continue;
     }
@@ -148,7 +149,7 @@ export function buildPersonnelAttendanceReport(rows: PersonnelAttendanceSourceRo
     day.legacyRestKnown = options.legacyRestKnown !== false;
     for (const interval of valid) {
       if (!interval.enteredAt || !interval.exitedAt || interval.exitUnknown) { day.durationUnknown = true; day.physicalDurationUnknown = true; }
-      if (interval.revision !== undefined && interval.revision !== interval.confirmedRevision) day.provisional = true;
+      if (isUnknownExitConfirmed(interval) || (interval.revision !== undefined && interval.revision !== interval.confirmedRevision)) day.provisional = true;
       day.intervals.push({ enteredAt: interval.enteredAt?.toISOString() || null, exitedAt: interval.exitedAt?.toISOString() || null, exitUnknown: interval.exitUnknown, exitSource: interval.exitSource });
       if (!interval.enteredAt || !interval.exitedAt || interval.exitUnknown) { openIntervals++; continue; }
       const minutes = Math.floor((interval.exitedAt.getTime() - interval.enteredAt.getTime()) / 60_000);

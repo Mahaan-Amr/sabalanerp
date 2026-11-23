@@ -422,7 +422,7 @@ export default function AttendancePage() {
       </ErpSection>
 
       <ErpSection title="کارکنان" actions={[]}>
-            <AttendanceReviewToolbar state={device.state} selected={selectedIntervals} onSelect={setSelectedIntervals} onSaved={async () => { await device.load(); await fetchAttendanceData(true); }} />
+            <AttendanceReviewToolbar state={device.state} onSaved={async () => { await device.load(); await fetchAttendanceData(true); }} />
             {device.error && <ErpInlineState kind="error" title={device.error} />}
             <ErpCheckbox label="فقط موارد نیازمند رسیدگی" checked={pendingOnly} onChange={e => setPendingOnly(e.target.checked)} />
 

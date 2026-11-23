@@ -11,7 +11,7 @@ import { AuditedAttendanceCorrection, type CorrectionTarget } from './AuditedAtt
 
 type Mapping = { id: string; personnelId: string | null; deviceCode: string; ignored: boolean; initialState: string; nameSnapshot: string | null };
 type Terminal = { id: string; name: string; mode: string; activatedAt: string | null; lastSeenAt: string | null; lastReadAt: string | null; mappings: Mapping[] };
-type Interval = { id: string; enteredAt: string | null; exitedAt: string | null; exitUnknown: boolean; exitSource?: string | null; hasConflict?: boolean; handoverRequired?: boolean; revision: number; confirmedRevision: number; attendanceRecord: { personnelId: string | null } };
+type Interval = { id: string; enteredAt: string | null; exitedAt: string | null; exitUnknown: boolean; unknownExitConfirmed?: boolean; exitSource?: string | null; hasConflict?: boolean; handoverRequired?: boolean; revision: number; confirmedRevision: number; attendanceRecord: { personnelId: string | null } };
 type Punch = { id: string; personnelId: string | null; occurredAt: string; correctedOccurredAt: string | null; receivedAt: string; status: string; reason: string | null; deviceCode: string; nameSnapshot: string | null };
 type PendingCase =
   | { id: string; kind: 'punch'; occurredAt: string; status: string; reason: string | null; deviceCode: string }
@@ -114,6 +114,7 @@ export function PersonnelReviewDialogs({ state, person, initial, onClose, onSave
   const [correction, setCorrection] = useState<CorrectionTarget | null>(null);
   const [view, setView] = useState('pending');
   const [selectedPunch, setSelectedPunch] = useState<string | null>(null);
+  const [exitConfirmation, setExitConfirmation] = useState<{ id: string; revision: number } | null>(null);
   const [details, setDetails] = useState<State | null>(null);
   const [cursor, setCursor] = useState('');
   const [intervalCursor, setIntervalCursor] = useState('');
@@ -123,7 +124,7 @@ export function PersonnelReviewDialogs({ state, person, initial, onClose, onSave
   const [choice, setChoice] = useState('UNKNOWN');
   const [actualTime, setActualTime] = useState('');
   const load = useCallback(async () => { if (person) { const r = await api.get('/attendance-device/state', { params: { personnelId: person.id, status: view === 'history' ? 'all' : 'pending', cursor: cursor || undefined, intervalCursor: intervalCursor || undefined } }); setDetails(r.data.data); } }, [person, cursor, intervalCursor, view]);
-  useEffect(() => { setCursor(''); setIntervalCursor(''); setView('pending'); setSelectedPunch(null); setDetails(null); setReason(''); setActualTime(''); setError(''); }, [person]);
+  useEffect(() => { setCursor(''); setIntervalCursor(''); setView('pending'); setSelectedPunch(null); setExitConfirmation(null); setDetails(null); setReason(''); setActualTime(''); setError(''); }, [person]);
   useEffect(() => { setChoice('UNKNOWN'); setError(''); }, [initial]);
   useEffect(() => { if (!person) return; let active = true; let timer: ReturnType<typeof setTimeout>; const poll = async () => { try { const r = await api.get('/attendance-device/state', { params: { personnelId: person.id, status: view === 'history' ? 'all' : 'pending', cursor: cursor || undefined, intervalCursor: intervalCursor || undefined } }); if (active) setDetails(r.data.data); } catch { if (active) setError('دریافت شواهد ناموفق بود.'); } finally { if (active) timer = setTimeout(poll, 1500); } }; void poll(); return () => { active = false; clearTimeout(timer); }; }, [person, cursor, intervalCursor, view]);
   const mutate = async (path: string, body: object, close = false) => { setBusy(true); setError(''); try { await api.post(`/attendance-device/${path}`, body); await onSaved(); if (close) onClose(); else await load(); } catch (e: any) { setError(e.response?.data?.error || 'ثبت تغییر ناموفق بود.'); } finally { setBusy(false); } };
@@ -135,17 +136,30 @@ export function PersonnelReviewDialogs({ state, person, initial, onClose, onSave
     <ErpSheet presentation="modal" open={Boolean(person)} pending={busy} onClose={onClose} title={`بررسی تردد ${person?.name || ''}`}>
       <div className="space-y-4">
         {error && <ErpInlineState kind="error" title={error} />}
-        <ErpSegmentedControl value={view} onChange={value => { setView(value); setCursor(''); setIntervalCursor(''); setDetails(null); setSelectedPunch(null); setReason(''); setActualTime(''); }} options={[{ value: 'pending', label: 'نیازمند رسیدگی' }, { value: 'history', label: 'سوابق و شواهد' }]} />
+        <ErpSegmentedControl value={view} onChange={value => { setView(value); setCursor(''); setIntervalCursor(''); setDetails(null); setSelectedPunch(null); setExitConfirmation(null); setReason(''); setActualTime(''); }} options={[{ value: 'pending', label: 'نیازمند رسیدگی' }, { value: 'history', label: 'سوابق و شواهد' }]} />
         {!details && <ErpSkeleton lines={3} />}
         {details && !details.intervals.length && !details.punches.length && <ErpEmptyState title={view === 'pending' ? 'موردی برای رسیدگی باقی نمانده است' : 'سابقه‌ای در این بخش نیست'} />}
         {details?.intervals.map(i => {
           const deferred = i.handoverRequired === false || (i.exitUnknown && i.exitSource === 'DAY_ROLLOVER');
-          const issue = intervalIssue(i);
+          const issue = i.unknownExitConfirmed ? 'خروج تأیید شده، ساعت نامعلوم' : intervalIssue(i);
           return <ErpCard key={i.id} className="space-y-3 p-3">
             <ErpStatus label={issue} tone={i.hasConflict || i.exitUnknown || !i.enteredAt || !i.exitedAt ? 'warning' : 'neutral'} />
             <div className="grid gap-1 text-sm sds-text-secondary"><p>ورود: <bdi>{i.enteredAt ? stamp(i.enteredAt) : 'ساعت نامعلوم'}</bdi></p><p>خروج: <bdi>{i.exitUnknown ? 'ساعت نامعلوم' : i.exitedAt ? stamp(i.exitedAt) : 'ثبت نشده'}</bdi></p></div>
-            {deferred && <p className="text-xs sds-text-secondary">خروج روز قبل برای اصلاح باقی مانده؛ مانع ورود روز جدید یا تحویل شیفت نیست.</p>}
-            {state?.capabilities.review && <div className="flex flex-wrap gap-2"><ErpButton label="اصلاح ورود/خروج" disabled={busy} onClick={() => onCorrect(i)} /><ErpButton label="بررسی ابطال یا خروج نامعلوم" variant="ghost" disabled={busy} onClick={() => setCorrection({ id: i.id, name: person?.name || '' })} /></div>}
+            {deferred && !i.unknownExitConfirmed && <p className="text-xs sds-text-secondary">خروج روز قبل برای اصلاح باقی مانده؛ مانع ورود روز جدید یا تحویل شیفت نیست.</p>}
+            {state?.capabilities.review && (
+              i.exitUnknown && !i.unknownExitConfirmed && exitConfirmation?.id === i.id ? (
+                <div className="flex flex-wrap gap-2">
+                  <ErpButton label="تأیید می‌کنم که خروج انجام شده" variant="solid" disabled={busy} onClick={() => mutate(`intervals/${i.id}/confirm-unknown-exit`, { revision: exitConfirmation.revision, departureConfirmed: true })} />
+                  <ErpButton label="انصراف" variant="ghost" disabled={busy} onClick={() => setExitConfirmation(null)} />
+                </div>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {i.exitUnknown && !i.unknownExitConfirmed && <ErpButton label="تأیید خروج بدون ساعت" disabled={busy} onClick={() => { setError(''); setExitConfirmation({ id: i.id, revision: i.revision }); }} />}
+                  <ErpButton label="اصلاح ورود/خروج" disabled={busy} onClick={() => onCorrect(i)} />
+                  <ErpButton label="بررسی ابطال یا خروج نامعلوم" variant="ghost" disabled={busy} onClick={() => setCorrection({ id: i.id, name: person?.name || '' })} />
+                </div>
+              )
+            )}
           </ErpCard>;
         })}
         {details && details.intervals.length === 100 && <ErpButton label="بازه‌های قدیمی‌تر" onClick={() => setIntervalCursor(details.intervals.at(-1)!.id)} />}
@@ -167,19 +181,15 @@ export function PersonnelReviewDialogs({ state, person, initial, onClose, onSave
   </>;
 }
 
-export function AttendanceReviewToolbar({ state, selected, onSelect, onSaved }: { state: State | null; selected: Record<string, number>; onSelect: (v: Record<string, number>) => void; onSaved: () => Promise<void> }) {
-  const [handover, setHandover] = useState(false); const [reason, setReason] = useState(''); const [assignee, setAssignee] = useState(''); const [error, setError] = useState(''); const [busy, setBusy] = useState(false);
-  const mutate = async (path: string, body: object) => { setBusy(true); setError(''); try { await api.post(`/attendance-device/${path}`, body); onSelect({}); setHandover(false); await onSaved(); } catch (e: any) { setError(e.response?.data?.error || 'عملیات ناموفق بود.'); } finally { setBusy(false); } };
+export function AttendanceReviewToolbar({ state, onSaved }: { state: State | null; onSaved: () => Promise<void> }) {
   if (!state) return null;
   const pending = state.personPending.reduce((n, p) => n + p.count, 0);
   return <div className="space-y-3" id="device-attendance">
-    {state.capabilities.review && <AttendanceAbsenceCases onChange={() => { void onSaved(); }} />}
+    {state.capabilities.review && <AttendanceAbsenceCases assignees={state.assignees} onChange={onSaved} />}
     {state.reviewCount > 0 && <ErpStatus tone="warning" label={`${state.reviewCount.toLocaleString('fa-IR')} شاهد دستگاه نیازمند رسیدگی`} />}
     {pending > 0 && <ErpInlineState kind="stale" title={`${pending.toLocaleString('fa-IR')} مورد نیازمند رسیدگی؛ خروج نامعلومِ منتقل‌شده از روز قبل مانع تحویل شیفت نیست.`} />}
-    <div className="flex flex-wrap gap-2">{state.capabilities.review && <><ErpButton label="تحویل موارد به شیفت بعد" onClick={() => setHandover(true)} /></>}{state.capabilities.manage && <ErpButton label="مدیریت دستگاه‌ها" href="/dashboard/hr/attendance-devices" variant="ghost" />}{state.capabilities.report && <ErpButton label="گزارش کارکرد پرسنل" href="/dashboard/security/reports/personnel-attendance" variant="ghost" />}</div>
+    <div className="flex flex-wrap gap-2">{state.capabilities.manage && <ErpButton label="مدیریت دستگاه‌ها" href="/dashboard/hr/attendance-devices" variant="ghost" />}{state.capabilities.report && <ErpButton label="گزارش کارکرد پرسنل" href="/dashboard/security/reports/personnel-attendance" variant="ghost" />}</div>
     {state.handovers[0] && <p className="text-xs sds-text-secondary">آخرین تحویل به {state.assignees.find(a => a.userId === state.handovers[0].assigneeId)?.user.firstName || 'مسئول پیگیری'}: {state.handovers[0].reason}</p>}
-    {error && <ErpInlineState kind="error" title={error} />}
-    <ErpSheet presentation="modal" open={handover} pending={busy} onClose={() => setHandover(false)} title="تحویل موارد به شیفت بعد" footer={<ErpButton label="ثبت تحویل" disabled={busy || !reason.trim() || !assignee} onClick={() => mutate('handover', { reason, assigneeId: assignee })} />}><ErpField label="دلیل"><ErpTextarea value={reason} onChange={e => setReason(e.target.value)} /></ErpField><ErpField label="مسئول پیگیری"><ErpSelect value={assignee} onChange={e => setAssignee(e.target.value)}><option value="">انتخاب کنید</option>{state.assignees.map(a => <option key={a.userId} value={a.userId}>{a.user.firstName} {a.user.lastName}</option>)}</ErpSelect></ErpField></ErpSheet>
   </div>;
 }
 

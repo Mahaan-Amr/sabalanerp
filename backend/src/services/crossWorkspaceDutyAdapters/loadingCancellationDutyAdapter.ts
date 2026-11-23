@@ -154,6 +154,7 @@ export const loadingCancellationDutyAdapter: CrossWorkspaceDutySourceAdapter = {
         await cancelFinalizedOrdinaryLoadingInTransaction(tx, {
           loadingId: duty.sourceId, actorId: input.actorUserId, reason: snapshot.reason,
           expectedDocumentIds: snapshot.documents.map(doc => doc.id),
+          allowPreviouslyVoidedDocuments: true,
         });
       } catch (error) {
         if (error instanceof LoadingCancellationAccountingAccessError) throw new Error('DUTY_NOT_AVAILABLE');

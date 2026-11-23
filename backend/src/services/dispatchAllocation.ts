@@ -1249,6 +1249,7 @@ export const recoverLegacyLoadingWaybill = (prisma: Database, input: {
 
 type FinalizedLoadingCancellation = {
   loadingId: string; reason: string; actorId: string; expectedDocumentIds?: string[];
+  allowPreviouslyVoidedDocuments?: boolean;
 };
 
 export const cancelFinalizedOrdinaryLoading = (prisma: Database, input: FinalizedLoadingCancellation) =>
@@ -1270,7 +1271,7 @@ export const cancelFinalizedOrdinaryLoadingInTransaction = async (tx: Tx, input:
   const loading = await tx.logisticsLoading.findUnique({
     where: { id: input.loadingId },
     include: {
-      salesDispatchInvoices: { where: { voidedAt: null }, select: { id: true, number: true, loadingId: true } },
+      salesDispatchInvoices: { select: { id: true, number: true, loadingId: true, voidedAt: true } },
       guardQueueTurns: { include: { physicalExit: true, manualOutageExit: true } },
       canonicalAllocationRevisions: { include: {
         lines: true, physicalExit: true, manualOutageExit: true,
@@ -1316,10 +1317,19 @@ export const cancelFinalizedOrdinaryLoadingInTransaction = async (tx: Tx, input:
     throw new DispatchAllocationConflictError('لغو فقط پیش از ثبت خروج و برای نوبت‌های نهایی‌شدهٔ همین بارگیری ممکن است.');
   }
   const issuedWaybills = waybills.filter(waybill => waybill.status === 'ISSUED');
-  const activeInvoices = loading.salesDispatchInvoices;
+  const activeInvoices = loading.salesDispatchInvoices.filter(invoice => !invoice.voidedAt);
   const documentIds = [...issuedWaybills.map(doc => doc.id), ...activeInvoices.map(doc => doc.id)].sort();
-  if (input.expectedDocumentIds && JSON.stringify([...input.expectedDocumentIds].sort()) !== JSON.stringify(documentIds)) {
-    throw new DispatchAllocationConflictError('اسناد بارگیری تغییر کرده‌اند. صفحه را به‌روز کنید و دوباره تأیید کنید.');
+  if (input.expectedDocumentIds) {
+    // A duty reviews fixed document identities. Separate Accounting voids may finish
+    // that work early, but must never authorize a replacement or unrelated document.
+    const previouslyVoidedIds = new Set(input.allowPreviouslyVoidedDocuments ? [
+      ...waybills.filter(doc => doc.status === 'VOIDED' && doc.voidedAt).map(doc => doc.id),
+      ...loading.salesDispatchInvoices.filter(doc => doc.voidedAt).map(doc => doc.id),
+    ] : []);
+    const remainingExpectedIds = input.expectedDocumentIds.filter(id => !previouslyVoidedIds.has(id)).sort();
+    if (JSON.stringify(remainingExpectedIds) !== JSON.stringify(documentIds)) {
+      throw new DispatchAllocationConflictError('اسناد بارگیری تغییر کرده‌اند. صفحه را به‌روز کنید و دوباره تأیید کنید.');
+    }
   }
   const authority = documentIds.length && input.expectedDocumentIds
     ? await loadingCancellationAccountingAuthority(tx, input.actorId) : null;

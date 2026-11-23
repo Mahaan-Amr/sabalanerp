@@ -1,12 +1,46 @@
 import { createHmac, randomBytes } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { AttendanceDeviceError, lockAttendance, refreshDeviceAttendance, requireReason } from './attendanceDevice';
+import { isUnknownExitConfirmed } from './attendanceDayBoundary';
 
 type DB = Prisma.TransactionClient;
 type Action = 'UNKNOWN_EXIT' | 'VOID';
 const previewKey = randomBytes(32);
 const lifetimeMs = 5 * 60_000;
 const json = (value: unknown) => JSON.parse(JSON.stringify(value));
+
+export async function confirmUnknownExit(
+  db: DB,
+  intervalId: string,
+  input: { revision?: unknown; departureConfirmed?: unknown },
+  actorId: string,
+) {
+  if (input.departureConfirmed !== true) throw new AttendanceDeviceError('انجام خروج را تأیید کنید.');
+  await lockAttendance(db);
+  const before = await db.attendanceInterval.findUnique({
+    where: { id: intervalId },
+    include: { attendanceRecord: { select: { personnelId: true } } },
+  });
+  if (!before || before.status !== 'ACTIVE' || !before.attendanceRecord.personnelId) {
+    throw new AttendanceDeviceError('بازه فعال پرسنل پیدا نشد.', 404);
+  }
+  if (!before.exitUnknown || before.exitedAt || before.revision !== input.revision || isUnknownExitConfirmed(before)) {
+    throw new AttendanceDeviceError('وضعیت خروج تغییر کرده یا قبلاً تأیید شده است؛ بازه را دوباره بررسی کنید.', 409);
+  }
+  const after = await db.attendanceInterval.update({
+    where: { id: intervalId },
+    data: { confirmedRevision: before.revision, confirmedBy: actorId, confirmedAt: new Date() },
+  });
+  const { attendanceRecord: _record, ...interval } = before;
+  await db.attendanceIntervalAudit.create({
+    data: {
+      intervalId, actorId, action: 'UNKNOWN_EXIT_CONFIRMED',
+      reason: 'انجام خروج تأیید شد؛ ساعت خروج نامعلوم است.',
+      beforeData: json(interval), afterData: json(after),
+    },
+  });
+  return after;
+}
 
 function command(value: any) {
   if (!value || !['UNKNOWN_EXIT', 'VOID'].includes(value.action)) throw new AttendanceDeviceError('نوع اصلاح معتبر انتخاب کنید.');

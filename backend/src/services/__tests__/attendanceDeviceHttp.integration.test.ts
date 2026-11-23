@@ -8,6 +8,7 @@ import securityRouter from '../../routes/security';
 import hrRouter from '../../routes/hr';
 import { securityDateKeyFromInstant, securityNowTime } from '../../utils/securityBusinessDate';
 import { createAuthoritativeSession, SESSION_COOKIE } from '../identitySessionService';
+import { reviewFingerprint } from '../attendanceDevice';
 
 if (!process.env.DATABASE_URL?.includes('@127.0.0.1:55432/sabalanerp?')) throw new Error('Local Compose database only.');
 
@@ -16,7 +17,9 @@ test('real HTTP: browser authority, terminal-scoped machine credential, replay a
   const users: string[] = [];
   const terminals: string[] = [];
   let shiftId: string | undefined;
+  let planId: string | undefined;
   let personnelId: string | undefined;
+  let secondPersonnelId: string | undefined;
   const app = express(); app.use(express.json()); app.use('/api/attendance-device', router); app.use('/api/security', securityRouter); app.use('/api/hr', hrRouter);
   const server = app.listen(0, '127.0.0.1');
   await new Promise<void>(resolve => server.once('listening', resolve));
@@ -53,9 +56,14 @@ test('real HTTP: browser authority, terminal-scoped machine credential, replay a
     assert.equal((await call(`/connector/${terminal.id}/punches`, concurrentPayload, terminal.token)).status, 200);
     assert.equal(await prisma.attendancePunch.count({ where: { terminalId: terminal.id, deviceCode: 'CONCURRENT' } }), 1);
     const shift = await prisma.shift.create({ data: { name: key, namePersian: key, startTime: '19:00', endTime: '07:00', duration: 720 } }); shiftId = shift.id;
-    await prisma.securityPersonnel.create({ data: { userId: viewer.id, shiftId, position: 'آزمون گارد' } });
-    await prisma.workspacePermission.create({ data: { userId: viewer.id, workspace: 'security', permissionLevel: 'view' } });
+    const guard = await prisma.securityPersonnel.create({ data: { userId: viewer.id, shiftId, position: 'آزمون گارد' } });
+    const guardAccess = await prisma.workspacePermission.create({ data: { userId: viewer.id, workspace: 'security', permissionLevel: 'view' } });
     const viewerCookie = `${SESSION_COOKIE}=${viewerSession.token}`;
+    const handoverStatus = async () => {
+      const response = await call('/absence-cases', undefined, undefined, viewerCookie);
+      assert.equal(response.status, 200);
+      return (await response.json() as { handoverRequired: boolean }).handoverRequired;
+    };
     assert.equal((await call('/confirm', { intervals: [] }, undefined, viewerCookie)).status, 400, 'every active guard can review; malformed selection still rejected');
     assert.equal((await call('/terminals', { name: key }, undefined, viewerCookie)).status, 403, 'guard cannot manage mappings or credentials');
     assert.equal((await call('/mappings/nonexistent/initial-state', { initialState: 'INSIDE', expectedInitialState: 'UNKNOWN', reason: 'بدون مجوز مدیریت' }, undefined, viewerCookie)).status, 403, 'ordinary guard cannot change the management-owned initial baseline');
@@ -71,7 +79,76 @@ test('real HTTP: browser authority, terminal-scoped machine credential, replay a
 
     const person = await prisma.personnel.create({ data: { firstName: 'ورود نامعلوم', lastName: key } }); personnelId = person.id;
     const date = securityDateKeyFromInstant(new Date());
+    const previousDate = new Date(Date.parse(`${date}T00:00:00Z`) - 86400000).toISOString().slice(0, 10);
     await prisma.securityAttendanceRosterMembership.create({ data: { personnelId, effectiveFrom: new Date(`${date}T00:00:00Z`), createdBy: admin.id } });
+
+    // Exercise the actual shift-end route with an ordinary guard and two missed exits.
+    const beforeMissedExits = await reviewFingerprint(prisma);
+    if (beforeMissedExits.count) {
+      // The shared local database may contain unrelated cases. Acknowledge that
+      // snapshot for the isolated guard without changing any existing case.
+      await prisma.attendanceReviewHandover.create({ data: {
+        actorId: viewer.id, assigneeId: admin.id, reason: 'تأیید موارد موجود در محیط آزمون',
+        evidenceHash: beforeMissedExits.hash, pendingCount: beforeMissedExits.count,
+      } });
+    }
+    const secondPerson = await prisma.personnel.create({ data: { firstName: 'خروج روز قبل', lastName: key } });
+    secondPersonnelId = secondPerson.id;
+    const priorRecords = await Promise.all([person.id, secondPerson.id].map(id =>
+      prisma.attendanceRecord.create({ data: { personnelId: id, date: new Date(`${previousDate}T00:00:00Z`), status: 'PRESENT' } })
+    ));
+    const entry = new Date(`${previousDate}T08:00:00+03:30`);
+    await prisma.attendanceInterval.create({ data: { attendanceRecordId: priorRecords[0].id, enteredAt: entry } });
+    const rolledOver = await prisma.attendanceInterval.create({ data: { attendanceRecordId: priorRecords[1].id, enteredAt: entry, exitUnknown: true, exitSource: 'DAY_ROLLOVER' } });
+    const priorState = (await (await call('/state?includePendingCases=true', undefined, undefined, viewerCookie)).json() as { data: any }).data;
+    assert.equal(priorState.personPending.filter((item: any) => [person.id, secondPerson.id].includes(item.personnelId)).reduce((count: number, item: any) => count + item.count, 0), 2);
+    assert.deepEqual(await reviewFingerprint(prisma), beforeMissedExits, 'missed exits do not change the blocking snapshot');
+    assert.equal(await handoverStatus(), false);
+    await prisma.workspacePermission.update({ where: { id: guardAccess.id }, data: { permissionLevel: 'edit' } });
+    const startsAt = new Date(Date.now() - 12 * 3600000 - 60000);
+    const endsAt = new Date(Date.now() - 60000);
+    const plan = await prisma.securityShiftPlan.create({ data: {
+      title: key, persianYear: 1405, anchorAt: startsAt, generateUntil: endsAt, status: 'PUBLISHED',
+      primaryAId: guard.id, primaryBId: guard.id, primaryCId: guard.id, createdBy: admin.id,
+    } });
+    planId = plan.id;
+    const slot = await prisma.securityShiftPlanSlot.create({ data: {
+      planId: plan.id, sequence: 1, startsAt, endsAt, plannedPersonnelId: guard.id,
+      session: { create: { personnelId: guard.id, startedAt: startsAt } },
+    } });
+    const ended = await securityCall(`/shift-plan-slots/${slot.id}/end`, {}, viewerCookie);
+    assert.equal(ended.status, 200, await ended.text());
+    assert.equal((await prisma.securityShiftSession.findUniqueOrThrow({ where: { slotId: slot.id } })).status, 'CLOSED');
+    assert.equal(await prisma.attendanceReviewHandover.count({ where: { actorId: viewer.id } }), beforeMissedExits.count ? 1 : 0);
+    assert.equal(await prisma.attendanceInterval.count({ where: { attendanceRecordId: { in: priorRecords.map(r => r.id) }, exitedAt: null } }), 2);
+    await prisma.workspacePermission.update({ where: { id: guardAccess.id }, data: { permissionLevel: 'view' } });
+
+    const confirmExitPath = `/intervals/${rolledOver.id}/confirm-unknown-exit`;
+    const exitConfirmation = { revision: rolledOver.revision, departureConfirmed: true };
+    assert.equal((await call(confirmExitPath, exitConfirmation, terminal.token)).status, 401);
+    assert.equal((await call(confirmExitPath, { ...exitConfirmation, departureConfirmed: false }, undefined, viewerCookie)).status, 400);
+    assert.equal((await call(confirmExitPath, { ...exitConfirmation, revision: rolledOver.revision + 1 }, undefined, viewerCookie)).status, 409);
+    const confirmations = await Promise.all(Array.from({ length: 2 }, () => call(confirmExitPath, exitConfirmation, undefined, viewerCookie)));
+    assert.deepEqual(confirmations.map(response => response.status).sort(), [200, 409]);
+    const confirmed = await prisma.attendanceInterval.findUniqueOrThrow({ where: { id: rolledOver.id } });
+    assert.equal(confirmed.exitedAt, null);
+    assert.equal(confirmed.exitUnknown, true);
+    assert.equal(confirmed.exitSource, 'DAY_ROLLOVER');
+    assert.equal(confirmed.confirmedBy, viewer.id);
+    const audits = await prisma.attendanceIntervalAudit.findMany({ where: { intervalId: confirmed.id, action: 'UNKNOWN_EXIT_CONFIRMED' } });
+    assert.deepEqual(audits.map(audit => audit.actorId), [viewer.id]);
+    const reviewedState = async (status: string) => {
+      const result = await call(`/state?personnelId=${secondPerson.id}&status=${status}`, undefined, undefined, viewerCookie);
+      assert.equal(result.status, 200);
+      return (await result.json() as { data: any }).data;
+    };
+    const remaining = await reviewedState('pending');
+    assert.equal(remaining.intervals.length, 0);
+    assert.ok(!remaining.personPending.some((item: any) => item.personnelId === secondPerson.id));
+    assert.equal((await reviewedState('all')).intervals[0].unknownExitConfirmed, true);
+    assert.deepEqual(await reviewFingerprint(prisma), beforeMissedExits);
+
+    await prisma.attendanceRecord.deleteMany({ where: { id: { in: priorRecords.map(r => r.id) } } });
     assert.equal((await securityCall('/attendance/checkin', { personnelId, date, entryUnknown: true })).status, 400, 'unknown entry requires a reason');
     const unknown = await securityCall('/attendance/checkin', { personnelId, date, entryUnknown: true, reason: 'ورود فراموش‌شده؛ ساعت معلوم نیست' });
     assert.equal(unknown.status, 201);
@@ -118,7 +195,6 @@ test('real HTTP: browser authority, terminal-scoped machine credential, replay a
     assert.equal(pendingState.status, 200);
     const pendingData = (await pendingState.json() as { data: any }).data;
     assert(pendingData.intervals.some((i: any) => i.id === interval.id), 'Unknown exits remain in the actionable list');
-    const previousDate = new Date(Date.parse(`${date}T00:00:00Z`) - 86400000).toISOString().slice(0, 10);
     const previousDaily = await fetch(base.replace('/attendance-device', '/security') + `/attendance/daily?date=${previousDate}&personnelId=${personnelId}`, { headers: { Cookie: cookie } });
     assert.equal(previousDaily.status, 200);
     assert.deepEqual((await previousDaily.json() as { data: any }).data.attendanceSummary, [], 'person is outside the selected daily roster');
@@ -142,12 +218,24 @@ test('real HTTP: browser authority, terminal-scoped machine credential, replay a
     await prisma.attendanceRecord.delete({ where: { id: ordinaryRecord.id } });
 
     const before = new Date(Date.now() - 3600000);
+    assert.equal(await handoverStatus(), true, 'unknown exit requiring review blocks shift end');
+    const baseline = await reviewFingerprint(prisma);
+    await prisma.attendanceReviewHandover.create({ data: {
+      actorId: viewer.id, assigneeId: admin.id, reason: 'تأیید موارد موجود در محیط آزمون',
+      evidenceHash: baseline.hash, pendingCount: baseline.count,
+    } });
+    assert.equal(await handoverStatus(), false, 'already handed over by this guard');
+    const priorRecord = await prisma.attendanceRecord.create({ data: { personnelId, date: new Date(`${previousDate}T00:00:00Z`), status: 'PRESENT' } });
+    await prisma.attendanceInterval.create({ data: { attendanceRecordId: priorRecord.id, enteredAt: new Date(`${previousDate}T08:00:00+03:30`) } });
+    assert.equal(await handoverStatus(), false, 'a prior-day open interval does not require another handover');
+    await prisma.attendanceRecord.delete({ where: { id: priorRecord.id } });
     await prisma.attendanceTerminal.update({ where: { id: terminal.id }, data: { mode: 'ACTIVE', activatedAt: before } });
     await prisma.attendanceTerminalPeriod.updateMany({ where: { terminalId: terminal.id }, data: { mode: 'ACTIVE', startsAt: before } });
     await prisma.attendanceTerminalMapping.create({ data: { terminalId: terminal.id, deviceCode: 'CLOCK_INVALID', personnelId, nameSnapshot: 'آزمون ساعت', initialState: 'OUTSIDE', effectiveFrom: before, createdBy: admin.id } });
     const invalidClock = await call(`/connector/${terminal.id}/punches`, { readOk: true, punches: [{ deviceCode: 'CLOCK_INVALID', occurredAt: new Date(Date.now() - 5000).toISOString(), verifyMode: 1, inOutRaw: 255 }], clockSample: { offsetMs: 35000, uncertaintyMs: 15001, measuredAt: new Date().toISOString() } }, terminal.token);
     assert.equal(invalidClock.status, 200, 'bad clock sample must not discard device evidence');
     assert.equal((await invalidClock.json() as { data: any }).data.accepted[0].status, 'REVIEW');
+    assert.equal(await handoverStatus(), true, 'new ambiguity requires a renewed handover');
     assert.equal(await prisma.attendanceInterval.count({ where: { attendanceRecord: { personnelId } } }), 1, 'bad clock sample creates no operational interval');
     const mixedReview = (await (await call('/state?includePendingCases=true', undefined, undefined, viewerCookie)).json() as { data: any }).data;
     const mixedPendingPerson = mixedReview.personPending.find((row: any) => row.personnelId === personnelId);
@@ -156,6 +244,15 @@ test('real HTTP: browser authority, terminal-scoped machine credential, replay a
     const reviewPunch = mixedPendingPerson.cases.find((item: any) => item.kind === 'punch');
     assert.equal(reviewPunch.deviceCode, 'CLOCK_INVALID');
     assert.ok(reviewPunch.reason && Number.isFinite(Date.parse(reviewPunch.occurredAt)));
+
+    const confirmMixedExit = await call(`/intervals/${interval.id}/confirm-unknown-exit`,
+      { ...exitConfirmation, revision: unknownAgain.revision }, undefined, viewerCookie);
+    assert.equal(confirmMixedExit.status, 200);
+    const punchStillPending = (await (await call('/state?includePendingCases=true', undefined, undefined, viewerCookie)).json() as { data: any }).data
+      .personPending.find((row: any) => row.personnelId === personnelId);
+    assert.deepEqual(punchStillPending.cases.map((item: any) => item.kind), ['punch']);
+    const incompleteAfterConfirm = await securityCall('/reports/personnel-attendance-preview', { startDate: date, endDate: date, personnelIds: [personnelId] });
+    assert.equal((await incompleteAfterConfirm.json() as { data: any }).data.people[0].durationUnknown, true);
 
     await prisma.securityPersonnel.update({ where: { userId: viewer.id }, data: { isActive: false } });
     assert.equal((await call('/confirm', { intervals: [] }, undefined, viewerCookie)).status, 403);
@@ -168,13 +265,22 @@ test('real HTTP: browser authority, terminal-scoped machine credential, replay a
       await prisma.attendanceTerminalMapping.deleteMany({ where: { terminalId: { in: terminals } } });
       await prisma.attendanceTerminalPeriod.deleteMany({ where: { terminalId: { in: terminals } } });
       await prisma.attendanceTerminal.deleteMany({ where: { id: { in: terminals } } });
+      await prisma.attendanceReviewHandover.deleteMany({ where: { actorId: { in: users } } });
       await prisma.authSession.deleteMany({ where: { userId: { in: users } } });
       await prisma.recognizedBrowserProfile.deleteMany({ where: { userId: { in: users } } });
+      if (planId) {
+        await prisma.securityShiftSession.deleteMany({ where: { slot: { planId } } });
+        await prisma.securityShiftPlan.delete({ where: { id: planId } });
+      }
       await prisma.securityPersonnel.deleteMany({ where: { userId: { in: users } } });
       if (personnelId) {
         await prisma.attendanceRecord.deleteMany({ where: { personnelId } });
         await prisma.securityAttendanceRosterMembership.deleteMany({ where: { personnelId } });
         await prisma.personnel.delete({ where: { id: personnelId } });
+      }
+      if (secondPersonnelId) {
+        await prisma.attendanceRecord.deleteMany({ where: { personnelId: secondPersonnelId } });
+        await prisma.personnel.delete({ where: { id: secondPersonnelId } });
       }
       if (shiftId) await prisma.shift.delete({ where: { id: shiftId } });
       await prisma.user.deleteMany({ where: { id: { in: users } } });

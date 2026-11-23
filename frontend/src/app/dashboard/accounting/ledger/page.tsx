@@ -1,7 +1,7 @@
 'use client';
 import { ErpPersianDateField } from '@/components/erp';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ErpBadge,
   ErpButton,
@@ -17,7 +17,10 @@ import {
   ErpSearchableSelect,
   ErpSheet,
 } from '@/components/erp';
-import { accountingAPI } from '@/lib/api';
+import { createAccountingAPI } from '@/lib/api';
+import { isPrivateClientScopeFailure } from '@/lib/privateClientScope';
+import { useAuth } from '@/contexts/AuthContext';
+import { useActorScopedHttp } from '@/hooks/useActorScopedHttp';
 import AccountingLedgerEvidence from '@/features/accounting/AccountingLedgerEvidence';
 import AccountingIdentityList from '@/features/accounting/AccountingIdentityList';
 import { useAccountingPanelRead } from '@/features/accounting/useAccountingPanelRead';
@@ -86,7 +89,16 @@ function LedgerReportStatus({ read }: { read: { data?: unknown[]; loading: boole
 }
 
 export default function AccountingLedgerPage() {
+  const { user } = useAuth();
+  return user ? <AccountingLedgerWorkspace key={user.id} actorId={user.id} /> : null;
+}
+
+function AccountingLedgerWorkspace({ actorId }: { actorId: string }) {
+  const api = useActorScopedHttp(actorId);
+  const accountingAPI = useMemo(() => createAccountingAPI(api), [api]);
   const [context, setContext] = useState<Context>(null);
+  const [contextDenied, setContextDenied] = useState(false);
+  const contextRead = useRef(0);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<Tab>('journal');
   const [identityTab, setIdentityTab] = useState<'financial' | 'party'>('financial');
@@ -119,19 +131,25 @@ export default function AccountingLedgerPage() {
   const [evidenceLoading, setEvidenceLoading] = useState(false);
 
   const loadContext = useCallback(async (background = false) => {
+    const request = ++contextRead.current;
     if (!background) setLoading(true);
     try {
       const response = await accountingAPI.getLedgerContext();
+      if (request !== contextRead.current) return;
       const next = response.data.data;
       setContext(next);
+      setContextDenied(false);
       const year = next?.books?.[0]?.fiscalYears?.[0];
       setFiscalYearId((current) => current || year?.id || '');
       setPeriodId((current) => current || year?.periods?.find((item: any) => item.status === 'OPEN')?.id || '');
     } catch (error: any) {
-      if ([401, 403].includes(error.response?.status)) setContext(null);
+      if (request !== contextRead.current) return;
+      if (isPrivateClientScopeFailure(error)) setContextDenied(true);
       setMessage({ kind: 'error', title: error.response?.data?.error || 'خواندن دفترکل ناموفق بود.' });
-    } finally { setLoading(false); }
-  }, []);
+    } finally {
+      if (request === contextRead.current) setLoading(false);
+    }
+  }, [accountingAPI]);
 
   useEffect(() => { void loadContext(); }, [loadContext]);
   useEffect(() => {
@@ -148,9 +166,9 @@ export default function AccountingLedgerPage() {
 
   const params = useMemo(() => ({ bookId: book?.id, fiscalYearId: year?.id, periodId: periodId || undefined }), [book?.id, year?.id, periodId]);
   const scope = params.bookId && params.fiscalYearId ? JSON.stringify(params) : undefined;
-  const loadJournal = useCallback(async (signal: AbortSignal): Promise<any[]> => (await accountingAPI.getLedgerJournal(params, signal)).data.data || [], [params]);
-  const loadDrafts = useCallback(async (signal: AbortSignal): Promise<any[]> => (await accountingAPI.getLedgerVouchers({ ...params, status: 'DRAFT' }, signal)).data.data || [], [params]);
-  const loadBalance = useCallback(async (signal: AbortSignal): Promise<any[]> => (await accountingAPI.getLedgerTrialBalance(params, signal)).data.data || [], [params]);
+  const loadJournal = useCallback(async (signal: AbortSignal): Promise<any[]> => (await accountingAPI.getLedgerJournal(params, signal)).data.data || [], [accountingAPI, params]);
+  const loadDrafts = useCallback(async (signal: AbortSignal): Promise<any[]> => (await accountingAPI.getLedgerVouchers({ ...params, status: 'DRAFT' }, signal)).data.data || [], [accountingAPI, params]);
+  const loadBalance = useCallback(async (signal: AbortSignal): Promise<any[]> => (await accountingAPI.getLedgerTrialBalance(params, signal)).data.data || [], [accountingAPI, params]);
   const journalRead = useAccountingPanelRead(tab === 'journal' ? scope : undefined, loadJournal, 'خواندن دفتر روزنامه ناموفق بود.');
   const draftRead = useAccountingPanelRead(tab === 'journal' ? scope : undefined, loadDrafts, 'خواندن پیش‌نویس‌های روزنامه ناموفق بود.');
   const balanceRead = useAccountingPanelRead(tab === 'balance' ? scope : undefined, loadBalance, 'خواندن تراز آزمایشی ناموفق بود.');
@@ -169,23 +187,36 @@ export default function AccountingLedgerPage() {
   }), { debit: BigInt(0), credit: BigInt(0) });
   const deniedRead = [journalRead, draftRead, balanceRead].find((read) => read.denied);
   const freshDrafts = !draftRead.loading && !draftRead.error;
-  const ledgerAccessDenied = Boolean(deniedRead);
+  const ledgerAccessDenied = contextDenied || Boolean(deniedRead);
   const freshJournal = !journalRead.loading && !journalRead.error;
 
-  const canWrite = ['ACCOUNTANT', 'ACCOUNTING_MANAGER'].includes(context?.accessProfile);
-  const canManage = context?.accessProfile === 'ACCOUNTING_MANAGER';
+  const canWrite = !ledgerAccessDenied && ['ACCOUNTANT', 'ACCOUNTING_MANAGER'].includes(context?.accessProfile);
+  const canManage = !ledgerAccessDenied && context?.accessProfile === 'ACCOUNTING_MANAGER';
   const canOverride = canWrite && (canManage || context?.isGlobalAdmin === true);
   const canPostCreated = createdVoucher?.status === 'DRAFT' && !createdVoucher.postingBlockedReason;
   const canPostTarget = canWrite && postTarget && !postTarget.postingBlockedReason
     && (freshDrafts || (canPostCreated && createdVoucher.id === postTarget.id));
 
+  const { discard: discardJournal } = journalRead;
+  const { discard: discardDrafts } = draftRead;
+  const { discard: discardBalance } = balanceRead;
   useEffect(() => {
     if (!ledgerAccessDenied) return;
+    contextRead.current++;
+    setContextDenied(true);
+    setContext(null);
+    setLoading(false);
+    setFiscalYearId('');
+    setPeriodId('');
+    discardJournal();
+    discardDrafts();
+    discardBalance();
     setCreated(undefined);
     setPostTarget(undefined);
     setReverseTarget(undefined);
     setEvidenceDetail(undefined);
-  }, [ledgerAccessDenied]);
+    setAuditHealth(undefined);
+  }, [discardBalance, discardDrafts, discardJournal, ledgerAccessDenied]);
   const voucherTotals = useMemo(() => voucher.lines.reduce((sum, line) => ({
     debit: sum.debit + integer(line.debitRials), credit: sum.credit + integer(line.creditRials),
   }), { debit: BigInt(0), credit: BigInt(0) }), [voucher.lines]);
@@ -226,10 +257,11 @@ export default function AccountingLedgerPage() {
   };
 
   const openEvidence = async (voucherId: string) => {
+    const generation = contextRead.current;
     setEvidenceLoading(true); setMessage(undefined);
     try {
       const response = await accountingAPI.getLedgerVoucherEvidence(voucherId, 'بازبینی شواهد قطعی سند در دفتر روزنامه');
-      setEvidenceDetail(response.data.data);
+      if (generation === contextRead.current) setEvidenceDetail(response.data.data);
     } catch (error: any) {
       setMessage({ kind: 'error', title: error.response?.data?.error || 'خواندن شواهد سند ناموفق بود.' });
     } finally { setEvidenceLoading(false); }
@@ -237,9 +269,9 @@ export default function AccountingLedgerPage() {
 
   if (loading) return <ErpLoading />;
 
-  if (deniedRead) return (
+  if (ledgerAccessDenied) return (
     <ErpPage eyebrow="حسابداری" title="دفترکل و کدینگ" backHref="/dashboard/accounting">
-      <ErpInlineState kind="permission" title={deniedRead.error || "دسترسی به گزارش دفترکل نیاز به بررسی دارد."} action={{ label: "تلاش دوباره", onClick: deniedRead.refresh }} />
+      <ErpInlineState kind="permission" title={deniedRead?.error || "دسترسی به گزارش دفترکل نیاز به بررسی دارد."} action={{ label: "تلاش دوباره", onClick: () => loadContext() }} />
     </ErpPage>
   );
 
@@ -423,8 +455,8 @@ export default function AccountingLedgerPage() {
         </ErpSection>}
         <ErpSection title="مدیریت دسترسی حسابداری" description="اعطا، انقضا و لغو سه سطح حسابداری فقط از مرجع واحد مدیریت دسترسی‌ها انجام می‌شود."><div className="flex justify-end"><ErpButton label="رفتن به مدیریت دسترسی‌ها" variant="outline" onClick={() => { window.location.href = '/dashboard/hr/permissions'; }} /></div></ErpSection>
       </>}
-      <ErpSheet open={Boolean(evidenceDetail)} onClose={() => setEvidenceDetail(undefined)} title="شواهد و منشأ سند" presentation="modal" footer={<div className="flex justify-end"><ErpButton label="بستن" variant="outline" onClick={() => setEvidenceDetail(undefined)} /></div>}>
-        {evidenceDetail && <AccountingLedgerEvidence evidence={evidenceDetail} />}
+      <ErpSheet open={canManage && Boolean(evidenceDetail)} onClose={() => setEvidenceDetail(undefined)} title="شواهد و منشأ سند" presentation="modal" footer={<div className="flex justify-end"><ErpButton label="بستن" variant="outline" onClick={() => setEvidenceDetail(undefined)} /></div>}>
+        {canManage && evidenceDetail && <AccountingLedgerEvidence evidence={evidenceDetail} />}
       </ErpSheet>
       <ErpSheet open={canWrite && Boolean(postTarget)} onClose={() => { if (!saving) { setPostTarget(undefined); setPostReason(''); setPostOverride(false); setOverrideReason(''); setPostError(''); } }} title="تأیید قطعی‌سازی سند" presentation="modal" pending={saving} footer={<div className="flex justify-end gap-2"><ErpButton label="انصراف" variant="ghost" disabled={saving} onClick={() => { setPostTarget(undefined); setPostError(''); }} /><ErpButton label="قطعی‌سازی" tone="success" disabled={saving || !canPostTarget || postReason.trim().length < 3 || (postOverride && overrideReason.trim().length < 8)} onClick={submitPost} /></div>}>
         {postError && <ErpInlineState kind="error" title={postError} />}

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useCallback, useContext, useEffect, useState, ReactNode } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState, ReactNode } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { workspacePermissionsAPI } from '@/lib/api';
@@ -150,6 +150,7 @@ interface WorkspaceContextType {
   hasPermission: (workspace: WORKSPACES, permission: WORKSPACE_PERMISSIONS) => boolean;
   getWorkspacePermission: (workspace: WORKSPACES) => WORKSPACE_PERMISSIONS | null;
   refreshPermissions: () => Promise<void>;
+  permissionsReady: boolean;
   loading: boolean;
 }
 
@@ -174,22 +175,30 @@ const initializePermissions = () => {
   });
   return initialPermissions;
 };
+const emptyWorkspacePermissions = initializePermissions();
+const emptyAccessibleWorkspaces: WorkspaceInfo[] = [];
 
 export const WorkspaceProvider: React.FC<WorkspaceProviderProps> = ({ children }) => {
   const [currentWorkspace, setCurrentWorkspaceState] = useState<WORKSPACES | null>(null);
   const [userPermissions, setUserPermissions] = useState<Record<WORKSPACES, WORKSPACE_PERMISSIONS[]>>({} as Record<WORKSPACES, WORKSPACE_PERMISSIONS[]>);
   const [accessibleWorkspaces, setAccessibleWorkspaces] = useState<WorkspaceInfo[]>([]);
+  const [permissionOwner, setPermissionOwner] = useState<string>();
+  const permissionRequest = useRef(0);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
   const pathname = usePathname();
-  const { isAuthenticated, loading: authLoading } = useAuth();
+  const { user, loading: authLoading } = useAuth();
+  const actorId = user?.id;
+  const permissionsReady = Boolean(actorId && permissionOwner === actorId);
 
   // Load user permissions from API
   const loadUserPermissions = useCallback(async () => {
     if (authLoading) return;
-    if (!isAuthenticated) {
-      setUserPermissions(initializePermissions());
-      setAccessibleWorkspaces([]);
+    const request = ++permissionRequest.current;
+    if (!actorId) {
+      setPermissionOwner(undefined);
+      setUserPermissions(emptyWorkspacePermissions);
+      setAccessibleWorkspaces(emptyAccessibleWorkspaces);
       setLoading(false);
       return;
     }
@@ -197,7 +206,8 @@ export const WorkspaceProvider: React.FC<WorkspaceProviderProps> = ({ children }
       setLoading(true);
       
       // Fetch real workspace permissions from API
-      const response = await workspacePermissionsAPI.getUserWorkspaces();
+      const response = await workspacePermissionsAPI.getUserWorkspaces(actorId);
+      if (request !== permissionRequest.current) return;
       
       if (response.data.success) {
         const workspacePermissions = response.data.data;
@@ -232,13 +242,17 @@ export const WorkspaceProvider: React.FC<WorkspaceProviderProps> = ({ children }
       }
 
     } catch (error) {
+      if (request !== permissionRequest.current) return;
       console.error('Error loading user permissions:', error);
       setUserPermissions(initializePermissions());
       setAccessibleWorkspaces([]);
     } finally {
-      setLoading(false);
+      if (request === permissionRequest.current) {
+        setPermissionOwner(actorId);
+        setLoading(false);
+      }
     }
-  }, [authLoading, isAuthenticated]);
+  }, [actorId, authLoading]);
 
   // Determine current workspace from pathname
   const determineCurrentWorkspace = useCallback(() => {
@@ -279,13 +293,13 @@ export const WorkspaceProvider: React.FC<WorkspaceProviderProps> = ({ children }
 
   // Check if user has specific permission for workspace
   const hasPermission = (workspace: WORKSPACES, permission: WORKSPACE_PERMISSIONS): boolean => {
-    const workspacePermissions = userPermissions[workspace] || [];
+    const workspacePermissions = permissionsReady ? userPermissions[workspace] || [] : [];
     return workspacePermissions.includes(permission);
   };
 
   // Get highest permission level for workspace
   const getWorkspacePermission = (workspace: WORKSPACES): WORKSPACE_PERMISSIONS | null => {
-    const workspacePermissions = userPermissions[workspace] || [];
+    const workspacePermissions = permissionsReady ? userPermissions[workspace] || [] : [];
     
     if (workspacePermissions.includes(WORKSPACE_PERMISSIONS.ADMIN)) {
       return WORKSPACE_PERMISSIONS.ADMIN;
@@ -317,13 +331,14 @@ export const WorkspaceProvider: React.FC<WorkspaceProviderProps> = ({ children }
 
   const value: WorkspaceContextType = {
     currentWorkspace,
-    userPermissions,
-    accessibleWorkspaces,
+    userPermissions: permissionsReady ? userPermissions : emptyWorkspacePermissions,
+    accessibleWorkspaces: permissionsReady ? accessibleWorkspaces : emptyAccessibleWorkspaces,
     setCurrentWorkspace,
     hasPermission,
     getWorkspacePermission,
     refreshPermissions,
-    loading
+    permissionsReady,
+    loading: loading || Boolean(actorId && pathname.startsWith('/dashboard') && !permissionsReady)
   };
 
   return (

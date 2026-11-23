@@ -7,6 +7,7 @@ import { createClientRequestId } from './requestIdentity';
 import { buildLoadingFinalizeRequest } from './loadingFinalizeRequest';
 import { buildAuthorizedPhysicalExitRequest } from './authorizedPhysicalExitRequest';
 import { createPrivateClient } from './privateClientScope';
+import type { RequestClient } from './actorScopedHttp';
 import { BrowserSessionContinuation, type BrowserSessionLease, type BrowserLoginAttempt } from './browserSessionContinuation';
 import { bindBrowserBuildRequestIdentity, bindBrowserBuildResourceUrl } from './browserBuildRequestIdentity';
 import { browserBuildHandoff } from './browserBuildHandoff';
@@ -619,7 +620,9 @@ export const dashboardAPI = {
 
 // Workspace Permissions API
 export const workspacePermissionsAPI = {
-  getUserWorkspaces: () => api.get('/workspace-permissions/user-workspaces'),
+  getUserWorkspaces: (expectedActorId?: string) => api.get('/workspace-permissions/user-workspaces', {
+    headers: expectedActorId ? { 'x-sabalan-expected-user': expectedActorId } : undefined,
+  }),
   getUserPermissions: (params?: { page?: number; limit?: number; userId?: string; workspace?: string }) =>
     api.get('/workspace-permissions', { params }),
   getRolePermissions: (params?: { role?: string; workspace?: string }) =>
@@ -633,13 +636,14 @@ export const workspacePermissionsAPI = {
 };
 
 // Departments API
-export const departmentsAPI = {
+export const createDepartmentsAPI = (api: RequestClient) => ({
   getDepartments: () => api.get('/departments'),
   getDepartment: (id: string) => api.get(`/departments/${id}`),
   createDepartment: (data: any) => api.post('/departments', data),
   updateDepartment: (id: string, data: any) => api.put(`/departments/${id}`, data),
   deleteDepartment: (id: string) => api.delete(`/departments/${id}`),
-};
+});
+export const departmentsAPI = createDepartmentsAPI(api);
 
 // Sales Workspace API
 export const salesAPI = {
@@ -879,7 +883,7 @@ export type CrmCustomerOption = {
 };
 
 // CRM Workspace API
-export const crmAPI = {
+export const createCrmAPI = (api: RequestClient) => ({
   // Customers
   getCustomers: (params?: { page?: number; limit?: number; search?: string; status?: string; customerType?: string; trustCategory?: string; ownership?: string; isBlacklisted?: boolean; isLocked?: boolean; view?: 'directory' }, signal?: AbortSignal) =>
     api.get('/crm/customers', { params, signal }),
@@ -1016,7 +1020,8 @@ export const crmAPI = {
   createFollowUp: (data: any) => api.post('/crm/follow-ups', data),
   getNextActions: (params?: any) => api.get('/crm/next-actions', { params }),
   completeNextAction: (id: string) => api.put(`/crm/next-actions/${id}/complete`),
-};
+});
+export const crmAPI = createCrmAPI(api);
 
 export const shipmentQuantityAPI = {
   getContract: (contractId: string, params?: { cutoff?: string; mode?: 'operational' | 'audit-known-at' }) =>
@@ -1118,7 +1123,7 @@ export const inventoryAPI = {
 };
 
 // Accounting Workspace API
-export const accountingAPI = {
+export const createAccountingAPI = (api: RequestClient) => ({
   recordCustomerPaperSignature: (contractId: string, revision: number) => api.post(`/accounting/contracts/${contractId}/customer-paper-signature`, { revision }),
   getCustomerAccounts: (params?: { search?: string; asOf?: string }) => api.get('/accounting/ledger/customer-profiles', { params }),
   getCustomerWorkspaceAccounts: (params?: { search?: string; asOf?: string; page?: number }) => api.get('/accounting/ledger/customer-accounts', { params }),
@@ -1346,9 +1351,10 @@ export const accountingAPI = {
   getBiometricConnectorDiagnostics: () => api.get('/biometric-connector/diagnostics'),
   createBiometricDiagnosticCommand: (workstationId: string) => api.post('/biometric-connector/diagnostics/command', { workstationId }),
   completeBiometricDiagnostic: (data: any) => api.post('/biometric-connector/diagnostics/result', data),
-};
+});
+export const accountingAPI = createAccountingAPI(api);
 
-export const dispatchConfirmationAPI = {
+export const createDispatchConfirmationAPI = (api: RequestClient) => ({
   getCapabilities: () => api.get('/dispatch-confirmation/capabilities'),
   enrollInternalDriver: (personnelId: string, data: any) => api.post(`/dispatch-confirmation/${biometricDriverPath(personnelId)}/enrollment`, data),
   cancelEnrollmentSession: (personnelId: string, enrollmentSessionId: string) => api.post(`/dispatch-confirmation/${biometricDriverPath(personnelId)}/enrollment-session/cancel`, { enrollmentSessionId }),
@@ -1368,22 +1374,24 @@ export const dispatchConfirmationAPI = {
   approveByGuard: (sessionId: string, data: { password: string; reason?: string }) => api.post(`/dispatch-confirmation/sessions/${sessionId}/guard-approval`, data),
   revokeAuthorization: (authorizationId: string, reason: string) => api.post(`/dispatch-confirmation/authorizations/${authorizationId}/revoke`, { reason }),
   revokeAuthorizationAsGuard: (authorizationId: string, reason: string) => api.post(`/dispatch-confirmation/guard/authorizations/${authorizationId}/revoke`, { reason }),
-};
+});
+export const dispatchConfirmationAPI = createDispatchConfirmationAPI(api);
 
 export const hrHiringMetricsAPI = {
   getDashboardMetrics: () => api.get('/hr-hiring/dashboard-metrics'),
 };
 
-export const biAPI = {
+export const createBiAPI = (api: RequestClient) => ({
   getSalesOverview: (params?: any) => api.get('/bi/sales/overview', { params }),
   getSalesAnalysis: (view: string, params?: any) => api.get(`/bi/sales/analysis/${view}`, { params }),
   exportSalesTable: (table: string, params?: any) =>
     api.get(`/bi/sales/export/${table}`, { params, responseType: 'blob' }),
   downloadSalesSummaryPdf: (params?: any) =>
     api.get('/bi/sales/summary.pdf', { params, responseType: 'blob' }),
-};
+});
+export const biAPI = createBiAPI(api);
 
-export const salesReportsAPI = {
+export const createSalesReportsAPI = (api: RequestClient) => ({
   getOverview: (params?: any) => api.get('/sales/reports/overview', { params }),
   getSummary: (params: Record<string, string>, signal?: AbortSignal) => api.get('/sales/reports/summary', { params, signal }),
   getDetails: (params: Record<string, string | number>, signal?: AbortSignal) => api.get('/sales/reports/details', { params, signal }),
@@ -1395,7 +1403,8 @@ export const salesReportsAPI = {
     api.post('/sales/reports/export.pdf', { filters, configuration }, { responseType: 'blob' }),
   downloadExcel: (filters: any, configuration: any) =>
     api.post('/sales/reports/export.xlsx', { filters, configuration }, { responseType: 'blob' })
-};
+});
+export const salesReportsAPI = createSalesReportsAPI(api);
 
 export const logisticsAPI = {
   getDashboard: () => api.get('/logistics/dashboard'),
@@ -1588,7 +1597,7 @@ export const contractsAPI = {
   delete: (id: string) => api.delete(`/contracts/${id}`),
 };
 
-export const securityAPI = {
+export const createSecurityAPI = (api: RequestClient) => ({
   // Shift management
   getShifts: () => api.get('/security/shifts'),
   createShift: (data: any) => api.post('/security/shifts', data),
@@ -1733,7 +1742,8 @@ export const securityAPI = {
   getAttendanceSignature: (id: string) => api.get(`/security/attendance/${id}/signature`),
   validateSignature: (signatureData: string, employeeId: string) => 
     api.post('/security/signature/validate', { signatureData, employeeId }),
-};
+});
+export const securityAPI = createSecurityAPI(api);
 
 export const personalAPI = {
   getLeaveRequests: (params?: any) => api.get('/personal/leave-requests', { params }),

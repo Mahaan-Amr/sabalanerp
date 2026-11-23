@@ -11,7 +11,11 @@ import {
 } from 'react-icons/fa';
 import PersianCalendarPicker from '@/components/PersianCalendar';
 import { PersianCalendar } from '@/lib/persian-calendar';
-import { biAPI, departmentsAPI, salesReportsAPI } from '@/lib/api';
+import { createBiAPI, createDepartmentsAPI, createSalesReportsAPI } from '@/lib/api';
+import { isPrivateClientScopeFailure } from '@/lib/privateClientScope';
+import { useActorScopedHttp } from '@/hooks/useActorScopedHttp';
+import { useAuth } from '@/contexts/AuthContext';
+import { useWorkspace, WORKSPACES } from '@/contexts/WorkspaceContext';
 import { formatMoneyNumber, formatPrice } from '@/lib/numberFormat';
 import { resolveChartLabel, RtlHorizontalBarChart, RtlTrendChart } from './RtlCharts';
 import { getSalesOperationalErrorMessage } from '@/features/sales/salesOperationalError';
@@ -24,7 +28,8 @@ type ReportPage = { rows: any[]; page: number; pageSize: number; totalPages: num
 type DrilldownRequest = { title: string; description?: string; selection: DrilldownSelection; accounting?: boolean };
 const pageSize = 25;
 
-function PagedReportRows({ filters, selection, children }: {
+function PagedReportRows({ salesReportsAPI, filters, selection, children }: {
+  salesReportsAPI: ReturnType<typeof createSalesReportsAPI>;
   filters: ReportFilters;
   selection: DrilldownSelection;
   children: (rows: any[]) => React.ReactNode;
@@ -45,7 +50,7 @@ function PagedReportRows({ filters, selection, children }: {
         }) });
       });
     return () => controller.abort();
-  }, [attempt, filters, page, selection]);
+  }, [attempt, filters, page, salesReportsAPI, selection]);
   const current = result?.page === page ? result : undefined;
   if (current?.error) return <ErpInlineState kind="error" title={current.error} action={{ label: 'تلاش دوباره',
     onClick: () => { setResult(undefined); retry((value) => value + 1); } }} />;
@@ -173,12 +178,25 @@ function AccountingDrilldownRows({ rows }: { rows: any[] }) {
 }
 
 export default function SalesReportingDashboard({ mode = 'sales' }: { mode?: Mode }) {
+  const { user } = useAuth();
+  const { getWorkspacePermission, permissionsReady } = useWorkspace();
+  if (!user) return null;
+  if (!permissionsReady) return <ErpLoading />;
+  const permission = getWorkspacePermission(mode === 'bi' ? WORKSPACES.BI : WORKSPACES.SALES);
+  return <ScopedSalesReportingDashboard key={JSON.stringify([user.id, user.role, permission, mode])} actorId={user.id} mode={mode} />;
+}
+
+function ScopedSalesReportingDashboard({ mode, actorId }: { mode: Mode; actorId: string }) {
+  const api = useActorScopedHttp(actorId);
+  const salesReportsAPI = useMemo(() => createSalesReportsAPI(api), [api]);
+  const biAPI = useMemo(() => createBiAPI(api), [api]);
+  const departmentsAPI = useMemo(() => createDepartmentsAPI(api), [api]);
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const requestedRange = searchParams.get('period');
   const requestedView = searchParams.get('view');
-  const storageKey = `sabalan-report-filters-${mode}`;
+  const storageKey = `sabalan-report-filters-${mode}:${actorId}`;
   const [received, setReceived] = useState<{ key: string; report: Report } | null>(null);
   const [filtersReady, setFiltersReady] = useState(false);
   const latestReportRequest = useRef<AbortController | null>(null);
@@ -196,6 +214,7 @@ export default function SalesReportingDashboard({ mode = 'sales' }: { mode?: Mod
   const [reportSellers, setReportSellers] = useState<any[]>([]);
   const [drilldown, setDrilldown] = useState<(DrilldownRequest & { requestKey: string; rows?: any[] }) | null>(null);
   const [presets, setPresets] = useState<any[]>([]);
+  const [presetRevision, setPresetRevision] = useState(0);
   const [presetName, setPresetName] = useState('');
   const [presetVisibility, setPresetVisibility] = useState('PERSONAL');
   const [exporting, setExporting] = useState(false);
@@ -208,12 +227,13 @@ export default function SalesReportingDashboard({ mode = 'sales' }: { mode?: Mod
 
   useEffect(() => {
     try {
-      const saved = JSON.parse(localStorage.getItem(storageKey) || '{}');
+      const stored = localStorage.getItem(storageKey);
+      const saved = JSON.parse(stored || localStorage.getItem(`sabalan-report-filters-${mode}`) || '{}');
       if (!requestedRange && rangeOptions.some(([id]) => id === saved.range)) setRange(saved.range);
       if (saved.customFrom) setCustomFrom(saved.customFrom);
       if (saved.customTo) setCustomTo(saved.customTo);
-      if (saved.departmentId) setDepartmentId(saved.departmentId);
-      if (saved.sellerId) setSellerId(saved.sellerId);
+      if (stored && saved.departmentId) setDepartmentId(saved.departmentId);
+      if (stored && saved.sellerId) setSellerId(saved.sellerId);
     } catch {}
     setFiltersReady(true);
     // Read saved filters once. URL replacements initiated by controls must not replay old filters.
@@ -245,7 +265,11 @@ export default function SalesReportingDashboard({ mode = 'sales' }: { mode?: Mod
       try { localStorage.setItem(storageKey, JSON.stringify({ range, customFrom, customTo, departmentId, sellerId })); } catch {}
     } catch (reason: any) {
       if (request.signal.aborted) return;
-      if ([401, 403].includes(reason?.response?.status)) setReceived(null);
+      if (isPrivateClientScopeFailure(reason)) {
+        setReceived(null);
+        setDrilldown(null);
+        setPresets([]);
+      }
       setError(mode === 'sales'
         ? getSalesOperationalErrorMessage(reason, {
           failedAction: 'دریافت گزارش فروش',
@@ -255,7 +279,7 @@ export default function SalesReportingDashboard({ mode = 'sales' }: { mode?: Mod
     } finally {
       if (!request.signal.aborted) setLoading(false);
     }
-  }, [mode, filters, filtersReady, requestKey, section, storageKey, range, customFrom, customTo, departmentId, sellerId]);
+  }, [biAPI, salesReportsAPI, mode, filters, filtersReady, requestKey, section, storageKey, range, customFrom, customTo, departmentId, sellerId]);
 
   useLayoutEffect(() => () => latestReportRequest.current?.abort(), [load]);
   useEffect(() => { void load(); }, [load]);
@@ -266,18 +290,16 @@ export default function SalesReportingDashboard({ mode = 'sales' }: { mode?: Mod
       .then((response) => { if (current) setDepartments(response.data.data || response.data || []); })
       .catch(() => undefined);
     return () => { current = false; };
-  }, [permissions?.canCompany]);
+  }, [departmentsAPI, permissions?.canCompany]);
   useEffect(() => {
-    if (mode !== 'sales' || activeTab !== 'export') return;
+    if (mode !== 'sales' || activeTab !== 'export' || !report) return;
     const controller = new AbortController();
+    setPresets([]);
     salesReportsAPI.getPresets(controller.signal).then((response) => {
-      if (!controller.signal.aborted) setPresets((current) => {
-        const byId = new Map([...(response.data.data || []), ...current].map((row) => [row.id, row]));
-        return Array.from(byId.values());
-      });
+      if (!controller.signal.aborted) setPresets(response.data.data || []);
     }).catch(() => undefined);
     return () => controller.abort();
-  }, [mode, activeTab]);
+  }, [mode, activeTab, presetRevision, report, salesReportsAPI]);
   useEffect(() => {
     setReportSellers([]);
     if (mode !== 'sales' || !permissions?.canSelectSeller) return;
@@ -286,7 +308,7 @@ export default function SalesReportingDashboard({ mode = 'sales' }: { mode?: Mod
       .then((response) => { if (!controller.signal.aborted) setReportSellers(response.data.data || []); })
       .catch(() => undefined);
     return () => controller.abort();
-  }, [departmentId, mode, permissions?.canSelectSeller]);
+  }, [departmentId, mode, permissions?.canSelectSeller, salesReportsAPI]);
 
   const updateReportUrl = useCallback((updates: { period?: string; view?: string }) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -333,9 +355,8 @@ export default function SalesReportingDashboard({ mode = 'sales' }: { mode?: Mod
     const save = ++latestPresetSave.current;
     setPresetError('');
     try {
-      const response = await salesReportsAPI.createPreset({ name: submittedName.trim(), visibility: presetVisibility, configuration: config });
-      const preset = response.data.data;
-      setPresets((rows) => rows.some((row) => row.id === preset.id) ? rows : [...rows, preset]);
+      await salesReportsAPI.createPreset({ name: submittedName.trim(), visibility: presetVisibility, configuration: config });
+      setPresetRevision(revision => revision + 1);
       if (save === latestPresetSave.current) setPresetName((current) => current === submittedName ? '' : current);
     } catch (reason) {
       if (save === latestPresetSave.current) setPresetError(getSalesOperationalErrorMessage(reason, {
@@ -435,7 +456,7 @@ export default function SalesReportingDashboard({ mode = 'sales' }: { mode?: Mod
         </div>}
 
         {activeTab === 'contracts' && <Panel title="قراردادها">{mode === 'sales'
-          ? <PagedReportRows key={requestKey} filters={filters} selection={allContracts}>{contractTable}</PagedReportRows>
+          ? <PagedReportRows salesReportsAPI={salesReportsAPI} key={requestKey} filters={filters} selection={allContracts}>{contractTable}</PagedReportRows>
           : contractTable(report.contracts)}</Panel>}
 
         {activeTab === 'customers' && <div className="grid gap-5 xl:grid-cols-[.9fr_1.1fr]"><Panel title="مشتریان بر اساس فروش قطعی"><RtlHorizontalBarChart data={report.customers.slice(0, 15).map((row: any) => ({ ...row, label: row.name }))} onSelect={(row) => openRows(`مشتری: ${row.name}`, `قراردادهای مجاز مرتبط با مشتری ${row.name}`, { kind: 'customer', key: row.id }, () => report.contracts.filter((contract: any) => contract.customerId === row.id))} /></Panel><Panel title="جزئیات مشتریان"><Table rows={report.customers} onRow={(row) => openRows(`مشتری: ${row.name}`, 'جزئیات قراردادهای مجاز این مشتری', { kind: 'customer', key: row.id }, () => report.contracts.filter((contract: any) => contract.customerId === row.id))} columns={[{ key: 'name', label: 'مشتری' }, { key: 'value', label: 'فروش قطعی', render: (row) => money(row.value) }, { key: 'contracts', label: 'قرارداد', render: (row) => count(row.contracts) }]} /></Panel></div>}
@@ -455,7 +476,7 @@ export default function SalesReportingDashboard({ mode = 'sales' }: { mode?: Mod
       title={activeDrilldown.title} presentation="modal" size="wide">
       {activeDrilldown.description && <p className="mb-3 text-sm text-[var(--sds-text-secondary)]">{activeDrilldown.description}</p>}
       {activeDrilldown.rows ? <ContractDrilldownRows rows={activeDrilldown.rows} /> :
-        <PagedReportRows key={JSON.stringify(activeDrilldown.selection)} filters={filters} selection={activeDrilldown.selection}>
+        <PagedReportRows salesReportsAPI={salesReportsAPI} key={JSON.stringify(activeDrilldown.selection)} filters={filters} selection={activeDrilldown.selection}>
           {(rows) => activeDrilldown.accounting ? <AccountingDrilldownRows rows={rows} />
             : <ContractDrilldownRows rows={rows} showTrendEvents={activeDrilldown.selection.kind === 'trend'} />}
         </PagedReportRows>}

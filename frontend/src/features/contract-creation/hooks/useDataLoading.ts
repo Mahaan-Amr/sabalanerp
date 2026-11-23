@@ -86,7 +86,9 @@ export const useDataLoading = ({ productStepActive, onError, onDataLoaded }: Use
   const [error, setError] = useState<string | null>(null);
 
   const productCatalogRequest = useRef<Promise<unknown> | null>(null);
+  const productCatalogStarted = useRef(false);
   const [productCatalogReady, setProductCatalogReady] = useState(false);
+  const [productCatalogError, setProductCatalogError] = useState<DataLoadError>();
   const errorSequenceRef = useRef(0);
   const activeErrorsRef = useRef(new Map<string, DataLoadError>());
   const requestTrackerRef = useRef(createLatestRequestTracker());
@@ -367,20 +369,33 @@ export const useDataLoading = ({ productStepActive, onError, onDataLoaded }: Use
     }
   }, [beginRequest, isLatestRequest, loadUserProfile, loadDepartments, recoverError, reportError]);
 
-  useEffect(() => {
-    if (!productStepActive || !currentUser || productCatalogRequest.current) return;
+  const loadProductCatalog = useCallback(async () => {
+    if (!currentUser || productCatalogRequest.current) return;
+    const loads: Record<string, () => Promise<unknown>> = { products: loadProducts };
+    if (capabilities.canLoadCuttingTypes) loads.cuttingTypes = loadCuttingTypes;
+    if (capabilities.canLoadSubServices) loads.subServices = loadSubServices;
+    if (capabilities.canLoadStoneFinishings) loads.stoneFinishings = loadStoneFinishings;
+    else setStoneFinishingLoadState('forbidden');
 
-    // Standalone service rows and product configurations both use these catalogs.
-    const tasks = [loadProducts()];
-    if (capabilities.canLoadCuttingTypes) tasks.push(loadCuttingTypes());
-    if (capabilities.canLoadSubServices) tasks.push(loadSubServices());
-    if (capabilities.canLoadStoneFinishings) {
-      tasks.push(loadStoneFinishings());
-    } else {
-      setStoneFinishingLoadState('forbidden');
+    const sources = Object.keys(loads);
+    const pending = productCatalogStarted.current ? sources.filter(source => activeErrorsRef.current.has(source)) : sources;
+    productCatalogStarted.current = true;
+    setProductCatalogError(undefined);
+    const request = Promise.all(pending.map(source => loads[source]()));
+    productCatalogRequest.current = request;
+    try {
+      await request;
+      const failure = sources.map(source => activeErrorsRef.current.get(source)).find(Boolean);
+      setProductCatalogError(failure);
+      setProductCatalogReady(!failure);
+    } finally {
+      productCatalogRequest.current = null;
     }
-    productCatalogRequest.current = Promise.all(tasks).finally(() => setProductCatalogReady(true));
-  }, [productStepActive, currentUser, capabilities, loadProducts, loadCuttingTypes, loadSubServices, loadStoneFinishings]);
+  }, [currentUser, capabilities, loadProducts, loadCuttingTypes, loadSubServices, loadStoneFinishings]);
+
+  useEffect(() => {
+    if (productStepActive && !productCatalogStarted.current) void loadProductCatalog();
+  }, [productStepActive, loadProductCatalog]);
 
   const getCuttingTypePricePerMeter = useCallback(
     (code: string): number | null => {
@@ -403,6 +418,8 @@ export const useDataLoading = ({ productStepActive, onError, onDataLoaded }: Use
     grantedWorkspaces,
     capabilities,
     productCatalogReady,
+    productCatalogError,
+    loadProductCatalog,
 
     loading,
     error,

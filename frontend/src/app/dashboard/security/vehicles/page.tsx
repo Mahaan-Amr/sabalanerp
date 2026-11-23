@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import {
   FaCarSide,
@@ -29,7 +29,8 @@ import {
   ErpWorkspacePage,
   erpFieldLabelClassName,
 } from "@/components/erp";
-import { crmAPI, dispatchConfirmationAPI, securityAPI, type CrmCustomerOption } from "@/lib/api";
+import { createCrmAPI, createDispatchConfirmationAPI, createSecurityAPI, type CrmCustomerOption } from "@/lib/api";
+import { useActorScopedHttp } from "@/hooks/useActorScopedHttp";
 import RoleAwareDispatchCases from "@/features/dispatch-case/RoleAwareDispatchCases";
 import { dispatchCaseReference } from "@/features/dispatch-case/dispatchCasePresentation";
 import {
@@ -129,9 +130,11 @@ export default function SecurityVehiclesPage() {
   const { hasPermission, loading: permissionsLoading } = useWorkspace();
   const canViewQueue = hasPermission(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.VIEW);
   const canEditQueue = hasPermission(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.EDIT);
+  if (!user) return null;
   return (
     <SecurityVehicleWorkspace
-      key={`${user?.id}:${canViewQueue}:${canEditQueue}`}
+      key={JSON.stringify([user.id, user.role, canViewQueue, canEditQueue])}
+      actorId={user.id}
       canViewQueue={canViewQueue}
       canEditQueue={canEditQueue}
       permissionsLoading={permissionsLoading}
@@ -139,11 +142,16 @@ export default function SecurityVehiclesPage() {
   );
 }
 
-function SecurityVehicleWorkspace({ canViewQueue, canEditQueue, permissionsLoading }: {
+function SecurityVehicleWorkspace({ actorId, canViewQueue, canEditQueue, permissionsLoading }: {
+  actorId: string;
   canViewQueue: boolean;
   canEditQueue: boolean;
   permissionsLoading: boolean;
 }) {
+  const api = useActorScopedHttp(actorId);
+  const crmAPI = useMemo(() => createCrmAPI(api), [api]);
+  const securityAPI = useMemo(() => createSecurityAPI(api), [api]);
+  const dispatchConfirmationAPI = useMemo(() => createDispatchConfirmationAPI(api), [api]);
   const mutationLock = useRef(false);
   const readSequence = useRef(0);
   const currentSection = useRef<VehicleSection>("queue");
@@ -252,7 +260,7 @@ function SecurityVehicleWorkspace({ canViewQueue, canEditQueue, permissionsLoadi
         break;
     }
     if (request === readSequence.current) setLoading(false);
-  }, [canEditQueue, canViewQueue]);
+  }, [canEditQueue, canViewQueue, securityAPI]);
 
   const refreshSection = () => {
     if (currentSection.current === "movements") setHistoryRefresh(refresh => refresh + 1);
@@ -273,7 +281,7 @@ function SecurityVehicleWorkspace({ canViewQueue, canEditQueue, permissionsLoadi
         ),
       )
       .catch(() => setCanApproveDispatchConfirmation(false));
-  }, []);
+  }, [dispatchConfirmationAPI]);
 
   useEffect(() => {
     if (activeSection !== "queue" || permissionsLoading || !canViewQueue || !queryReady) return;
@@ -1259,7 +1267,7 @@ function SecurityVehicleWorkspace({ canViewQueue, canEditQueue, permissionsLoadi
           {activeSection === "movements" && (
             <ErpSection title="سوابق تردد">
               <div className="space-y-3">
-                {canViewQueue && <CanonicalQueueHistory refresh={historyRefresh} />}
+                {canViewQueue && <CanonicalQueueHistory refresh={historyRefresh} securityAPI={securityAPI} />}
                 {loading && !movements.length && <ErpSkeleton lines={3} />}
                 {movements.map((movement) => (
                   <ErpCard key={movement.id} className="p-4">

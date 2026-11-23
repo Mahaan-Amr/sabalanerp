@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FaBan, FaEye, FaFileAlt, FaFingerprint, FaTruck, FaRedo, FaReply, FaSync, FaWrench } from "react-icons/fa";
 import {
   type ErpAction,
@@ -27,10 +27,12 @@ import { dispatchCaseReference } from "@/features/dispatch-case/dispatchCasePres
 import { operationalStatusLabel } from "@/features/dispatch/operationalStatusPresentation";
 import { userFacingError } from "@/features/dispatch/userFacingError";
 import { biometricAttemptNotice, confirmationActionsFor } from "@/features/biometric/dispatchConfirmationPresentation";
-import api, { accountingAPI, dispatchConfirmationAPI } from "@/lib/api";
+import { createAccountingAPI, createDispatchConfirmationAPI } from "@/lib/api";
 import { biometricConnectorClient } from "@/lib/biometricConnector";
 import { formatNumericInputText, normalizeDigits } from "@/lib/numberFormat";
 import { useAuth } from "@/contexts/AuthContext";
+import { useWorkspace, WORKSPACES } from "@/contexts/WorkspaceContext";
+import { useActorScopedHttp } from "@/hooks/useActorScopedHttp";
 import { clearOtherActorLoadingIssues, forgetLoadingIssue, rememberLoadingIssue, storedLoadingIssue,
   type LoadingIssueRequest } from "@/features/accounting/pendingLoadingIssue";
 
@@ -93,14 +95,26 @@ const dispatchPageSize = 50;
 
 export default function AccountingDispatchPage() {
   const { user, loading: authLoading } = useAuth();
-  const issueActorId = useRef(user?.id);
-  issueActorId.current = user?.id;
-  const [loadingIssues, setLoadingIssues] = useState<Record<string, LoadingIssueState>>({});
+  const { getWorkspacePermission, permissionsReady } = useWorkspace();
   useEffect(() => {
-    if (authLoading) return;
-    clearOtherActorLoadingIssues(user?.id);
-    setLoadingIssues({});
+    if (!authLoading) clearOtherActorLoadingIssues(user?.id);
   }, [authLoading, user?.id]);
+  if (authLoading || !user) return null;
+  if (!permissionsReady) return <ErpLoading />;
+  const permission = getWorkspacePermission(WORKSPACES.ACCOUNTING);
+  return <AccountingDispatchWorkspace key={JSON.stringify([user.id, user.role, permission])} actorId={user.id} />;
+}
+
+function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
+  const api = useActorScopedHttp(actorId);
+  const accountingAPI = useMemo(() => createAccountingAPI(api), [api]);
+  const dispatchConfirmationAPI = useMemo(() => createDispatchConfirmationAPI(api), [api]);
+  const issueActorId = useRef<string | undefined>(actorId);
+  useEffect(() => {
+    issueActorId.current = actorId;
+    return () => { issueActorId.current = undefined; };
+  }, [actorId]);
+  const [loadingIssues, setLoadingIssues] = useState<Record<string, LoadingIssueState>>({});
   const groupReads = useRef(new Set<string>());
   const [section, setSection] = useState<DispatchSection>("candidates");
   const [search, setSearch] = useState("");
@@ -147,6 +161,15 @@ export default function AccountingDispatchPage() {
     canManageAccountingConfirmation: false,
   });
   const confirmationActions = confirmationActionsFor(confirmation || {});
+  const discardCandidates = useCallback(() => {
+    setDispatchCandidates([]);
+    setCandidatePage(undefined);
+    setDetailCandidateId(null);
+    setDetailRead(undefined);
+    setReferenceTarget(null);
+    setReferenceDetail(undefined);
+    setReasonAction(null);
+  }, []);
 
   useEffect(() => {
     if (!referenceCandidateId) return;
@@ -160,7 +183,7 @@ export default function AccountingDispatchPage() {
         if (!controller.signal.aborted) setReferenceDetail(null);
       });
     return () => controller.abort();
-  }, [referenceCandidateId, referenceWaybillId]);
+  }, [api, referenceCandidateId, referenceWaybillId]);
 
   const loadDispatch = useCallback(async () => {
     const request = ++registryRequest.current;
@@ -188,8 +211,7 @@ export default function AccountingDispatchPage() {
     } catch (error: any) {
       if (request !== registryRequest.current) return;
       if (dispatchCandidateAccessDenied(error)) {
-        setDispatchCandidates([]);
-        setCandidatePage(undefined);
+        discardCandidates();
         const capabilities = await dispatchConfirmationAPI.getCapabilities().catch(() => null);
         if (request !== registryRequest.current) return;
         setDispatchCapabilities(capabilities?.data.success ? capabilities.data.data : {
@@ -205,7 +227,7 @@ export default function AccountingDispatchPage() {
     } finally {
       if (request === registryRequest.current) setLoading(false);
     }
-  }, [page, registrySearch, showTimeline]);
+  }, [accountingAPI, dispatchConfirmationAPI, discardCandidates, page, registrySearch, showTimeline]);
 
   const runDispatch = async (
     command: () => Promise<any>,
@@ -235,7 +257,7 @@ export default function AccountingDispatchPage() {
         setDispatchCandidates(refreshed.data.data || []);
         retryDetail(attempt => attempt + 1);
       } catch (error) {
-        if (dispatchCandidateAccessDenied(error)) setDispatchCandidates([]);
+        if (dispatchCandidateAccessDenied(error)) discardCandidates();
         // Confirmation-only actors may not have permission to list candidates.
       }
       return true;
@@ -387,7 +409,7 @@ export default function AccountingDispatchPage() {
         if (!controller.signal.aborted) setDetailRead({ key: detailKey, value: null });
       });
     return () => controller.abort();
-  }, [selectedId, selectedWaybillId, detailKey]);
+  }, [api, selectedId, selectedWaybillId, detailKey]);
   const loadingId = selectedCandidate?.loadingId;
   const selectedLoadingId = useRef(loadingId);
   selectedLoadingId.current = loadingId;
@@ -397,8 +419,8 @@ export default function AccountingDispatchPage() {
   if (previousGroup.rows.length !== group.length || group.some((candidate, index) => candidate !== previousGroup.rows[index])) {
     groupSnapshot.current = { rows: group, version: previousGroup.version + 1 };
   }
-  const issueScope: LoadingIssueScope | null = user && loadingId
-    ? { actorId: user.id, loadingId, key: loadingIssueKey(user.id, loadingId) }
+  const issueScope: LoadingIssueScope | null = loadingId
+    ? { actorId, loadingId, key: loadingIssueKey(actorId, loadingId) }
     : null;
   const issue = issueScope ? loadingIssues[issueScope.key] : undefined;
   const setIssue = (scope: LoadingIssueScope, state: LoadingIssueState) => {
@@ -525,10 +547,10 @@ export default function AccountingDispatchPage() {
     setDetailRead(undefined);
     setDetailCandidateId(id);
     const selected = dispatchCandidates.find(candidate => candidate.id === id);
-    if (user && selected?.loadingId) {
-      const command = storedLoadingIssue(user.id, selected.loadingId);
+    if (selected?.loadingId) {
+      const command = storedLoadingIssue(actorId, selected.loadingId);
       if (command) {
-        const key = loadingIssueKey(user.id, selected.loadingId);
+        const key = loadingIssueKey(actorId, selected.loadingId);
         setLoadingIssues(current => current[key] ? current : {
           ...current, [key]: { status: "unknown", command, receiptMissing: false },
         });
@@ -627,8 +649,7 @@ export default function AccountingDispatchPage() {
       setReferenceError(null);
     }, error => {
       if (dispatchCandidateAccessDenied(error)) {
-        setDispatchCandidates([]);
-        setReferenceTarget(null);
+        discardCandidates();
         setDispatchNotice({ kind: "error", text: "دسترسی به اطلاعات بارگیری مجاز نیست." });
         return;
       }

@@ -18,6 +18,7 @@ const overview = (label: string) => ({
 
 test('sales report applies and stores only the newest filters when responses arrive out of order', async ({ page }) => {
   await loginAsAdmin(page);
+  const account = await (await page.request.get('/api/auth/me')).json();
   let releaseOlder: (() => void) | undefined;
   const reads: string[] = [];
   await page.route('**/api/sales/reports/summary?*', async (route) => {
@@ -48,7 +49,7 @@ test('sales report applies and stores only the newest filters when responses arr
   await expect(page.getByText(/نتیجهٔ فیلتر آخر/)).toBeVisible();
   releaseOlder!();
   await expect(page.getByText(/نتیجهٔ قدیمی/)).toHaveCount(0);
-  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('sabalan-report-filters-sales') || '{}').range))
+  await expect.poll(() => page.evaluate((actorId) => JSON.parse(localStorage.getItem(`sabalan-report-filters-sales:${actorId}`) || '{}').range, account.data.id))
     .toBe('yesterday');
   await page.goto('/dashboard/sales/reports');
   await expect(filter).toHaveValue('yesterday');
@@ -95,11 +96,14 @@ test('an older preset save cannot clear input after a newer save completes', asy
   await loginAsAdmin(page);
   await page.route('**/api/sales/reports/summary?*', (route) => reply(route, metadata));
   let releaseOlder: (() => void) | undefined;
+  const stored: object[] = [];
   await page.route('**/api/sales/reports/presets', async (route) => {
-    if (route.request().method() === 'GET') return reply(route, []);
+    if (route.request().method() === 'GET') return reply(route, stored);
     const saved = route.request().postDataJSON();
     if (saved.name === 'تنظیم یک') await new Promise<void>((resolve) => { releaseOlder = resolve; });
-    await reply(route, { ...saved, id: saved.name });
+    const record = { ...saved, id: saved.name };
+    stored.push(record);
+    await reply(route, record);
   });
   await page.goto('/dashboard/sales/reports?view=export&period=today');
   const name = page.getByPlaceholder('نام پیش‌تنظیم');

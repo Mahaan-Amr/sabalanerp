@@ -24,6 +24,7 @@ interface Step2CustomerSelectionProps {
   customerScopeId?: string;
   customerType?: string;
   onSelectionPending: (pending: boolean) => void;
+  onSelectionAccess: (permitted: boolean) => void;
   currentStep: number;
 }
 
@@ -55,6 +56,7 @@ export const Step2CustomerSelection: React.FC<Step2CustomerSelectionProps> = ({
   customerScopeId,
   customerType,
   onSelectionPending,
+  onSelectionAccess,
   currentStep
 }) => {
   const router = useRouter();
@@ -113,6 +115,11 @@ export const Step2CustomerSelection: React.FC<Step2CustomerSelectionProps> = ({
     });
     return () => controller.abort();
   }, [canLoadCustomers, customerId, customerType, restoreKey, restoredSelection, result, visibleSelection]);
+
+  useEffect(() => {
+    if (selectedOption) onSelectionAccess(true);
+    else if (!canLoadCustomers || result?.error?.kind === 'permission' || restoredSelection) onSelectionAccess(false);
+  }, [canLoadCustomers, onSelectionAccess, restoredSelection, result?.error?.kind, selectedOption]);
 
   useEffect(() => {
     if (!selectedOption || storedCustomer || pendingSelection) return;

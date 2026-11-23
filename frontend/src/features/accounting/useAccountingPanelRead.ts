@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { isPrivateClientScopeFailure } from '@/lib/privateClientScope';
 
 type PanelState<T> = {
   key: string;
@@ -36,7 +37,7 @@ export function useAccountingPanelRead<T>(
     } catch (reason) {
       if (controller.signal.aborted) return;
       const response = (reason as { response?: { status?: number; data?: { error?: string; message?: string } } })?.response;
-      const denied = response?.status === 401 || response?.status === 403;
+      const denied = isPrivateClientScopeFailure(reason);
       const localError = reason instanceof Error && /^[\u0600-\u06ff]/.test(reason.message) ? reason.message : undefined;
       const error = response?.data?.error || response?.data?.message || localError || fallbackError;
       setState((current) => ({

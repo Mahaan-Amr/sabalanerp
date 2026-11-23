@@ -989,7 +989,6 @@ export const getAccountingWorkspaceResponse = async (req: AuthRequest, res: Resp
     const workspace = await getAccountingWorkspace(req.query, { userId: req.user!.id });
     res.json({ success: true, data: workspace });
   } catch (error) {
-    console.error('Accounting workspace error:', error);
     accountingReadFailure(res, error);
   }
 };
@@ -1041,7 +1040,6 @@ export const createAccountingFinancialTrendResponse = (
     const trend = await loadTrend(req.query.range, new Date(), { userId: req.user!.id });
     res.json({ success: true, data: trend });
   } catch (error) {
-    console.error('Accounting financial trend error:', error);
     accountingReadFailure(res, error);
   }
 };

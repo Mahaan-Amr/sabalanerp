@@ -39,7 +39,7 @@ import {
   FaChevronUp,
   FaTools
 } from 'react-icons/fa';
-import { salesAPI, crmAPI, dashboardAPI } from '@/lib/api';
+import { salesAPI, crmAPI, dashboardAPI, servicesAPI } from '@/lib/api';
 import PersianCalendar from '@/lib/persian-calendar';
 import PersianCalendarComponent from '@/components/PersianCalendar';
 import { downloadBlobResponse } from '@/lib/downloadFile';
@@ -700,6 +700,7 @@ export default function CreateContractWizard({
   const [generalErrorKind, setGeneralErrorKind] = useState<'error' | 'permission' | 'stale'>('error');
   const [dataLoadingError, setDataLoadingError] = useState<{ message: string; kind: 'error' | 'permission' | 'stale' }>();
   const [customerSelectionPending, setCustomerSelectionPending] = useState(false);
+  const [authorizedCustomerKey, setAuthorizedCustomerKey] = useState<string>();
   const [restoredProductConfiguration, setRestoredProductConfiguration] = useState(false);
 
   useEffect(() => {
@@ -857,9 +858,31 @@ export default function CreateContractWizard({
     currentUser,
     capabilities,
     productCatalogReady,
+    productCatalogError,
+    loadProductCatalog,
     loadInitialData: loadData,
     getCuttingTypePricePerMeter
   } = dataLoading;
+  const customerScopeId = currentUser?.id || currentUser?.username;
+  const customerType = isCollaborationContract ? 'Collaborative' : undefined;
+  const customerId = wizardData.customerId;
+  const customerKey = customerScopeId && customerId ? JSON.stringify([customerScopeId, customerType, customerId]) : undefined;
+  const customerSelectionAuthorized = Boolean(customerKey && capabilities.canLoadCustomers && authorizedCustomerKey === customerKey);
+  const applyCustomerSelectionAccess = useCallback((permitted: boolean) => {
+    setAuthorizedCustomerKey(current => permitted ? customerKey : current === customerKey ? undefined : current);
+  }, [customerKey]);
+
+  useEffect(() => {
+    if (currentStep <= 2 || isContractEditMode || !customerKey || customerSelectionAuthorized || !capabilities.canLoadCustomers) return;
+    const controller = new AbortController();
+    crmAPI.getCustomerOptions({ id: customerId, limit: 1, customerType }, controller.signal).then(response => {
+      assertSuccessfulSalesResponse(response);
+      if (!controller.signal.aborted && response.data.data.some(row => row.id === customerId)) {
+        setAuthorizedCustomerKey(customerKey);
+      }
+    }).catch(() => undefined);
+    return () => controller.abort();
+  }, [currentStep, isContractEditMode, customerId, customerKey, customerSelectionAuthorized, capabilities.canLoadCustomers, customerType]);
   const sellerProductHistory = useSellerProductHistory(
     currentUser?.id || currentUser?.username || null
   );
@@ -5564,6 +5587,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       case 2:
         if (!wizardData.customerId || wizardData.customer?.id !== wizardData.customerId) {
           newErrors.customerId = 'انتخاب مشتری الزامی است';
+        } else if (!customerSelectionAuthorized && (!isContractEditMode || currentStep === 2)) {
+          newErrors.customerId = 'دسترسی به مشتری انتخاب‌شده را در مرحلهٔ انتخاب مشتری بررسی کنید.';
         }
         break;
       case 3:
@@ -5807,9 +5832,10 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
             customerSearchTerm={customerSearchTerm}
             setCustomerSearchTerm={setCustomerSearchTerm}
             canLoadCustomers={capabilities.canLoadCustomers}
-            customerScopeId={currentUser?.id || currentUser?.username}
-            customerType={isCollaborationContract ? 'Collaborative' : undefined}
+            customerScopeId={customerScopeId}
+            customerType={customerType}
             onSelectionPending={setCustomerSelectionPending}
+            onSelectionAccess={applyCustomerSelectionAccess}
             currentStep={currentStep}
           />
         );
@@ -5826,6 +5852,10 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
 
       case 4:
         if (!productCatalogReady) {
+          if (productCatalogError) {
+            return <ErpInlineState kind={productCatalogError.kind} title={productCatalogError.message}
+              action={{ label: 'تلاش دوباره', onClick: () => { void loadProductCatalog(); } }} />;
+          }
           if (!currentUser && dataLoadingError) {
             return <ErpInlineState kind={dataLoadingError.kind} title={dataLoadingError.message}
               action={{ label: 'تلاش دوباره', onClick: () => { void loadData(); } }} />;
@@ -6349,7 +6379,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
               mutationPending: loading || wizardLoading || contractSubmission.isSubmitting || customerSelectionPending,
               recoveryReady: editRecovery.ready
             }),
-            canGoNext: true,
+            canGoNext: currentStep !== 2 || !customerId || customerSelectionAuthorized,
             canGoPrevious: visibleCurrentStep > 1,
             showSubmitOnEveryStep: isContractEditMode,
             labels: {

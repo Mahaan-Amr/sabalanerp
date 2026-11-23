@@ -14,7 +14,7 @@ import {
 } from "@/components/erp";
 import { operationalStatusLabel } from "@/features/dispatch/operationalStatusPresentation";
 import { userFacingError } from "@/features/dispatch/userFacingError";
-import { securityAPI } from "@/lib/api";
+import type { createSecurityAPI } from "@/lib/api";
 
 export const canonicalQueueStatusLabel: Record<string, string> = {
   WAITING_AT_GATE: "در انتظار گیت",
@@ -77,11 +77,14 @@ const turnLabel = (turn: HistoryTurn) => {
   return `${name} · ${plate?.plate || "بدون پلاک"}`;
 };
 
-export default function CanonicalQueueHistory({ refresh }: { refresh: number }) {
+export default function CanonicalQueueHistory({ refresh, securityAPI }: {
+  refresh: number;
+  securityAPI: Pick<ReturnType<typeof createSecurityAPI>, "getCanonicalDriverQueueHistory" | "getCanonicalDriverQueueEvents">;
+}) {
   const [page, setPage] = useState(1);
   const [retry, setRetry] = useState(0);
   const [history, setHistory] = useState<ReadResult<HistoryPage>>({ status: "loading" });
-  const [selected, setSelected] = useState<HistoryTurn | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [events, setEvents] = useState<ReadResult<QueueEvent[]>>({ status: "loading" });
   const [eventRetry, setEventRetry] = useState(0);
 
@@ -90,18 +93,25 @@ export default function CanonicalQueueHistory({ refresh }: { refresh: number }) 
     setHistory({ status: "loading" });
     securityAPI.getCanonicalDriverQueueHistory(page, controller.signal)
       .then(({ data }) => {
-        if (!controller.signal.aborted) setHistory({ status: "ready", data });
+        if (!controller.signal.aborted) {
+          setHistory({ status: "ready", data });
+          setSelectedId(current => data.data.some((turn: HistoryTurn) => turn.id === current) ? current : null);
+        }
       })
       .catch(error => {
-        if (!controller.signal.aborted) setHistory({ status: "error", message: userFacingError(error, "سوابق نوبت‌ها دریافت نشد.") });
+        if (!controller.signal.aborted) {
+          setHistory({ status: "error", message: userFacingError(error, "سوابق نوبت‌ها دریافت نشد.") });
+          setSelectedId(null);
+        }
       });
     return () => controller.abort();
-  }, [page, refresh, retry]);
+  }, [page, refresh, retry, securityAPI]);
 
-  const selectedId = selected?.id;
+  const selected = history.status === "ready" ? history.data.data.find(turn => turn.id === selectedId) : undefined;
   useEffect(() => {
     if (!selectedId) return;
     const controller = new AbortController();
+    setEvents({ status: "loading" });
     securityAPI.getCanonicalDriverQueueEvents(selectedId, controller.signal)
       .then(({ data }) => {
         if (!controller.signal.aborted) setEvents({ status: "ready", data: data.data });
@@ -110,7 +120,7 @@ export default function CanonicalQueueHistory({ refresh }: { refresh: number }) 
         if (!controller.signal.aborted) setEvents({ status: "error", message: userFacingError(error, "رویدادهای نوبت دریافت نشد.") });
       });
     return () => controller.abort();
-  }, [selectedId, eventRetry]);
+  }, [selectedId, eventRetry, refresh, securityAPI]);
 
   return (
     <>
@@ -139,7 +149,7 @@ export default function CanonicalQueueHistory({ refresh }: { refresh: number }) 
                 variant="ghost"
                 onClick={() => {
                   setEvents({ status: "loading" });
-                  setSelected(turn);
+                  setSelectedId(turn.id);
                 }}
               />
             </ErpCard>
@@ -155,8 +165,9 @@ export default function CanonicalQueueHistory({ refresh }: { refresh: number }) 
         </>
       )}
 
-      <ErpSheet open={Boolean(selected)} presentation="modal" title="رویدادهای نوبت"
-        onClose={() => setSelected(null)}>
+      <ErpSheet open={Boolean(selectedId)} presentation="modal" title="رویدادهای نوبت"
+        onClose={() => setSelectedId(null)}>
+        {selectedId && !selected && <ErpSkeleton lines={3} />}
         {selected && (
           <div className="space-y-3">
             <p className="font-semibold sds-text-primary">{turnLabel(selected)}</p>

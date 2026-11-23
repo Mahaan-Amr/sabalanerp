@@ -65,6 +65,12 @@ test('contract customer is actionable and a draft customer is restored before pr
       payment: { currency: 'تومان', payments: [], totalContractAmount: 0 }, discount: null, signature: null,
     }
   });
+  let failCatalog = true;
+  await page.route('**/api/products?*', async route => {
+    if (!failCatalog) return route.continue();
+    failCatalog = false;
+    await route.fulfill({ status: 503, json: { success: false, error: 'کاتالوگ موقتاً در دسترس نیست.' } });
+  });
   await page.goto('/dashboard/sales/contracts/create?fresh=1&returnTo=contract&step=2');
   await expect.poll(() => customerRequests.filter(request => request.byId).length).toBe(1);
   await expect(workflow.getByText('مشتری قدیمی', { exact: true })).toBeVisible();
@@ -74,4 +80,27 @@ test('contract customer is actionable and a draft customer is restored before pr
   expect(catalogRequests).toEqual([]);
   await workflow.getByRole('button', { name: 'ادامه: انتخاب محصولات', exact: true }).click();
   await expect.poll(() => [...catalogRequests].sort()).toEqual([...catalogRoutes].sort());
+  await workflow.getByRole('button', { name: 'تلاش دوباره', exact: true }).click();
+  await expect.poll(() => catalogRequests.filter(path => path === '/api/products').length).toBe(2);
+  for (const route of catalogRoutes.slice(1)) expect(catalogRequests.filter(path => path === route)).toHaveLength(1);
+});
+
+test('a draft customer outside the current scope cannot advance the contract', async ({ page }) => {
+  await loginAsAdmin(page);
+  await page.route('**/api/crm/customer-options?**', route => route.fulfill({ json: { success: true, data: [] } }));
+  await page.goto('/dashboard/sales/contracts/create?fresh=1');
+  await seedContractNavigation(page, {
+    currentStep: 2,
+    wizardData: {
+      contractKind: 'standard', contractDate: '1405/08/20', contractNumber: '', customerId: draftCustomer.id,
+      customer: draftCustomer, projectId: draftCustomer.projectAddresses[0].id, project: draftCustomer.projectAddresses[0],
+      selectedProductTypeForAddition: null, products: [], serviceRows: [], deliveries: [],
+      payment: { currency: 'تومان', payments: [], totalContractAmount: 0 }, discount: null, signature: null,
+    },
+  });
+  await page.goto('/dashboard/sales/contracts/create?fresh=1&returnTo=contract&step=2');
+  const workflow = page.locator('main.sds-workspace');
+  await expect(workflow.getByText('مشتری پیش‌نویس در دسترس نیست.', { exact: true })).toBeVisible();
+  await expect(workflow.getByText('مشتری قدیمی', { exact: true })).toHaveCount(0);
+  await expect(workflow.getByRole('button', { name: 'ادامه: مدیریت پروژه', exact: true })).toBeDisabled();
 });

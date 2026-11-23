@@ -1,4 +1,5 @@
 import { Prisma } from "@prisma/client";
+import { projectLoadedMaterialRows } from "./materialQuantities";
 import { createHash } from "node:crypto";
 import {
   assessBoundAllocationPricingFreshness,
@@ -247,7 +248,7 @@ async function buildInvoiceSource(
       throw new SalesInvoiceError(
         "قیمت تأییدشده بارگیری تغییر کرده؛ ابتدا اصلاح ارسال را تکمیل کنید.",
       );
-    const priced = await readBoundPricedAllocation(tx, revision.id);
+    const priced = await readBoundPricedAllocation(tx, revision.id, { includeQuantityBasis: includePrint });
     if (result.currency && result.currency !== priced.currency)
       throw new SalesInvoiceError("ارز اقلام فاکتور یکسان نیست.");
     result.currency = priced.currency;
@@ -420,7 +421,7 @@ async function buildInvoiceSource(
           (approvedRow: { productRowId: string }) => approvedRow.productRowId === line.productRowId,
         )?.canonicalAllInTotal;
         if (approved != null) print.contractedGross[line.allocationRevisionLineId] = String(approved);
-        print.rows[line.allocationRevisionLineId] = projectRows(line.productRowId);
+        print.rows[line.allocationRevisionLineId] = projectLoadedMaterialRows(projectRows(line.productRowId), product, line, line.quantityBasis);
       }
       const evidence = record(version?.sourceEvidence);
       const technical = partner

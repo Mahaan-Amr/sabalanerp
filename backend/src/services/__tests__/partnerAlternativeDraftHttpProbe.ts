@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import express from 'express';
+import { PartnerEventSchema, CustomerContractOutputSchema } from '@sabalanerp/partner-sales-contracts';
+import type { Prisma } from '@prisma/client';
 import type { AddressInfo } from 'node:net';
 import { prisma } from '../../lib/prisma';
 import accountingRouter from '../../routes/accounting';
@@ -81,15 +83,38 @@ async function main() {
       assert.equal(published.status, 200, JSON.stringify(published.body));
       const receivable = await prisma.accountingReceivable.findFirstOrThrow({ where: { invoiceRecordId: invoiceId } });
 
-      // Reproduce a pre-parity obligation lacking old logistics evidence and
-      // Sepidar evidence. Keep its actual canonical debt and approval event.
-      await prisma.$transaction(async tx => {
-        await tx.$executeRawUnsafe('SET LOCAL session_replication_role = replica');
-        await tx.shipmentQuantityEvidence.deleteMany({ where: { partnerCaseId: expected.caseId, kind: 'CONTRACTED_SET' } });
-        await tx.partnerFulfillmentLineage.deleteMany({ where: { caseId: expected.caseId } });
-        await tx.accountingFinancialRecord.update({ where: { id: invoiceId }, data: { sepidarAmount: null } });
-      });
+      // Disqualify the Sepidar path while leaving the published canonical debt.
+      // A positive baseline ensures these reads exercise the authority gate.
+      await prisma.accountingFinancialRecord.update({ where: { id: invoiceId }, data: { sepidarAmount: null } });
+      assert.equal((await baselines()).length, 1);
       await assertHidden('no-realized-receipt');
+      const { customerPaymentPlan: plan } = CustomerContractOutputSchema.parse(sale.head.customerProjection);
+      await prisma.$transaction(async tx => {
+        const recordedAt = new Date();
+        const receiptId = 'retail-fixture-receipt';
+        const actorId = sale.profile.userId;
+        const receipt = { receiptId, planId: plan.planId, kind: 'RECEIPT', method: 'CASH', actorId,
+          commandId: receiptId, correlationId: receiptId, recordedAt: recordedAt.toISOString(),
+          amount: { amount: '2000', currency: 'IRR' }, effectiveDate: recordedAt.toISOString().slice(0, 10),
+          allocations: plan.installments.map(item => ({ installmentId: item.installmentId, amount: item.amount.amount })),
+        };
+        const event = PartnerEventSchema.parse({ schemaVersion: 1, type: 'RETAIL_RECEIPT', eventId: `retail-event:${receiptId}`,
+          commandId: receiptId, correlationId: receiptId, actorId, recordedAt: receipt.recordedAt, effectiveDate: receipt.effectiveDate,
+          owner: expected, planId: plan.planId, receiptId, amount: receipt.amount, allocations: receipt.allocations });
+        const latest = await tx.partnerCaseEvent.findFirstOrThrow({ where: { caseId: sale.id }, orderBy: { sequence: 'desc' } });
+        const effectiveDate = new Date(receipt.effectiveDate);
+        await tx.partnerCaseEvent.create({ data: { id: event.eventId, type: event.type, caseId: sale.id,
+          caseRevision: expected.revision, integrityHash: expected.integrityHash, sequence: latest.sequence + 1,
+          actorId, commandId: receiptId, correlationId: receiptId, effectiveDate, evidence: { publicEvent: event } } });
+        await tx.partnerRetailReceipt.create({ data: { id: receiptId, caseId: sale.id, planId: plan.planId,
+          kind: receipt.kind, amount: receipt.amount.amount, currency: receipt.amount.currency, actorId,
+          commandId: receiptId, effectiveDate, recordedAt, evidence: { schemaVersion: 1, receipt } } });
+        await tx.partnerRetailReceiptAllocation.createMany({ data: receipt.allocations.map(item => ({
+          ...item, receiptId, planId: plan.planId,
+        })) });
+      });
+      await assertHidden('end-customer-paid-in-full');
+
       const partial = await accounting({ kind: 'REGISTER_RECEIPT', receivableId: receivable.id,
         method: 'BANK_TRANSFER', amount: '800' }, 'partial-receipt');
       assert.equal(partial.status, 200, JSON.stringify(partial.body));
@@ -103,6 +128,12 @@ async function main() {
       const deposited = await update('DEPOSITED', 'deposited-check');
       assert.equal(deposited.status, 200, JSON.stringify(deposited.body));
       await assertHidden('posted-but-uncleared');
+      // Legacy obligations can reach checkout without physical coverage.
+      await prisma.$transaction(async tx => {
+        await tx.$executeRawUnsafe('SET LOCAL session_replication_role = replica');
+        await tx.shipmentQuantityEvidence.deleteMany({ where: { partnerCaseId: expected.caseId, kind: 'CONTRACTED_SET' } });
+        await tx.partnerFulfillmentLineage.deleteMany({ where: { caseId: expected.caseId } });
+      });
       assert.equal((await baselines()).length, 0);
       const clear = () => update('CLEARED', 'cleared-check');
       const cleared = await clear();
@@ -131,6 +162,19 @@ async function main() {
     assert.equal((await baselines()).length, 1);
 
     if (authorityId) {
+      const audit = await prisma.accountingAuditLog.findFirstOrThrow({ where: { entityId: authorityId, action: 'DISPATCH_MANAGER_APPROVE' } });
+      const { partnerCaseOwner, ...legacyDecision } = audit.afterState as Prisma.JsonObject;
+      assert.deepEqual(partnerCaseOwner, expected);
+      await prisma.accountingAuditLog.update({ where: { id: audit.id }, data: { afterState: legacyDecision as Prisma.InputJsonObject } });
+      const legacy = await load(projectsPath);
+      assert.equal(legacy.status, 200, JSON.stringify(legacy.body));
+      assert.ok(legacy.body.data.some((row: { deliveryId: string }) => row.deliveryId === selection.deliveryId),
+        'a historical decision after this effective Case revision remains valid');
+      await prisma.accountingAuditLog.update({ where: { id: audit.id }, data: { afterState: {
+        ...legacyDecision, partnerCaseOwner: { ...expected, revision: expected.revision + 1 },
+      } as Prisma.InputJsonObject } });
+      await assertHidden('manager-witness-for-another-case-revision');
+      await prisma.accountingAuditLog.update({ where: { id: audit.id }, data: { afterState: audit.afterState as Prisma.InputJsonObject } });
       // Keep a live-shaped grant with a stale commercial revision.
       const authority = await prisma.contractDispatchAuthority.findUniqueOrThrow({ where: { id: authorityId } });
       await prisma.contractDispatchAuthority.update({ where: { id: authority.id }, data: { revision: authority.revision - 1 } });

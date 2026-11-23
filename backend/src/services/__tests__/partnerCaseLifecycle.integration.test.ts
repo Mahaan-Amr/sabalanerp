@@ -1209,6 +1209,31 @@ test('real-schema loading source selects canonical delivery evidence without cha
     assert.equal(missing.ok ? null : missing.error.code, 'NOT_FOUND');
     const stale = await fulfillment.readLoadingSource({ ...expected, revision: 2 }, 'second-delivery');
     assert.equal(stale.ok ? null : stale.error.code, 'ROW_STALE');
+    const accountantId = `${ids.caseId}-dispatch-accountant`;
+    await database.$transaction(async tx => {
+      await tx.user.create({ data: { id: accountantId, username: accountantId,
+        email: `${accountantId}@example.invalid`, password: 'not-a-login', firstName: 'Dispatch', lastName: 'Accountant' } });
+      await tx.workspacePermission.create({ data: { userId: accountantId, workspace: 'accounting', permissionLevel: 'edit', grantedBy: actorId } });
+      await tx.featurePermission.create({ data: { userId: accountantId, workspace: 'accounting',
+        feature: 'accounting_invoice_candidates_manage', permissionLevel: 'edit', grantedBy: actorId } });
+      for (const action of ['ACCOUNTING_READ', 'ACCOUNTING_WRITE']) await tx.effectiveActionGrant.create({ data: {
+        id: `${accountantId}-${action}`, principalKind: 'USER', principalId: accountantId, subjectUserId: accountantId,
+        domain: 'PARTNER', action, rootKind: 'CASE', purpose: 'ACCOUNTING', scope: 'PURPOSE_BOUND',
+        boundRootId: ids.caseId, effect: 'ALLOW', grantedBy: actorId, reason: 'isolated dispatch document authority',
+        correlationId: `${accountantId}-${action}` } });
+    });
+    const committedCase = await database.partnerSaleCase.findUniqueOrThrow({ where: { id: ids.caseId }, include: { head: true } });
+    const committedPublicEvent = await database.partnerCaseEvent.findFirstOrThrow({ where: {
+      caseId: ids.caseId, type: 'CASE_COMMITTED' }, select: { evidence: true } });
+    const commitment = PartnerEventSchema.parse((committedPublicEvent.evidence as Prisma.JsonObject).publicEvent);
+    if (commitment.type !== 'CASE_COMMITTED') throw new Error('Committed Partner event fixture is invalid');
+    const accountingView = { ...((committedCase.head.internalProjection as Prisma.JsonObject).accounting as object),
+      state: 'COMMITTED' } as Parameters<ReturnType<typeof createPartnerAccountingAdapter>['enqueueCommitted']>[0];
+    const queued = await createPartnerAccountingAdapter(createPrismaPartnerAccountingRepository({ database,
+      actorId: accountantId, correlationId: `${accountantId}-queue` })).enqueueCommitted(accountingView, commitment);
+    assert.equal(queued.ok, true, JSON.stringify(queued));
+    const invoice = await database.accountingFinancialRecord.findFirstOrThrow({ where: { sourceId: ids.internalId } });
+    await prepareDraftFixtureInvoice(temporary.databaseUrl, invoice.id, accountantId, 'APPROVE');
     const loadingCommand = { expected, deliveryId: 'second-delivery', actorId,
       correlationId: `${ids.caseId}-loading`, idempotencyKey: `${ids.caseId}-loading`,
       reason: 'ثبت بارگیری تحویل دوم مشتری از پرونده قطعی' };
@@ -1291,39 +1316,13 @@ test('real-schema loading source selects canonical delivery evidence without cha
     if (process.env.PERSONAL_PICKUP_ACCEPTANCE !== '1') await promisify(execFile)(process.execPath, ['backend/node_modules/tsx/dist/cli.mjs',
       'backend/src/services/__tests__/partnerLoadingHttpProbe.ts'], { timeout: 120_000, env: { ...process.env,
         DATABASE_URL: temporary.databaseUrl, PARTNER_TEST_ACTOR_ID: actorId, PARTNER_TEST_OWNER: JSON.stringify(expected) } });
-    const accountantId = `${ids.caseId}-dispatch-accountant`;
-    await database.$transaction(async tx => {
-      await tx.user.create({ data: { id: accountantId, username: accountantId,
-        email: `${accountantId}@example.invalid`, password: 'not-a-login', firstName: 'Dispatch', lastName: 'Accountant' } });
-      if (process.env.PERSONAL_PICKUP_ACCEPTANCE === '1') {
-        await tx.workspacePermission.create({ data: { userId: accountantId, workspace: 'accounting', permissionLevel: 'edit', grantedBy: actorId } });
-        await tx.featurePermission.create({ data: { userId: accountantId, workspace: 'accounting',
-          feature: 'accounting_invoice_candidates_manage', permissionLevel: 'edit', grantedBy: actorId } });
-      }
-      for (const action of ['ACCOUNTING_READ', 'ACCOUNTING_WRITE']) await tx.effectiveActionGrant.create({ data: {
-        id: `${accountantId}-${action}`, principalKind: 'USER', principalId: accountantId, subjectUserId: accountantId,
-        domain: 'PARTNER', action, rootKind: 'CASE', purpose: 'ACCOUNTING', scope: 'PURPOSE_BOUND',
-        boundRootId: ids.caseId, effect: 'ALLOW', grantedBy: actorId, reason: 'isolated dispatch document authority',
-        correlationId: `${accountantId}-${action}` } });
-    });
-    const committedCase = await database.partnerSaleCase.findUniqueOrThrow({ where: { id: ids.caseId }, include: { head: true } });
-    const committedPublicEvent = await database.partnerCaseEvent.findFirstOrThrow({ where: {
-      caseId: ids.caseId, type: 'CASE_COMMITTED' }, select: { evidence: true } });
-    const commitment = PartnerEventSchema.parse((committedPublicEvent.evidence as Prisma.JsonObject).publicEvent);
-    if (commitment.type !== 'CASE_COMMITTED') throw new Error('Committed Partner event fixture is invalid');
-    const accountingView = { ...((committedCase.head.internalProjection as Prisma.JsonObject).accounting as object),
-      state: 'COMMITTED' } as Parameters<ReturnType<typeof createPartnerAccountingAdapter>['enqueueCommitted']>[0];
-    const queued = await createPartnerAccountingAdapter(createPrismaPartnerAccountingRepository({ database,
-      actorId: accountantId, correlationId: `${accountantId}-queue` })).enqueueCommitted(accountingView, commitment);
-    assert.equal(queued.ok, true, JSON.stringify(queued));
-    const invoice = await database.accountingFinancialRecord.findFirstOrThrow({ where: { sourceId: ids.internalId } });
-    if (process.env.PERSONAL_PICKUP_ACCEPTANCE !== '1') await promisify(execFile)(process.execPath, ['backend/node_modules/tsx/dist/cli.mjs',
-      'backend/src/services/__tests__/partnerFinancialApprovalProbe.ts'], { timeout: 120_000, env: { ...process.env,
-        DATABASE_URL: temporary.databaseUrl, PARTNER_TEST_INVOICE_ID: invoice.id, PARTNER_TEST_ACTOR_ID: accountantId } });
     for (const [feature, permissionLevel] of [['accounting_dispatch_candidates_view', 'view'],
       ['accounting_dispatch_candidates_manage', 'edit']] as const) {
       await database.featurePermission.create({ data: { userId: accountantId, workspace: 'accounting', feature,
         permissionLevel, grantedBy: accountantId } });
+    }
+    if (process.env.PERSONAL_PICKUP_ACCEPTANCE !== '1') {
+      await prepareDraftFixtureInvoice(temporary.databaseUrl, invoice.id, accountantId, 'PUBLISH');
     }
     const probe = process.env.PERSONAL_PICKUP_ACCEPTANCE === '1' ? 'personalPickupHttpProbe' : 'partnerFinalizationHttpProbe';
     const result = await promisify(execFile)(process.execPath, ['backend/node_modules/tsx/dist/cli.mjs',
@@ -1401,6 +1400,9 @@ test('real-schema correction HTTP dispatch approves a requested retail correctio
     assert.equal(missingBaseline.totalsByUnit[0].isComplete, false);
     const initialLineage = await materialize('first-lineage');
     assert.equal(initialLineage.ok, true, JSON.stringify(initialLineage));
+    const accountantId = `${ids.caseId}-accountant`;
+    const invoice = await seedDraftInvoice(database, ids, accountantId);
+    await prepareDraftFixtureInvoice(temporary.databaseUrl, invoice.id, accountantId, 'APPROVE');
     const retainedLoading = await createPartnerCaseLoading(database, { expected: owner,
       deliveryId: createPartnerFixtures().customer.deliveries[0].deliveryId, actorId: `${ids.caseId}-manager`,
       correlationId: `${ids.caseId}-loading`, idempotencyKey: `${ids.caseId}-loading`, reason: 'ثبت بارگیری پیش از اصلاح تجاری' });
@@ -1764,7 +1766,7 @@ test('Partner customer SMS uses the customer recipient, immutable public details
   } finally { await database.$disconnect(); await temporary.cleanup(); }
 });
 
-async function seedCommittedDraftCase(database: PrismaClient, ids: Ids) {
+async function seedCommittedDraftCase(database: PrismaClient, ids: Ids, includeRetailPlan = false) {
   return database.$transaction(async tx => {
     const seeded = await seedCase(tx, ids, false, false, [
       { deliveryId: 'first-delivery', date: '2026-09-05', destination: 'محل نخست مشتری', items: [{ productRowId: ids.rowId, quantity: '1.00' }] },
@@ -1786,6 +1788,14 @@ async function seedCommittedDraftCase(database: PrismaClient, ids: Ids) {
     const { appendPartnerCommercialEvent } = await import('../partnerSales/cases/commercialEvents');
     await appendPartnerCommercialEvent(tx, ids.caseId, ids.partnerId, 'PARTNER_FLOW_MIGRATED', { commercialFlowVersion: 2 });
     assert.equal(await tx.partnerCaseRevision.count({ where: { caseId: ids.caseId } }), 1, 'retained revision before fixture commit');
+    if (includeRetailPlan) {
+      const plan = createPartnerFixtures().customer.customerPaymentPlan;
+      await tx.partnerPaymentPlan.create({ data: { id: plan.planId, caseId: ids.caseId, caseRevision: 1,
+        purpose: 'RETAIL', version: 1, effectiveDate: new Date(plan.effectiveDate), evidence: plan, integrityHash: await canonicalHash(plan), installments: {
+          create: plan.installments.map(item => ({ id: item.installmentId, dueDate: new Date(item.dueDate),
+            amount: item.amount.amount, currency: item.amount.currency, method: item.method, evidence: item })),
+        } } });
+    }
     await tx.$executeRawUnsafe('SET CONSTRAINTS ALL IMMEDIATE');
     return seeded;
   });
@@ -1800,6 +1810,13 @@ async function seedDraftLogisticsActor(database: PrismaClient, ids: Ids) {
     userId: logisticsId, workspace: 'logistics', feature, permissionLevel: 'edit', grantedBy: logisticsId,
   })) });
   return logisticsId;
+}
+
+async function prepareDraftFixtureInvoice(databaseUrl: string, invoiceId: string, actorId: string, action: 'APPROVE' | 'PUBLISH') {
+  await promisify(execFile)(process.execPath, ['backend/node_modules/tsx/dist/cli.mjs',
+    'backend/src/services/__tests__/partnerFinancialApprovalProbe.ts'], { timeout: 120_000, env: { ...process.env,
+    DATABASE_URL: databaseUrl, PARTNER_TEST_INVOICE_ID: invoiceId, PARTNER_TEST_ACTOR_ID: actorId,
+    PARTNER_TEST_DRAFT_FIXTURE: action } });
 }
 
 async function seedDraftInvoice(database: PrismaClient, ids: Ids, accountantId: string) {
@@ -1860,7 +1877,7 @@ test('realized Partner wholesale settlement opens Logistics selection and draft 
   const accountantId = `${ids.caseId}-accountant`;
   try {
     await database.effectiveAuthorizationState.create({ data: { id: 1, revision: 1 } });
-    const expected = await seedCommittedDraftCase(database, ids);
+    const expected = await seedCommittedDraftCase(database, ids, true);
     const logisticsId = await seedDraftLogisticsActor(database, ids);
     const invoice = await seedDraftInvoice(database, ids, accountantId);
     await database.featurePermission.createMany({ data: [

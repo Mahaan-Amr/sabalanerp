@@ -43,12 +43,18 @@ async function main() {
       await prisma.user.create({ data: { id: outsiderId, username: outsiderId, email: `${outsiderId}@example.invalid`,
         password: 'not-a-login', firstName: 'Unscoped', lastName: 'Logistics' } });
       await prisma.workspacePermission.create({ data: { userId: outsiderId, workspace: 'logistics', permissionLevel: 'admin' } });
+      for (const action of ['FULFILLMENT_READ', 'FULFILLMENT_WRITE']) {
+        await prisma.effectiveActionGrant.create({ data: { id: `${outsiderId}-${action}`, principalKind: 'USER', principalId: outsiderId,
+          subjectUserId: outsiderId, domain: 'PARTNER', action, rootKind: 'CASE', purpose: 'FULFILLMENT',
+          scope: 'PURPOSE_BOUND', boundRootId: expected.caseId, effect: 'DENY', grantedBy: actorId,
+          reason: 'isolated logistics denial fixture', correlationId: `${outsiderId}-${action}` } });
+      }
       const outsider = await createAuthoritativeSession(prisma, outsiderId, { ipAddress: '127.0.0.1', userAgent: 'isolated-334-loading' });
       const hidden = await request(`/loadings/${loadingId}`, 'GET', undefined, outsider.token);
       assert.equal(hidden.status, 404, JSON.stringify(hidden.body));
       const list = await request('/loadings', 'GET', undefined, outsider.token);
       assert.equal(list.status, 200, JSON.stringify(list.body));
-      assert.equal(JSON.stringify(list.body).includes(loadingId), false, 'ordinary Logistics permission does not expose a private Case loading');
+      assert.equal(JSON.stringify(list.body).includes(loadingId), false, 'an explicit Case denial takes precedence over Logistics workspace permissions');
       const dashboard = await request('/dashboard', 'GET', undefined, outsider.token);
       assert.equal(dashboard.status, 200, JSON.stringify(dashboard.body));
       assert.equal(dashboard.body.data.metrics.drafts, 0, 'dashboard counts are scoped before aggregation');
@@ -61,13 +67,19 @@ async function main() {
         assert.equal(result.status, 404, `${attempt.method} ${attempt.path}: ${JSON.stringify(result.body)}`);
       }
       assert.equal((await request(`/loadings/${loadingId}`)).body.data.status, 'DRAFT');
+      const licenceExpiresAt = new Date('2099-01-01');
       const driver = await prisma.externalDriver.create({ data: { firstName: 'Loading', lastName: 'Fixture',
-        nationalCode: '3340000000', phone: '09120003340', status: 'ACTIVE', statusRecordedBy: actorId, createdBy: actorId,
-        documents: { create: { documentType: 'DRIVING_LICENCE', reference: 'isolated-334-driver', recordedBy: actorId } } } });
+        nationalCode: '3340000000', phone: '09120003340', licenceNumber: '3340000000', licenceClass: '1', licenceExpiresAt,
+        status: 'ACTIVE', statusRecordedBy: actorId, createdBy: actorId,
+        documents: { create: { documentType: 'DRIVING_LICENCE', expiresAt: licenceExpiresAt, reference: 'isolated-334-driver', recordedBy: actorId } } } });
       const vehicle = await prisma.externalVehicle.create({ data: { vehicleType: 'Isolated loading fixture', status: 'ACTIVE',
         statusRecordedBy: actorId, createdBy: actorId,
         plates: { create: { plate: '334-test', normalizedPlate: '334test', effectiveFrom: new Date(), reason: 'isolated fixture', recordedBy: actorId } },
         documents: { create: { documentType: 'VEHICLE_REGISTRATION', reference: 'isolated-334-vehicle', recordedBy: actorId } } } });
+      await prisma.externalDriverVehicleAssignment.create({ data: { driverId: driver.id, vehicleId: vehicle.id,
+        effectiveFrom: new Date(), reason: 'isolated Partner loading fixture', recordedBy: actorId } });
+      await prisma.driverBiometricEnrollment.create({ data: { externalDriverId: driver.id, status: 'ACTIVE',
+        confirmationPhone: driver.phone, enrolledBy: actorId } });
       const admission = await request('/api/security/canonical-driver-queue', 'POST', { source: 'EXTERNAL', driverId: driver.id, vehicleId: vehicle.id });
       assert.equal(admission.status, 201, JSON.stringify(admission.body));
       const turnId = admission.body.data.id;
@@ -75,7 +87,7 @@ async function main() {
       const reservePath = `/canonical-driver-queue/${turnId}/reserve`;
       const reservation = { loadingId, expected, reason: 'رزرو راننده برای تحویل مستقیم مشتری پرونده' };
       const deniedReservation = await request(reservePath, 'POST', reservation, outsider.token);
-      assert.equal(deniedReservation.status, 404, 'an ordinary driver-management grant cannot reserve a private Case loading');
+      assert.equal(deniedReservation.status, 404, 'a Case denial prevents reservation of the denied loading');
       const reserved = await request(reservePath, 'POST', reservation);
       assert.equal(reserved.status, 200, JSON.stringify(reserved.body));
       assert.equal(reserved.body.data.status, 'RESERVED_FOR_LOADING');
@@ -104,7 +116,7 @@ async function main() {
       const releasePath = `/canonical-driver-queue/${turnId}/release`;
       const release = { loadingId, reason: 'آزادسازی رزرو پیش از تخصیص بار' };
       assert.equal((await request(releasePath, 'POST', release, outsider.token)).status, 404,
-        'a Logistics workspace grant alone cannot release another Case reservation');
+        'a Case denial prevents release of the denied loading reservation');
       await prisma.partnerOperationsControl.update({ where: { id: 'partner-operations' }, data: { operationalPaused: true } });
       try {
         const released = await request(releasePath, 'POST', release);
@@ -135,6 +147,10 @@ async function main() {
       assert.equal(JSON.stringify(privateHistory.body).includes(JSON.stringify(expected.caseId)), false);
       assert.equal(privateHistory.body.data.some((turn: { id: string }) => turn.id === turnId), true,
         'the physical driver visit remains visible to Guard independently of private Case association');
+      await prisma.effectiveActionGrant.update({ where: { id: `${outsiderId}-FULFILLMENT_READ` }, data: {
+        revokedAt: new Date(), revokedBy: actorId, revocationReason: 'isolated Guard scope fixture',
+        revocationCorrelationId: `${outsiderId}-replace-read-denial`,
+      } });
       await prisma.effectiveActionGrant.create({ data: { id: `${outsiderId}-guard-read`, principalKind: 'USER',
         principalId: outsiderId, subjectUserId: outsiderId, domain: 'PARTNER', action: 'FULFILLMENT_READ', rootKind: 'CASE',
         purpose: 'FULFILLMENT', scope: 'PURPOSE_BOUND', boundRootId: expected.caseId, effect: 'ALLOW', grantedBy: actorId,

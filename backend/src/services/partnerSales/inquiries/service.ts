@@ -11,6 +11,7 @@ import { authorizePartnerTechnicalRollout, lockPartnerOperationsControl } from '
 import { parseInquiryDefinition, type ConfigurationRef, type InquiryDefinition } from './definition';
 import { createPartnerInquiryQuery } from './query';
 import { sameCaseInquiryLineage } from './caseInquiryLineage';
+import { lockPartnerProfileAndInquiry } from './locks';
 import { partnerTechnicalCaseIsEditable } from '../cases/commercialEditPermission';
 import {
   createPartnerPricingDuty,
@@ -134,10 +135,10 @@ async function decideInquiry(dependencies: PartnerInquiryDependencies,
         : { ok: false, error: partnerError('INTEGRITY_CONFLICT') } as const;
     }
     const locking = performance.now();
-    // Use the same Case -> Inquiry lock order as cancellation and replacement.
+    // Keep the Case lock first, then take Profile before Inquiry.
     const owner = await tx.partnerInquiry.findUnique({ where: { id: command.inquiryId }, select: { caseId: true } });
     if (owner?.caseId) await tx.$queryRaw`SELECT id FROM partner_sale_cases WHERE id = ${owner.caseId} FOR UPDATE`;
-    await tx.$queryRaw`SELECT id FROM partner_inquiries WHERE id = ${command.inquiryId} FOR UPDATE`;
+    await lockPartnerProfileAndInquiry(tx, command.inquiryId);
     observeTiming(dependencies, 'inquiry_lock', locking);
     const inquiry = await tx.partnerInquiry.findUnique({ where: { id: command.inquiryId },
       select: { id: true, profileId: true, revision: true, submittedAt: true, profile: { select: { userId: true } },
@@ -287,7 +288,7 @@ async function mutateInquiryLifecycle(dependencies: PartnerInquiryDependencies,
         ? { ok: true, value: { commandId: receipt.commandId, replayed: true, eventIds: receipt.eventIds } } as const
         : { ok: false, error: partnerError('INTEGRITY_CONFLICT') } as const;
     }
-    await tx.$queryRaw`SELECT id FROM partner_inquiries WHERE id = ${command.inquiryId} FOR UPDATE`;
+    await lockPartnerProfileAndInquiry(tx, command.inquiryId);
     const inquiry = await tx.partnerInquiry.findUnique({ where: { id: command.inquiryId },
       select: { id: true, profileId: true, revision: true,
         profile: { select: { userId: true } } } });

@@ -39,7 +39,7 @@ import {
   FaChevronUp,
   FaTools
 } from 'react-icons/fa';
-import { salesAPI, crmAPI, dashboardAPI, servicesAPI } from '@/lib/api';
+import { salesAPI, crmAPI, dashboardAPI } from '@/lib/api';
 import PersianCalendar from '@/lib/persian-calendar';
 import PersianCalendarComponent from '@/components/PersianCalendar';
 import { downloadBlobResponse } from '@/lib/downloadFile';
@@ -55,6 +55,7 @@ import {
   ErpNeumorphicWorkflowLayout,
   ErpPressable,
   ErpSelect,
+  ErpSkeleton,
   ErpTextarea
 } from '@/components/erp';
 
@@ -689,7 +690,6 @@ export default function CreateContractWizard({
     setCustomerSearchTerm,
     productSearchTerm,
     setProductSearchTerm,
-    stateRestored,
     setStateRestored,
     restorationAttempted
   } = useContractWizard();
@@ -699,6 +699,8 @@ export default function CreateContractWizard({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [generalErrorKind, setGeneralErrorKind] = useState<'error' | 'permission' | 'stale'>('error');
   const [dataLoadingError, setDataLoadingError] = useState<{ message: string; kind: 'error' | 'permission' | 'stale' }>();
+  const [customerSelectionPending, setCustomerSelectionPending] = useState(false);
+  const [restoredProductConfiguration, setRestoredProductConfiguration] = useState(false);
 
   useEffect(() => {
     if (!Object.values(errors).some(Boolean)) return;
@@ -836,16 +838,15 @@ export default function CreateContractWizard({
     setDataLoadingError(undefined);
   }, []);
 
-  // Data loading is now provided by useDataLoading hook
+  const needsProductCatalog = currentStep === 4 || restoredProductConfiguration;
   const dataLoading = useDataLoading({
-    autoLoad: !stateRestored, // Only auto-load if not restoring from localStorage
+    productStepActive: needsProductCatalog,
     onError: handleDataLoadingError,
     onDataLoaded: handleDataLoaded
   });
 
   // Extract data from dataLoading hook
   const {
-    customers,
     products,
     departments,
     cuttingTypes,
@@ -855,25 +856,12 @@ export default function CreateContractWizard({
     userDepartment,
     currentUser,
     capabilities,
-    setCustomers,
-    setProducts,
-    setDepartments,
-    setCuttingTypes,
-    setSubServices,
-    setStoneFinishings,
-    loadCustomers,
+    productCatalogReady,
     loadInitialData: loadData,
     getCuttingTypePricePerMeter
   } = dataLoading;
   const sellerProductHistory = useSellerProductHistory(
     currentUser?.id || currentUser?.username || null
-  );
-
-  const customerOptions = useMemo(
-    () => isCollaborationContract
-      ? customers.filter((customer) => customer.customerType === 'Collaborative')
-      : customers,
-    [customers, isCollaborationContract]
   );
 
   const discountBaseSubtotal = useMemo(
@@ -1005,20 +993,6 @@ export default function CreateContractWizard({
     payableContractTotal,
     setWizardData
   ]);
-
-  useEffect(() => {
-    if (!capabilities.canLoadCustomers) return;
-
-    const search = customerSearchTerm.trim();
-    const timeoutId = window.setTimeout(() => {
-      loadCustomers({
-        limit: search ? 20 : 3,
-        search: search || undefined
-      });
-    }, search ? 300 : 0);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [capabilities.canLoadCustomers, customerSearchTerm, loadCustomers]);
 
   // Delivery step state is now provided by useDeliverySchedule hook
   const deliverySchedule = useDeliverySchedule(wizardData.products);
@@ -2024,51 +1998,6 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     };
   };
 
-  // Debounced tools search
-  useEffect(() => {
-    let active = true;
-    const term = stairSystemV2.toolsSearchTerm?.trim();
-    if (!capabilities.canLoadSubServices) {
-      stairSystemV2.setToolsResults([]);
-      stairSystemV2.setIsSearchingTools(false);
-      return;
-    }
-    // If no term, load top tools (initial list) instead of clearing
-    stairSystemV2.setIsSearchingTools(true);
-    const timeout = setTimeout(async () => {
-      try {
-        const params: any = { isActive: true, limit: 1000 };
-        if (term) params.search = term;
-        const res = await servicesAPI.getSubServices(params);
-        if (!active) return;
-        const items = res?.data?.items || res?.data?.data || [];
-        stairSystemV2.setToolsResults(items);
-      } catch (e) {
-        console.error('Tools search failed', e);
-        if (active) stairSystemV2.setToolsResults([]);
-      } finally {
-        if (active) stairSystemV2.setIsSearchingTools(false);
-      }
-    }, 300);
-    return () => { active = false; clearTimeout(timeout); };
-  }, [stairSystemV2.toolsSearchTerm, capabilities.canLoadSubServices]);
-
-  // Preload tools list once when modal flow is used
-  useEffect(() => {
-    if (!capabilities.canLoadSubServices) {
-      stairSystemV2.setToolsResults([]);
-      return;
-    }
-    (async () => {
-      try {
-        const res = await servicesAPI.getSubServices({ isActive: true, limit: 1000 });
-        const items = res?.data?.items || res?.data?.data || [];
-        stairSystemV2.setToolsResults(items);
-      } catch (e) {
-        console.error('Initial tools preload failed', e);
-      }
-    })();
-  }, [capabilities.canLoadSubServices]);
 
   // Product modal state is now managed by useProductModal hook (see above)
 
@@ -2469,6 +2398,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     }
 
     const savedRemaining = savedProductModal.remainingStone as Record<string, unknown> | undefined;
+    setRestoredProductConfiguration(savedProductModal.showProductModal === true || savedRemaining?.isOpen === true);
     if (savedRemaining) {
       if (typeof savedRemaining.isOpen === 'boolean') remainingStoneModal.setShowRemainingStoneModal(savedRemaining.isOpen);
       if ('selectedStone' in savedRemaining) remainingStoneModal.setSelectedRemainingStone(savedRemaining.selectedStone as RemainingStone | null);
@@ -2617,7 +2547,37 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     hasRecoverableDraft: Boolean(recoverableDraftOffer)
   });
   const editRecoveryBlocked = editRecovery.blocked;
-  const stairModalOpen = !editRecoveryBlocked && showProductModal && productConfig.productType === 'stair';
+  const stairModalOpen = productCatalogReady && !editRecoveryBlocked && showProductModal && productConfig.productType === 'stair';
+  const { toolsSearchTerm, setToolsResults, setIsSearchingTools } = stairSystemV2;
+  useEffect(() => {
+    if (!stairModalOpen || !capabilities.canLoadSubServices) {
+      setToolsResults([]);
+      setIsSearchingTools(false);
+      return;
+    }
+    const search = toolsSearchTerm.trim();
+    if (!search) {
+      setToolsResults(subServices);
+      setIsSearchingTools(false);
+      return;
+    }
+    let active = true;
+    setIsSearchingTools(true);
+    const timeout = setTimeout(async () => {
+      try {
+        const response = await servicesAPI.getSubServices({ isActive: true, limit: 1000, search });
+        if (active) setToolsResults(response.data?.items || response.data?.data || []);
+      } catch {
+        if (active) setToolsResults([]);
+      } finally {
+        if (active) setIsSearchingTools(false);
+      }
+    }, 300);
+    return () => {
+      active = false;
+      clearTimeout(timeout);
+    };
+  }, [capabilities.canLoadSubServices, setIsSearchingTools, setToolsResults, stairModalOpen, subServices, toolsSearchTerm]);
   const [activeStairDraft] = getActiveDraft();
   const searchStairStones = useMemo(
     () => createStairStoneSearch(products, salesAPI.getProducts),
@@ -2706,9 +2666,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
 
   // Product filtering hook provides all filtered lists
   const productFiltering = useProductFiltering({
-    customers: customerOptions,
     products,
-    customerSearchTerm,
     productSearchTerm,
     treadProductSearchTerm,
     riserProductSearchTerm,
@@ -2717,7 +2675,6 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     sellerProductHistory: sellerProductHistory.history
   });
   const {
-    filteredCustomers,
     filteredProducts,
     filteredTreadProducts,
     filteredRiserProducts,
@@ -2992,10 +2949,6 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
             // Clear the saved state after successful restoration
             contractNavigationStorage.removeItem('contractWizardState');
 
-            // Refresh data to show newly created entities
-            await loadData();
-            await generateContractNumber();
-
             // Re-fetch customer so project list (Step 3) includes newly added projects
             const returnedCustomerId = returnSelection?.customerId || savedWizardData.customerId;
             if (returnedCustomerId) {
@@ -3006,11 +2959,16 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                   const returnedProject = returnSelection?.projectId
                     ? returnedCustomer.projectAddresses?.find((project: ProjectAddress) => project.id === returnSelection.projectId) || null
                     : returnedCustomerId === savedWizardData.customerId ? savedWizardData.project : null;
-                  updateWizardData({
-                    customerId: returnedCustomerId,
-                    customer: returnedCustomer,
-                    projectId: returnedProject?.id || '',
-                    project: returnedProject
+                  setWizardData(previous => {
+                    if (previous.customerId !== (savedWizardData.customerId || '') ||
+                        previous.projectId !== (savedWizardData.projectId || '')) return previous;
+                    return {
+                      ...previous,
+                      customerId: returnedCustomerId,
+                      customer: returnedCustomer,
+                      projectId: returnedProject?.id || '',
+                      project: returnedProject
+                    };
                   });
                 }
               } catch (err) {
@@ -3024,20 +2982,12 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
             setCurrentStep(normalizeWizardStep(parseInt(step, 10)));
             setStateRestored(true);
             restorationAttempted.current = true;
-
-            // Refresh data to show newly created entities
-            await loadData();
-            await generateContractNumber();
           }
         } else {
           // If no saved state, use URL step as fallback
           setCurrentStep(normalizeWizardStep(parseInt(step, 10)));
           setStateRestored(true);
           restorationAttempted.current = true;
-
-          // Refresh data to show newly created entities
-          await loadData();
-          await generateContractNumber();
         }
       })().finally(() => setAutosaveHydrated(true));
     }
@@ -5612,7 +5562,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         }
         break;
       case 2:
-        if (!wizardData.customerId) {
+        if (!wizardData.customerId || wizardData.customer?.id !== wizardData.customerId) {
           newErrors.customerId = 'انتخاب مشتری الزامی است';
         }
         break;
@@ -5856,10 +5806,11 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
             errors={errors}
             customerSearchTerm={customerSearchTerm}
             setCustomerSearchTerm={setCustomerSearchTerm}
-            customers={customerOptions}
-            filteredCustomers={filteredCustomers}
+            canLoadCustomers={capabilities.canLoadCustomers}
+            customerScopeId={currentUser?.id || currentUser?.username}
+            customerType={isCollaborationContract ? 'Collaborative' : undefined}
+            onSelectionPending={setCustomerSelectionPending}
             currentStep={currentStep}
-            isOwnerScopedUser={currentUser?.role !== 'ADMIN'}
           />
         );
 
@@ -5874,6 +5825,13 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         );
 
       case 4:
+        if (!productCatalogReady) {
+          if (!currentUser && dataLoadingError) {
+            return <ErpInlineState kind={dataLoadingError.kind} title={dataLoadingError.message}
+              action={{ label: 'تلاش دوباره', onClick: () => { void loadData(); } }} />;
+          }
+          return <ErpSkeleton label="در حال دریافت کاتالوگ محصولات و خدمات" />;
+        }
         return (
           <Step5ProductSelection
             controller={productCartController}
@@ -6377,7 +6335,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           currentStep={currentStep}
           navigationStep={visibleCurrentStep}
           steps={visibleWizardSteps as WizardStep[]}
-          clickableSteps={isContractEditMode}
+          clickableSteps={isContractEditMode && !customerSelectionPending}
           onStepClick={(step) => {
             setCurrentStep(step);
             setErrors({});
@@ -6388,7 +6346,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
             onSubmit: handleWizardSubmit,
             loading: contractCreationPrimaryPending({
               creationComplete: isContractCreationComplete,
-              mutationPending: loading || wizardLoading || contractSubmission.isSubmitting,
+              mutationPending: loading || wizardLoading || contractSubmission.isSubmitting || customerSelectionPending,
               recoveryReady: editRecovery.ready
             }),
             canGoNext: true,
@@ -6417,7 +6375,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
             title="ذخیرهٔ بازیابی محلی محدود شده است؛ تا برقراری ذخیرهٔ امن سرور این صفحه را نبندید."
           />
         )}
-        {dataLoadingError && (
+        {dataLoadingError && (currentStep !== 4 || currentUser) && (
           <ErpInlineState kind={dataLoadingError.kind} title={dataLoadingError.message} />
         )}
         {errors.general && (
@@ -10969,7 +10927,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         </ErpNeumorphicDialog>
         {/* New Modal Components */}
         <ProductConfigurationModal
-          isOpen={!editRecoveryBlocked && productModal.showProductModal && productModal.productConfig.productType !== 'stair' && !!productModal.selectedProduct}
+          isOpen={productCatalogReady && !editRecoveryBlocked && productModal.showProductModal && productModal.productConfig.productType !== 'stair' && !!productModal.selectedProduct}
           onClose={() => {
             productModal.setShowProductModal(false);
             productModal.setSelectedProduct(null);
@@ -10992,7 +10950,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         />
 
         <RemainingStoneModal
-          isOpen={remainingStoneModal.showRemainingStoneModal}
+          isOpen={productCatalogReady && remainingStoneModal.showRemainingStoneModal}
           onClose={() => {
             remainingStoneModal.setShowRemainingStoneModal(false);
             remainingStoneModal.setSelectedRemainingStone(null);

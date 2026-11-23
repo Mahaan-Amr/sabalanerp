@@ -890,7 +890,7 @@ export const crmAPI = {
   getCustomerOwners: () => api.get('/crm/customer-owners'),
   getSellers: () => api.get('/crm/sellers'),
   
-  getCustomer: (id: string) => api.get(`/crm/customers/${id}`),
+  getCustomer: (id: string, signal?: AbortSignal) => api.get(`/crm/customers/${id}`, { signal }),
 
   checkDuplicateCustomer: (payload: { nationalCode?: string | null; phoneNumbers?: Array<{ number?: string | null }> }) =>
     api.post('/crm/customers/duplicate-check', payload),

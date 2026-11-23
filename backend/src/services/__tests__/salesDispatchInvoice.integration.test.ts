@@ -111,11 +111,23 @@ async function run() {
                   tools: [{ code: "TEST-TOOL", name: "ابزار نیم‌لول",
                     computedMeters: 2, pricePerMeter: 4, totalPrice: 8 }],
                   cuttingBreakdown: [{ type: "longitudinal", meters: 1, rate: 3, cost: 3 }],
+                  finishings: [
+                    { finishingId: 'length-finishing', name: 'پرداخت طولی رایگان', calculationBase: 'length', quantity: 9, unitPrice: 0, cost: 0 },
+                    { finishingId: 'count-finishing', name: 'پرداخت تعدادی رایگان', calculationBase: 'count', quantity: 12, unitPrice: 0, cost: 0 },
+                  ],
                   finishingId: "test-finishing",
                   finishingName: "ساب آزمون",
                   finishingUnitPrice: 2,
                   finishingCost: 6,
                   squareMeters: 3,
+                },
+                {
+                  rowId: `layer-${rowId}`, parentProductRowId: rowId,
+                  stoneName: 'لایه آزمون', length: '1.2', lengthUnit: 'm', width: '5', widthUnit: 'cm',
+                  quantity: 3, squareMeters: 0.18, totalPrice: 0,
+                  meta: { isLayer: true, layerEdges: { front: true },
+                    layerType: { name: 'لایه رایگان آزمون', pricePerLayer: 0 },
+                    layerInfo: { parentProductRowId: rowId, layerSetQuantity: 3, pricingQuantity: 3, calculationUnit: 'set' } },
                 },
               ],
             },
@@ -502,6 +514,21 @@ async function run() {
         assert.match(invoiceHtml, /سنگ مصوب[\s\S]*ابزار نیم‌لول[\s\S]*۴۰ \/ متر طول/);
         assert.match(invoiceHtml, /برش طولی[\s\S]*۳۰ \/ متر طول/);
         assert.match(invoiceHtml, /ساب آزمون[\s\S]*۲۰ \/ متر مربع/);
+        // The issued whole-loading document includes two contracts/drivers;
+        // each operation belongs to that driver's 1.25 / 3 approved share.
+        const operationRows = invoiceHtml.match(/<tr class="operation">[\s\S]*?<\/tr>/g) || [];
+        const tools = operationRows.filter(row => row.includes('ابزار نیم‌لول'));
+        assert.equal(tools.length, 2);
+        for (const row of tools) assert.match(row, /۰٫۸۳۳۳/);
+        for (const row of operationRows.filter(row => row.includes('برش طولی'))) assert.match(row, /۰٫۴۱۶۷/);
+        for (const row of operationRows.filter(row => row.includes('ساب آزمون'))) assert.match(row, /۱٫۲۵/);
+        for (const row of operationRows.filter(row => row.includes('پرداخت طولی رایگان'))) assert.match(row, /۳٫۷۵/);
+        for (const row of operationRows.filter(row => row.includes('پرداخت تعدادی رایگان'))) assert.match(row, /<td>۵<\/td>/);
+        assert.equal(operationRows.filter(row => row.includes('پرداخت طولی رایگان')).length, 2);
+        assert.equal(operationRows.filter(row => row.includes('پرداخت تعدادی رایگان')).length, 2);
+        const layers = operationRows.filter(row => row.includes('لایه رایگان آزمون'));
+        assert.equal(layers.length, 2);
+        for (const row of layers) assert.match(row, /۱٫۲۵ ست/);
         assert.match(invoiceHtml, /امضای تحویل‌گیرنده/);
         const record = await tx.salesDispatchInvoice.findUniqueOrThrow({ where: { id: issued.id } });
         const { print, pdfLayoutVersion: _pdfLayoutVersion, ...legacySnapshot } = record.snapshot as Prisma.JsonObject;

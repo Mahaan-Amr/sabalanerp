@@ -19,6 +19,7 @@ export const salesInvoicePdfLayoutVersion = 2;
 
 function rialRate(value: string, multiplier: number) {
   const [rate, unit] = value.split(' / ', 2);
+  if (/[٪%]/.test(rate)) return value;
   const amount = parsePrintNumber(rate);
   if (!amount) return value;
   const [whole, fraction] = amount.mul(multiplier).toFixed().split('.');

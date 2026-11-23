@@ -29,6 +29,23 @@ export type InvoiceContext = {
   expectedRevisionIds?: readonly string[];
   expectedWaybillId?: string;
 };
+type LoadingIssueCommand = { id: string; fingerprint: string };
+type InvoiceReceipt = { id: string; number: string };
+const loadingIssueAction = "ISSUE_LOADING_DOCUMENTS";
+const loadingIssueKey = (actorId: string, id: string) => `loading-issue:${actorId}:${id}`;
+
+async function findLoadingIssueReceipt(
+  tx: Prisma.TransactionClient, ctx: InvoiceContext, loadingId: string, id: string,
+) {
+  const row = await tx.accountingDispatchCommand.findFirst({
+    where: {
+      actorId: ctx.actorId, action: loadingIssueAction, idempotencyKey: loadingIssueKey(ctx.actorId, id),
+      candidate: { allocationRevision: { loadingId } },
+    },
+    select: { result: true },
+  });
+  return row?.result as { invoice: InvoiceReceipt; fingerprint: string } | undefined;
+}
 const lock = async (tx: Prisma.TransactionClient, loadingId: string) => {
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`SALES_INVOICE:${loadingId}`}))`;
 };
@@ -167,6 +184,7 @@ export async function voidSalesInvoiceInTransaction(
 const transaction = async <T>(
   db: PrismaClient,
   work: (tx: Prisma.TransactionClient) => Promise<T>,
+  retryLoadingIssueReceiptRace = false,
 ) => {
   for (let attempt = 0; ; attempt++)
     try {
@@ -186,7 +204,11 @@ const transaction = async <T>(
         ((Array.isArray(target) && target.includes("loadingId")) ||
           (typeof target === "string" &&
             target.startsWith("sales_dispatch_invoices_")));
-      const retry = invoiceRace || isRetryableDispatchTransactionError(error);
+      const receiptRace = retryLoadingIssueReceiptRace &&
+        error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002" &&
+        ((Array.isArray(target) && target.includes("candidateId") && target.includes("idempotencyKey")) ||
+          (typeof target === "string" && target.startsWith("accounting_dispatch_commands_")));
+      const retry = invoiceRace || receiptRace || isRetryableDispatchTransactionError(error);
       if (!retry) throw error;
       if (attempt >= 2)
         throw new SalesInvoiceError(
@@ -205,6 +227,15 @@ export function createSalesInvoiceService(
   documentStorage?: DispatchArtifactStorage,
 ) {
   return {
+    loadingIssueReceipt: async (ctx: InvoiceContext, loadingId: string, id: string, fingerprint?: string) =>
+      transaction(db, async (tx) => {
+        await authorize(tx, ctx, loadingId, true);
+        const previous = await findLoadingIssueReceipt(tx, ctx, loadingId, id);
+        if (previous && fingerprint !== undefined && previous.fingerprint !== fingerprint) {
+          throw new SalesInvoiceError('شناسه فرمان با درخواست قبلی مطابقت ندارد.', 409);
+        }
+        return previous?.invoice;
+      }),
     list: async (ctx: InvoiceContext, loadingId: string) =>
       transaction(db, async (tx) => {
         await authorize(tx, ctx, loadingId);
@@ -269,13 +300,38 @@ export function createSalesInvoiceService(
           })),
         };
       }),
-    issue: async (ctx: InvoiceContext, loadingId: string, requestKey: string) =>
+    issue: async (ctx: InvoiceContext, loadingId: string, requestKey: string, command?: LoadingIssueCommand) =>
       transaction(db, async (tx) => {
         if (!requestKey?.trim() || requestKey.length > 200)
           throw new SalesInvoiceError("شناسه درخواست صدور معتبر نیست.", 400);
         await authorize(tx, ctx, loadingId, true);
         await assertCanonicalDispatchCommandAllowed(tx);
         await lock(tx, loadingId);
+        if (command) {
+          const previous = await findLoadingIssueReceipt(tx, ctx, loadingId, command.id);
+          if (previous) {
+            if (previous.fingerprint !== command.fingerprint) {
+              throw new SalesInvoiceError('شناسه فرمان با درخواست قبلی مطابقت ندارد.', 409);
+            }
+            return previous.invoice;
+          }
+        }
+        const finish = async (invoice: InvoiceReceipt) => {
+          if (command) {
+            const candidate = await tx.accountingDispatchCandidate.findFirst({
+              where: { allocationRevisionId: { in: [...(ctx.expectedRevisionIds ?? [])] } },
+              orderBy: { id: 'asc' },
+              select: { id: true },
+            });
+            if (!candidate) throw new SalesInvoiceError('تخصیص نهایی رانندگان برای این بارگیری پیدا نشد.');
+            await tx.accountingDispatchCommand.create({ data: {
+              candidateId: candidate.id, actorId: ctx.actorId, action: loadingIssueAction,
+              idempotencyKey: loadingIssueKey(ctx.actorId, command.id),
+              result: { invoice, fingerprint: command.fingerprint },
+            } });
+          }
+          return invoice;
+        };
         if (ctx.requireDispatchDocumentGate) {
           const gate = await loadShipmentStatementRuntimeStateUnderLock(tx);
           if (!gate) throw new SalesInvoiceError('وضعیت گذار اسناد قابل بررسی نیست.');
@@ -344,7 +400,7 @@ export function createSalesInvoiceService(
         const replay = await tx.salesDispatchInvoice.findUnique({
           where: { loadingId_requestKey: { loadingId, requestKey } },
         });
-        if (replay) return { id: replay.id, number: replay.number.toString() };
+        if (replay) return finish({ id: replay.id, number: replay.number.toString() });
         const source = await readInvoiceSource(tx, loadingId, true),
           hash = invoiceSourceHash(source);
         const active = await tx.salesDispatchInvoice.findFirst({
@@ -355,7 +411,7 @@ export function createSalesInvoiceService(
             throw new SalesInvoiceError(
               "ابتدا فاکتور قبلی را با دلیل معتبر باطل کنید.",
             );
-          return { id: active.id, number: active.number.toString() };
+          return finish({ id: active.id, number: active.number.toString() });
         }
         const predecessor = await tx.salesDispatchInvoice.findFirst({
           where: { loadingId },
@@ -401,8 +457,8 @@ export function createSalesInvoiceService(
           },
           ctx.actorId,
         );
-        return { id, number: number.toString() };
-      }),
+        return finish({ id, number: number.toString() });
+      }, Boolean(command)),
     void: async (
       ctx: InvoiceContext,
       loadingId: string,

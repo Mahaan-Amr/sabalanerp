@@ -1,9 +1,12 @@
 'use client';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { FaBalanceScale, FaCheck, FaSync, FaTimes } from 'react-icons/fa';
-import { ErpEmptyState, ErpInlineState, ErpListPage, ErpPagination, type ErpAction, type ErpColumn } from '@/components/erp';
+import { ErpEmptyState, ErpListPage, ErpPagination, type ErpAction, type ErpColumn } from '@/components/erp';
 import { accountingAPI } from '@/lib/api';
+import { useAccountingRegister, type AccountingRegisterRequest } from '@/features/accounting/useAccountingRegister';
+import { AccountingRegisterFeedback } from '@/features/accounting/AccountingRegisterFeedback';
+import { isCurrentAccountingRegisterRow } from '@/features/accounting/accountingRegisterLoader';
 import { partnerTrackingCode } from '@sabalanerp/partner-sales-contracts';
 import { emptyAccountingPagination, readAccountingListResponse, StatusBadge, dateFa, money, taxStatusLabels,
   PartnerAccountingIdentity, accountingFailureMessage } from '@/features/accounting/accountingUi';
@@ -35,15 +38,10 @@ export default function AccountingTaxPage() {
     [searchParams],
   );
   const query = canonicalQuery.state;
-  const [rows, setRows] = useState<any[]>([]);
-  const [pagination, setPagination] = useState(emptyAccountingPagination);
-  const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [searchInput, setSearchInput] = useState(query.search);
-  const [trackTarget, setTrackTarget] = useState<{ row: any; status: string } | null>(null);
+  const [savedTrackTarget, setTrackTarget] = useState<{ row: any; status: string } | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const requestVersion = useRef(0);
 
   const replaceQuery = useCallback((next: ReturnType<typeof canonicalizeTaxQuery>) => {
     const serialized = next.params.toString();
@@ -66,41 +64,32 @@ export default function AccountingTaxPage() {
     return () => window.clearTimeout(timeout);
   }, [query.search, searchInput, updateQuery]);
 
-  const loadRows = useCallback(async () => {
-    const version = ++requestVersion.current;
-    setRows([]); setTrackTarget(null); setLoadError(null);
-    try {
-      setLoading(true);
-      const response = await accountingAPI.getTaxRecords({
-        view: query.view || undefined,
-        search: query.search || undefined,
-        status: query.status,
-        page: query.page,
-        pageSize: pagination.pageSize,
-      });
-      if (version !== requestVersion.current) return;
-      if (!response.data.success) throw new Error('داده‌های مالیاتی دریافت نشد.');
-      {
-        const data = readAccountingListResponse<any>(response.data.data);
-        setRows(data.items);
-        setPagination({ page: data.page, pageSize: data.pageSize, total: data.total });
-      }
-    } catch (error) {
-      if (version !== requestVersion.current) return;
-      setPagination(previous => ({ ...previous, total: 0 }));
-      setLoadError(accountingFailureMessage(error, 'اطلاعات مالیاتی در دسترس نیست؛ دوباره تلاش کنید.'));
-    } finally {
-      if (version === requestVersion.current) setLoading(false);
-    }
-  }, [pagination.pageSize, query.page, query.search, query.status, query.view]);
+  const readRows = useCallback(async (request: AccountingRegisterRequest) => {
+    const response = await accountingAPI.getTaxRecords({
+      page: query.page,
+      search: query.search || undefined,
+      status: query.status,
+      view: query.view || undefined,
+      pageSize: emptyAccountingPagination.pageSize,
+    }, request);
+    if (!response.data.success) throw new Error('Accounting read failed');
+    return { ...readAccountingListResponse<any>(response.data.data) };
+  }, [query.page, query.search, query.status, query.view]);
+  const register = useAccountingRegister(readRows, 'اطلاعات مالیاتی بارگیری نشد؛ دوباره تلاش کنید.');
+  const { state, load: loadRows } = register;
+  const rows = state.data?.items ?? [];
+  const pagination = state.data ?? emptyAccountingPagination;
 
+  const trackTarget = savedTrackTarget && isCurrentAccountingRegisterRow(state.data?.items, savedTrackTarget.row,
+    row => row.id) ? savedTrackTarget : null;
   useEffect(() => {
-    loadRows();
-    return () => { requestVersion.current += 1; };
-  }, [loadRows]);
+    if (!trackTarget) setTrackTarget(null);
+    if (state.data === null) setActionError(null);
+  }, [state.data, trackTarget]);
+  const actionsBlocked = state.status !== 'ready';
 
   const track = async (values: Record<string, string | number>) => {
-    if (!trackTarget) return;
+    if (!trackTarget || actionLoading || !register.canAct()) return;
     try {
       setActionError(null);
       setActionLoading(`${trackTarget.row.id}:${trackTarget.status}`);
@@ -115,10 +104,11 @@ export default function AccountingTaxPage() {
           ? ['SUBMITTED_MANUALLY', 'SUBMITTED_EXTERNALLY'].includes(trackTarget.status)
             ? accountingEventInstant({ timing: values.timing, date: values.eventDate, time: values.eventTime }) : undefined
           : values.submittedAt ? PersianCalendar.toGregorian(String(values.submittedAt)).toISOString() : new Date().toISOString(),
-      });
+      }, register.mutationRequest);
       setTrackTarget(null);
       await loadRows();
     } catch (error) {
+      if (!register.isActive() || register.clearOnDenial(error)) return;
       setActionError(accountingFailureMessage(error, 'به‌روزرسانی مالیات انجام نشد'));
     } finally {
       setActionLoading(null);
@@ -163,13 +153,14 @@ export default function AccountingTaxPage() {
       rowKey={(row) => row.id}
       columns={columns}
       rowActions={rowActions}
-      isLoading={loading}
+      isLoading={state.status === 'loading'}
+      suspendRowActions={actionsBlocked || Boolean(actionLoading)}
       footer={<ErpPagination currentPage={pagination.page} totalPages={Math.max(Math.ceil(pagination.total / pagination.pageSize), 1)} totalItems={pagination.total} itemsPerPage={pagination.pageSize} onPageChange={(page) => updateQuery({ page })} itemLabel="پرونده" />}
-      emptyState={<ErpEmptyState icon={FaBalanceScale} title="پرونده مالیاتی ثبت نشده است" description="با ایجاد پیش‌نویس صورتحساب، پرونده مالیاتی و آمادگی سامانه مودیان ایجاد می‌شود." />}
+      emptyState={state.data !== null ? <ErpEmptyState icon={FaBalanceScale} title="پرونده مالیاتی ثبت نشده است" description="با ایجاد پیش‌نویس صورتحساب، پرونده مالیاتی و آمادگی سامانه مودیان ایجاد می‌شود." /> : null}
     >
-      {loadError && <ErpInlineState kind="error" title={loadError} action={{ label: 'تلاش دوباره', onClick: loadRows }} />}
-      <AccountingActionModal
-        open={Boolean(trackTarget)}
+      <AccountingRegisterFeedback state={state} retry={loadRows} />
+      {trackTarget && <AccountingActionModal
+        open
         title="پیگیری وضعیت سامانه مودیان"
         description={trackTarget ? `${trackTarget.row.partnerContext?.caseNumber ? partnerTrackingCode(trackTarget.row.partnerContext.caseNumber, trackTarget.row.partnerContext.trackingNumber) : trackTarget.row.contract?.contractNumber || 'قرارداد'} - ${taxStatusLabels[trackTarget.status] || trackTarget.status}` : undefined}
         fields={[
@@ -182,10 +173,12 @@ export default function AccountingTaxPage() {
         ]}
         submitLabel="ثبت پیگیری"
         busy={Boolean(actionLoading)}
+        blocked={actionsBlocked}
+        onRetry={state.status === 'error' ? loadRows : undefined}
         error={actionError}
         onClose={() => setTrackTarget(null)}
         onSubmit={track}
-      />
+      />}
     </ErpListPage>
   );
 }

@@ -35,13 +35,13 @@ export function classifyLoadingDocumentPart(revision: {
 
 /** Each command owns its own durable idempotency record. A retry re-reads the
  * authoritative state and never repeats work already committed. */
-export async function issueLoadingDocuments(input: {
+export async function issueLoadingDocuments<Receipt>(input: {
   loadingId: string;
   parts: LoadingDocumentPart[];
   invoicePredecessorId: string | null;
   issueWaybill(candidateId: string, idempotencyKey: string): Promise<void>;
   reconstructWaybill?(candidateId: string): Promise<void>;
-  issueInvoice(idempotencyKey: string): Promise<void>;
+  issueInvoice(idempotencyKey: string): Promise<Receipt>;
 }) {
   if (!input.parts.length) throw new LoadingDocumentIssuanceError('تخصیص نهایی رانندگان برای این بارگیری پیدا نشد.');
   const blocked = input.parts.find(part => part.state === 'BLOCKED');
@@ -60,5 +60,5 @@ export async function issueLoadingDocuments(input: {
   }
   const identity = createHash('sha256').update(JSON.stringify({ loadingId: input.loadingId,
     revisions: parts.map(part => part.revisionId), predecessor: input.invoicePredecessorId })).digest('hex');
-  await input.issueInvoice(`loading-document:${identity}`);
+  return input.issueInvoice(`loading-document:${identity}`);
 }

@@ -1,11 +1,14 @@
 'use client';
 import { ErpPersianDateField } from '@/components/erp';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { FaExclamationTriangle, FaEye, FaFileInvoice, FaPlus, FaSave, FaSync, FaTrashAlt } from 'react-icons/fa';
 import { ErpButton, ErpCard, ErpEmptyState, ErpField, ErpInlineState, ErpInput, ErpListPage, ErpPagination, ErpRialInput, ErpSearchableSelect, ErpSheet, type ErpAction, type ErpColumn } from '@/components/erp';
 import { accountingAPI } from '@/lib/api';
-import { partnerTrackingCode } from '@sabalanerp/partner-sales-contracts';
+import { useAccountingRegister, type AccountingRegisterRequest } from '@/features/accounting/useAccountingRegister';
+import { AccountingRegisterFeedback } from '@/features/accounting/AccountingRegisterFeedback';
+import { isCurrentAccountingRegisterRow } from '@/features/accounting/accountingRegisterLoader';
+import { partnerTrackingCode, type SabalanPaymentPlanCandidate } from '@sabalanerp/partner-sales-contracts';
 import PersianCalendar from '@/lib/persian-calendar';
 import { emptyAccountingPagination, readAccountingListResponse, StatusBadge, dateFa, money,
   PartnerAccountingIdentity, accountingFailureMessage } from '@/features/accounting/accountingUi';
@@ -49,22 +52,16 @@ export default function AccountingInvoiceCandidatesPage() {
   );
   const query = canonicalQuery.state;
   const periodOptions = useMemo(() => buildPersianPeriodOptions(query.period), [query.period]);
-  const [rows, setRows] = useState<any[]>([]);
-  const [pagination, setPagination] = useState(emptyAccountingPagination);
-  const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [searchInput, setSearchInput] = useState(query.search);
-  const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
-  const [voidTarget, setVoidTarget] = useState<any | null>(null);
+  const [savedDeleteTarget, setDeleteTarget] = useState<any | null>(null);
+  const [savedVoidTarget, setVoidTarget] = useState<any | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [planCandidates, setPlanCandidates] = useState<any[]>([]);
-  const [planTarget, setPlanTarget] = useState<any | null>(null);
+  const [savedPlanTarget, setPlanTarget] = useState<SabalanPaymentPlanCandidate | null>(null);
   const [planEffectiveDate, setPlanEffectiveDate] = useState('');
   const [planInstallments, setPlanInstallments] = useState<Array<{ id: string; dueDate: string; amount: string;
     method: 'CASH' | 'BANK_TRANSFER' | 'CHECK'; checkNumber?: string; checkBank?: string }>>([]);
-  const requestVersion = useRef(0);
 
   const replaceQuery = useCallback((next: ReturnType<typeof canonicalizeInvoiceCandidatesQuery>) => {
     const serialized = next.params.toString();
@@ -87,47 +84,70 @@ export default function AccountingInvoiceCandidatesPage() {
     return () => window.clearTimeout(timeout);
   }, [query.search, searchInput, updateQuery]);
 
-  const loadRows = useCallback(async () => {
-    const version = ++requestVersion.current;
-    setRows([]); setDeleteTarget(null); setLoadError(null);
-    try {
-      setLoading(true);
-      const [response, candidatesResponse] = await Promise.all([accountingAPI.getFinancialRecords({
-        kind: 'INVOICE_CANDIDATE',
-        view: query.view || undefined,
-        period: query.period || undefined,
-        date: query.date || undefined,
-        cutoff: query.cutoff || undefined,
-        search: query.search || undefined,
-        status: query.status,
-        page: query.page,
-        pageSize: pagination.pageSize,
-      }), accountingAPI.getPartnerSabalanPlanCandidates().catch(() => null)]);
-      if (version !== requestVersion.current) return;
-      if (!response.data.success) throw new Error('Accounting read failed');
-      if (response.data.success) {
-        const data = readAccountingListResponse<any>(response.data.data);
-        setRows(data.items);
-        setPagination({ page: data.page, pageSize: data.pageSize, total: data.total });
-      }
-      setPlanCandidates(candidatesResponse?.data.success ? candidatesResponse.data.data : []);
-    } catch (error) {
-      if (version !== requestVersion.current) return;
-      setPagination(current => ({ ...current, total: 0 }));
-      setLoadError(accountingFailureMessage(error, 'صورتحساب‌ها بارگیری نشد؛ دسترسی و اتصال را بررسی کنید و دوباره به‌روزرسانی کنید.'));
-    } finally {
-      if (version === requestVersion.current) setLoading(false);
-    }
-  }, [pagination.pageSize, query.cutoff, query.date, query.page, query.period, query.search, query.status, query.view]);
+  const readRows = useCallback(async (request: AccountingRegisterRequest) => {
+    const response = await accountingAPI.getFinancialRecords({
+      kind: 'INVOICE_CANDIDATE',
+      cutoff: query.cutoff || undefined,
+      date: query.date || undefined,
+      page: query.page,
+      period: query.period || undefined,
+      search: query.search || undefined,
+      status: query.status,
+      view: query.view || undefined,
+      pageSize: emptyAccountingPagination.pageSize,
+    }, request);
+    if (!response.data.success) throw new Error('Accounting read failed');
+    return { ...readAccountingListResponse<any>(response.data.data) };
+  }, [query.cutoff, query.date, query.page, query.period, query.search, query.status, query.view]);
+  const register = useAccountingRegister(readRows, 'صورتحساب‌ها بارگیری نشد؛ دوباره تلاش کنید.');
+  const { state: invoiceState, load: loadRows } = register;
+  const readPlanCandidates = useCallback(async (request: AccountingRegisterRequest) => {
+    const response = await accountingAPI.getPartnerSabalanPlanCandidates(request);
+    if (!response.data.success) throw new Error('Accounting payment plan candidates read failed');
+    return response.data.data as SabalanPaymentPlanCandidate[];
+  }, []);
+  const planRegister = useAccountingRegister(readPlanCandidates, 'نامزدهای برنامه پرداخت بارگیری نشد؛ دوباره تلاش کنید.', invoiceState.data !== null);
+  const planCandidates = planRegister.state.data;
+  const planTarget = savedPlanTarget && isCurrentAccountingRegisterRow(planCandidates ?? undefined,
+    savedPlanTarget, candidate => candidate.expected.caseId) ? savedPlanTarget : null;
+  const { clearOnDenial } = register;
+  const planState = planRegister.state;
+  const actorDenied = planState.status === 'denied' && planState.reason === 'actor' ? planState : null;
+  useEffect(() => {
+    if (actorDenied) clearOnDenial({ code: 'AUTH_CONTEXT_CHANGED' });
+  }, [actorDenied, clearOnDenial]);
+  const state = actorDenied ?? invoiceState;
+  const rows = state.data?.items ?? [];
+  const pagination = state.data ?? emptyAccountingPagination;
 
-  const openPlan = (candidate: any) => {
+  const deleteTarget = savedDeleteTarget && isCurrentAccountingRegisterRow(state.data?.items, savedDeleteTarget,
+    row => row.id) ? savedDeleteTarget : null;
+  const voidTarget = savedVoidTarget && isCurrentAccountingRegisterRow(state.data?.items, savedVoidTarget,
+    row => row.id) ? savedVoidTarget : null;
+  useEffect(() => {
+    if (!deleteTarget) setDeleteTarget(null);
+    if (!voidTarget) setVoidTarget(null);
+    if (!planTarget) {
+      setPlanTarget(null);
+      setPlanEffectiveDate('');
+      setPlanInstallments(previous => previous.length ? [] : previous);
+    }
+    if (state.data === null) setActionError(null);
+    if (state.data === null) setActionSuccess(null);
+  }, [state.data, deleteTarget, voidTarget, planTarget]);
+  const actionsBlocked = state.status !== 'ready';
+  const planBlocked = actionsBlocked || planRegister.state.status !== 'ready';
+  const refresh = () => { void loadRows(); void planRegister.load(); };
+
+  const openPlan = (candidate: SabalanPaymentPlanCandidate) => {
+    if (actionLoading || !register.canAct() || !planRegister.canAct()) return;
     const today = new Date().toISOString().slice(0, 10);
     setActionError(null); setPlanTarget(candidate); setPlanEffectiveDate(today);
     setPlanInstallments([{ id: crypto.randomUUID(), dueDate: today, amount: candidate.payable.amount, method: 'BANK_TRANSFER' }]);
   };
 
   const savePlan = async () => {
-    if (!planTarget) return;
+    if (!planTarget || actionLoading || !register.canAct() || !planRegister.canAct()) return;
     setActionError(null); setActionLoading(`plan:${planTarget.expected.caseId}`);
     try {
       await accountingAPI.setPartnerSabalanPaymentPlan({ expected: planTarget.expected,
@@ -136,20 +156,18 @@ export default function AccountingInvoiceCandidatesPage() {
           installmentId: `partner-sabalan-installment-${item.id}`, dueDate: item.dueDate,
           amount: { amount: item.amount, currency: planTarget.payable.currency }, method: item.method,
           ...(item.method === 'CHECK' ? { check: { number: item.checkNumber, bank: item.checkBank, dueDate: item.dueDate } } : {}),
-        })) } });
-      setPlanTarget(null); setActionSuccess('برنامه پرداخت ثبت و پیش‌نویس صورتحساب ساخته شد.');
-      await loadRows();
+        })) } }, register.mutationRequest);
+      setPlanTarget(null);
+      if (register.isActive()) setActionSuccess('برنامه پرداخت ثبت و پیش‌نویس صورتحساب ساخته شد.');
+      refresh();
     } catch (error) {
+      if (!register.isActive() || planRegister.clearOnDenial(error)) return;
       setActionError((error as any)?.response?.data?.error || 'ثبت برنامه پرداخت انجام نشد.');
     } finally { setActionLoading(null); }
   };
 
-  useEffect(() => {
-    loadRows();
-    return () => { requestVersion.current += 1; };
-  }, [loadRows]);
-
   const deleteDraftRecord = async (row: any) => {
+    if (!deleteTarget || actionLoading || !register.canAct()) return;
     setActionError(null);
     setActionLoading(row.id);
     try {
@@ -157,10 +175,11 @@ export default function AccountingInvoiceCandidatesPage() {
         kind: 'DELETE_DRAFT_ACCOUNTING_RECORD',
         recordId: row.id,
         note: 'Deleted draft from invoice candidates register',
-      });
+      }, register.mutationRequest);
       setDeleteTarget(null);
       await loadRows();
     } catch (error) {
+      if (!register.isActive() || register.clearOnDenial(error)) return;
       console.error('Delete draft accounting record failed:', error);
       setActionError((error as any)?.response?.data?.error || 'حذف پیش‌نویس رکورد مالی انجام نشد');
     } finally {
@@ -169,7 +188,7 @@ export default function AccountingInvoiceCandidatesPage() {
   };
 
   const startVoidCase = async (values: Record<string, string | number>) => {
-    if (!voidTarget) return;
+    if (!voidTarget || actionLoading || !register.canAct()) return;
     setActionError(null); setActionLoading(voidTarget.id);
     try {
       const reasonKind = String(values.reasonKind || 'OTHER');
@@ -178,11 +197,12 @@ export default function AccountingInvoiceCandidatesPage() {
         reason: String(values.reason || '').trim(),
         effectiveAt: PersianCalendar.toGregorian(String(values.effectiveAt)).toISOString(),
         ...(reasonKind === 'DUPLICATE_ISSUE' ? { retainedRecordId: String(values.retainedRecordId || '') } : {}),
-      });
+      }, register.mutationRequest);
       setVoidTarget(null);
-      if (voidTarget.contractId) router.push(`/dashboard/accounting/contracts/${voidTarget.contractId}#financial-void-cases`);
+      if (voidTarget.contractId && register.isActive()) router.push(`/dashboard/accounting/contracts/${voidTarget.contractId}#financial-void-cases`);
       else await loadRows();
     } catch (error) {
+      if (!register.isActive() || register.clearOnDenial(error)) return;
       setActionError(accountingFailureMessage(error, 'شروع پرونده ابطال انجام نشد؛ دلیل و فاکتور معتبر را بررسی کنید.'));
     } finally { setActionLoading(null); }
   };
@@ -236,7 +256,7 @@ export default function AccountingInvoiceCandidatesPage() {
       description={query.view === 'invoiced'
         ? `رکوردهای مؤثر در رویدادهای مالی${query.period ? ` دوره شمسی ${query.period.replace('-', '/')}` : ''}.`
         : 'صورتحساب‌های پیشنهادی که حسابداری از قراردادهای تایید شده، امضا شده یا چاپ شده ایجاد کرده است.'}
-      actions={[{ label: 'به‌روزرسانی', icon: FaSync, onClick: loadRows, tone: 'neutral' }]}
+      actions={[{ label: 'به‌روزرسانی', icon: FaSync, onClick: refresh, tone: 'neutral' }]}
       filters={[
         { id: 'search', label: 'جستجو', type: 'search', value: searchInput, onChange: setSearchInput, placeholder: 'شماره قرارداد یا مشتری...' },
         { id: 'status', label: 'وضعیت', type: 'select', value: query.status, onChange: (value) => updateQuery({ status: value }), options: statusOptions },
@@ -253,25 +273,30 @@ export default function AccountingInvoiceCandidatesPage() {
       rowKey={(row) => row.id}
       columns={columns}
       rowActions={rowActions}
-      isLoading={loading}
+      isLoading={state.status === 'loading'}
+      suspendRowActions={actionsBlocked || Boolean(actionLoading)}
       footer={<ErpPagination currentPage={pagination.page} totalPages={Math.max(Math.ceil(pagination.total / pagination.pageSize), 1)} totalItems={pagination.total} itemsPerPage={pagination.pageSize} onPageChange={(page) => updateQuery({ page })} itemLabel="رکورد" />}
-      emptyState={<ErpEmptyState icon={FaFileInvoice} title="صورتحسابی در این فیلتر وجود ندارد" description="این نتیجه خالی، جمعیت انتخاب‌شده در داشبورد یا فیلترهای فعلی را نشان می‌دهد." />}
+      emptyState={state.data !== null ? <ErpEmptyState icon={FaFileInvoice} title="صورتحسابی در این فیلتر وجود ندارد" description="این نتیجه خالی، جمعیت انتخاب‌شده در داشبورد یا فیلترهای فعلی را نشان می‌دهد." /> : null}
     >
-      {planCandidates.length > 0 && <div className="space-y-3">
-        {planCandidates.map(candidate => <ErpCard key={candidate.expected.caseId} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+      {Boolean(planCandidates?.length) && <div className="space-y-3">
+        {planCandidates?.map(candidate => <ErpCard key={candidate.expected.caseId} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
           <div><p className="font-semibold">{partnerTrackingCode(candidate.caseNumber, candidate.trackingNumber)} · {candidate.partnerDisplayName}</p>
             <p className="sds-text-muted text-sm">{money(candidate.payable.amount, candidate.payable.currency)}</p></div>
-          <ErpButton label="ثبت برنامه پرداخت به سبلان" icon={FaPlus} onClick={() => openPlan(candidate)} />
+          <ErpButton label="ثبت برنامه پرداخت به سبلان" icon={FaPlus} ariaDisabled={planBlocked || Boolean(actionLoading)} onClick={() => openPlan(candidate)} />
         </ErpCard>)}
       </div>}
       {actionSuccess && <ErpInlineState kind="success" title={actionSuccess} />}
-      {loadError && <ErpInlineState kind="error" title={loadError} action={{ label: 'تلاش دوباره', onClick: loadRows }} />}
+      <AccountingRegisterFeedback state={state} retry={loadRows} />
+      {(planRegister.state.status === 'error' || planRegister.state.status === 'refreshing') &&
+        <AccountingRegisterFeedback state={planRegister.state} retry={planRegister.load} />}
       {actionError && !deleteTarget && !voidTarget && <ErpInlineState kind="error" title={actionError} />}
-      <ErpSheet open={Boolean(planTarget)} onClose={() => setPlanTarget(null)} title="برنامه پرداخت فروشنده به سبلان"
+      {planTarget && <ErpSheet open onClose={() => setPlanTarget(null)} title="برنامه پرداخت فروشنده به سبلان"
         presentation="modal" pending={Boolean(actionLoading)} footer={<ErpButton label="ثبت برنامه پرداخت" icon={FaSave}
-          disabled={!planEffectiveDate || !planInstallments.length || planInstallments.some(item => !item.dueDate || !item.amount ||
+          disabled={planBlocked || Boolean(actionLoading) || !planEffectiveDate || !planInstallments.length || planInstallments.some(item => !item.dueDate || !item.amount ||
             (item.method === 'CHECK' && (!item.checkNumber?.trim() || !item.checkBank?.trim())))} onClick={() => void savePlan()} />}>
         <div className="space-y-4">
+          {planBlocked && <ErpInlineState kind="stale" title="برای ثبت برنامه، ابتدا باید اطلاعات تازه دریافت شود."
+            action={state.status === 'error' || planState.status === 'error' ? { label: 'تلاش دوباره', onClick: refresh } : undefined} />}
           {actionError && <ErpInlineState kind="error" title={actionError} />}
           <ErpField label="تاریخ شروع" required><ErpPersianDateField valueFormat="iso-date" value={planEffectiveDate} onChange={(value) => setPlanEffectiveDate(value)} /></ErpField>
           {planInstallments.map((item, index) => <ErpCard key={item.id} className="space-y-3 p-3">
@@ -295,20 +320,22 @@ export default function AccountingInvoiceCandidatesPage() {
           <ErpButton label="افزودن قسط" icon={FaPlus} variant="outline" onClick={() => setPlanInstallments(rows => [...rows,
             { id: crypto.randomUUID(), dueDate: planEffectiveDate, amount: '', method: 'BANK_TRANSFER' }])} />
         </div>
-      </ErpSheet>
-      <AccountingActionModal
-        open={Boolean(deleteTarget)}
+      </ErpSheet>}
+      {deleteTarget && <AccountingActionModal
+        open
         title="حذف پیش‌نویس رکورد مالی"
         description="فقط پیش‌نویس‌های تایید نشده و بدون رکورد پایین‌دستی حذف می‌شوند. این اقدام در سوابق حسابداری ثبت می‌شود."
         fields={[{ id: 'note', label: 'یادداشت حذف', type: 'textarea', defaultValue: 'Deleted draft from invoice candidates register' }]}
         submitLabel="حذف پیش‌نویس"
         busy={Boolean(actionLoading)}
+        blocked={actionsBlocked}
+        onRetry={state.status === 'error' ? loadRows : undefined}
         error={actionError}
         onClose={() => setDeleteTarget(null)}
         onSubmit={(values) => deleteDraftRecord({ ...deleteTarget, note: String(values.note || '') })}
-      />
-      <AccountingActionModal
-        open={Boolean(voidTarget)}
+      />}
+      {voidTarget && <AccountingActionModal
+        open
         title="شروع پرونده ابطال مالی"
         description="سامانه مراحل تعیین‌تکلیف دریافت‌ها، چک‌ها و دریافتنی را به‌ترتیب نشان می‌دهد."
         fields={[
@@ -329,10 +356,12 @@ export default function AccountingInvoiceCandidatesPage() {
         submitLabel="شروع ابطال"
         destructive
         busy={Boolean(actionLoading)}
+        blocked={actionsBlocked}
+        onRetry={state.status === 'error' ? loadRows : undefined}
         error={actionError}
         onClose={() => setVoidTarget(null)}
         onSubmit={startVoidCase}
-      />
+      />}
     </ErpListPage>
   );
 }

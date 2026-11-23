@@ -31,6 +31,7 @@ export type ErpAction = {
   tone?: ErpTone;
   variant?: 'solid' | 'soft' | 'outline' | 'ghost';
   disabled?: boolean;
+  ariaDisabled?: boolean;
   title?: string;
   className?: string;
 };
@@ -182,11 +183,12 @@ export function ErpButton({
   tone = 'primary',
   variant = 'soft',
   disabled,
+  ariaDisabled,
   title,
   className: extraClassName,
 }: ErpAction) {
   const className = cx(
-    'sds-action inline-flex items-center justify-center gap-2 px-3 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50',
+    'sds-action inline-flex items-center justify-center gap-2 px-3 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:opacity-50',
     buttonClasses(tone, variant),
     extraClassName
   );
@@ -200,22 +202,23 @@ export function ErpButton({
 
   if (href && !disabled) {
     return (
-      <Link href={href} onClick={onClick} className={className} title={title}>
+      <Link href={href} aria-disabled={ariaDisabled || undefined} onClick={ariaDisabled ? event => event.preventDefault() : onClick} className={className} title={title}>
         {content}
       </Link>
     );
   }
 
   return (
-    <button type={type} onClick={onClick} disabled={disabled} className={className} title={title}>
+    <button type={type} onClick={ariaDisabled ? event => event.preventDefault() : onClick} disabled={disabled}
+      aria-disabled={ariaDisabled || undefined} className={className} title={title}>
       {content}
     </button>
   );
 }
 
-export function ErpIconButton({ label, icon: Icon, href, onClick, tone = 'neutral', disabled, title }: ErpAction) {
+export function ErpIconButton({ label, icon: Icon, href, onClick, tone = 'neutral', disabled, ariaDisabled, title }: ErpAction) {
   const className = cx(
-    'sds-action inline-flex h-11 w-11 flex-shrink-0 items-center justify-center text-sm disabled:cursor-not-allowed disabled:opacity-50',
+    'sds-action inline-flex h-11 w-11 flex-shrink-0 items-center justify-center text-sm disabled:cursor-not-allowed disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:opacity-50',
     buttonClasses(tone, 'ghost')
   );
 
@@ -223,14 +226,16 @@ export function ErpIconButton({ label, icon: Icon, href, onClick, tone = 'neutra
 
   if (href && !disabled) {
     return (
-      <Link href={href} className={className} aria-label={label} title={title || label}>
+      <Link href={href} aria-disabled={ariaDisabled || undefined} onClick={ariaDisabled ? event => event.preventDefault() : undefined}
+        className={className} aria-label={label} title={title || label}>
         {content}
       </Link>
     );
   }
 
   return (
-    <button type="button" onClick={onClick} disabled={disabled} className={className} aria-label={label} title={title || label}>
+    <button type="button" onClick={ariaDisabled ? event => event.preventDefault() : onClick} disabled={disabled}
+      aria-disabled={ariaDisabled || undefined} className={className} aria-label={label} title={title || label}>
       {content}
     </button>
   );
@@ -969,14 +974,17 @@ function ErpListRowActions({ actions, mode }: { actions: ErpAction[]; mode: 'ico
   </>;
 }
 
-export function ErpListPage<T>({ rows, rowKey, columns, filters = [], filterLayout = 'default', showFilterLabels = false, sectionNavigation, rowActions, rowActionMode = 'icons', rowClassName, focusedRowKey, emptyState, isLoading, footer, children, mobileLayout = 'cards', ...pageProps }: {
+export function ErpListPage<T>({ rows, rowKey, columns, filters = [], filterLayout = 'default', showFilterLabels = false, sectionNavigation, rowActions, rowActionMode = 'icons', rowClassName, focusedRowKey, preserveFocusedRowPosition, suspendRowActions, emptyState, isLoading, footer, children, mobileLayout = 'cards', ...pageProps }: {
   filters?: ErpFilter[];
   filterLayout?: 'default' | 'wide-search';
   showFilterLabels?: boolean;
   sectionNavigation?: React.ReactNode;
+  preserveFocusedRowPosition?: boolean;
 } & Parameters<typeof ErpListContent<T>>[0] & Omit<Parameters<typeof ErpPage>[0], 'children'> & { children?: React.ReactNode }) {
+  const focusAvailable = Boolean(focusedRowKey && rows.some(row => rowKey(row) === focusedRowKey));
+  const rowsForFocus = preserveFocusedRowPosition ? undefined : rows;
   React.useEffect(() => {
-    if (!focusedRowKey) return;
+    if (!focusAvailable) return;
     const frame = window.requestAnimationFrame(() => {
       const target = Array.from(document.querySelectorAll<HTMLElement>('[data-erp-focused-row="true"]'))
         .find((element) => element.getClientRects().length > 0);
@@ -985,7 +993,7 @@ export function ErpListPage<T>({ rows, rowKey, columns, filters = [], filterLayo
       target.scrollIntoView({ behavior, block: 'center' });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [focusedRowKey, rows]);
+  }, [focusAvailable, focusedRowKey, rowsForFocus]);
 
   return (
     <ErpPage {...pageProps}>
@@ -993,14 +1001,14 @@ export function ErpListPage<T>({ rows, rowKey, columns, filters = [], filterLayo
       <ErpFilters filters={filters} layout={filterLayout} showLabels={showFilterLabels} />
       {children}
       <ErpListContent rows={rows} rowKey={rowKey} columns={columns} rowActions={rowActions}
-        rowActionMode={rowActionMode} rowClassName={rowClassName} focusedRowKey={focusedRowKey}
+        rowActionMode={rowActionMode} suspendRowActions={suspendRowActions} rowClassName={rowClassName} focusedRowKey={focusedRowKey}
         emptyState={emptyState} isLoading={isLoading} footer={footer} mobileLayout={mobileLayout} />
     </ErpPage>
   );
 }
 
 export function ErpListContent<T>({
-  rows, rowKey, columns, rowActions, rowActionMode = 'icons', rowClassName,
+  rows, rowKey, columns, rowActions, rowActionMode = 'icons', suspendRowActions = false, rowClassName,
   focusedRowKey, emptyState, isLoading, footer, mobileLayout = 'cards',
 }: {
   rows: T[];
@@ -1008,6 +1016,7 @@ export function ErpListContent<T>({
   columns: ErpColumn<T>[];
   rowActions?: (row: T) => ErpAction[];
   rowActionMode?: 'icons' | 'menu';
+  suspendRowActions?: boolean;
   rowClassName?: (row: T) => string;
   focusedRowKey?: string;
   emptyState?: React.ReactNode;
@@ -1015,6 +1024,9 @@ export function ErpListContent<T>({
   footer?: React.ReactNode;
   mobileLayout?: 'cards' | 'table';
 }) {
+  const actionsFor = (row: T) => (rowActions?.(row) ?? []).map(action =>
+    suspendRowActions && !action.href ? { ...action, ariaDisabled: true } : action);
+
   return (
     <ErpSection>
       {isLoading ? (
@@ -1039,7 +1051,7 @@ export function ErpListContent<T>({
                   ))}
                   {rowActions && (
                     <div className="flex flex-wrap gap-2 border-t border-[var(--sds-border-default)] pt-3 dark:border-[var(--sds-border-strong)]">
-                      <ErpListRowActions actions={rowActions(row)} mode={rowActionMode} />
+                      <ErpListRowActions actions={actionsFor(row)} mode={rowActionMode} />
                     </div>
                   )}
                 </div>
@@ -1070,7 +1082,7 @@ export function ErpListContent<T>({
                     {rowActions && (
                       <td className="px-3 py-4">
                         <div className="flex justify-end gap-1">
-                          <ErpListRowActions actions={rowActions(row)} mode={rowActionMode} />
+                          <ErpListRowActions actions={actionsFor(row)} mode={rowActionMode} />
                         </div>
                       </td>
                     )}

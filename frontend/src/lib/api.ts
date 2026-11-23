@@ -1362,8 +1362,10 @@ export const biAPI = {
 
 export const salesReportsAPI = {
   getOverview: (params?: any) => api.get('/sales/reports/overview', { params }),
-  getSellers: (params?: any) => api.get('/sales/reports/sellers', { params }),
-  getPresets: () => api.get('/sales/reports/presets'),
+  getSummary: (params: Record<string, string>, signal?: AbortSignal) => api.get('/sales/reports/summary', { params, signal }),
+  getDetails: (params: Record<string, string | number>, signal?: AbortSignal) => api.get('/sales/reports/details', { params, signal }),
+  getSellers: (params?: any, signal?: AbortSignal) => api.get('/sales/reports/sellers', { params, signal }),
+  getPresets: (signal?: AbortSignal) => api.get('/sales/reports/presets', { signal }),
   createPreset: (data: any) => api.post('/sales/reports/presets', data),
   deletePreset: (id: string) => api.delete(`/sales/reports/presets/${id}`),
   downloadPdf: (filters: any, configuration: any) =>

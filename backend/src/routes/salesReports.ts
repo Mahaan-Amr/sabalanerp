@@ -4,7 +4,10 @@ import { Prisma } from '@prisma/client';
 import * as XLSX from 'xlsx';
 import { protect } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES, WorkspaceRequest } from '../middleware/workspace';
-import { buildSalesReport, getSalesReportSellers, SalesReportAccess } from '../services/salesReportingService';
+import {
+  buildSalesReport, buildSalesReportPage, buildSalesReportSummary, getSalesReportSellers,
+  SALES_REPORT_SECTIONS, SalesReportAccess, SalesReportDrilldown,
+} from '../services/salesReportingService';
 import { generatePdfFromHtml } from '../utils/pdf';
 import { downloadAndRemoveDocumentPdf } from '../services/documentPdfDownload';
 import { renderReportPdfHeaderTemplate, renderYekanFontFaces } from '../utils/printTemplate';
@@ -140,6 +143,48 @@ const renderReport = (report: any, config: ReturnType<typeof safeConfig>) => {
 router.get('/overview', ...reportAccess, async (req: WorkspaceRequest, res: Response) => {
   try { res.json({ success: true, data: await buildSalesReport(accessFor(req), req.query) }); }
   catch (error: any) { res.status(error.message.includes('permitted') ? 403 : 400).json({ success: false, error: error.message }); }
+});
+
+router.get('/summary', ...reportAccess, async (req: WorkspaceRequest, res: Response) => {
+  const section = SALES_REPORT_SECTIONS.find((name) => name === (req.query.section ?? 'overview'));
+  if (!section) return res.status(400).json({ success: false, error: 'Invalid sales report section' });
+  try {
+    return res.json({ success: true, data: await buildSalesReportSummary(accessFor(req), req.query, section) });
+  } catch (error: any) {
+    return res.status(error.message.includes('permitted') ? 403 : 400).json({ success: false, error: error.message });
+  }
+});
+
+const parseDrilldown = ({ kind = 'contracts', key, commercialFlowVersion }: WorkspaceRequest['query']): SalesReportDrilldown | null => {
+  if (kind === 'contracts' || kind === 'accountingUnassigned' || kind === 'accountingConflict') return { kind };
+  if (typeof key !== 'string' || !key || key.length > 200) return null;
+  if (kind === 'status') {
+    if (commercialFlowVersion !== '0' && commercialFlowVersion !== '1') return null;
+    return { kind, key, commercialFlowVersion: commercialFlowVersion === '1' ? 1 : 0 };
+  }
+  if (kind === 'trend' || kind === 'customer' || kind === 'product' || kind === 'seller' || kind === 'accountingSeller') return { kind, key };
+  return null;
+};
+
+router.get('/details', ...reportAccess, async (req: WorkspaceRequest, res: Response) => {
+  const selection = parseDrilldown(req.query);
+  const requestedPage = req.query.page ?? '1';
+  const requestedSize = req.query.pageSize ?? '25';
+  if (!selection || typeof requestedPage !== 'string' || typeof requestedSize !== 'string'
+    || !/^\d{1,9}$/.test(requestedPage) || !/^\d{1,3}$/.test(requestedSize)
+    || Number(requestedPage) < 1 || Number(requestedSize) < 1 || Number(requestedSize) > 100) {
+    return res.status(400).json({ success: false, error: 'Invalid sales report drilldown or page' });
+  }
+  try {
+    return res.json({
+      success: true,
+      data: await buildSalesReportPage(accessFor(req), req.query, selection, {
+        page: Number(requestedPage), pageSize: Number(requestedSize),
+      }),
+    });
+  } catch (error: any) {
+    return res.status(error.message.includes('permitted') ? 403 : 400).json({ success: false, error: error.message });
+  }
 });
 
 router.get('/sellers', ...reportAccess, async (req: WorkspaceRequest, res: Response) => {

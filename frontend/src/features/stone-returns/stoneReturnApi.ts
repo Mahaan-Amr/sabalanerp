@@ -55,7 +55,9 @@ export type StoneReturnCandidate = StoneReturnSourceKey & {
   remainingQuantity: string;
 };
 
-export type StoneReturnDraftRow = StoneReturnAllocationInput & { id: string; originalInvoiceNumber: string; contractNumber: string };
+export type StoneReturnDraftRow = StoneReturnAllocationInput & {
+  id: string; originalInvoiceNumber: string; contractNumber: string; productRowId: string;
+};
 export type StoneReturnReview = {
   receipt: StoneReturnReceipt;
   originKnown: boolean;
@@ -96,6 +98,8 @@ export type StoneReturnFinalization = {
       customerCreditRials: string;
       shares: Array<StoneReturnOriginalRate & StoneReturnOriginalAmounts & {
         draftRowId: string;
+        loadingId?: string;
+        loadingNumber?: string | null;
         shipmentReturnEvidenceId: string;
         valuationLayerId: string;
         quantity: string;

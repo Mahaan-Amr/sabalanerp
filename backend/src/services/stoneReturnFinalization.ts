@@ -1,13 +1,12 @@
+import { loadAcceptedStoneReturnStock } from './stoneReturnAvailability';
 import { randomUUID } from 'node:crypto';
 import { parseCanonicalDecimal } from '@sabalanerp/contract-product-graph';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { AccountingCustomerTreasuryError, type CustomerTreasuryActor } from './accountingCustomerTreasury';
 import { recognizeCustomerReturnWithin, type CustomerReturnRecognitionInput } from './accountingCustomerTreasuryPrisma';
 import { hashAccountingEvidence } from './accountingLedgerFoundation';
-import { resolveAccountingOperationalEvidence } from './accountingOperationalEvidence';
-import { hashSupplyChainEvidence } from './accountingSupplyChain';
 import { createAccountingSupplyChainPrismaRepository } from './accountingSupplyChainPrismaRepository';
-import { exactQuantityText, formatExactQuantityAtoms, parseExactQuantityAtoms } from './exactQuantity';
+import { formatExactQuantityAtoms, parseExactQuantityAtoms } from './exactQuantity';
 import { EXCESS_SHIPMENT_RETURN_SOURCE } from './shipmentQuantityProjection';
 import { recordFinalizedExcessShipmentReturns } from './shipmentExcessReturns';
 import { lockStoneReturnCase, readStoneReturnAllocationDraft } from './stoneReturnAllocationDraft';
@@ -18,7 +17,7 @@ import { apportionStoneReturnCredit, stoneReturnRatesDiffer } from './stoneRetur
 import { readStoneReturnReceipt } from './stoneReturnReceipts';
 
 type FinalizedShare = {
-  draftRowId: string; shipmentReturnEvidenceId: string; valuationLayerId: string; quantity: string;
+  draftRowId: string; loadingId: string; loadingNumber: string | null; shipmentReturnEvidenceId: string; valuationLayerId: string; quantity: string;
   originalInvoicedQuantity: string; originalLineNetRials: string;
   originalNetRials: string; originalTaxRials: string; costRials: string;
 };
@@ -176,29 +175,6 @@ export async function readStoneReturnPostingContext(db: PrismaClient, receiptId:
   }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
 }
 
-async function loadAcceptedStock(tx: Tx, receipt: Awaited<ReturnType<typeof readStoneReturnReceipt>>) {
-  if (!receipt.inventoryIdentityId) throw new StoneReturnAllocationError(409, 'هویت موجودی پذیرش لجستیک پیدا نشد.');
-  const identity = await tx.accountingInventoryIdentity.findUnique({ where: { id: receipt.inventoryIdentityId } });
-  const reference = { type: 'LOGISTICS_STONE_RETURN_ACCEPTANCE', id: receipt.id, version: 1 };
-  const evidence = await resolveAccountingOperationalEvidence(tx, reference, [reference.type]);
-  const events = await tx.accountingInventoryEvent.findMany({ where: { identityId: receipt.inventoryIdentityId,
-    eventType: 'RECEIPT', sourceType: reference.type, sourceId: reference.id, sourceVersion: reference.version,
-  } });
-  const event = events[0];
-  const payload = evidence.payload as Prisma.JsonObject;
-  if (!identity || identity.originId !== receipt.id || identity.governedUnit !== receipt.unit
-    || identity.valuationMethod !== 'SPECIFIC_IDENTIFICATION' || events.length !== 1 || event.unit !== receipt.unit
-    || event.sourceHash !== evidence.hash || hashSupplyChainEvidence(event.sourcePayload) !== evidence.hash
-    || payload?.id !== receipt.id || payload.customerId !== receipt.customerId || payload.productId !== receipt.productId
-    || payload.unit !== receipt.unit || payload.inventoryIdentityId !== identity.id
-    || payload.guardReturnMovementId !== receipt.guardReturnMovementId
-    || typeof payload.acceptedQuantity !== 'string' || exactQuantityText(payload.acceptedQuantity) !== exactQuantityText(receipt.acceptedQuantity)
-    || !event.quantity.eq(receipt.acceptedQuantity) || event.occurredAt.getTime() !== receipt.createdAt.getTime()) {
-    throw new StoneReturnAllocationError(409, 'مقدار یا هویت موجودی با شاهد تغییرناپذیر پذیرش لجستیک سازگار نیست.');
-  }
-  return { identity, event, evidence };
-}
-
 export async function finalizeStoneReturn(db: PrismaClient, receiptId: string, actor: CustomerTreasuryActor, body: unknown) {
   if (actor.profile === 'VIEWER') {
     throw new AccountingCustomerTreasuryError('ACCOUNTING_WRITE_FORBIDDEN', 'مجوز ثبت قطعی مرجوعی ندارید.', 403);
@@ -248,7 +224,11 @@ export async function finalizeStoneReturn(db: PrismaClient, receiptId: string, a
     const period = options.periods.find(item => item.id === command.periodId);
     const rule = options.rules.find(item => item.id === command.postingRuleId);
     if (!period || !rule) throw new StoneReturnAllocationError(409, 'دوره باز و قاعده مؤثر ثبت مشتری را از دفتر مرجع انتخاب کنید.');
-    const stock = await loadAcceptedStock(tx, receipt);
+    if (receipt.inventoryIdentityId) {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${receipt.inventoryIdentityId}))`;
+    }
+    const stock = await loadAcceptedStoneReturnStock(tx, receipt);
+    if (!stock) throw new StoneReturnAllocationError(409, 'مقدار یا هویت موجودی با شاهد تغییرناپذیر پذیرش لجستیک سازگار نیست.');
     const repository = createAccountingSupplyChainPrismaRepository(tx);
     await repository.lockInventoryIdentities([stock.identity.id]);
     if ((await repository.listLayers(stock.identity.id)).length) {
@@ -281,7 +261,7 @@ export async function finalizeStoneReturn(db: PrismaClient, receiptId: string, a
         lines: lines.map(line => ({ lineId: line.id, agreedUnitRateRials: command.agreedUnitRateRials,
           rateDifferenceReason: command.rateDifferenceReason ?? undefined })),
       }, {
-        caseId: receiptId, customerId: receipt.customerId, unit: receipt.unit, receiptEventId: stock.event.id,
+        caseId: receiptId, finalizedAt, customerId: receipt.customerId, unit: receipt.unit, receiptEventId: stock.event.id,
         receiptEvidenceHash: stock.evidence.hash, draftId: draft.id, draftVersion: draft.version, draftHash, attributionReason: draft.attributionReason,
         shares: invoiceShares.map(({ id, candidate }) => ({
           id, evidenceId: shipmentIds.get(id)!, dispatchEvidenceId: candidate.dispatchEvidenceId,
@@ -307,9 +287,10 @@ export async function finalizeStoneReturn(db: PrismaClient, receiptId: string, a
           valueRials: line.costRials, valuationMethod: stock.identity.valuationMethod,
           sourceType: EXCESS_SHIPMENT_RETURN_SOURCE, sourceId: line.id, createdAt: finalizedAt,
         });
+        const { originalRate, candidate } = invoiceShares[lineIndex];
         valuedShares.push({
-          draftRowId: line.id, shipmentReturnEvidenceId: line.evidenceId, valuationLayerId: layerId, quantity: line.quantity,
-          ...invoiceShares[lineIndex].originalRate,
+          loadingId: candidate.loadingId, loadingNumber: candidate.loadingNumber, draftRowId: line.id, shipmentReturnEvidenceId: line.evidenceId, valuationLayerId: layerId, quantity: line.quantity,
+          ...originalRate,
           originalNetRials: line.netRials.toString(), originalTaxRials: line.taxRials.toString(), costRials: line.costRials.toString(),
         });
       }

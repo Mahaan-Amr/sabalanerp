@@ -48,11 +48,13 @@ export async function listStoneReturnAllocationReviews(db: PrismaClient, after?:
 }
 
 export async function readStoneReturnAllocationReview(tx: Tx, receiptId: string) {
-  const [receipt, draft, finalization] = await Promise.all([
+  const [receipt, finalization] = await Promise.all([
     readStoneReturnReceipt(tx, receiptId),
-    readStoneReturnAllocationDraft(tx, receiptId),
     tx.stoneReturnFinalization.findUnique({ where: { receiptId } }),
   ]);
+  const draft = finalization
+    ? presentDraft(await tx.stoneReturnAllocationDraft.findUniqueOrThrow({ where: { id: finalization.draftId }, include: includeRows }))
+    : await readStoneReturnAllocationDraft(tx, receiptId);
   const sources: StoneReturnCandidates = finalization
     ? { candidates: [], blockedReason: null, hasUnlinkedOriginals: false, originKnown: false }
     : await loadStoneReturnCandidates(tx, receipt);

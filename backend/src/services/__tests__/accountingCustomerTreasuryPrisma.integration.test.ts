@@ -555,7 +555,7 @@ test('customer revenue and treasury tracer bullet persists once and projects onl
       assert.equal(creditLine?.partyId, profile.accountingPartyId);
       assert.equal(creditLine.creditRials.toFixed(0), '550');
 
-      await returnTest.test('Logistics 40/35 receipt posts one negotiated credit across two invoices, rolls back fully on a second-invoice error, and replays once', async () => {
+      await returnTest.test('Logistics 40/35 receipt posts one negotiated credit across two invoices, rolls back fully on a second-invoice error, and replays once', async (stoneReturnTest) => {
         const dispatchAt = new Date('2026-09-22T08:00:00Z');
         const recognizedAt = new Date('2026-09-23T08:00:00Z');
         const postingDate = '2026-09-24';
@@ -649,7 +649,9 @@ test('customer revenue and treasury tracer bullet persists once and projects onl
           ...returnCommand, rateDifferenceReason: '   ',
         }), /دلیل تفاوت نرخ/);
 
-        const accountBefore = (await projectCustomerAccountPrisma(database, accountAt)).standaloneCreditRials;
+        const creditAt = async (asOf = new Date()) =>
+          (await projectCustomerAccountPrisma(database, { ...accountAt, asOf })).standaloneCreditRials;
+        const accountBefore = await creditAt();
         const availableToLoad = async () => Promise.all([first, second].map(async ({ contractId }) =>
           (await readShipmentQuantityProjection(database, { contractId })).rows[0].quantities?.availableToLoad));
         assert.deepEqual(await availableToLoad(), ['5.000', '5.000']);
@@ -673,7 +675,7 @@ test('customer revenue and treasury tracer bullet persists once and projects onl
         const failed = await readStoneReturnAllocationReview(database, accepted.id);
         assert.equal(failed.allocationStatus, 'DRAFT');
         assert.equal(failed.finalization, null);
-        assert.equal((await projectCustomerAccountPrisma(database, accountAt)).standaloneCreditRials, accountBefore);
+        assert.equal(await creditAt(), accountBefore);
         assert.deepEqual(await availableToLoad(), ['5.000', '5.000']);
         assert.equal(await database.accountingInventoryValuationLayer.count({ where: { identityId: accepted.inventoryIdentityId } }), 0);
         assert.equal(await database.shipmentQuantityEvidence.count({ where: { kind: 'EXCESS_RETURN_FINALIZED' } }), 0);
@@ -688,6 +690,9 @@ test('customer revenue and treasury tracer bullet persists once and projects onl
         assert.equal(reviewed.allocationStatus, 'FINALIZED');
         assert.equal(reviewed.finalization?.draftVersion, complete.draft.version);
         assert.equal(reviewed.unallocatedQuantity, '0.000');
+        assert.equal(reviewed.draft?.id, complete.draft.id);
+        assert.equal(reviewed.draft?.attributionReason, attributionReason);
+        assert.deepEqual(reviewed.draft?.rows.map(row => row.dispatchEvidenceId).sort(), [first.dispatchEvidenceId, second.dispatchEvidenceId].sort());
         await assert.rejects(saveStoneReturnAllocationDraft(database, accepted.id, actor.id,
           { ...draftInput, expectedVersion: complete.draft.version, rows }), /قبلاً ثبت قطعی/);
         await assert.rejects(finalizeStoneReturn(database, accepted.id, accountant, { ...returnCommand, date: '2026-09-25' }), /فرمان دیگری/);
@@ -709,6 +714,7 @@ test('customer revenue and treasury tracer bullet persists once and projects onl
         const invoiceCredits = credits.map(item => {
           const voucher = posted.find(entry => entry.id === item.voucherId);
           assert.ok(voucher);
+          assert.equal(voucher.postedAt?.getTime(), outcomes[0].data.finalizedAt.getTime());
           const credit = voucher.lines.find(line => line.accountId === receivable.id);
           assert.ok(credit);
           assert.equal(item.customerCreditRials, credit.creditRials.toFixed(0));
@@ -720,7 +726,8 @@ test('customer revenue and treasury tracer bullet persists once and projects onl
           return credit.creditRials.toFixed(0);
         });
         assert.equal(invoiceCredits.reduce((sum, part) => sum + BigInt(part), 0n), 87_500_001n);
-        assert.equal((await projectCustomerAccountPrisma(database, accountAt)).standaloneCreditRials - accountBefore, 87_500_001n);
+        assert.equal(await creditAt(outcomes[0].data.finalizedAt) - accountBefore, 87_500_001n);
+        assert.equal(await creditAt(new Date(outcomes[0].data.finalizedAt.getTime() - 1)), accountBefore);
         assert.deepEqual(await availableToLoad(), ['5.000', '5.000']);
         const shares = await Promise.all([first, second].map(async ({ contractId }) =>
           (await readShipmentQuantityProjection(database, { contractId })).rows[0].quantities));
@@ -736,6 +743,43 @@ test('customer revenue and treasury tracer bullet persists once and projects onl
         assert.deepEqual(returnTax.map(invoice => [invoice.referenceTaxInvoiceId, invoice.taxRials.toFixed(0)]), [
           [first.originalTaxInvoiceId, '1800000'], [second.originalTaxInvoiceId, '4200000'],
         ]);
+
+        await stoneReturnTest.test('two independently saved cases cannot consume the same remaining sale quantity', async () => {
+          const quantity = '3.000001';
+          const prepare = async () => {
+            const { data } = await recordStoneReturnReceipt(database, actor.id, {
+              requestId: randomUUID(), customerId: customer.id, productId: product.id, unit: 'squareMeter',
+              receivedQuantity: quantity, acceptedQuantity: quantity,
+            });
+            const draft = await saveStoneReturnAllocationDraft(database, data.id, actor.id, {
+              expectedVersion: 0, rows: [{ ...first, quantity }], attributionReason,
+            });
+            return { receipt: data, draft: draft.draft };
+          };
+          const cases = [await prepare(), await prepare()];
+          const attempts = await Promise.allSettled(cases.map(({ receipt, draft }) => finalizeStoneReturn(database, receipt.id, accountant, {
+            ...returnCommand, expectedVersion: draft.version, requestId: draft.id,
+          })));
+          assert.equal(attempts.filter(result => result.status === 'fulfilled').length, 1);
+          const rejected = attempts.find(result => result.status === 'rejected');
+          assert.match(String(rejected?.reason), /مانده قابل برگشت/);
+          const reviewedCases = await Promise.all(cases.map(({ receipt }) => readStoneReturnAllocationReview(database, receipt.id)));
+          assert.deepEqual(reviewedCases.map(review => review.allocationStatus).sort(), ['DRAFT', 'FINALIZED']);
+          const finalized = attempts.find(result => result.status === 'fulfilled');
+          assert.ok(finalized);
+          const finalizedSummary = finalized.value.data.summary as Prisma.JsonObject;
+          const [credit] = finalizedSummary.credits as Prisma.JsonObject[];
+          const line = await database.accountingTaxInvoiceLine.findFirstOrThrow({ where: { taxInvoiceId: String(credit.taxInvoiceId) } });
+          assert.equal(line.roundedTaxRials.toFixed(), '360000');
+          assert.equal(line.rawTaxAmount.toFixed(), '360000.12');
+          assert.equal(line.rawBaseAmount.toFixed(), '3600001.2');
+          const rounding = (line.allocationEvidence as Prisma.JsonObject).returnRounding as Prisma.JsonObject;
+          assert.equal(rounding.policy, 'CUMULATIVE_PROPORTION_HALF_UP_IRR_V1');
+          assert.equal(rounding.originalQuantity, '20');
+          assert.equal(rounding.priorReturnedQuantity, '15');
+          assert.equal(rounding.returnedQuantity, '3.000001');
+          assert.equal(rounding.cumulativeReturnedQuantity, '18.000001');
+        });
       });
     });
   } finally {

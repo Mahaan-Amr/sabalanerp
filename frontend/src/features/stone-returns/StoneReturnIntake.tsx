@@ -6,7 +6,7 @@ import {
 } from '@/components/erp';
 import { LogisticsPage } from '@/features/logistics/LogisticsWorkspace';
 import { userFacingError } from '@/features/dispatch/userFacingError';
-import { normalizeDigits } from '@/lib/numberFormat';
+import { normalizeStoneReturnQuantity, stoneReturnQuantityAtoms } from './stoneReturnQuantityInput';
 import { displayStoneReturnQuantity, stoneReturnApi, stoneReturnUnitLabels, type StoneReturnOption } from './stoneReturnApi';
 
 const listHref = '/dashboard/logistics/returns';
@@ -56,10 +56,6 @@ function Lookup({ label, placeholder, fetchOptions, selected, onChange, enabled 
   </div>;
 }
 
-function normalizedQuantity(value: string) {
-  return normalizeDigits(value).trim().replace(/,/g, '').replace(/^0+(?=\d)/, '').replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
-}
-
 export function StoneReturnIntake() {
   const [customer, setCustomer] = useState<StoneReturnOption | null>(null);
   const [product, setProduct] = useState<StoneReturnOption | null>(null);
@@ -69,6 +65,7 @@ export function StoneReturnIntake() {
   const [accepted, setAccepted] = useState('');
   const [reason, setReason] = useState('');
   const [pending, setPending] = useState(false);
+  const [attempted, setAttempted] = useState(false);
   const [uncertain, setUncertain] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -77,20 +74,31 @@ export function StoneReturnIntake() {
   const customerId = customer?.id ?? '';
   const lookupGuard = useCallback((query: string) => stoneReturnApi.guard(customerId, query), [customerId]);
   const editable = !pending && !uncertain;
-  const receivedQuantity = normalizedQuantity(received);
-  const acceptedQuantity = normalizedQuantity(accepted);
-  const reasonRequired = !!receivedQuantity && !!acceptedQuantity && receivedQuantity !== acceptedQuantity;
+  const receivedQuantity = normalizeStoneReturnQuantity(received, true);
+  const acceptedQuantity = normalizeStoneReturnQuantity(accepted, true);
+  const receivedAtoms = stoneReturnQuantityAtoms(receivedQuantity, unit);
+  const acceptedAtoms = stoneReturnQuantityAtoms(acceptedQuantity, unit);
+  const receivedError = !receivedAtoms
+    ? (unit === 'count' ? 'مقدار دریافتی باید عدد صحیح مثبت باشد.' : 'مقدار دریافتی معتبر و بزرگ‌تر از صفر وارد کنید.') : undefined;
+  const acceptedError = acceptedAtoms === null
+    ? (unit === 'count' ? 'مقدار پذیرفته‌شده باید عدد صحیح باشد.' : 'مقدار پذیرفته‌شده معتبر وارد کنید.')
+    : receivedAtoms !== null && acceptedAtoms > receivedAtoms
+      ? 'مقدار پذیرفته‌شده نمی‌تواند از مقدار دریافتی بیشتر باشد.' : undefined;
+  const reasonRequired = receivedAtoms !== null && acceptedAtoms !== null && receivedAtoms > acceptedAtoms;
+  const reasonError = reasonRequired && !reason.trim() ? 'علت رد را وارد کنید.' : undefined;
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (busy.current || success) return;
+    setAttempted(true);
+    setError('');
     if (!customer || !product || !unit) {
       setError('مشتری، سنگ و واحد را انتخاب کنید.');
       return;
     }
+    if (receivedError || acceptedError || reasonError) return;
     busy.current = true;
     setPending(true);
-    setError('');
     requestId.current ||= crypto.randomUUID();
     try {
       const { data } = await stoneReturnApi.record({
@@ -113,7 +121,7 @@ export function StoneReturnIntake() {
   return <LogisticsPage eyebrow="لجستیک" title="ثبت دریافت سنگ مرجوعی" backHref={listHref}>
     {success ? <ErpInlineState kind="success" title={success} action={{ label: 'مشاهده مرجوعی‌ها', href: listHref }} /> :
       <ErpSection>
-        <form className="space-y-5" onSubmit={submit}>
+        <form className="space-y-5" onSubmit={submit} noValidate>
           {error && <ErpInlineState kind="error" title={error} />}
           <div className="grid gap-4 md:grid-cols-2">
             <Lookup label="مشتری" placeholder="انتخاب مشتری" selected={customer} onChange={option => { setCustomer(option); setGuard(null); }}
@@ -128,14 +136,14 @@ export function StoneReturnIntake() {
                 {Object.entries(stoneReturnUnitLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
               </ErpSelect>
             </ErpField>
-            <ErpField label="مقدار دریافتی" required>
+            <ErpField label="مقدار دریافتی" required error={attempted ? receivedError : undefined}>
               <ErpInput required inputMode="decimal" maxLength={100} value={received} disabled={!editable} onChange={event => setReceived(event.target.value)} />
             </ErpField>
-            <ErpField label="مقدار پذیرفته‌شده" required>
+            <ErpField label="مقدار پذیرفته‌شده" required error={attempted ? acceptedError : undefined}>
               <ErpInput required inputMode="decimal" maxLength={100} value={accepted} disabled={!editable} onChange={event => setAccepted(event.target.value)} />
             </ErpField>
           </div>
-          {reasonRequired && <ErpField label="علت رد" required>
+          {reasonRequired && <ErpField label="علت رد" required error={attempted ? reasonError : undefined}>
             <ErpTextarea required maxLength={2000} value={reason} disabled={!editable} onChange={event => setReason(event.target.value)} />
           </ErpField>}
           <ErpButton type="submit" tone="primary" variant="solid" disabled={pending}

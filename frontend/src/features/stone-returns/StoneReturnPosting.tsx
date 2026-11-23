@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import React, { useEffect, useRef, useState, type FormEvent } from 'react';
 import {
   ErpButton, ErpCard, ErpField, ErpFieldView, ErpInlineState, ErpInput, ErpPersianDateField, ErpSection,
   ErpSelect, ErpSkeleton, ErpSummaryGrid, ErpTextarea,
@@ -8,7 +8,7 @@ import {
 import { userFacingError } from '@/features/dispatch/userFacingError';
 import {
   displayExactDecimal, displayStoneReturnQuantity, stoneReturnApi, stoneReturnUnitLabels,
-  type StoneReturnFinalization, type StoneReturnPostingContext,
+  type StoneReturnFinalization, type StoneReturnReview, type StoneReturnPostingContext,
 } from './stoneReturnApi';
 import { describeStoneReturnRate } from './stoneReturnRate';
 
@@ -132,8 +132,13 @@ export function StoneReturnPosting({ receiptId, draft, acceptedQuantity, unit, p
   </ErpSection>;
 }
 
-export function StoneReturnPostingResult({ finalization, unit }: { finalization: StoneReturnFinalization; unit: string }) {
+export function StoneReturnPostingResult({ finalization, draft, unit }: {
+  finalization: StoneReturnFinalization;
+  draft: StoneReturnReview['draft'];
+  unit: string;
+}) {
   const { summary } = finalization;
+  const allocations = new Map(draft?.rows.map(row => [row.id, row]));
   return <ErpSection title="اسناد قطعی مرجوعی">
     <ErpSummaryGrid columns={3} items={[
       { label: 'تاریخ سند', value: new Date(finalization.documentDate).toLocaleDateString('fa-IR', { timeZone: 'UTC' }) },
@@ -143,14 +148,31 @@ export function StoneReturnPostingResult({ finalization, unit }: { finalization:
       { label: 'مالیات مرجع', value: displayRials(summary.originalTaxRials) },
       { label: 'بستانکاری توافقی', value: displayRials(summary.customerCreditRials), tone: 'success' },
     ]} />
+    {draft?.attributionReason && <ErpFieldView label="دلیل انتخاب ردیف‌های فروش" value={draft.attributionReason} />}
     {summary.rateDifferenceReason && <ErpFieldView label="دلیل تفاوت نرخ با فروش اولیه" value={summary.rateDifferenceReason} />}
     {summary.credits.map(credit => <ErpCard key={credit.creditInvoiceId}>
       <h3 className="mb-3 font-semibold break-words">صورتحساب مرجع {credit.originalInvoiceNumber}</h3>
       <ErpSummaryGrid items={[
         { label: 'بستانکاری مشتری', value: displayRials(credit.customerCreditRials), tone: 'success' },
         { label: 'شماره سند حسابداری', value: credit.voucherNumber?.toLocaleString('fa-IR') ?? <bdi className="break-all">{credit.voucherId}</bdi> },
-        ...credit.shares.map(share => ({ label: 'مقدار ثبت‌شده', value: displayStoneReturnQuantity(share.quantity, unit) })),
       ]} />
+      {credit.shares.map(share => {
+        const row = allocations.get(share.draftRowId);
+        const loadingReference = share.loadingNumber || share.loadingId;
+        const reference = (value: string) => <bdi className="break-all">{value}</bdi>;
+        return <div key={share.draftRowId} className="mt-4">
+          <ErpSummaryGrid items={[
+            ...(row ? [
+              { label: 'قرارداد مرجع', value: reference(row.contractNumber) },
+              { label: 'شناسه ردیف فروش مرجع', value: reference(row.originalLineId) },
+              { label: 'شناسه ردیف سنگ', value: reference(row.productRowId) },
+              { label: 'شناسه شاهد خروج بارگیری', value: reference(row.dispatchEvidenceId) },
+            ] : []),
+            ...(loadingReference ? [{ label: 'بارگیری مرجع', value: reference(loadingReference) }] : []),
+            { label: 'مقدار ثبت‌شده', value: displayStoneReturnQuantity(share.quantity, unit) },
+          ]} />
+        </div>;
+      })}
     </ErpCard>)}
   </ErpSection>;
 }

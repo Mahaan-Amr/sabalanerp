@@ -20,6 +20,7 @@ import type {
   SupplierInvoiceRecord,
 } from './accountingSupplyChain';
 import { hashSupplyChainEvidence } from './accountingSupplyChain';
+import { readAcceptedStoneReturnQuantity } from './stoneReturnAvailability';
 import { createAccountingLedgerPrismaRepository } from './accountingLedgerPrismaRepository';
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
@@ -284,11 +285,15 @@ class PrismaSupplyChainRepository implements AccountingSupplyChainRepository {
     });
   }
 
+  async readAcceptedStoneReturnQuantity(identityId: string) {
+    return readAcceptedStoneReturnQuantity(this.db, identityId);
+  }
+
   async listLayers(identityId: string): Promise<ReadonlyArray<InventoryLayerRecord>> {
     const rows = await this.db.accountingInventoryValuationLayer.findMany({ where: { identityId }, include: { identity: true }, orderBy: { createdAt: 'asc' } });
     return rows.map((row) => ({
       id: row.id, identityId: row.identityId, warehouseId: row.warehouseId, locationId: row.locationId,
-      originId: row.identity.originId ?? undefined, unit: row.unit, quantity: row.quantity.toString(),
+      originId: row.identity.originId ?? undefined, unit: row.unit, quantity: row.quantity.toFixed(),
       valueRials: BigInt(row.valueRials.toString()), valuationMethod: row.valuationMethod,
       sourceType: row.sourceType, sourceId: row.sourceId, createdAt: row.createdAt,
     }));
@@ -306,7 +311,7 @@ class PrismaSupplyChainRepository implements AccountingSupplyChainRepository {
 
   async listConsumptions(identityId: string): Promise<ReadonlyArray<InventoryConsumptionRecord>> {
     const rows = await this.db.accountingInventoryLayerConsumption.findMany({ where: { identityId }, orderBy: { createdAt: 'asc' } });
-    return rows.map((row) => ({ id: row.id, identityId: row.identityId, layerId: row.layerId, unit: row.unit, quantity: row.quantity.toString(), valueRials: BigInt(row.valueRials.toString()), purpose: row.purpose, sourceId: row.sourceId, createdAt: row.createdAt }));
+    return rows.map((row) => ({ id: row.id, identityId: row.identityId, layerId: row.layerId, unit: row.unit, quantity: row.quantity.toFixed(), valueRials: BigInt(row.valueRials.toString()), purpose: row.purpose, sourceId: row.sourceId, createdAt: row.createdAt }));
   }
 
   async saveConsumption(item: InventoryConsumptionRecord) {
@@ -325,7 +330,7 @@ class PrismaSupplyChainRepository implements AccountingSupplyChainRepository {
       warehouseId: row.warehouseId,
       locationId: row.locationId,
       unit: row.unit,
-      quantity: row.quantity.toString(),
+      quantity: row.quantity.toFixed(),
       voucherId: row.voucherId ?? undefined,
       evidence: evidenceFromColumns(row),
       occurredAt: row.occurredAt,
@@ -427,7 +432,7 @@ class PrismaSupplyChainRepository implements AccountingSupplyChainRepository {
     releaseEvidenceHash: string | null; releaseEvidencePayload: Prisma.JsonValue | null; releasedBy: string | null;
   }): InventoryReservationRecord {
     return {
-      id: row.id, identityId: row.identityId, unit: row.unit, quantity: row.quantity.toString(), purposeId: row.purposeId,
+      id: row.id, identityId: row.identityId, unit: row.unit, quantity: row.quantity.toFixed(), purposeId: row.purposeId,
       idempotencyKey: row.idempotencyKey, evidence: reservationEvidence(row), status: row.status, createdAt: row.createdAt,
       releasedAt: row.releasedAt ?? undefined, releasedByActorId: row.releasedBy ?? undefined,
       releaseEvidence: row.releaseEvidenceType && row.releaseEvidenceId && row.releaseEvidenceVersion && row.releaseEvidenceHash && row.releaseEvidencePayload

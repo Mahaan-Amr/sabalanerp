@@ -211,6 +211,7 @@ export interface AccountingSupplyChainRepository {
   listAllocations(): Promise<ReadonlyArray<AllocationRecord>>;
   getAllocation(id: string): Promise<AllocationRecord | null>;
   saveAllocation(item: AllocationRecord): Promise<void>;
+  readAcceptedStoneReturnQuantity(identityId: string): Promise<{ unit: string | null; quantity: string } | null>;
   listLayers(identityId: string): Promise<ReadonlyArray<InventoryLayerRecord>>;
   saveLayer(item: InventoryLayerRecord): Promise<void>;
   listConsumptions(identityId: string): Promise<ReadonlyArray<InventoryConsumptionRecord>>;
@@ -262,6 +263,7 @@ export const createInMemorySupplyChainRepository = (): AccountingSupplyChainRepo
     listAllocations: async () => structuredClone(state.allocations),
     getAllocation: async (id) => structuredClone(state.allocations.find((item) => item.id === id) ?? null),
     saveAllocation: async (item) => { state.allocations = [...state.allocations.filter((entry) => entry.id !== item.id), structuredClone(item)]; },
+    readAcceptedStoneReturnQuantity: async () => null,
     listLayers: async (identityId) => structuredClone(state.layers.filter((item) => item.identityId === identityId)),
     saveLayer: async (item) => { state.layers.push(structuredClone(item)); },
     listConsumptions: async (identityId) => structuredClone(state.consumptions.filter((item) => item.identityId === identityId)),
@@ -930,15 +932,22 @@ export const createAccountingSupplyChainApplication = (
           }
           return prior;
         }
-        const projection = await inventoryProjection(command.identityId, tx);
+        const acceptedReturn = await tx.readAcceptedStoneReturnQuantity(command.identityId);
+        const requested = decimal(command.quantity);
+        if (acceptedReturn && command.unit === 'count' && requested.units % power(requested.scale) !== 0n) {
+          throw new SupplyChainAccountingError('WHOLE_COUNT_REQUIRED', 'مقدار رزرو در واحد عدد باید صحیح باشد.', 400);
+        }
+        const projection = acceptedReturn ?? await inventoryProjection(command.identityId, tx);
         if (projection.unit !== command.unit) throw new SupplyChainAccountingError('INCOMPATIBLE_INVENTORY_UNIT', 'واحد رزرو با موجودی سازگار نیست.', 400);
         const activeReservations = (await tx.listReservations(command.identityId)).filter((item) => item.status === 'ACTIVE');
         const reserved = activeReservations.map((item) => decimal(item.quantity)).reduce<Decimal | null>((sum, item) => sum ? addDecimal(sum, item) : item, null);
-        const requestedWithReserved = reserved ? addDecimal(reserved, decimal(command.quantity)) : decimal(command.quantity);
-        if (compareDecimal(requestedWithReserved, decimal(projection.quantity)) > 0) throw new SupplyChainAccountingError('INSUFFICIENT_INVENTORY', 'موجودی آزاد برای رزرو کافی نیست.');
+        const requestedWithReserved = reserved ? addDecimal(reserved, requested) : requested;
+        if (projection.quantity === '0' || compareDecimal(requestedWithReserved, decimal(projection.quantity)) > 0) {
+          throw new SupplyChainAccountingError('INSUFFICIENT_INVENTORY', 'موجودی آزاد برای رزرو کافی نیست.');
+        }
         const reservation: InventoryReservationRecord = {
           id: randomUUID(), identityId: command.identityId, unit: command.unit,
-          quantity: decimal(command.quantity).canonical, purposeId: command.purposeId,
+          quantity: requested.canonical, purposeId: command.purposeId,
           idempotencyKey: command.idempotencyKey, evidence: command.evidence,
           status: 'ACTIVE', createdAt: dependencies.now(),
         };

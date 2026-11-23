@@ -9,7 +9,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { hasFeatureAccess } from '@/lib/permissions';
 import { StoneReturnPosting, StoneReturnPostingResult } from './StoneReturnPosting';
 import { userFacingError } from '@/features/dispatch/userFacingError';
-import { normalizeDigits } from '@/lib/numberFormat';
+import { normalizeStoneReturnQuantity as quantityInput, stoneReturnQuantityAtoms } from './stoneReturnQuantityInput';
 import {
   displayExactDecimal, displayStoneReturnQuantity, stoneReturnAllocationStatuses, stoneReturnApi,
   type StoneReturnAllocationInput, type StoneReturnCandidate, type StoneReturnReview, type StoneReturnSourceKey,
@@ -17,10 +17,6 @@ import {
 
 const listHref = '/dashboard/accounting/returns';
 const candidateKey = (row: StoneReturnSourceKey) => JSON.stringify([row.originalInvoiceId, row.originalLineId, row.dispatchEvidenceId]);
-
-function quantityInput(value: string) {
-  return normalizeDigits(value).trim().replace(/^0+(?=\d)/, '').replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
-}
 
 function candidateRate(rate: string) {
   const [whole, fraction] = rate.split('.');
@@ -31,11 +27,12 @@ function candidateRate(rate: string) {
   </span>;
 }
 
-function StoneReturnCandidateFields({ candidate, quantity, editable, disabled, onChange }: {
+function StoneReturnCandidateFields({ candidate, quantity, editable, disabled, error, onChange }: {
   candidate: StoneReturnCandidate;
   quantity: string;
   editable: boolean;
   disabled: boolean;
+  error?: string;
   onChange: (value: string) => void;
 }) {
   const readable = (value: string) => displayStoneReturnQuantity(value, candidate.unit);
@@ -50,7 +47,7 @@ function StoneReturnCandidateFields({ candidate, quantity, editable, disabled, o
       { label: 'مرجوعی قبلی بارگیری', value: readable(candidate.dispatchPriorReturnedQuantity) },
     ]} />
     {editable && (!/^0(?:\.0+)?$/.test(candidate.remainingQuantity) || quantity) ? <ErpField
-      label={`مقدار تخصیص صورتحساب ${candidate.originalInvoiceNumber} · ${candidate.loadingNumber ?? deliveryDate}`}>
+      error={error} label={`مقدار تخصیص صورتحساب ${candidate.originalInvoiceNumber} · ${candidate.loadingNumber ?? deliveryDate}`}>
       <ErpInput inputMode="decimal" maxLength={100} value={quantity} disabled={disabled} onChange={event => onChange(event.target.value)} />
     </ErpField> : quantity && <ErpFieldView label="مقدار تخصیص‌یافته" value={readable(quantity)} />}
   </ErpCard>;
@@ -67,11 +64,13 @@ export function StoneReturnReviewPage({ receiptId }: { receiptId: string }) {
   const [posting, setPosting] = useState(false);
   const [error, setError] = useState('');
   const [stale, setStale] = useState(false);
+  const [attempted, setAttempted] = useState(false);
   const [saved, setSaved] = useState(false);
   const busy = useRef(false);
 
   function apply(next: StoneReturnReview) {
     setReview(next);
+    setAttempted(false);
     setAmounts(Object.fromEntries((next.draft?.rows ?? []).map(row => [candidateKey(row), row.quantity])));
     setReason(next.draft?.attributionReason ?? '');
   }
@@ -105,6 +104,21 @@ export function StoneReturnReviewPage({ receiptId }: { receiptId: string }) {
     && hasFeatureAccess(user, 'accounting_customer_posting_manage', 'edit');
   const hasAllocations = Object.values(amounts).some(amount => quantityInput(amount) && quantityInput(amount) !== '0');
 
+  const amountErrors = new Map(review?.candidates.flatMap<readonly [string, string]>(candidate => {
+    const key = candidateKey(candidate);
+    const amount = quantityInput(amounts[key] ?? '');
+    if (!amount || amount === '0') return [];
+    const quantity = stoneReturnQuantityAtoms(amount, candidate.unit);
+    const remaining = stoneReturnQuantityAtoms(quantityInput(candidate.remainingQuantity), candidate.unit);
+    if (!quantity) {
+      return [[key, candidate.unit === 'count' ? 'مقدار تخصیص باید عدد صحیح مثبت باشد.' : 'مقدار تخصیص باید عدد مثبت معتبر باشد.']];
+    }
+    if (remaining !== null && quantity > remaining) return [[key, 'مقدار تخصیص از مانده این ردیف بیشتر است.']];
+    return [];
+  }));
+  const reasonRequired = Boolean(review && !review.originKnown && hasAllocations);
+  const reasonError = reasonRequired && !reason.trim() ? 'دلیل انتخاب ردیف‌های فروش را وارد کنید.' : undefined;
+
   function changeQuantity(key: string, value: string) {
     setAmounts(previous => ({ ...previous, [key]: value }));
     setSaved(false);
@@ -113,6 +127,8 @@ export function StoneReturnReviewPage({ receiptId }: { receiptId: string }) {
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!review || busy.current || !editable || posting || unavailableRows.length) return;
+    setAttempted(true);
+    if (amountErrors.size || reasonError) return;
     const rows: StoneReturnAllocationInput[] = review.candidates.flatMap(row => {
       const quantity = quantityInput(amounts[candidateKey(row)] ?? '');
       return quantity && quantity !== '0' ? [{
@@ -154,7 +170,7 @@ export function StoneReturnReviewPage({ receiptId }: { receiptId: string }) {
           ]} />
         </ErpSection>
         {review.allocationStatus !== 'REJECTED' && review.allocationStatus !== 'FINALIZED' && <ErpSection title="تخصیص به فروش">
-          <form className="space-y-4" onSubmit={submit}>
+          <form className="space-y-4" onSubmit={submit} noValidate>
             <ErpSummaryGrid items={[
               { label: 'تخصیص ذخیره‌شده', value: displayStoneReturnQuantity(review.allocatedQuantity, receipt.unit) },
               { label: 'مقدار باقی‌مانده برای تخصیص', value: displayStoneReturnQuantity(review.unallocatedQuantity, receipt.unit) },
@@ -166,7 +182,7 @@ export function StoneReturnReviewPage({ receiptId }: { receiptId: string }) {
             {review.candidates.map(candidate => {
               const key = candidateKey(candidate);
               return <StoneReturnCandidateFields key={key} candidate={candidate} quantity={amounts[key] ?? ''}
-                editable={editable} disabled={pending || posting} onChange={value => changeQuantity(key, value)} />;
+                editable={editable} disabled={pending || posting} error={attempted ? amountErrors.get(key) : undefined} onChange={value => changeQuantity(key, value)} />;
             })}
             {unavailableRows.map(row => <ErpCard className="space-y-3" key={row.id}>
               <ErpInlineState kind="stale" title={`قرارداد ${row.contractNumber} · صورتحساب ${row.originalInvoiceNumber} دیگر قابل تخصیص نیست.`} />
@@ -175,8 +191,8 @@ export function StoneReturnReviewPage({ receiptId }: { receiptId: string }) {
                 onClick={() => changeQuantity(candidateKey(row), '')} />}
             </ErpCard>)}
             {editable && (review.candidates.length > 0 || review.draft) ? <>
-              <ErpField label="دلیل انتخاب ردیف‌های فروش" required={!review.originKnown && hasAllocations}>
-                <ErpTextarea maxLength={2000} required={!review.originKnown && hasAllocations} value={reason} disabled={pending || posting}
+              <ErpField label="دلیل انتخاب ردیف‌های فروش" required={reasonRequired} error={attempted ? reasonError : undefined}>
+                <ErpTextarea maxLength={2000} required={reasonRequired} value={reason} disabled={pending || posting}
                   onChange={event => { setReason(event.target.value); setSaved(false); }} />
               </ErpField>
               <ErpButton type="submit" tone="primary" variant="solid" disabled={pending || posting || unavailableRows.length > 0}
@@ -187,7 +203,7 @@ export function StoneReturnReviewPage({ receiptId }: { receiptId: string }) {
         {canPost && review.draft && <StoneReturnPosting key={review.draft.id} receiptId={receiptId} draft={review.draft}
           acceptedQuantity={receipt.acceptedQuantity} unit={receipt.unit} posting={posting} onPostingChange={setPosting}
           onPosted={finalization => setReview({ ...review, finalization, allocationStatus: 'FINALIZED' })} />}
-        {review.finalization && <StoneReturnPostingResult finalization={review.finalization} unit={receipt.unit} />}
+        {review.finalization && <StoneReturnPostingResult finalization={review.finalization} draft={review.draft} unit={receipt.unit} />}
       </>}
     </>}
   </ErpPage>;

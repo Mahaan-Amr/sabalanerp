@@ -20,7 +20,7 @@ import { guardPhysicalExitIntegrityHash } from './physicalGateExit';
 import { hasValidPersistedSalesShipmentEvidenceHash, mapPersistedEvidence } from './shipmentQuantityProjectionStore';
 import { exactQuantityText, formatExactQuantityAtoms, parseExactQuantityAtoms } from './exactQuantity';
 import { excessShipmentReturnEvidenceFailure } from './shipmentQuantityProjection';
-import { allocateOriginalReturnAmounts } from './stoneReturnOriginalAmounts';
+import { allocateOriginalReturnAmounts, calculateStoneReturnTaxProvenance } from './stoneReturnOriginalAmounts';
 import { stoneReturnRatesDiffer } from './stoneReturnNegotiatedAmounts';
 import { generatePdfBufferFromHtml } from '../utils/pdf';
 import { collectedCustomerCheckRials, effectiveCustomerReceiptRials } from './accountingCustomerReceiptBalance';
@@ -561,6 +561,7 @@ export type CustomerReturnRecognitionInput = {
 
 export type StoneReturnPostingContext = {
   caseId: string;
+  finalizedAt: Date;
   customerId: string;
   unit: string;
   receiptEventId: string;
@@ -705,8 +706,8 @@ export const recognizeCustomerReturnWithin = async (
       throw new AccountingCustomerTreasuryError('RETURN_EXCEEDS_ORIGINAL_LINE', 'کمیت برگشت با ردیف صورتحساب مرجع سازگار نیست.', 409);
     }
     let amounts: { netRials: bigint; taxRials: bigint; costRials: bigint };
+    const prior = cumulativeByLine.get(line.originalLineId) ?? '0';
     if (stoneReturn) {
-      const prior = cumulativeByLine.get(line.originalLineId) ?? '0';
       try {
         amounts = allocateOriginalReturnAmounts({
           quantity: source.quantity.toFixed(), netRials: source.rawBaseAmount.toFixed(),
@@ -738,7 +739,12 @@ export const recognizeCustomerReturnWithin = async (
     }])) {
       throw new AccountingCustomerTreasuryError('NEGOTIATED_RETURN_RATE_REASON_REQUIRED', 'دلیل تفاوت نرخ توافقی با نرخ خالص فروش اولیه الزامی است.', 400);
     }
-    return { ...line, netRials, taxRials, costRials, originalTaxLineId: source.id };
+    const taxProvenance = stoneReturn ? calculateStoneReturnTaxProvenance({
+      quantity: source.quantity.toFixed(), rawBaseAmount: source.rawBaseAmount.toFixed(),
+      recordedRawTaxAmount: source.rawTaxAmount.toFixed(), roundedTaxRials: source.roundedTaxRials.toFixed(),
+      rateBasisPoints: line.taxRule.rateBasisPoints, exempt: source.exempt,
+    }, prior, line.quantity) : null;
+    return { ...line, netRials, taxRials, costRials, originalTaxLineId: source.id, ...(taxProvenance && { taxProvenance }) };
   });
   for (const line of stoneReturn ? [] : derivedLines) {
     const source = originalTaxInvoice.lines.find((item) => item.sourceLineId === line.originalLineId)!;
@@ -778,7 +784,7 @@ export const recognizeCustomerReturnWithin = async (
     ...(negotiatedEvidence ? { negotiatedCredit: negotiatedEvidence } : {}) };
   const evidenceType = stoneReturn ? 'EXCESS_RETURN_FINALIZED' : 'VERIFIED_CUSTOMER_RETURN';
   const evidence = lineEvidence(evidenceType, input.idempotencyKey, 1, payload);
-  const app = ledgerApp(tx, new Date());
+  const app = ledgerApp(tx, stoneReturn?.finalizedAt ?? new Date());
   const draft = await app.createManualDraft({ bookId: input.bookId, fiscalYearId: input.fiscalYearId, periodId: input.periodId,
     idempotencyKey: input.idempotencyKey, correlationId: input.correlationId, description: `برگشت از فروش ${original.number}`,
     documentDate: input.returnedAt, occurredAt: input.returnedAt,
@@ -813,9 +819,12 @@ export const recognizeCustomerReturnWithin = async (
     protocolVersion: 'TAXPAYER-V1', netRials: netRials.toString(), taxRials: taxRials.toString(), status: 'QUEUED', issuedAt: input.returnedAt,
     lines: { create: derivedLines.map((line) => ({ sourceLineId: line.id, productRowId: line.productRowId,
       quantity: line.quantity, costRials: line.costRials.toString(), taxRuleId: line.taxRule.id,
-      taxRuleVersion: line.taxRule.version, citation: line.taxRule.citation, rawBaseAmount: line.netRials.toString(),
-      rawTaxAmount: `${line.taxRials}.00000000`, roundedTaxRials: line.taxRials.toString(), exempt: line.taxRule.exempt,
+      taxRuleVersion: line.taxRule.version, citation: line.taxRule.citation,
+      rawBaseAmount: line.taxProvenance?.rawBaseAmount ?? line.netRials.toString(),
+      rawTaxAmount: line.taxProvenance?.rawTaxAmount ?? `${line.taxRials}.00000000`,
+      roundedTaxRials: line.taxRials.toString(), exempt: line.taxRule.exempt,
       allocationEvidence: json({ returnEvidenceId: line.evidenceId, rateBasisPoints: line.taxRule.rateBasisPoints,
+        ...(line.taxProvenance && { returnRounding: line.taxProvenance.allocation }),
         ...(stoneReturn || negotiatedCredit ? { originalLineId: line.originalLineId, originalTaxLineId: line.originalTaxLineId } : {}),
       }) })) } } });
   const credit = await tx.accountingCommercialCustomerInvoice.create({ data: { id: invoiceId, profileId: original.profileId,

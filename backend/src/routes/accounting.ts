@@ -545,9 +545,13 @@ const sepidarReferenceAuditOrder = [{ createdAt: 'desc' }, { id: 'desc' }] satis
 const sepidarReferenceAuditFields = { id: true, beforeState: true, afterState: true, actorId: true, createdAt: true, note: true } as const;
 
 router.get('/dispatch-candidates', accountingDispatchView, async (req: AuthRequest, res: Response) => {
+  const loadingId = typeof req.query.loadingId === 'string' ? req.query.loadingId.trim() : undefined;
+  if (req.query.loadingId !== undefined && !loadingId) return res.sendStatus(400);
   try {
-    const { manage, candidates } = await readPartnerSnapshot(prisma, async tx => {
-      const owners = await tx.accountingDispatchCandidate.findMany({ orderBy: { id: 'asc' }, select: {
+    const { manage, confirmation, candidates } = await readPartnerSnapshot(prisma, async tx => {
+      const owners = await tx.accountingDispatchCandidate.findMany({
+        where: loadingId ? { allocationRevision: { loadingId } } : undefined,
+        orderBy: { id: 'asc' }, select: {
         id: true, allocationRevision: { select: { sourceKind: true, partnerCaseId: true, loadingId: true } },
       } });
       const authority = createAuditedPartnerAuthorization(tx, { actorId: req.user!.id, purpose: 'ACCOUNTING', channel: 'LIST' }, {
@@ -574,6 +578,9 @@ router.get('/dispatch-candidates', accountingDispatchView, async (req: AuthReque
       const manage = await resolveNarrowFeatureAccess(tx, { userId: req.user!.id, role: req.user!.role,
         workspace: WORKSPACES.ACCOUNTING, feature: FEATURES.ACCOUNTING_DISPATCH_CANDIDATES_MANAGE,
         requiredPermission: FEATURE_PERMISSIONS.EDIT });
+      const confirmation = await resolveNarrowFeatureAccess(tx, { userId: req.user!.id, role: req.user!.role,
+        workspace: WORKSPACES.ACCOUNTING, feature: FEATURES.ACCOUNTING_DISPATCH_CONFIRMATION_MANAGE,
+        requiredPermission: FEATURE_PERMISSIONS.EDIT });
       const canManageOwner = (owner: typeof owners[number]['allocationRevision']) => manage.allowed &&
         (owner.sourceKind === 'SALES_CONTRACT' || (owner.sourceKind === 'PARTNER_CASE' &&
           owner.partnerCaseId !== null && writablePartnerCases.has(owner.partnerCaseId)));
@@ -591,7 +598,8 @@ router.get('/dispatch-candidates', accountingDispatchView, async (req: AuthReque
         waybills: { orderBy: { issuedAt: 'asc' }, select: { id: true, number: true, status: true,
           issuedAt: true, voidedAt: true, replacesWaybillId: true,
           legacyReconstruction: { select: { id: true, createdAt: true } },
-          physicalExit: { select: { recordedAt: true } } } },
+          physicalExit: { select: { recordedAt: true } },
+          _count: { select: { documentArtifacts: { where: { kind: 'WAYBILL' } } } } } },
       } });
       const currentInvoices = await tx.salesDispatchInvoice.findMany({
         where: { loadingId: { in: [...new Set(candidates.map(candidate => candidate.allocationRevision.loadingId))] }, voidedAt: null },
@@ -617,9 +625,10 @@ router.get('/dispatch-candidates', accountingDispatchView, async (req: AuthReque
       }
       const time = (value?: Date | null) => value?.getTime() ?? 0;
       const ownerById = new Map(owners.map(owner => [owner.id, owner.allocationRevision]));
-      return { manage, candidates: candidates.map(candidate => {
+      return { manage, confirmation, candidates: candidates.map(candidate => {
         const owner = ownerById.get(candidate.id);
-        const { allocationRevision, ...candidateData } = candidate;
+        const { allocationRevision, waybills, ...candidateData } = candidate;
+        const lines = projectAccountingDispatchLines(allocationRevision.lines);
         const invoice = invoiceActivityByLoading.get(allocationRevision.loadingId);
         const lastActivityAt = new Date(Math.max(time(candidate.createdAt), time(candidate.dispositionAt),
           time(invoice?.issuedAt), time(invoice?.voidedAt), ...candidate.waybills.map(waybill => Math.max(
@@ -632,14 +641,20 @@ router.get('/dispatch-candidates', accountingDispatchView, async (req: AuthReque
           canManageSepidarLoadingReference: allocationRevision.loading.status === 'FINALIZED' &&
             !blockedReferenceLoadingIds.has(allocationRevision.loadingId),
           summary: projectAccountingDispatchCandidateSummary(allocationRevision.snapshot),
-          lines: owner?.sourceKind === 'SALES_CONTRACT' ? projectAccountingDispatchLines(allocationRevision.lines) : [],
+          contractNumbers: [...new Set(lines.flatMap(line => line.contractNumber ? [line.contractNumber] : []))],
+          lines: owner?.sourceKind === 'SALES_CONTRACT' ? lines : [],
+          waybills: waybills.map(({ _count, ...waybill }) => ({
+            ...waybill, number: waybill.number.toString(), hasWaybillArtifact: _count.documentArtifacts === 1,
+          })),
           canManage: Boolean(owner && canManageOwner(owner)) };
       }).sort((left, right) => right.lastActivityAt.getTime() - left.lastActivityAt.getTime()
         || right.createdAt.getTime() - left.createdAt.getTime() || left.id.localeCompare(right.id)) };
     });
     res.setHeader('X-Dispatch-Documents-Permission', manage.allowed ? 'MANAGE' : 'VIEW');
-    return res.json({ success: true, data: candidates.map((candidate) => ({ ...candidate,
-      waybills: candidate.waybills.map((waybill) => ({ ...waybill, number: waybill.number.toString() })) })) });
+    return res.json({ success: true, data: candidates, capabilities: {
+      canManageAccountingCandidates: manage.allowed,
+      canManageAccountingConfirmation: confirmation.allowed,
+    } });
   } catch (error) { return dispatchError(res, error); }
 });
 

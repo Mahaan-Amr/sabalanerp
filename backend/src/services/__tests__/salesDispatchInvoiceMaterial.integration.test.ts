@@ -129,6 +129,15 @@ async function run() {
               ],
             },
           };
+          if (scenario === 'currency') {
+            (sourceSnapshot as any).currency = 'IRR';
+            for (const product of sourceSnapshot.contractData.products) {
+              for (const field of ['originalTotalPrice', 'totalPrice', 'unitPrice', 'finishingUnitPrice', 'finishingCost'])
+                (product as any)[field] *= 10;
+              for (const tool of product.tools) { tool.pricePerMeter *= 10; tool.totalPrice *= 10; }
+              for (const cut of product.cuttingBreakdown) { cut.rate *= 10; cut.cost *= 10; }
+            }
+          }
           const contract = await tx.salesContract.create({
             data: {
               id: contractId,
@@ -437,7 +446,7 @@ async function run() {
         const cutRows = operations.filter(row => row.includes('برش طولی'));
         assert.equal(toolRows.length, 2);
         assert.equal(cutRows.length, 2);
-        if (scenario === 'partial') {
+        if (scenario === 'partial' || scenario === 'currency') {
           assert.ok(toolRows.some(row => row.includes('۴۶٫۵')), '30/100 treads carry 46.5 metres of the approved 155-metre tool');
           assert.ok(cutRows.some(row => row.includes('۸۴')), '70/90 risers carry 84 metres of the approved 108-metre cut');
         } else if (scenario === 'full') {
@@ -447,6 +456,29 @@ async function run() {
           assert.ok(toolRows.some(row => row.includes('۱٫۵۵')), 'contract minimum is not charged again per shipment');
           assert.ok(cutRows.some(row => row.includes('۱٫۲')), 'one riser carries 1.2 metres of longitudinal cutting');
         }
+        if (scenario === 'currency') {
+          assert.ok(toolRows.every(row => />۳۳<\//.test(row)), 'historical rial totals reconcile with canonical toman approval before shipment allocation');
+          assert.ok(toolRows.every(row => row.includes('۴۰ / متر طول')));
+        }
+        const storedInvoice = await tx.salesDispatchInvoice.findUniqueOrThrow({ where: { id: issued.id } });
+        const oldPrint = (storedInvoice.snapshot as any).print;
+        const originalArtifact = Buffer.from('immutable older issued PDF');
+        const olderInvoice = { ...storedInvoice, pdf: originalArtifact, pdfSha256: bytesHash(originalArtifact),
+          snapshot: { ...(storedInvoice.snapshot as any), pdfLayoutVersion: 2,
+            print: { ...oldPrint, rows: Object.fromEntries(Object.entries(oldPrint.rows).map(([key, rows]) =>
+              [key, (rows as any[]).map(row => ({ ...row, count: '۹۹۹۹', linearMeasurement: '۹۹۹۹', squareMeasurement: '۹۹۹۹' }))])) } } };
+        const historicalClient = new Proxy(client, {
+          get(target, key, receiver) {
+            if (key === '$transaction') return async (work: (database: PrismaClient) => Promise<unknown>) => work(historicalClient);
+            if (key === 'salesDispatchInvoice') return { findFirst: async () => olderInvoice };
+            return Reflect.get(target, key, receiver);
+          },
+        });
+        const historicalService = createSalesInvoiceService(historicalClient,
+          async (snapshot, reason) => Buffer.from(renderSalesInvoice(snapshot, reason)));
+        assert.equal(Buffer.from((await historicalService.download(ctx, loading.id, issued.id)).bytes).toString(), html,
+          'ordinary download regenerates stale material/services from the same frozen evidence');
+        assert.equal(bytesHash((await historicalService.download(ctx, loading.id, issued.id, false, true)).bytes), bytesHash(originalArtifact));
         assert.equal(download.number, issued.number);
         assert.match(html, /۲۰۰/); // Original approved net: 20 toman, displayed in rials.
         throw rollback;

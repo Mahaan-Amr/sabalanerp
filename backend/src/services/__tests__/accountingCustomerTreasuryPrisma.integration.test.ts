@@ -433,6 +433,101 @@ test('customer revenue and treasury tracer bullet persists once and projects onl
       const journalScope = { bookId: book.id, fiscalYearId: year.id };
       const journalBefore = await listPostedJournal(database, journalScope);
       const abort = new Error('Caller rejected the return');
+
+      await t.test('negotiated credit above the entire original invoice preserves its original reversals and rolls back atomically', async () => {
+        const originalTaxLine = await database.accountingTaxInvoiceLine.findUniqueOrThrow({
+          where: { taxInvoiceId_sourceLineId: { taxInvoiceId: sale.taxInvoice!.id, sourceLineId: originalLine.id } },
+        });
+        const negotiatedCredit = { caseId: 'stone-return-case-1', agreedGrossRials: 1_500n, lines: [{
+          lineId: 'credit-line-1', agreedUnitRateRials: '1500', rateDifferenceReason: 'توافق برای قبول برگشت',
+        }] };
+        await assert.rejects(database.$transaction(async (tx) => {
+          const staged = await recognizeCustomerReturnWithin(tx, returnCommand, negotiatedCredit);
+          assert.equal(staged.grossRials.toFixed(0), '550');
+          assert.equal((await projectCustomerAccountPrisma(tx, accountAt)).standaloneCreditRials, 1_500n);
+          const voucher = (await listPostedJournal(tx, journalScope)).find((entry) => entry.id === staged.ledgerVoucherId);
+          assert.ok(voucher);
+          const postedAmounts = voucher.lines.map((line) => [line.accountId, line.debitRials.toFixed(0), line.creditRials.toFixed(0)]);
+          assert.deepEqual(postedAmounts, [
+            [revenue.id, '500', '0'], [tax.id, '50', '0'], [revenue.id, '950', '0'],
+            [receivable.id, '0', '1500'], [inventory.id, '300', '0'], [cost.id, '0', '300'],
+          ]);
+          assert.equal(voucher.lines.find((line) => line.accountId === receivable.id)?.partyId, profile.accountingPartyId);
+          const returnTaxInvoice = await tx.accountingTaxInvoice.findUniqueOrThrow({
+            where: { id: staged.taxInvoiceId! }, include: { lines: true, outboxMessages: true },
+          });
+          assert.equal(returnTaxInvoice.referenceTaxInvoiceId, sale.taxInvoice?.id);
+          assert.equal(returnTaxInvoice.documentKind, 'RETURN');
+          assert.equal(returnTaxInvoice.outboxMessages.length, 1);
+          const [taxLine] = returnTaxInvoice.lines;
+          assert.equal(taxLine.rawBaseAmount.toFixed(0), '500');
+          assert.equal(taxLine.roundedTaxRials.toFixed(0), '50');
+          assert.equal(taxLine.costRials.toFixed(0), '300');
+          assert.equal(taxLine.taxRuleId, originalLine.taxRule.id);
+          assert.equal(taxLine.taxRuleVersion, originalLine.taxRule.version);
+          assert.equal(taxLine.citation, originalLine.taxRule.citation);
+          assert.equal(taxLine.exempt, originalLine.taxRule.exempt);
+          assert.deepEqual(taxLine.allocationEvidence, {
+            returnEvidenceId: returnEvidence.id, originalLineId: originalLine.id,
+            originalTaxLineId: originalTaxLine.id, rateBasisPoints: 1000,
+          });
+          const postedEvidence = await tx.accountingLedgerVoucher.findUniqueOrThrow({
+            where: { id: staged.ledgerVoucherId }, select: { sourcePayload: true, lines: { select: { evidenceType: true } } },
+          });
+          const payload = postedEvidence.sourcePayload as Prisma.JsonObject;
+          assert.deepEqual(payload.negotiatedCredit, {
+            caseId: 'stone-return-case-1', originalInvoiceId: sale.invoice.id, originalTaxInvoiceId: sale.taxInvoice!.id,
+            agreedGrossRials: '1500', standardGrossRials: '550', commercialDifferenceRials: '950',
+            lines: [{ lineId: 'credit-line-1', agreedUnitRateRials: '1500', rateDifferenceReason: 'توافق برای قبول برگشت',
+              originalLineId: originalLine.id, originalTaxLineId: originalTaxLine.id, returnEvidenceId: returnEvidence.id,
+              quantity: '1.000', netRials: '500', taxRials: '50', costRials: '300', taxRule: originalLine.taxRule }],
+          });
+          assert.equal(postedEvidence.lines.filter((line) => line.evidenceType === 'CUSTOMER_RETURN_COMMERCIAL_DIFFERENCE').length, 1);
+          assert.equal((await recognizeCustomerReturnWithin(tx, returnCommand, negotiatedCredit)).id, staged.id);
+          for (const changedTerms of [
+            { ...negotiatedCredit, caseId: 'different-case' },
+            { ...negotiatedCredit, agreedGrossRials: 1_501n },
+            { ...negotiatedCredit, lines: [{ ...negotiatedCredit.lines[0], agreedUnitRateRials: '1501' }] },
+            { ...negotiatedCredit, lines: [{ ...negotiatedCredit.lines[0], rateDifferenceReason: 'علت دیگری برای همان توافق' }] },
+          ]) {
+            await assert.rejects(recognizeCustomerReturnWithin(tx, returnCommand, changedTerms), { code: 'IDEMPOTENCY_KEY_REUSED' });
+          }
+          throw abort;
+        }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }), (error) => error === abort);
+        assert.equal((await projectCustomerAccountPrisma(database, accountAt)).standaloneCreditRials, 0n);
+        assert.deepEqual(await listPostedJournal(database, journalScope), journalBefore);
+      });
+      await t.test('lower rates require a reason and equal net rates preserve the original VAT independently', async () => {
+        const terms = { caseId: 'stone-return-case-1', agreedGrossRials: 400n,
+          lines: [{ lineId: 'credit-line-1', agreedUnitRateRials: '400' }] };
+        const transactionOptions = { isolationLevel: Prisma.TransactionIsolationLevel.Serializable };
+        await assert.rejects(database.$transaction((tx) => recognizeCustomerReturnWithin(tx, returnCommand, terms),
+          transactionOptions), { code: 'NEGOTIATED_RETURN_RATE_REASON_REQUIRED' });
+        await assert.rejects(database.$transaction((tx) => recognizeCustomerReturnWithin(tx, returnCommand, {
+          ...terms, agreedGrossRials: 500n, lines: [{ lineId: 'credit-line-1', agreedUnitRateRials: '499.999' }],
+        }), transactionOptions), { code: 'NEGOTIATED_RETURN_RATE_REASON_REQUIRED' });
+
+        for (const { agreedGrossRials, rate, reason, adjustment } of [
+          { agreedGrossRials: 400n, rate: '400', reason: 'توافق درباره کاهش نرخ مرجوعی', adjustment: '150' },
+          { agreedGrossRials: 500n, rate: '500.00', reason: undefined, adjustment: '50' },
+        ]) {
+          await assert.rejects(database.$transaction(async (tx) => {
+            const credit = await recognizeCustomerReturnWithin(tx, returnCommand, {
+              ...terms, agreedGrossRials,
+              lines: [{ lineId: 'credit-line-1', agreedUnitRateRials: rate, rateDifferenceReason: reason }],
+            });
+            assert.equal(credit.grossRials.toFixed(0), '550');
+            assert.equal(credit.taxRials.toFixed(0), '50');
+            assert.equal((await projectCustomerAccountPrisma(tx, accountAt)).standaloneCreditRials, agreedGrossRials);
+            const voucher = (await listPostedJournal(tx, journalScope)).find((entry) => entry.id === credit.ledgerVoucherId);
+            assert.ok(voucher);
+            assert.equal(voucher.lines.find((line) => line.accountId === revenue.id && line.creditRials.gt(0))?.creditRials.toFixed(0), adjustment);
+            assert.equal(voucher.lines.find((line) => line.accountId === receivable.id)?.creditRials.toFixed(0), agreedGrossRials.toString());
+            throw abort;
+          }, transactionOptions), (error) => error === abort);
+        }
+      });
+
       await assert.rejects(database.$transaction(async (tx) => {
         const staged = await recognizeCustomerReturnWithin(tx, returnCommand);
         assert.equal(staged.status, 'CREDIT_NOTE');

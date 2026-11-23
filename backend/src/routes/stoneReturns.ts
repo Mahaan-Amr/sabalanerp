@@ -5,9 +5,12 @@ import { FEATURE_PERMISSIONS, FEATURES, requireFeatureAccess, type FeatureReques
 import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES, type WorkspaceRequest } from '../middleware/workspace';
 import { SupplyChainAccountingError } from '../services/accountingSupplyChain';
 import {
-  listStoneReturnReceipts, readStoneReturnReceipt, recordStoneReturnReceipt, searchStoneReturnCustomers,
+  listStoneReturnReceipts, recordStoneReturnReceipt, searchStoneReturnCustomers,
   searchStoneReturnProducts, searchStoneReturnGuardMovements, StoneReturnReceiptError,
 } from '../services/stoneReturnReceipts';
+
+import { listStoneReturnAllocationReviews, readStoneReturnAllocationReview, saveStoneReturnAllocationDraft } from '../services/stoneReturnAllocationDraft';
+import { StoneReturnAllocationError } from '../services/stoneReturnAllocationRules';
 
 export function stoneReturnEndpoint(action: (req: AuthRequest & FeatureRequest & WorkspaceRequest) => Promise<unknown>, created = false): RequestHandler {
   return async (req, res) => {
@@ -16,7 +19,7 @@ export function stoneReturnEndpoint(action: (req: AuthRequest & FeatureRequest &
       const data = await action(req);
       res.status(created && !(data as { replayed?: boolean }).replayed ? 201 : 200).json({ success: true, data });
     } catch (error) {
-      if (error instanceof StoneReturnReceiptError || error instanceof SupplyChainAccountingError) {
+      if (error instanceof StoneReturnReceiptError || error instanceof StoneReturnAllocationError || error instanceof SupplyChainAccountingError) {
         res.status(error.status).json({ success: false, error: error.message });
         return;
       }
@@ -40,6 +43,15 @@ export const accountingStoneReturnsView = [
   requireFeatureAccess(FEATURES.ACCOUNTING_STONE_RETURNS, FEATURE_PERMISSIONS.VIEW),
 ];
 
+export const accountingStoneReturnsEdit = [
+  protect,
+  requireWorkspaceAccess(WORKSPACES.ACCOUNTING, WORKSPACE_PERMISSIONS.EDIT),
+  requireFeatureAccess(FEATURES.ACCOUNTING_STONE_RETURNS, FEATURE_PERMISSIONS.EDIT),
+];
+
+const hasEditAccess = (req: FeatureRequest & WorkspaceRequest) =>
+  [req.workspacePermission, req.featurePermission].every(level => level === 'edit' || level === 'admin');
+
 const logisticsView = [
   protect,
   requireWorkspaceAccess(WORKSPACES.LOGISTICS, WORKSPACE_PERMISSIONS.VIEW),
@@ -51,15 +63,22 @@ const logisticsEdit = [
   requireFeatureAccess(FEATURES.LOGISTICS_STONE_RETURNS, FEATURE_PERMISSIONS.EDIT),
 ];
 
-const list = stoneReturnEndpoint(req => listStoneReturnReceipts(prisma, queryText(req.query.after, 100)));
 export const accountingStoneReturnsRouter = express.Router();
-accountingStoneReturnsRouter.get('/', ...accountingStoneReturnsView, list);
-accountingStoneReturnsRouter.get('/:id', ...accountingStoneReturnsView, stoneReturnEndpoint(req => readStoneReturnReceipt(prisma, req.params.id)));
+accountingStoneReturnsRouter.get('/', ...accountingStoneReturnsView, stoneReturnEndpoint(req =>
+  listStoneReturnAllocationReviews(prisma, queryText(req.query.after, 100))));
+accountingStoneReturnsRouter.get('/:id', ...accountingStoneReturnsView, stoneReturnEndpoint(async req => ({
+  ...await readStoneReturnAllocationReview(prisma, req.params.id),
+  canAllocate: hasEditAccess(req),
+})));
+accountingStoneReturnsRouter.put('/:id/allocations', ...accountingStoneReturnsEdit, stoneReturnEndpoint(async req => ({
+  ...await saveStoneReturnAllocationDraft(prisma, req.params.id, req.user!.id, req.body),
+  canAllocate: true,
+})));
 
 export const logisticsStoneReturnsRouter = express.Router();
 logisticsStoneReturnsRouter.get('/', ...logisticsView, stoneReturnEndpoint(async req => ({
   ...await listStoneReturnReceipts(prisma, queryText(req.query.after, 100)),
-  canRecord: [req.workspacePermission, req.featurePermission].every(level => level === 'edit' || level === 'admin'),
+  canRecord: hasEditAccess(req),
 })));
 logisticsStoneReturnsRouter.get('/customers', ...logisticsEdit, stoneReturnEndpoint(req => searchStoneReturnCustomers(prisma, queryText(req.query.search, 120))));
 logisticsStoneReturnsRouter.get('/products', ...logisticsEdit, stoneReturnEndpoint(req => searchStoneReturnProducts(prisma, queryText(req.query.search, 120))));

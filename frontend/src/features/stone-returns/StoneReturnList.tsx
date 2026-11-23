@@ -1,9 +1,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { ErpButton, ErpEmptyState, ErpInlineState, ErpListPage } from '@/components/erp';
+import { FaEye } from 'react-icons/fa';
+import { ErpButton, ErpEmptyState, ErpInlineState, ErpListPage, ErpStatus } from '@/components/erp';
 import { userFacingError } from '@/features/dispatch/userFacingError';
-import { displayStoneReturnQuantity, stoneReturnApi, type StoneReturnReceipt } from './stoneReturnApi';
+import { displayStoneReturnQuantity, stoneReturnAllocationStatuses, stoneReturnApi, type StoneReturnReceipt } from './stoneReturnApi';
 
 export function StoneReturnList({ workspace }: { workspace: 'logistics' | 'accounting' }) {
   const [items, setItems] = useState<StoneReturnReceipt[]>([]);
@@ -39,6 +40,10 @@ export function StoneReturnList({ workspace }: { workspace: 'logistics' | 'accou
     actions={logistics && canRecord ? [{ label: 'ثبت دریافت سنگ', href: '/dashboard/logistics/returns/new', tone: 'primary', variant: 'solid' }] : []}
     rows={items}
     rowKey={row => row.id}
+    rowActionMode="menu"
+    rowActions={row => logistics ? [] : [{
+      label: 'مشاهده پرونده', href: `/dashboard/accounting/returns/${encodeURIComponent(row.id)}`, icon: FaEye, tone: 'primary',
+    }]}
     isLoading={loading && items.length === 0}
     columns={[
       { id: 'customer', header: 'مشتری', mobileLabel: 'مشتری', priority: 'primary', cell: row => row.customerName },
@@ -47,6 +52,9 @@ export function StoneReturnList({ workspace }: { workspace: 'logistics' | 'accou
       { id: 'received', header: 'دریافتی', mobileLabel: 'دریافتی', cell: row => displayStoneReturnQuantity(row.receivedQuantity, row.unit) },
       { id: 'accepted', header: 'پذیرفته‌شده', mobileLabel: 'پذیرفته‌شده', cell: row => displayStoneReturnQuantity(row.acceptedQuantity, row.unit) },
       { id: 'rejected', header: 'ردشده', mobileLabel: 'ردشده', cell: row => displayStoneReturnQuantity(row.rejectedQuantity, row.unit) },
+      ...(!logistics ? [{ id: 'status', header: 'وضعیت', mobileLabel: 'وضعیت', cell: (row: StoneReturnReceipt) =>
+        row.allocationStatus ? <ErpStatus {...stoneReturnAllocationStatuses[row.allocationStatus]} /> : '—',
+      }] : []),
       { id: 'reason', header: 'علت رد', mobileLabel: 'علت رد', cell: row => row.rejectionReason ?? '—' },
     ]}
     emptyState={error ? null : <ErpEmptyState title="مرجوعی سنگی ثبت نشده است" />}

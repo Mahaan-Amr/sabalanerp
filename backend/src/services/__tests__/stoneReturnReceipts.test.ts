@@ -32,3 +32,39 @@ test('acceptance cannot exceed intake or round the physical decision', () => {
   });
   assert.equal(exact.rejectedQuantity, '5.000000000000000000000000000001');
 });
+
+test('an intake cannot reuse a witness already verified for this stone and unit', async () => {
+  const { recordStoneReturnReceipt } = await import('../stoneReturnReceipts');
+  const tx = {
+    $executeRaw: async () => 1,
+    stoneReturnReceipt: { findUnique: async () => null, findFirst: async () => null },
+    shipmentQuantityEvidence: { findFirst: async () => ({ id: 'verified' }) },
+  };
+  await assert.rejects(recordStoneReturnReceipt(tx as unknown as Parameters<typeof recordStoneReturnReceipt>[0], 'logistics-user', {
+    ...command, guardReturnMovementId: 'existing-return',
+  }), /قبلاً ثبت شده است/);
+});
+
+test('an intake retries a serializable conflict and returns the existing receipt on replay', async () => {
+  const { Prisma } = await import('@prisma/client');
+  const { recordStoneReturnReceipt } = await import('../stoneReturnReceipts');
+  let attempts = 0;
+  const db = {
+    $transaction: async (record: (tx: unknown) => Promise<unknown>, options: { isolationLevel: string }) => {
+      assert.equal(options.isolationLevel, 'Serializable');
+      attempts += 1;
+      if (attempts === 1) throw { code: 'P2034' };
+      return record({
+        $executeRaw: async () => 1,
+        stoneReturnReceipt: { findUnique: async () => ({
+          ...command, id: 'existing', guardReturnMovementId: null,
+          receivedQuantity: new Prisma.Decimal('40'), acceptedQuantity: new Prisma.Decimal('35'), rejectedQuantity: new Prisma.Decimal('5'),
+        }) },
+      });
+    },
+  };
+  const result = await recordStoneReturnReceipt(db as unknown as Parameters<typeof recordStoneReturnReceipt>[0], 'logistics-user', command);
+  assert.equal(result.data.id, 'existing');
+  assert.equal(result.replayed, true);
+  assert.equal(attempts, 2);
+});

@@ -4,7 +4,15 @@ export const stoneReturnUnitLabels: Record<string, string> = {
   squareMeter: 'مترمربع', meter: 'متر طول', count: 'عدد', ton: 'تن',
 };
 
+export type StoneReturnAllocationStatus = 'REJECTED' | 'RECEIVED' | 'DRAFT';
+export const stoneReturnAllocationStatuses = {
+  REJECTED: { label: 'رد کامل', tone: 'neutral' },
+  RECEIVED: { label: 'در انتظار تخصیص', tone: 'warning' },
+  DRAFT: { label: 'پیش‌نویس تخصیص', tone: 'info' },
+} as const;
+
 export type StoneReturnReceipt = {
+  allocationStatus?: StoneReturnAllocationStatus;
   id: string;
   customerId: string;
   customerName: string;
@@ -21,6 +29,44 @@ export type StoneReturnReceipt = {
   createdAt: string;
 };
 
+export type StoneReturnSourceKey = {
+  originalInvoiceId: string;
+  originalLineId: string;
+  dispatchEvidenceId: string;
+};
+
+export type StoneReturnAllocationInput = StoneReturnSourceKey & { quantity: string };
+
+export type StoneReturnCandidate = StoneReturnSourceKey & {
+  originalInvoiceNumber: string;
+  contractNumber: string;
+  loadingId: string;
+  loadingNumber: string | null;
+  deliveredAt: string;
+  unit: string;
+  originalNetRateRials: string;
+  deliveredQuantity: string;
+  linePriorReturnedQuantity: string;
+  dispatchPriorReturnedQuantity: string;
+  lineRemainingQuantity: string;
+  dispatchRemainingQuantity: string;
+  remainingQuantity: string;
+};
+
+export type StoneReturnDraftRow = StoneReturnAllocationInput & { id: string; originalInvoiceNumber: string; contractNumber: string };
+export type StoneReturnReview = {
+  receipt: StoneReturnReceipt;
+  originKnown: boolean;
+  blockedReason: string | null;
+  hasUnlinkedOriginals: boolean;
+  allocationStatus: StoneReturnAllocationStatus;
+  candidates: StoneReturnCandidate[];
+  draft: { id: string; version: number; attributionReason: string | null; createdAt: string; rows: StoneReturnDraftRow[] } | null;
+  allocatedQuantity: string;
+  unallocatedQuantity: string;
+  canAllocate: boolean;
+};
+
 export type StoneReturnOption = { id: string; label: string; description?: string | null };
 type Envelope<T> = { success: true; data: T };
 type ReceiptPage = { items: StoneReturnReceipt[]; nextCursor: string | null; canRecord?: boolean };
@@ -31,10 +77,15 @@ type StoneReturnIntake = {
 };
 
 const logistics = '/logistics/stone-returns';
+const accounting = '/accounting/stone-returns';
+const reviewUrl = (id: string) => `${accounting}/${encodeURIComponent(id)}`;
 
 export const stoneReturnApi = {
   list: async (workspace: 'logistics' | 'accounting', after?: string) =>
     (await api.get<Envelope<ReceiptPage>>(`/${workspace}/stone-returns`, { params: { after } })).data.data,
+  review: async (id: string) => (await api.get<Envelope<StoneReturnReview>>(reviewUrl(id))).data.data,
+  saveAllocations: async (id: string, command: { expectedVersion: number; rows: StoneReturnAllocationInput[]; attributionReason: string }) =>
+    (await api.put<Envelope<StoneReturnReview>>(`${reviewUrl(id)}/allocations`, command)).data.data,
   customers: async (search: string) =>
     (await api.get<Envelope<StoneReturnOption[]>>(`${logistics}/customers`, { params: { search } })).data.data,
   products: async (search: string) =>
@@ -52,8 +103,13 @@ export const stoneReturnApi = {
 };
 
 /** Keeps all persisted decimal digits when displaying exact quantity. */
-export function displayStoneReturnQuantity(quantity: string, unit: string) {
-  const [integer, fraction] = quantity.split('.');
+export function displayExactDecimal(quantity: string) {
+  const [integer, decimals] = quantity.split('.');
+  const fraction = decimals?.replace(/0+$/, '');
   const tail = fraction ? '٫' + Array.from(fraction, digit => '۰۱۲۳۴۵۶۷۸۹'[Number(digit)]).join('') : '';
-  return `${BigInt(integer).toLocaleString('fa-IR')}${tail} ${stoneReturnUnitLabels[unit] ?? unit}`;
+  return `${BigInt(integer).toLocaleString('fa-IR')}${tail}`;
+}
+
+export function displayStoneReturnQuantity(quantity: string, unit: string) {
+  return `${displayExactDecimal(quantity)} ${stoneReturnUnitLabels[unit] ?? unit}`;
 }

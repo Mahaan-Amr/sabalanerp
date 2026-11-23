@@ -17,11 +17,7 @@ import {
 import { createAccountingLedgerApplication, hashAccountingEvidence, IRR_ROUNDING_RULE_V1 } from './accountingLedgerFoundation';
 import { createAccountingLedgerPrismaRepository } from './accountingLedgerPrismaRepository';
 import { guardPhysicalExitIntegrityHash } from './physicalGateExit';
-import {
-  hasValidPersistedSalesShipmentEvidenceHash,
-  mapPersistedEvidence,
-  shipmentQuantityEvidenceIntegrityHash,
-} from './shipmentQuantityProjectionStore';
+import { hasValidPersistedSalesShipmentEvidenceHash, mapPersistedEvidence } from './shipmentQuantityProjectionStore';
 import { exactQuantityText, formatExactQuantityAtoms, parseExactQuantityAtoms } from './exactQuantity';
 import { excessShipmentReturnEvidenceFailure } from './shipmentQuantityProjection';
 import { allocateOriginalReturnAmounts } from './stoneReturnOriginalAmounts';
@@ -218,11 +214,8 @@ export const publishInventoryValuationEvidencePrisma = async (database: PrismaCl
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`inventory-valuation:${input.shipmentQuantityEvidenceId}`}))`;
   const source = await tx.shipmentQuantityEvidence.findUnique({ where: { id: input.shipmentQuantityEvidenceId },
     include: { contractItem: { include: { product: true } } } });
-  const sourceIntegrityHash = source ? shipmentQuantityEvidenceIntegrityHash({ ...source,
-    quantity: source.quantity.toString(), effectiveAt: source.effectiveAt.toISOString(),
-    recordedAt: source.recordedAt.toISOString(), metadata: source.metadata as Record<string, unknown> } as Parameters<typeof shipmentQuantityEvidenceIntegrityHash>[0]) : null;
   const totalCost = source ? source.quantity.mul(input.unitCostRials.toString()) : null;
-  if (!source || !source.contractId || source.returnEvidenceId != null || source.integrityHash !== sourceIntegrityHash
+  if (!source || !source.contractId || source.returnEvidenceId != null || !hasValidPersistedSalesShipmentEvidenceHash(source)
     || !['PHYSICAL_EXIT', 'MANUAL_OUTAGE_EXIT', 'DISPATCH_CORRECTION_POSTED', 'LEGACY_DISPATCHED'].includes(source.kind)
     || !source.contractItem?.product.stoneTypeCode || input.valuationMethod !== 'SPECIFIC_IDENTIFICATION'
     || !Number.isInteger(input.valuationVersion) || input.valuationVersion < 1 || input.inventoryDocumentId.trim().length < 3
@@ -508,7 +501,9 @@ export const recognizeCustomerSalePrisma = async (database: PrismaClient, comman
     const expected = persistedRule.exempt ? 0n : (line.netRials * BigInt(persistedRate) + 5_000n) / 10_000n;
     if (expected !== line.taxRials) throw new AccountingCustomerTreasuryError('TAX_RULE_MISMATCH', 'مالیات ردیف با قاعده مؤثر سازگار نیست.', 400);
   }
-  const sourcePayload = { policy: command.policy, evidence: authoritativeEvidence, contractId: command.contractId, contractVersion: command.contractVersion };
+  const sourcePayload = { policy: command.policy, evidence: authoritativeEvidence, contractId: command.contractId,
+    contractVersion: command.contractVersion, lineCostEvidenceIds: Object.fromEntries(command.lines
+      .filter(line => line.costEvidenceId).map(line => [line.id, line.costEvidenceId])) };
   const source = { type: 'CONTROL_TRANSFER', id: authoritativeEvidence.id, version: authoritativeEvidence.version,
     payload: sourcePayload, hash: hashAccountingEvidence(sourcePayload) };
   const evidence = lineEvidence('CONTROL_TRANSFER', authoritativeEvidence.id, authoritativeEvidence.version, sourcePayload);
@@ -537,7 +532,8 @@ export const recognizeCustomerSalePrisma = async (database: PrismaClient, comman
       productRowId: line.productRowId, quantity: line.quantity, costRials: line.costRials.toString(),
       citation: line.taxRule.citation, rawBaseAmount: line.netRials.toString(),
       rawTaxAmount: `${line.taxRials}.00000000`, roundedTaxRials: line.taxRials.toString(), exempt: line.taxRule.exempt,
-      allocationEvidence: json({ rateBasisPoints: line.taxRule.rateBasisPoints, quantity: line.quantity, rounding: 'HALF_UP_IRR' }) })) } },
+      allocationEvidence: json({ rateBasisPoints: line.taxRule.rateBasisPoints, quantity: line.quantity, rounding: 'HALF_UP_IRR',
+        ...(line.costEvidenceId && { costEvidenceId: line.costEvidenceId }) }) })) } },
   });
   const invoice = await tx.accountingCommercialCustomerInvoice.create({ data: { id: invoiceId, profileId: profile.id,
     contractId: command.contractId, contractVersion: command.contractVersion, number: command.commercialInvoiceNumber,

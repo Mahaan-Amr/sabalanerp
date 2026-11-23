@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { historicalServicePrintData } from "./historicalServices";
+import { projectLoadedServiceRows, type ServiceQuantityBasis } from "./serviceQuantities";
 import { projectLoadedMaterialRows } from "./materialQuantities";
 import { createHash } from "node:crypto";
 import {
@@ -377,7 +378,7 @@ async function buildInvoiceSource(
       }
     }
     const currentLines: InvoiceLine[] = [];
-    const materialProjection = new Map<string, { product: any; basis: typeof priced.lines[number]["quantityBasis"] }>();
+    const materialProjection = new Map<string, { product: any; basis: typeof priced.lines[number]["quantityBasis"]; serviceBasis?: ServiceQuantityBasis }>();
     const siblingDispatchRows = new Set(priced.lines.map(line => line.productRowId));
     const contractRows = new Map<string, ReturnType<typeof createDispatchProductRows>>();
     for (const line of priced.lines) {
@@ -424,7 +425,13 @@ async function buildInvoiceSource(
         )?.canonicalAllInTotal;
         if (approved != null) print.contractedGross[line.allocationRevisionLineId] = String(approved);
         print.rows[line.allocationRevisionLineId] = projectRows(line.productRowId);
-        materialProjection.set(line.allocationRevisionLineId, { product, basis: line.quantityBasis });
+        const contractedQuantity = partner ? product.quantity : version?.rows?.find(
+          (approvedRow: { productRowId: string }) => approvedRow.productRowId === line.productRowId,
+        )?.contractedQuantity;
+        materialProjection.set(line.allocationRevisionLineId, { product, basis: line.quantityBasis,
+          serviceBasis: contractedQuantity != null ? {
+            contractedQuantity: String(contractedQuantity), beforeQuantity: '0', afterQuantity: line.quantity,
+          } : undefined });
       }
       const evidence = record(version?.sourceEvidence);
       const technical = partner
@@ -566,7 +573,12 @@ async function buildInvoiceSource(
       if (print && projection) {
         const basis = projection.basis ? { ...projection.basis,
           afterQuantity: amount(projection.basis.beforeQuantity).plus(line.quantity).toFixed() } : undefined;
-        print.rows[line.key] = projectLoadedMaterialRows(print.rows[line.key], projection.product, line, basis);
+        const serviceBasis = basis || (projection.serviceBasis ? {
+          ...projection.serviceBasis, afterQuantity: line.quantity,
+        } : undefined);
+        print.rows[line.key] = projectLoadedServiceRows(
+          projectLoadedMaterialRows(print.rows[line.key], projection.product, line, basis), projection.product, serviceBasis,
+        );
       }
       if (
         amount(line.quantity).lt(0) ||

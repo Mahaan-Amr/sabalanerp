@@ -115,3 +115,37 @@ test('an older preset save cannot clear input after a newer save completes', asy
   await expect(page.locator('option').filter({ hasText: 'تنظیم یک' })).toHaveCount(1);
   await expect(name).toHaveValue('تنظیم یک');
 });
+
+test('Excel download shows preparation, reports a busy exporter, and downloads on retry', async ({ page }) => {
+  await loginAsAdmin(page);
+  await page.route('**/api/sales/reports/summary?*', (route) => reply(route, metadata));
+  await page.route('**/api/sales/reports/presets', (route) => reply(route, []));
+  let releaseBusy: (() => void) | undefined;
+  let attempts = 0;
+  await page.route('**/api/sales/reports/export.xlsx', async (route) => {
+    expect(route.request().postDataJSON().filters.period).toBe('today');
+    if (++attempts === 1) {
+      await new Promise<void>((resolve) => { releaseBusy = resolve; });
+      await route.fulfill({ status: 429, json: { success: false, code: 'SALES_WORKBOOK_BUSY' } });
+      return;
+    }
+    await route.fulfill({
+      contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      body: 'Workbook download fixture',
+    });
+  });
+  await page.goto('/dashboard/sales/reports?view=export&period=today');
+  const excel = page.getByRole('button', { name: 'Excel', exact: true });
+  await excel.click();
+  await expect(excel).toBeDisabled();
+  await expect(page.getByRole('status').filter({ hasText: 'در حال آماده‌سازی خروجی' })).toBeVisible();
+  await expect.poll(() => Boolean(releaseBusy)).toBe(true);
+  releaseBusy!();
+  await expect(page.getByRole('alert').filter({ hasText: 'خروجی دیگری در حال آماده‌سازی است' })).toBeVisible();
+  await expect(excel).toBeEnabled();
+  const downloaded = page.waitForEvent('download');
+  await excel.click();
+  expect((await downloaded).suggestedFilename()).toBe('sales-report.xlsx');
+  await expect(page.getByRole('status').filter({ hasText: 'دانلود فایل شروع شد' })).toBeVisible();
+  expect(attempts).toBe(2);
+});

@@ -31,8 +31,13 @@ export type PartnerCaseRecordTarget =
 /** Transaction-scoped, using the caller's shared Prisma transaction. Never owns
  * a PrismaClient or commits/disconnects. Unsupported roots fail closed. */
 export function prismaAuthorizationSource<Action extends PartnerActionV2>(tx: Prisma.TransactionClient,
-  resolveAuthority: ResolvePartnerAuthority<Action>, target?: PartnerAuthorizationTarget): AuthorizationSource<Action> {
+  resolveAuthority: ResolvePartnerAuthority<Action>, target?: PartnerAuthorizationTarget,
+  mode: 'COMMAND' | 'RESPONDER_SNAPSHOT' = 'COMMAND'): AuthorizationSource<Action> {
   return { read: async (actorId, root) => {
+    const lockResources = mode === 'COMMAND';
+    if (!lockResources && (root.kind !== 'INQUIRY' || target)) {
+      throw new Error('Responder snapshot authority requires a plain inquiry root');
+    }
     let resource: AuthorizationEvidence['resource'] = null;
     let profileId = root.kind === 'PROFILE' ? root.id : null;
     if (root.kind === 'PROFILE' && target && 'prospectiveProfileOwnerId' in target) {
@@ -48,7 +53,7 @@ export function prismaAuthorizationSource<Action extends PartnerActionV2>(tx: Pr
       profileId = null;
     }
     if (root.kind === 'INQUIRY') {
-      await tx.$queryRaw`SELECT id FROM partner_inquiries WHERE id = ${root.id} FOR UPDATE`;
+      if (lockResources) await tx.$queryRaw`SELECT id FROM partner_inquiries WHERE id = ${root.id} FOR UPDATE`;
       profileId = (await tx.partnerInquiry.findUnique({ where: { id: root.id }, select: { profileId: true } }))?.profileId ?? null;
     }
     if (root.kind === 'CASE') {
@@ -91,13 +96,15 @@ export function prismaAuthorizationSource<Action extends PartnerActionV2>(tx: Pr
       }
     }
     if (profileId) {
-      await tx.$queryRaw`SELECT id FROM partner_profiles WHERE id = ${profileId} FOR UPDATE`;
+      if (lockResources) await tx.$queryRaw`SELECT id FROM partner_profiles WHERE id = ${profileId} FOR UPDATE`;
       const profile = await tx.partnerProfile.findUnique({ where: { id: profileId }, select: { userId: true, state: true, revision: true } });
       if (profile) {
-        // All callers lock root/profile before Users, never the inverse. Sorting
-        // the two User ids prevents actor/owner lock inversion across profiles.
-        const userIds = [...new Set([actorId, profile.userId])].sort();
-        for (const id of userIds) await tx.$queryRaw`SELECT id FROM users WHERE id = ${id} FOR UPDATE`;
+        if (lockResources) {
+          // Commands lock root/profile before Users. Sorting the two User ids
+          // prevents actor/owner lock inversion across profiles.
+          const userIds = [...new Set([actorId, profile.userId])].sort();
+          for (const id of userIds) await tx.$queryRaw`SELECT id FROM users WHERE id = ${id} FOR UPDATE`;
+        }
         const owner = await tx.user.findUnique({ where: { id: profile.userId }, select: { departmentId: true } });
         resource = { root, partnerSellerId: profile.userId, partnerStatus: profile.state, lifecycleRevision: profile.revision,
           ...(owner?.departmentId ? { departmentId: owner.departmentId } : {}) };
@@ -107,9 +114,8 @@ export function prismaAuthorizationSource<Action extends PartnerActionV2>(tx: Pr
       id: true, isActive: true, role: true, departmentId: true, partnerProfile: { select: { state: true, revision: true } },
     } });
     if (root.kind === 'INQUIRY' && resource) {
-      // The root FOR UPDATE excludes concurrent assignment commits through
-      // their parent FK. Assignment evidence is append-only; never authorize
-      // using its historical eligibility snapshot instead of current authority.
+      // Commands exclude concurrent assignment commits through the parent FK.
+      // The responder view reads the assignment from its repeatable snapshot.
       const assignment = await tx.partnerInquiryAssignment.findFirst({ where: { inquiryId: root.id },
         orderBy: { revision: 'desc' }, select: { id: true, revision: true, responderId: true } });
       if (assignment) resource.assignment = { actorId: assignment.responderId, assignmentId: assignment.id,

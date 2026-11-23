@@ -19,12 +19,12 @@ const frontendBuild = frontendSection.match(
 )?.[1] ?? '';
 assert.match(
   frontendBuild,
-  /^\s*context:\s*\.\s*$/m,
+  /^ {6}context:\s*\.\s*$/m,
   'Frontend production build context must be the repository root.'
 );
 assert.match(
   frontendBuild,
-  /^\s*dockerfile:\s*frontend\/Dockerfile\s*$/m,
+  /^ {6}dockerfile:\s*frontend\/Dockerfile\s*$/m,
   'Frontend production build must use frontend/Dockerfile from the root context.'
 );
 
@@ -48,13 +48,12 @@ assert.match(
   /COPY frontend \./,
   'Frontend source must be copied from the repository-root build context.'
 );
-assert.match(
-  dockerfile,
-  /COPY --from=(?:builder|production-builder) \/packages\/contract-product-graph \/packages\/contract-product-graph/,
-  'Runtime image must preserve the target of the frontend package symlink.'
-);
+const runtimePackageStage = dockerfile.match(
+  /^COPY --from=(builder|production-builder) \/packages\/contract-product-graph \/packages\/contract-product-graph[ \t]*\r?$/m
+)?.[1];
+assert.ok(runtimePackageStage, 'Runtime image must preserve the target of the frontend package symlink.');
 
-if (/COPY --from=production-builder \/packages\/contract-product-graph/.test(dockerfile)) {
+if (runtimePackageStage === 'production-builder') {
   assert.match(dockerfile, /^FROM builder AS production-builder\r?$/m, 'Production builder must inherit the compiled canonical graph package.');
 }
 console.log('frontend Docker workspace dependency check passed');

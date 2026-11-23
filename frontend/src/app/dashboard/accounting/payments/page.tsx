@@ -1,9 +1,12 @@
 'use client';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { FaMoneyCheckAlt, FaSync } from 'react-icons/fa';
 import { ErpCard, ErpEmptyState, ErpInlineState, ErpListPage, ErpPagination, type ErpAction, type ErpColumn } from '@/components/erp';
 import { accountingAPI } from '@/lib/api';
+import { useAccountingRegister, type AccountingRegisterRequest } from '@/features/accounting/useAccountingRegister';
+import { AccountingRegisterFeedback } from '@/features/accounting/AccountingRegisterFeedback';
+import { isCurrentAccountingRegisterRow } from '@/features/accounting/accountingRegisterLoader';
 import { partnerTrackingCode } from '@sabalanerp/partner-sales-contracts';
 import { emptyAccountingPagination, readAccountingListResponse, StatusBadge, dateFa, money, PartnerAccountingIdentity, accountingFailureMessage } from '@/features/accounting/accountingUi';
 import AccountingActionModal from '@/features/accounting/AccountingActionModal';
@@ -48,16 +51,10 @@ export default function AccountingPaymentsPage() {
     [searchParams],
   );
   const query = canonicalQuery.state;
-  const [rows, setRows] = useState<any[]>([]);
-  const [pagination, setPagination] = useState(emptyAccountingPagination);
-  const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [searchInput, setSearchInput] = useState(query.search);
-  const [focus, setFocus] = useState<any | null>(null);
-  const [checkTarget, setCheckTarget] = useState<{ row: any; status: string } | null>(null);
+  const [savedCheckTarget, setCheckTarget] = useState<{ row: any; status: string } | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const requestVersion = useRef(0);
 
   const replaceQuery = useCallback((next: ReturnType<typeof canonicalizePaymentsQuery>) => {
     const serialized = next.params.toString();
@@ -80,47 +77,38 @@ export default function AccountingPaymentsPage() {
     return () => window.clearTimeout(timeout);
   }, [query.search, searchInput, updateQuery]);
 
-  const loadRows = useCallback(async () => {
-    const version = ++requestVersion.current;
-    setRows([]); setFocus(null); setCheckTarget(null); setLoadError(null);
-    try {
-      setLoading(true);
-      const response = await accountingAPI.getPayments({
-        view: query.view || undefined,
-        due: query.due || undefined,
-        period: query.period || undefined,
-        date: query.date || undefined,
-        cutoff: query.cutoff || undefined,
-        recordId: query.recordId || undefined,
-        search: query.search || undefined,
-        status: query.status,
-        page: query.page,
-        pageSize: pagination.pageSize,
-      });
-      if (version !== requestVersion.current) return;
-      if (!response.data.success) throw new Error('Accounting read failed');
-      if (response.data.success) {
-        const data = readAccountingListResponse<any>(response.data.data);
-        setRows(data.items);
-        setPagination({ page: data.page, pageSize: data.pageSize, total: data.total });
-        setFocus(response.data.data?.focus || null);
-      }
-    } catch (error) {
-      if (version !== requestVersion.current) return;
-      setPagination(current => ({ ...current, total: 0 }));
-      setLoadError(accountingFailureMessage(error, 'دریافت‌ها بارگیری نشد؛ دسترسی و اتصال را بررسی کنید و دوباره به‌روزرسانی کنید.'));
-    } finally {
-      if (version === requestVersion.current) setLoading(false);
-    }
-  }, [pagination.pageSize, query.cutoff, query.date, query.due, query.page, query.period, query.recordId, query.search, query.status, query.view]);
+  const readRows = useCallback(async (request: AccountingRegisterRequest) => {
+    const response = await accountingAPI.getPayments({
+      cutoff: query.cutoff || undefined,
+      date: query.date || undefined,
+      due: query.due || undefined,
+      page: query.page,
+      period: query.period || undefined,
+      recordId: query.recordId || undefined,
+      search: query.search || undefined,
+      status: query.status,
+      view: query.view || undefined,
+      pageSize: emptyAccountingPagination.pageSize,
+    }, request);
+    if (!response.data.success) throw new Error('Accounting read failed');
+    return { ...readAccountingListResponse<any>(response.data.data), focus: response.data.data?.focus || null };
+  }, [query.cutoff, query.date, query.due, query.page, query.period, query.recordId, query.search, query.status, query.view]);
+  const register = useAccountingRegister(readRows, 'دریافت‌ها بارگیری نشد؛ دوباره تلاش کنید.');
+  const { state, load: loadRows } = register;
+  const rows = state.data?.items ?? [];
+  const pagination = state.data ?? emptyAccountingPagination;
+  const focus = state.data?.focus;
 
+  const checkTarget = savedCheckTarget && isCurrentAccountingRegisterRow(state.data?.items, savedCheckTarget.row,
+    row => row.projectionId || row.id) ? savedCheckTarget : null;
   useEffect(() => {
-    loadRows();
-    return () => { requestVersion.current += 1; };
-  }, [loadRows]);
+    if (!checkTarget) setCheckTarget(null);
+    if (state.data === null) setActionError(null);
+  }, [state.data, checkTarget]);
+  const actionsBlocked = state.status !== 'ready';
 
   const updateCheck = async (values: Record<string, string | number>) => {
-    if (!checkTarget) return;
+    if (!checkTarget || actionLoading || !register.canAct()) return;
     try {
       setActionError(null);
       setActionLoading(`${checkTarget.row.id}:${checkTarget.status}`);
@@ -132,10 +120,11 @@ export default function AccountingPaymentsPage() {
           ? accountingEventInstant({ timing: values.timing, date: values.eventDate, time: values.eventTime })
           : PersianCalendar.toGregorian(String(values.occurredAt)).toISOString(),
         note: String(values.note || ''),
-      });
+      }, register.mutationRequest);
       setCheckTarget(null);
       await loadRows();
     } catch (error) {
+      if (!register.isActive() || register.clearOnDenial(error)) return;
       console.error('Error updating check:', error);
       setActionError(accountingFailureMessage(error, error instanceof Error && /[\u0600-\u06ff]/.test(error.message)
         ? error.message : 'ثبت تغییر دریافت انجام نشد؛ اطلاعات و مجوز خود را بررسی کنید.'));
@@ -193,14 +182,16 @@ export default function AccountingPaymentsPage() {
       ]}
       rows={rows}
       rowKey={(row) => row.projectionId || row.id}
+      preserveFocusedRowPosition
       focusedRowKey={focus?.state === 'focused' && focus.inPage ? (rows.find((row) => row.id === query.recordId)?.projectionId || query.recordId) : undefined}
       columns={columns}
       rowActions={rowActions}
-      isLoading={loading}
+      isLoading={state.status === 'loading'}
+      suspendRowActions={actionsBlocked || Boolean(actionLoading)}
       footer={<ErpPagination currentPage={pagination.page} totalPages={Math.max(Math.ceil(pagination.total / pagination.pageSize), 1)} totalItems={pagination.total} itemsPerPage={pagination.pageSize} onPageChange={(page) => updateQuery({ page })} itemLabel="دریافت" />}
-      emptyState={<ErpEmptyState icon={FaMoneyCheckAlt} title="دریافت یا چکی ثبت نشده است" description="دریافت‌ها از پرونده حسابداری قرارداد ثبت و پیگیری می‌شوند." />}
+      emptyState={state.data !== null ? <ErpEmptyState icon={FaMoneyCheckAlt} title="دریافت یا چکی ثبت نشده است" description="دریافت‌ها از پرونده حسابداری قرارداد ثبت و پیگیری می‌شوند." /> : null}
     >
-      {loadError && <ErpInlineState kind="error" title={loadError} action={{ label: 'تلاش دوباره', onClick: loadRows }} />}
+      <AccountingRegisterFeedback state={state} retry={loadRows} />
       {focus?.state === 'missing' && <ErpInlineState kind="stale" title="این رکورد دریافت دیگر در دسترس نیست؛ فهرست، وضعیت فعلی را نشان می‌دهد." />}
       {focus?.state === 'current-truth' && <ErpInlineState kind="stale" title="وضعیت دریافت تغییر کرده است؛ رکورد فعلی بدون تغییر جمعیت فیلترشده بازیابی شد." />}
       {(focus?.state === 'current-truth' || (focus?.state === 'focused' && !focus.inPage)) && focus.record && (
@@ -214,8 +205,8 @@ export default function AccountingPaymentsPage() {
         </ErpCard>
       )}
       {focus?.state === 'focused' && <ErpInlineState kind="success" title="رکورد دریافت پیوندشده در جمعیت فعلی پیدا شد." />}
-      <AccountingActionModal
-        open={Boolean(checkTarget)}
+      {checkTarget && <AccountingActionModal
+        open
         title={checkTarget?.status === 'REVERSE_RECEIPT' ? 'برگشت دریافت' : checkTarget?.status === 'RETURNED' ? 'عودت چک' : 'به‌روزرسانی وضعیت چک'}
         description={checkTarget?.row.sourceKind === 'PARTNER_INTERNAL_RECORD'
           ? `پرونده ${partnerTrackingCode(checkTarget.row.partnerContext?.caseNumber ?? '', checkTarget.row.partnerContext?.trackingNumber)} · ${money(checkTarget.row.amount, checkTarget.row.currency)}${['RETURNED', 'REVERSE_RECEIPT'].includes(checkTarget.status) ? ' — با تأیید این اقدام، اثر وصول برگشت می‌خورد و مانده حساب به‌روزرسانی می‌شود.' : ''}`
@@ -232,10 +223,12 @@ export default function AccountingPaymentsPage() {
         submitLabel={checkTarget?.status === 'REVERSE_RECEIPT' ? 'تأیید برگشت دریافت' : checkTarget?.status === 'RETURNED' ? 'تأیید عودت چک' : 'ثبت وضعیت'}
         destructive={['RETURNED', 'BOUNCED', 'REVERSE_RECEIPT'].includes(checkTarget?.status || '')}
         busy={Boolean(actionLoading)}
+        blocked={actionsBlocked}
+        onRetry={state.status === 'error' ? loadRows : undefined}
         error={actionError}
         onClose={() => setCheckTarget(null)}
         onSubmit={updateCheck}
-      />
+      />}
     </ErpListPage>
   );
 }

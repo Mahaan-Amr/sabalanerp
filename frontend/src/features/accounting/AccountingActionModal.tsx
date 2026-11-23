@@ -43,6 +43,8 @@ type AccountingActionModalProps = {
   submitLabel?: string;
   destructive?: boolean;
   busy?: boolean;
+  blocked?: boolean;
+  onRetry?: () => void;
   error?: string | null;
   onClose: () => void;
   onSubmit: (values: Record<string, string | number>) => void | Promise<void>;
@@ -56,6 +58,8 @@ export default function AccountingActionModal({
   submitLabel = 'ثبت',
   destructive = false,
   busy = false,
+  blocked = false,
+  onRetry,
   error,
   onClose,
   onSubmit,
@@ -101,6 +105,7 @@ export default function AccountingActionModal({
   });
 
   const submit = () => {
+    if (blocked || busy) return;
     if (missingFields.length) {
       setTouched(fields.reduce((acc, field) => ({ ...acc, [field.id]: true }), {}));
       return;
@@ -123,11 +128,13 @@ export default function AccountingActionModal({
       footer={(
         <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <ErpButton label="انصراف" tone="neutral" variant="outline" onClick={onClose} disabled={busy} />
-          <ErpButton label={submitLabel} tone={destructive ? 'danger' : 'primary'} variant="solid" onClick={submit} disabled={busy} />
+          <ErpButton label={submitLabel} tone={destructive ? 'danger' : 'primary'} variant="solid" onClick={submit} disabled={busy} ariaDisabled={blocked} />
         </div>
       )}
     >
       <div className="space-y-4">
+        {blocked && <ErpInlineState kind="stale" title="برای ثبت تغییر، ابتدا باید اطلاعات فهرست به‌روز شود."
+          action={onRetry ? { label: 'تلاش دوباره', onClick: onRetry } : undefined} />}
         {description ? <p className="sds-text-secondary text-sm leading-6">{description}</p> : null}
           {visibleFields.map((field) => {
             const invalid = Boolean(touched[field.id] && missingFields.some((item) => item.id === field.id));

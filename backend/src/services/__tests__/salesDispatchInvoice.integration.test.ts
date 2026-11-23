@@ -459,16 +459,22 @@ async function run() {
         assert.doesNotMatch(Buffer.from(reprinted).toString(), /نرخ - ریال|مبلغ کل - ریال/);
         assert.equal(await reprintReader.reprintWaybill({ ...oldArtifact, templateVersion: 'dispatch-test-contract-table-v2' }), undefined);
         const financialCount = await tx.accountingFinancialRecord.count();
+        const command = { id: randomUUID(), fingerprint: 'test-command' };
         const issuedParts = await tx.accountingDispatchCandidate.findMany({
           where: { id: { in: candidates } }, select: { id: true, allocationRevisionId: true },
         });
         const group = { loadingId: loading.id, invoicePredecessorId: null,
           parts: issuedParts.map(part => ({ candidateId: part.id, revisionId: part.allocationRevisionId, state: 'COMPLETE' as const })),
           issueWaybill: async () => { throw new Error('A completed waybill must not be reissued.'); },
-          issueInvoice: async (key: string) => { await service.issue(ctx, loading.id, key); },
+          issueInvoice: (key: string) => service.issue({ ...ctx, expectedRevisionIds: issuedParts.map(part => part.allocationRevisionId) },
+            loading.id, key, command),
         };
-        await issueLoadingDocuments(group);
-        await issueLoadingDocuments(group);
+        assert.equal(await service.loadingIssueReceipt(ctx, loading.id, command.id), undefined);
+        const commandReceipt = await issueLoadingDocuments(group);
+        assert.deepEqual(await issueLoadingDocuments(group), commandReceipt);
+        assert.deepEqual(await service.loadingIssueReceipt(ctx, loading.id, command.id), commandReceipt);
+        await assert.rejects(() => service.loadingIssueReceipt(ctx, loading.id, command.id, 'different-input'),
+          (error) => error instanceof SalesInvoiceError && error.status === 409);
         const issued = await service.issue(ctx, loading.id, "same-key");
         assert.deepEqual(
           await service.issue(ctx, loading.id, "same-key"),
@@ -550,6 +556,8 @@ async function run() {
           () => service.list(ctx, loading.id),
           (error) => error instanceof SalesInvoiceError && error.status === 403,
         );
+        await assert.rejects(() => service.loadingIssueReceipt(ctx, loading.id, command.id),
+          (error) => error instanceof SalesInvoiceError && error.status === 403);
         await tx.$executeRawUnsafe("ROLLBACK TO SAVEPOINT invoice_partner");
         await assert.rejects(
           () =>
@@ -583,6 +591,7 @@ async function run() {
         );
         const replacement = await service.issue(ctx, loading.id, "replacement");
         assert.notEqual(replacement.number, issued.number);
+        assert.deepEqual(await service.loadingIssueReceipt(ctx, loading.id, command.id), issued);
         assert.equal(
           (
             await tx.salesDispatchInvoice.findUniqueOrThrow({

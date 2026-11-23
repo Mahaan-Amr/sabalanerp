@@ -31,6 +31,9 @@ const reply = (route: Route, data: unknown) =>
     contentType: "application/json",
     body: JSON.stringify({ success: true, data }),
   });
+const candidateList = /\/api\/accounting\/dispatch-candidates(?:\?.*)?$/;
+const replyWithIssueReceipt = (route: Route, invoice: { id: string; number: string }) =>
+  reply(route, { status: "ISSUED", commandId: route.request().postDataJSON().commandId, invoice });
 
 test("Accounting reissues a paired cancellation on the same loading", async ({ page }) => {
   await loginAsAdmin(page);
@@ -38,7 +41,7 @@ test("Accounting reissues a paired cancellation on the same loading", async ({ p
   const loadingId = "qa-recover-loading-12";
   const recovery = { waybillId: "waybill-11", waybillNumber: "11", invoiceId: "invoice-9", invoiceNumber: "9" };
   let requests = 0;
-  await page.route("**/api/accounting/dispatch-candidates", route => reply(route, [{
+  await page.route(candidateList, route => reply(route, [{
     id: "recovery-candidate", loadingId, status: "ACCEPTED", canManage: true,
     summary: { loadingNumber: "12", driverName: "راننده آزمون" },
     waybills: [
@@ -60,10 +63,11 @@ test("Accounting reissues a paired cancellation on the same loading", async ({ p
   await page.route(`**/api/accounting/loadings/${loadingId}/issue-dispatch-documents`, async route => {
     expect(route.request().method()).toBe("POST");
     expect(route.request().postDataJSON()).toEqual({
+      commandId: expect.stringMatching(/^[0-9a-f-]{36}$/),
       recovery: { waybillId: "waybill-11", invoiceId: "invoice-9", reason: "صدور مجدد برای همان بارگیری" },
     });
     requests++;
-    await reply(route, { status: "ISSUED" });
+    await replyWithIssueReceipt(route, { id: "invoice-12", number: "12" });
   });
   await page.goto("/dashboard/accounting/dispatch");
   await page.getByRole("table").getByRole("button", { name: "جزئیات اقلام و اسناد بارگیری" }).click();
@@ -90,7 +94,7 @@ test("Accounting repairs an invalid invoice while its replacement waybill remain
   const oldInvoice = { id: "invoice-10", number: "10" };
   let status = "INVALIDATED";
   let replacementIssued = false;
-  await page.route("**/api/accounting/dispatch-candidates", route => reply(route, [{
+  await page.route(candidateList, route => reply(route, [{
     id: "repair-candidate", loadingId, status: "ACCEPTED", canManage: true,
     summary: { loadingNumber: "13", driverName: "راننده آزمون" },
     currentSalesInvoice: status === "INVALIDATED" ? oldInvoice : null,
@@ -113,7 +117,7 @@ test("Accounting repairs an invalid invoice while its replacement waybill remain
   await page.route(`**/api/accounting/loadings/${loadingId}/issue-dispatch-documents`, route => {
     expect(status).toBe("VOIDED");
     replacementIssued = true;
-    return reply(route, { status: "ISSUED" });
+    return replyWithIssueReceipt(route, { id: "invoice-replacement", number: "22" });
   });
   await page.goto("/dashboard/accounting/dispatch");
   const row = page.getByRole("table").getByRole("row", { name: /راننده آزمون/ });
@@ -162,7 +166,7 @@ for (const width of [1280, 390]) {
     let currentInvoice: { id: string; number: string } | null = null;
     let initialVoidKey: string;
 
-    await page.route("**/api/accounting/dispatch-candidates", (route) =>
+    await page.route(candidateList, (route) =>
       reply(
         route,
         [0, 1].map((i) => ({
@@ -216,7 +220,7 @@ for (const width of [1280, 390]) {
           status: "ISSUED",
           voidReason: null,
         });
-        await reply(route, { status: "ISSUED" });
+        await replyWithIssueReceipt(route, currentInvoice);
       },
     );
     await page.route(
@@ -404,7 +408,7 @@ test("Accounting verifies a customer pickup before issuing its waybill and sales
   let sent = false;
   let verified = false;
   let issued = false;
-  await page.route("**/api/accounting/dispatch-candidates", route => reply(route, [{
+  await page.route(candidateList, route => reply(route, [{
     id: candidateId, loadingId, status: issued ? "ACCEPTED" : "PENDING", canManage: true,
     summary: { loadingNumber: "14", driverName: "راننده متفرقه", driverSource: "CUSTOMER_PICKUP", plate: "۱۲ ب ۳۴۵ ایران ۶۷" },
     pickupVerification: verified ? { verifiedAt: new Date().toISOString() } : null,
@@ -430,7 +434,7 @@ test("Accounting verifies a customer pickup before issuing its waybill and sales
   await page.route(`**/api/accounting/loadings/${loadingId}/issue-dispatch-documents`, route => {
     expect(verified).toBe(true);
     issued = true;
-    return reply(route, { status: "ISSUED" });
+    return replyWithIssueReceipt(route, { id: "pickup-invoice", number: "22" });
   });
   await page.goto("/dashboard/accounting/dispatch");
   await page.getByRole("table").getByRole("button", { name: "جزئیات اقلام و اسناد بارگیری" }).click();
@@ -452,7 +456,7 @@ test("Accounting shows the OTP controls after the biometric fallback starts", as
   await loginAsAdmin(page);
   const waybillId = "qa-fallback-waybill";
   const sessionId = "qa-fallback-session";
-  await page.route("**/api/accounting/dispatch-candidates", route => reply(route, [{
+  await page.route(candidateList, route => reply(route, [{
     id: "qa-fallback-candidate", loadingId: "qa-fallback-loading", status: "ACCEPTED", canManage: true,
     summary: { loadingNumber: "15", driverName: "راننده نمونه", driverSource: "INTERNAL" },
     waybills: [{ id: waybillId, number: "23", status: "ISSUED" }],
@@ -494,7 +498,7 @@ test("Accounting shows how to recover from an unregistered biometric workstation
   await loginAsAdmin(page);
   const waybillId = "qa-workstation-waybill";
   const sessionId = "qa-workstation-session";
-  await page.route("**/api/accounting/dispatch-candidates", route => reply(route, [{
+  await page.route(candidateList, route => reply(route, [{
     id: "qa-workstation-candidate", loadingId: "qa-workstation-loading", status: "ACCEPTED", canManage: true,
     summary: { loadingNumber: "15", driverName: "راننده نمونه", driverSource: "INTERNAL" },
     waybills: [{ id: waybillId, number: "23", status: "ISSUED" }],

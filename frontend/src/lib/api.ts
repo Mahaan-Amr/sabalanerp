@@ -1233,8 +1233,8 @@ export const accountingAPI = {
   reopenCloseRun: (id: string, data: { confirmed: boolean; reason: string }) => api.post(`/accounting/period-end/close-runs/${id}/reopen`, data),
   createRestatementCase: (data: any) => api.post('/accounting/period-end/restatement-cases', data),
   archiveAccountingEvidence: (data: any) => api.post('/accounting/period-end/archive-evidence', data),
-    getPartnerSabalanPlanCandidates: () => api.get('/partner-accounting/sabalan-plan-candidates'),
-    setPartnerSabalanPaymentPlan: (data: any) => api.post('/partner-accounting/sabalan-payment-plan', data),
+    getPartnerSabalanPlanCandidates: (request?: AxiosRequestConfig) => api.get('/partner-accounting/sabalan-plan-candidates', request),
+    setPartnerSabalanPaymentPlan: (data: any, request?: AxiosRequestConfig) => api.post('/partner-accounting/sabalan-payment-plan', data, request),
   getWorkspace: (params?: any) => api.get('/accounting/workspace', { params }),
   getDashboard: (params: { range: '1m' | '3m' | '6m' | '1y'; due?: string; deadlineType?: string }) =>
     api.get('/accounting/dashboard', { params }),
@@ -1248,8 +1248,10 @@ export const accountingAPI = {
     api.get('/accounting/dispatch-candidates', { params: { page, pageSize, search } }),
   registerSepidarLoadingReference: (loadingId: string, data: { value: string | null; expectedVersion: string | null; reason?: string }) =>
     api.post(`/accounting/loadings/${encodeURIComponent(loadingId)}/sepidar-reference`, data),
-  issueLoadingDocuments: (loadingId: string, recovery?: { waybillId: string; invoiceId: string; reason: string }) =>
-    api.post(`/accounting/loadings/${encodeURIComponent(loadingId)}/issue-dispatch-documents`, recovery ? { recovery } : undefined),
+  issueLoadingDocuments: (loadingId: string, commandId: string, recovery?: { waybillId: string; invoiceId: string; reason: string }) =>
+    api.post(`/accounting/loadings/${encodeURIComponent(loadingId)}/issue-dispatch-documents`, { commandId, recovery }),
+  getLoadingDocumentIssueReceipt: (loadingId: string, commandId: string) =>
+    api.get(`/accounting/loadings/${encodeURIComponent(loadingId)}/issue-dispatch-documents/${encodeURIComponent(commandId)}`),
   reconstructLegacyWaybill: (waybillId: string, reason: string) => api.post(`/accounting/dispatch-waybills/${encodeURIComponent(waybillId)}/reconstruct-legacy`, { reason }),
   decideDispatchCandidate: (id: string, data: { action: 'ACCEPT' | 'REJECT'; reason: string; idempotencyKey: string }) =>
     api.post(`/accounting/dispatch-candidates/${id}/decision`, data),
@@ -1299,10 +1301,10 @@ export const accountingAPI = {
       params: { ...params, download: true },
       responseType: 'blob'
     }),
-  getFinancialRecords: (params?: any) => api.get('/accounting/financial-records', { params }),
-  getReceivables: (params?: any) => api.get('/accounting/receivables', { params }),
-  getPayments: (params?: any) => api.get('/accounting/payments', { params }),
-  getTaxRecords: (params?: any) => api.get('/accounting/tax', { params }),
+  getFinancialRecords: (params?: any, request?: AxiosRequestConfig) => api.get('/accounting/financial-records', { ...request, params }),
+  getReceivables: (params?: any, request?: AxiosRequestConfig) => api.get('/accounting/receivables', { ...request, params }),
+  getPayments: (params?: any, request?: AxiosRequestConfig) => api.get('/accounting/payments', { ...request, params }),
+  getTaxRecords: (params?: any, request?: AxiosRequestConfig) => api.get('/accounting/tax', { ...request, params }),
   getCorrectionRequests: (params?: any) => api.get('/accounting/correction-requests', { params }),
   createCorrectionRequest: (
     contractId: string,
@@ -1315,7 +1317,7 @@ export const accountingAPI = {
   getPerformanceReport: (params?: any) => api.get('/accounting/performance', { params }),
   getSettings: () => api.get('/accounting/settings'),
   updateSettings: (data: any) => api.put('/accounting/settings', data),
-  executeAction: (data: any) => api.post('/accounting/actions', data),
+  executeAction: (data: any, request?: AxiosRequestConfig) => api.post('/accounting/actions', data, request),
   getBiometricConnectorDiagnostics: () => api.get('/biometric-connector/diagnostics'),
   createBiometricDiagnosticCommand: (workstationId: string) => api.post('/biometric-connector/diagnostics/command', { workstationId }),
   completeBiometricDiagnostic: (data: any) => api.post('/biometric-connector/diagnostics/result', data),

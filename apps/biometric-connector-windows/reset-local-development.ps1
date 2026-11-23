@@ -9,6 +9,9 @@ $backendEnvPath = Join-Path $projectDirectory '.local\backend.env'
 
 Push-Location $repositoryRoot
 try {
+    & node scripts/start-local-docker.mjs --check
+    if ($LASTEXITCODE -ne 0) { throw 'The local backend startup check failed.' }
+
     & docker compose -f $composePath ps | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'The sabalanerp-local Compose project is unavailable.' }
     Remove-Item -LiteralPath $backendEnvPath -Force -ErrorAction SilentlyContinue

@@ -1,7 +1,5 @@
 import { spawnSync } from 'node:child_process';
-
-const composeFile = 'docker-compose.local.yml';
-const compose = ['compose', '-f', composeFile];
+import { localCompose as compose, startStandardLocal } from './lib/standard-local-docker.mjs';
 
 function runDocker(args) {
   const result = spawnSync('docker', args, {
@@ -69,7 +67,8 @@ async function expectPage(url, expectedText, label) {
 }
 
 console.log('Building and starting the production-like local Docker stack...');
-runDocker([...compose, 'up', '--build', '-d', '--wait']);
+const startupStatus = startStandardLocal(compose, ['--build', '-d', '--wait']);
+if (startupStatus !== 0) process.exit(startupStatus);
 
 const frontendUrl = publishedUrl('frontend', 3000);
 const inquiryUrl = publishedUrl('inquiry', 3001);

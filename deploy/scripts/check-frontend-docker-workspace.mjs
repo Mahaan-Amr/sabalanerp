@@ -48,7 +48,10 @@ assert.match(
   /COPY frontend \./,
   'Frontend source must be copied from the repository-root build context.'
 );
-const runtimePackageStage = dockerfile.match(
+const runnerStage = dockerfile.split(/^[ \t]*FROM[ \t]+/im).find(
+  (stage) => /^\S+[ \t]+AS[ \t]+runner[ \t]*\r?\n/i.test(stage)
+) ?? '';
+const runtimePackageStage = runnerStage.match(
   /^COPY --from=(builder|production-builder) \/packages\/contract-product-graph \/packages\/contract-product-graph[ \t]*\r?$/m
 )?.[1];
 assert.ok(runtimePackageStage, 'Runtime image must preserve the target of the frontend package symlink.');

@@ -1,5 +1,6 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
+import { startStandardLocal } from './lib/standard-local-docker.mjs';
 
 const compose = [
   'compose',
@@ -65,7 +66,8 @@ function waitFor(url, label, timeoutMs = 120_000) {
 }
 
 console.log('Building and starting development containers...');
-runDocker([...compose, 'up', '--build', '-d']);
+const startupStatus = startStandardLocal(compose, ['--build', '-d']);
+if (startupStatus !== 0) process.exit(startupStatus);
 
 console.log('Synchronizing the latest workspace state...');
 const copies = [

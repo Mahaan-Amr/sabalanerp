@@ -1,4 +1,4 @@
-# Apply last, only with docker-compose.local.yml and the optional development override.
+# Apply after docker-compose.local.yml for the existing sabalanerp-local project.
 x-inquiry-data-subpath: &inquiry-data-subpath ${LOCAL_INQUIRY_DATA_SUBPATH:?Set the existing local-recovered Inquiry volume subdirectory}
 
 services:
@@ -10,7 +10,6 @@ services:
         target: /app/recovery-sources/inquiry
         volume:
           subpath: *inquiry-data-subpath
-      - recovery_coordination:/app/recovery-coordination
 
   inquiry:
     command: ["node", "/app/run-inquiry-local-restored.cjs"]
@@ -24,7 +23,7 @@ services:
         target: /data
         volume:
           subpath: *inquiry-data-subpath
-      - recovery_coordination:/app/recovery-coordination
+      - ${LOCAL_RECOVERY_COORDINATION_SOURCE:-recovery_coordination}:/app/recovery-coordination
       - type: bind
         source: ./deploy/scripts/run-inquiry-local-restored.cjs
         target: /app/run-inquiry-local-restored.cjs

@@ -7,6 +7,7 @@ import { repositoryRoot, interfaceVersion, preflight, validateNamespace, localSq
 import { buildInventory, renderInventory } from '../tests/partner-sales/harness/inventory.mjs';
 import { removeFixture } from '../tests/partner-sales/harness/fixtures.mjs';
 import { foundationInterface } from '../tests/partner-sales/harness/foundation.mjs';
+import { assertStandardLocalStartup, localCompose } from './lib/standard-local-docker.mjs';
 
 const [mode = 'unit', ...args] = process.argv.slice(2);
 try {
@@ -100,6 +101,7 @@ function quoteIdentifier(value) {
   return `"${value}"`;
 }
 async function runBrowserAcceptance() {
+  assertStandardLocalStartup(localCompose, { cwd: repositoryRoot });
   const databaseName = `sabalanerp_partner_browser_${randomUUID().replaceAll('-', '').slice(0, 16)}`;
   const quoted = quoteIdentifier(databaseName);
   const databaseUrl = `postgresql://postgres:sabalanerp-local-only@127.0.0.1:55432/${databaseName}` +
@@ -168,7 +170,7 @@ async function runBrowserAcceptance() {
 
 try {
   manifest.sourceFiles = await hashFiles(path.join(repositoryRoot, 'tests/partner-sales'));
-  for (const file of ['scripts/run-partner-sales-tests.mjs', 'playwright.partner-sales.config.ts', '.github/workflows/partner-sales.yml']) {
+  for (const file of ['scripts/run-partner-sales-tests.mjs', 'scripts/lib/standard-local-docker.mjs', 'playwright.partner-sales.config.ts', '.github/workflows/partner-sales.yml']) {
     manifest.sourceFiles.push({ path: file, sha256: createHash('sha256').update(await readFile(path.join(repositoryRoot, file))).digest('hex') });
   }
   manifest.sourceHash = createHash('sha256').update(JSON.stringify(manifest.sourceFiles.sort((a, b) => a.path.localeCompare(b.path)))).digest('hex');

@@ -37,6 +37,9 @@ if (-not (Test-Path -LiteralPath $adapterPath -PathType Leaf)) {
 
 Push-Location $repositoryRoot
 try {
+    & node scripts/start-local-docker.mjs --check
+    if ($LASTEXITCODE -ne 0) { throw 'The local backend startup check failed.' }
+
     $runningServices = @(& docker compose -f $composePath ps --status running --services)
     if ($LASTEXITCODE -ne 0) { throw 'The sabalanerp-local Compose project is unavailable.' }
     if ($runningServices -notcontains 'backend' -or $runningServices -notcontains 'frontend') {

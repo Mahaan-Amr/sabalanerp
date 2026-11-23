@@ -70,3 +70,14 @@ test('a commented-out copy cannot satisfy the runtime package contract', () => {
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Runtime image must preserve/);
 });
+
+test('a canonical package copy in local-dev cannot satisfy the runner contract', () => {
+  const copy = 'COPY --from=production-builder /packages/contract-product-graph /packages/contract-product-graph';
+  assert.ok(dockerfile.includes(copy));
+  const result = check(compose, dockerfile.replace(copy, '').replace(
+    'FROM builder AS local-dev',
+    `FROM builder AS local-dev\n${copy}`
+  ));
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Runtime image must preserve/);
+});

@@ -161,3 +161,78 @@ test('داشبورد پایان دوره در عرض باریک، وضعیت‌�
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true);
   await page.screenshot({ path: testInfo.outputPath('پایان-دوره-عرض-باریک.png'), fullPage: true });
 });
+
+test('دفتر روزنامه با خطای محلی پیش‌نویس قابل استفاده می‌ماند و تراز فقط هنگام انتخاب خوانده می‌شود', async ({ page }) => {
+  await login(page);
+  await mockLedger(page, 'VIEWER', true, false, true);
+  let balanceRequests = 0;
+  let draftRequests = 0;
+  let releaseDraft!: () => void;
+  const delayedDraft = new Promise<void>((resolve) => { releaseDraft = resolve; });
+  await page.route('**/api/accounting/ledger/trial-balance?**', (route) => {
+    balanceRequests += 1;
+    return json(route, 500, { error: 'خطای آزمایشی تراز' });
+  });
+  await page.route('**/api/accounting/ledger/vouchers?**', async (route) => {
+    draftRequests += 1;
+    if (draftRequests === 1) {
+      await delayedDraft;
+      return json(route, 500, { error: 'خطای آزمایشی پیش‌نویس' });
+    }
+    return json(route, 200, { data: [] });
+  });
+
+  await page.goto('/dashboard/accounting/ledger');
+  try {
+    await expect(page.getByText('سند قطعی آزمایشی')).toBeVisible();
+    await expect(page.getByText('پیش‌نویس تعیین‌تکلیف‌نشده‌ای وجود ندارد.')).toHaveCount(0);
+  } finally {
+    releaseDraft();
+  }
+  await expect(page.getByRole('alert').filter({ hasText: 'خطای آزمایشی پیش‌نویس' })).toBeVisible();
+  expect(balanceRequests).toBe(0);
+  await page.getByRole('button', { name: 'تلاش دوباره' }).click();
+  await expect(page.getByText('پیش‌نویس تعیین‌تکلیف‌نشده‌ای وجود ندارد.')).toBeVisible();
+  await expect(page.getByText('سند قطعی آزمایشی')).toBeVisible();
+  await page.getByRole('button', { name: 'تراز آزمایشی', exact: true }).click();
+  await expect(page.getByRole('alert').filter({ hasText: 'خطای آزمایشی تراز' })).toBeVisible();
+  await expect(page.getByText('گردش قطعی برای نمایش وجود ندارد.')).toHaveCount(0);
+});
+
+test('اقلام خرید پیش از خواندن حساب‌ها آماده‌اند و تنظیم قاعده به حساب معتبر نیاز دارد', async ({ page }) => {
+  await login(page);
+  let canManagePostingRules = true;
+  await page.route('**/api/accounting/supply-chain/workspace', (route) => json(route, 200, {
+    data: { canManagePostingRules, invoices: [], postingRules: [] },
+  }));
+  let accountRequests = 0;
+  await page.route('**/api/accounting/ledger/context', (route) => {
+    accountRequests += 1;
+    return accountRequests === 1
+      ? json(route, 500, { error: 'خطای آزمایشی حساب‌ها' })
+      : json(route, 200, context('ACCOUNTING_MANAGER'));
+  });
+
+  await page.goto('/dashboard/accounting/supply-chain');
+  await expect(page.getByText('فاکتور قطعی تأمین‌کننده‌ای ثبت نشده است.')).toBeVisible();
+  expect(accountRequests).toBe(0);
+  await page.getByRole('button', { name: 'قواعد ثبت' }).click();
+  await expect(page.getByRole('alert').filter({ hasText: 'خطای آزمایشی حساب‌ها' })).toBeVisible();
+  await expect(page.getByText('قاعده ثبتی تعریف نشده است.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'فعال‌سازی نسخه' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'تلاش دوباره' }).click();
+  const activate = page.getByRole('button', { name: 'فعال‌سازی نسخه' });
+  await expect(activate).toBeDisabled();
+  await page.getByRole('combobox', { name: 'نقش حسابی' }).click();
+  await page.getByRole('option', { name: 'موجودی مواد و کالا' }).click();
+  await expect(activate).toBeDisabled();
+  await page.getByRole('combobox', { name: 'حساب معین' }).click();
+  await page.getByRole('option', { name: '101001 · صندوق' }).click();
+  await expect(activate).toBeEnabled();
+
+  canManagePostingRules = false;
+  await page.getByRole('button', { name: 'به‌روزرسانی' }).click();
+  await expect(page.getByRole('button', { name: 'قواعد ثبت' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'فعال‌سازی نسخه' })).toHaveCount(0);
+  await expect(page.getByText('فاکتور قطعی تأمین‌کننده‌ای ثبت نشده است.')).toBeVisible();
+});

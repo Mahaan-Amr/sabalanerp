@@ -106,7 +106,8 @@ router.get('/workspace', access('view'), handle(async (req) => {
     prisma.accountingInventoryMigrationRun.findMany({ include: { _count: { select: { items: true } } }, orderBy: { createdAt: 'desc' }, take: 30 }),
     prisma.accountingSupplyChainPostingRule.findMany({ include: { account: { select: { code: true, titlePersian: true } } }, orderBy: [{ accountRole: 'asc' }, { version: 'desc' }] }),
   ]);
-  const result = { exceptions, invoices, openItems, transactions, checks, identities, migrations, postingRules };
+  const canManagePostingRules = actorOf(req).profile === 'ACCOUNTING_MANAGER';
+  const result = { exceptions, invoices, openItems, transactions, checks, identities, migrations, postingRules, canManagePostingRules };
   await repository.saveCommandAudit({
     id: randomUUID(), commandName: 'readSupplyChainWorkspace', result: 'SUCCEEDED', actorId: req.user!.id,
     effectiveProfile: actorOf(req).profile, commandHash: hashSupplyChainEvidence({

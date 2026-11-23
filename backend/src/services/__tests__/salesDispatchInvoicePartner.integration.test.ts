@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { PrismaClient, type Prisma } from '@prisma/client';
-import { PartnerEventSchema } from '@sabalanerp/partner-sales-contracts';
+import { PartnerEventSchema, canonicalHash } from '@sabalanerp/partner-sales-contracts';
 import { seedHistoricalAccountingRead } from './partnerAccountingHistoricalReadSeed';
 import { createSalesInvoiceService } from '../salesDispatchInvoice/service';
+import { bytesHash } from '../salesDispatchInvoice/source';
 import { renderSalesInvoice } from '../salesDispatchInvoice/render';
 import { pricedAllocationIntegrityHash } from '../pricedAllocationLedger';
 
@@ -96,7 +97,10 @@ async function run() {
       const pricing = await tx.partnerAllocationRevisionPricing.create({ data: { allocationRevisionId: revision.id,
         caseId: owner.caseId, caseRevision: 1, integrityHash: owner.integrityHash, internalRecordId: f.row.internalRecordId,
         sourceFinancialRecordId: f.invoice.id, financialApprovalEvidenceId: approval.financialApprovalEvidenceId,
-        preparationEvidenceHash: preparation.evidenceHash, readinessEvidenceHash: randomUUID(), currency: preparation.amount.currency,
+        preparationEvidenceHash: preparation.evidenceHash, readinessEvidenceHash: await canonicalHash({ schemaVersion: 1,
+          purpose: 'PARTNER_SHIPMENT_PRICING_READY', owner, internalRecordId: preparation.internalRecordId,
+          invoiceRecordId: f.invoice.id, financialApprovalEvidenceId: approval.financialApprovalEvidenceId,
+          preparationEvidenceHash: preparation.evidenceHash }), currency: preparation.amount.currency,
         grossAmount: '800', discountAmount: '0', netAmount: '800', pricingIntegrityHash: randomUUID() } });
       const payload = { sourceKind: 'PARTNER_CASE' as const, caseId: owner.caseId, internalRecordId: f.row.internalRecordId,
         allocationRevisionLineId: line.id, productRowId: row.productRowId, quantity: '1.000', unit: row.unit,
@@ -133,7 +137,27 @@ async function run() {
       assert.match(html, /همکار آزمایشی/);
       assert.equal((await service.download(context, loading.id, issued.id)).bytes.toString(), html,
         'successive downloads preserve the same approved quantities and charges');
-      console.log('Partner partial dispatch invoice issuance/download preserves wholesale amount and historical service rate');
+      const saved = await tx.salesDispatchInvoice.findUniqueOrThrow({ where: { id: issued.id } });
+      const oldSnapshot = structuredClone(saved.snapshot) as Record<string, any>;
+      delete oldSnapshot.pdfLayoutVersion;
+      for (const rows of Object.values(oldSnapshot.print.rows) as any[][])
+        for (const row of rows) if (row.category === 'برش') row.linearMeasurement = '۹۹۹۹';
+      const originalBytes = Buffer.from('original Partner historical invoice artifact');
+      const legacyClient = new Proxy(client, { get(target, key, receiver) {
+        if (key === '$transaction') return async (work: (value: unknown) => unknown) => work(legacyClient);
+        if (key === 'salesDispatchInvoice') return { findFirst: async () => ({ ...saved,
+          snapshot: oldSnapshot, pdf: originalBytes, pdfSha256: bytesHash(originalBytes) }) };
+        return Reflect.get(target, key, receiver);
+      } });
+      const legacy = createSalesInvoiceService(legacyClient,
+        async (snapshot, reason) => Buffer.from(renderSalesInvoice(snapshot, reason)));
+      const refreshed = await legacy.download(context, loading.id, issued.id);
+      assert.equal(refreshed.number, issued.number);
+      assert.equal(Buffer.from(refreshed.bytes).toString(), html,
+        'historical stale printable rows refresh from frozen Partner geometry and approved wholesale evidence');
+      assert.equal(bytesHash((await legacy.download(context, loading.id, issued.id, false, true)).bytes), bytesHash(originalBytes),
+        'the original artifact remains independently retrievable');
+      console.log('Partner partial dispatch issue/download and historical refresh preserve service share, wholesale price and original artifact');
       throw rollback;
     }, { timeout: 60000, maxWait: 10000 });
   } catch (error) { if (error !== rollback) throw error; }

@@ -53,9 +53,9 @@ test('commands fail closed for view-only, blocked, stale, or incomplete state', 
   assert.equal(canRunDispatchDocumentCommand('REPLACE', workspace('MANAGE'), incomplete, false), false);
 });
 
-test('missing selected case falls back to first visible case without crossing filters', () => {
+test('missing selected case does not open another case or cross filters', () => {
   const view = buildDispatchDocumentView(workspace('MANAGE'), 'ISSUED', 'ready');
-  assert.equal(view.selectedCase?.id, 'issued');
+  assert.equal(view.selectedCase, null);
 });
 
 test('display money rounds the authoritative decimal without binary floating-point loss', () => {

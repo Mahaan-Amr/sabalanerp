@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { loginAsAdmin } from './support/design-system';
 
-for (const result of ['acknowledged', 'recovered', 'resumed'] as const) {
+for (const result of ['acknowledged', 'recovered', 'resumed', 'reloaded'] as const) {
   test(`loading confirms a command that is ${result} before refreshing its group`, async ({ page }) => {
     await loginAsAdmin(page);
     const reads: (string | null)[] = [];
@@ -9,6 +9,7 @@ for (const result of ['acknowledged', 'recovered', 'resumed'] as const) {
     const receiptReads: string[] = [];
     let failRefresh = true;
     let committed = false;
+    let canReadReceipt = result !== 'reloaded';
     let releaseRefresh!: () => void;
     const refreshResponse = new Promise<void>(resolve => { releaseRefresh = resolve; });
     const rows = [
@@ -49,6 +50,7 @@ for (const result of ['acknowledged', 'recovered', 'resumed'] as const) {
     await page.route('**/api/accounting/loadings/group-a/issue-dispatch-documents/*', route => {
       const commandId = new URL(route.request().url()).pathname.split('/').at(-1)!;
       receiptReads.push(commandId);
+      if (!canReadReceipt) return route.fulfill({ status: 503, json: { success: false } });
       if (!committed) {
         return route.fulfill({ status: 404, json: { success: false, code: 'LOADING_ISSUE_RECEIPT_MISSING' } });
       }
@@ -56,8 +58,9 @@ for (const result of ['acknowledged', 'recovered', 'resumed'] as const) {
     });
 
     await page.goto('/dashboard/accounting/dispatch');
-    await page.getByRole('row').filter({ hasText: 'راننده الف' })
+    const openLoading = () => page.getByRole('row').filter({ hasText: 'راننده الف' })
       .getByRole('button', { name: 'جزئیات اقلام و اسناد بارگیری' }).click();
+    await openLoading();
     const dialog = page.getByRole('dialog');
     const issue = dialog.getByRole('button', { name: 'صدور بارنامه‌ها و فاکتور فروش', exact: true });
     await issue.dblclick({ timeout: 5_000 });
@@ -66,12 +69,19 @@ for (const result of ['acknowledged', 'recovered', 'resumed'] as const) {
       expect(posts).toHaveLength(1);
       await dialog.getByRole('button', { name: 'ادامهٔ همان فرمان صدور' }).click();
     }
+    if (result === 'reloaded') {
+      await expect(dialog.getByText('نتیجهٔ فرمان صدور هنوز مشخص نیست.')).toBeVisible();
+      await page.reload();
+      canReadReceipt = true;
+      await openLoading();
+      await dialog.getByRole('button', { name: 'بررسی دوبارهٔ رسید صدور' }).click();
+    }
     await expect(dialog.getByText('بارنامه‌ها و فاکتور فروش صادر شدند.')).toBeVisible();
     await expect(dialog.getByText('بارنامه‌ها و فاکتور فروش صادر شدند.')).toContainText('42');
     expect(posts).toHaveLength(result === 'resumed' ? 2 : 1);
     expect(posts[0]).toMatch(/^[0-9a-f-]{36}$/);
     expect(new Set(posts).size).toBe(1);
-    expect(receiptReads).toEqual(result === 'acknowledged' ? [] : [posts[0]]);
+    expect(receiptReads).toEqual(result === 'acknowledged' ? [] : result === 'reloaded' ? [posts[0], posts[0]] : [posts[0]]);
     releaseRefresh();
     const retry = dialog.getByRole('button', { name: 'تلاش دوباره برای خواندن وضعیت بارگیری' });
     await expect(retry).toBeVisible();
@@ -79,7 +89,7 @@ for (const result of ['acknowledged', 'recovered', 'resumed'] as const) {
     failRefresh = false;
     await retry.click();
     await expect(retry).toHaveCount(0);
-    expect(reads).toEqual([null, 'group-a', 'group-a']);
+    expect(reads).toEqual(result === 'reloaded' ? [null, null, 'group-a', 'group-a'] : [null, 'group-a', 'group-a']);
     expect(posts).toHaveLength(result === 'resumed' ? 2 : 1);
     await page.keyboard.press('Escape');
     await expect(page.getByRole('row').filter({ hasText: 'راننده ب' })).toContainText('پذیرفته‌شده');

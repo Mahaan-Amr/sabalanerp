@@ -13,7 +13,7 @@ export async function attachAccountingTrendAuditState<T extends AuditHeader>(
     SELECT id, jsonb_build_object('checkStatus', CASE
       WHEN jsonb_typeof("afterState"->'checkStatus') = 'string' THEN "afterState"->'checkStatus'
       ELSE 'null'::jsonb END) AS "afterState"
-    FROM accounting_audit_logs WHERE id IN (${Prisma.join(checks.map(row => row.id))})
+    FROM accounting_audit_logs WHERE id = ANY(${checks.map(row => row.id)}::text[])
   `) : [];
   const byId = new Map(states.map(row => [row.id, row.afterState]));
   return headers.map(row => ({ ...row, afterState: byId.get(row.id) ?? null }));

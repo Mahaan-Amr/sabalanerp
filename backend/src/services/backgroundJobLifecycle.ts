@@ -1,4 +1,5 @@
 import { withRecoveryBackgroundWrite } from './recoveryRuntime';
+import { observeRuntimeBackgroundJob } from './runtimeCapacityObservation';
 
 type Job = { name: string; intervalMs: number; initialDelayMs?: number; run: () => Promise<unknown> };
 
@@ -21,7 +22,7 @@ export class BackgroundJobGroup {
     const invoke = () => {
       if (stopped || this.stopping || running) return;
       running = true;
-      const task = Promise.resolve().then(() => this.execute(job.run)).then(() => undefined,
+      const task = Promise.resolve().then(() => this.execute(observeRuntimeBackgroundJob(job.name, job.run))).then(() => undefined,
         () => { console.error('Background job failed', { name: job.name, code: 'BACKGROUND_JOB_FAILED' }); })
         .finally(() => { running = false; this.tasks.delete(task); });
       this.tasks.add(task);

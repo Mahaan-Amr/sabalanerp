@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import type { Prisma, PrismaClient } from '@prisma/client';
 import { startOrdinaryApplicationWorkers } from './services/applicationWorkers';
 import { readFile } from 'fs/promises';
 import { performance } from 'node:perf_hooks';
@@ -10,6 +11,7 @@ import { disconnectDatabase, prisma } from './lib/prisma';
 import { getRecoveryRuntimeState, initializeRecoveryRuntime, waitForActiveWrites, waitForRecoveryOperationDrain } from './services/recoveryRuntime';
 import { initializeSystemRecovery } from './services/systemRecoveryLifecycle';
 import { verifyHrRedesignCutover } from './services/hrRedesignCutover';
+import { startRuntimeCapacityObservation } from './services/runtimeCapacityObservation';
 
 import { accountingMeasurementCommit } from './middleware/accountingRequestObserver';
 
@@ -33,6 +35,7 @@ const { app, server, io, realtimeDelivery, hrRedesignCutoverStartup } = createAp
 const PORT = process.env.PORT || 5000;
 
 let applicationWorkers: Awaited<ReturnType<typeof startOrdinaryApplicationWorkers>> | undefined;
+let stopCapacityObservation: ReturnType<typeof startRuntimeCapacityObservation> | undefined;
 
 // Start only after interrupted recovery has been finalized or safely rolled back.
 startRuntime(runtimeRole, {
@@ -54,6 +57,13 @@ startRuntime(runtimeRole, {
     }
   },
   listen: () => server.listen(PORT, () => {
+    if (process.env.RUNTIME_CAPACITY_OBSERVATION === '1') {
+      const observedPrisma = prisma as PrismaClient & { $metrics?: { json(): Promise<Prisma.Metrics> } };
+      stopCapacityObservation = startRuntimeCapacityObservation({
+        commit: accountingMeasurementCommit(process.env.APP_COMMIT),
+        poolMetrics: async () => getRecoveryRuntimeState().mode === 'NORMAL' ? observedPrisma.$metrics?.json() : undefined,
+      });
+    }
     logStartup('listening');
     console.log(`? Server running on port ${PORT}`);
     console.log(`? Health check: http://localhost:${PORT}/api/health`);
@@ -76,6 +86,7 @@ const shutdown = async (signal: NodeJS.Signals) => {
     const remaining = () => Math.max(0, deadline - performance.now());
     // Stop admission before closing sockets; callbacks already running must finish.
     await Promise.all([
+      stopCapacityObservation?.(),
       applicationWorkers?.stopAndDrain(240_000),
       waitForRecoveryOperationDrain(240_000),
       waitForActiveWrites(240_000),

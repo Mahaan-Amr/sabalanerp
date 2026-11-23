@@ -2211,6 +2211,7 @@ model SalesReportPreset {
 }
 
 model CrmCustomer {
+  stoneReturnReceipts StoneReturnReceipt[]
   trustCategory                    String @default("NORMAL")
   creditLimitRials                  Decimal? @db.Decimal(18, 0)
   creditPolicyVersion               Int @default(0)
@@ -2498,6 +2499,7 @@ model CrmTimelineEvent {
 }
 
 model Product {
+  stoneReturnReceipts StoneReturnReceipt[]
   id                                String                             @id @default(cuid())
   code                              String                             @unique
   name                              String
@@ -2839,6 +2841,7 @@ model SecurityVehiclePairPhoto {
 }
 
 model SecurityVehicleMovement {
+  stoneReturnReceipts StoneReturnReceipt[]
   id                     String                           @id @default(cuid())
   movementNumber         String                           @unique
   direction              SecurityVehicleMovementDirection
@@ -7148,6 +7151,7 @@ model AccountingCheckCustodyEvent {
 }
 
 model AccountingInventoryIdentity {
+  stoneReturnReceipt StoneReturnReceipt?
   id              String                              @id
   kind            AccountingInventoryIdentityKind
   originId        String?
@@ -13204,4 +13208,34 @@ model PurchasingExistingEvidence {
   @@unique([sourceType, sourceId])
   @@index([documentId])
   @@map("purchasing_existing_evidence")
+}
+
+model StoneReturnReceipt {
+  id                    String                       @id @default(cuid())
+  requestId             String
+  customerId            String
+  customerName          String
+  productId             String
+  productCode           String
+  productName           String
+  unit                  String
+  receivedQuantity      Decimal                      @db.Decimal(65, 30)
+  acceptedQuantity      Decimal                      @db.Decimal(65, 30)
+  rejectedQuantity      Decimal                      @db.Decimal(65, 30)
+  rejectionReason       String?
+  guardReturnMovementId String?
+  inventoryIdentityId   String?                      @unique
+  createdBy             String
+  createdAt             DateTime                     @default(now())
+  customer              CrmCustomer                  @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  product               Product                      @relation(fields: [productId], references: [id], onDelete: Restrict)
+  guardReturnMovement   SecurityVehicleMovement?     @relation(fields: [guardReturnMovementId], references: [id], onDelete: Restrict)
+  inventoryIdentity     AccountingInventoryIdentity? @relation(fields: [inventoryIdentityId], references: [id], onDelete: Restrict)
+
+  @@unique([createdBy, requestId])
+  @@index([createdAt, id])
+  @@index([customerId, productId, unit])
+  @@index([productId])
+  @@unique([guardReturnMovementId, productId, unit], map: "stone_return_receipts_guard_product_unit_key")
+  @@map("stone_return_receipts")
 }

@@ -284,8 +284,8 @@ async function main() {
         kind: 'MANAGER', revision: corrected.commercialRevision, requestedBy: requesterId, createdAt: earlierGrant.createdAt } });
       await createContractDispatchDuty(prisma, staleRequest.id);
       const staleManager = await request(authorityPath, requester.token);
-      assert.equal(staleManager.body.data.activeManagerId, null);
-      assert.equal(staleManager.body.data.commercialManagerId, earlierGrant.id);
+      assert.equal(staleManager.body.data.draftManagerId, null);
+      assert.equal(staleManager.body.data.activeManagerId, earlierGrant.id);
       assert.equal(staleManager.body.data.canRequestManager, true);
       assert.equal(staleManager.body.data.authorities.find((row: { id: string }) => row.id === staleRequest.id).canDecide, false);
       const stalePath = `/dispatch-credit/authorities/${staleRequest.id}/actions`;
@@ -303,6 +303,7 @@ async function main() {
       assert.equal((await request(replacementPath, manager.token, replacementDecision)).status, 200);
       const afterRenewal = await request(authorityPath, requester.token);
       assert.equal(afterRenewal.body.data.activeManagerId, replacement.body.data.id);
+      assert.equal(afterRenewal.body.data.draftManagerId, replacement.body.data.id);
       assert.equal(afterRenewal.body.data.authorities.find((row: { id: string }) => row.id === renewed.body.data.id).status, 'SUPERSEDED');
       assert.equal((await load('/loadings', selection, 'corrected-managerial-approval')).status, 201);
 

@@ -49,7 +49,7 @@ export default function ContractDispatchCreditPanel({ contractId, refreshKey, ch
       <ErpButton label="پس‌گرفتن درخواست" variant="outline" onClick={() => open({ kind: 'ACTION', authority: row, action: 'WITHDRAW' })} />}
     {row.status === 'APPROVED' && ['MANAGER','CREDIT'].includes(row.kind) && (view?.access.request || view?.access.seller || view?.access.manage) &&
       <ErpButton label="درخواست تغییر موعد" variant="outline" onClick={() => open({ kind: 'DATE', authority: row })} />}
-    {row.id === view?.commercialManagerId && view.access.manage &&
+    {row.id === view?.activeManagerId && view.access.manage &&
       <ErpButton label="لغو مجوز ارسال" tone="danger" variant="outline" onClick={() => open({ kind: 'ACTION', authority: row, action: 'REVOKE' })} />}
     {row.kind === 'CREDIT' && row.status === 'APPROVED' && view?.access.manage && row.sellerId !== view.responsibleSeller.id &&
       <ErpButton label={`انتقال ضمانت به ${view.responsibleSeller.displayName}`} variant="outline" onClick={() => open({ kind: 'TRANSFER', authority: row })} />}

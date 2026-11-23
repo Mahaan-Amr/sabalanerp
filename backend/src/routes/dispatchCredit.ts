@@ -93,7 +93,7 @@ router.get('/contracts/:id', handle(async req => {
     responsibleSeller: { id: contract.responsibleSellerId, displayName: names.get(contract.responsibleSellerId) ?? 'فروشنده مسئول' },
     access, eligible: contract.partnerCaseId ? await prisma.$transaction(tx => partnerCommercialDispatchEligible(tx, contract.partnerCaseId!)) : await ordinaryContractDispatchEligible(prisma, contract),
     balance: contract.partnerCaseId ? null : await creditBalance(prisma, contract.responsibleSellerId),
-    activeManagerId: draftManager?.id ?? null, commercialManagerId: commercialManager?.id ?? null };
+    activeManagerId: commercialManager?.id ?? null, draftManagerId: contract.partnerCaseId ? draftManager?.id ?? null : null };
 }));
 router.post('/contracts/:id/requests', handle(req => prisma.$transaction(async tx => {
   await accessibleContract(tx, req.params.id, req.user.id);

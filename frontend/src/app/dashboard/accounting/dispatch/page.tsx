@@ -232,7 +232,7 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
   const runDispatch = async (
     command: () => Promise<any>,
     notice: string | ((data: any) => DispatchNotice),
-    recover?: (error: any) => Promise<boolean>,
+    options: { loadingId?: string; recover?: (error: any) => Promise<boolean> } = {},
   ): Promise<boolean> => {
     if (dispatchPendingRef.current) return false;
     dispatchPendingRef.current = true;
@@ -252,17 +252,17 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
           ...current,
           authorization: response.data.data.authorization,
         }));
-      try {
-        const refreshed = await accountingAPI.getDispatchCandidates();
-        setDispatchCandidates(refreshed.data.data || []);
-        retryDetail(attempt => attempt + 1);
-      } catch (error) {
-        if (dispatchCandidateAccessDenied(error)) discardCandidates();
-        // Confirmation-only actors may not have permission to list candidates.
+      if (options.loadingId) {
+        try {
+          await refreshCandidateGroup(options.loadingId);
+        } catch (error) {
+          if (dispatchCandidateAccessDenied(error)) discardCandidates();
+          // Confirmation-only actors may not have permission to list candidates.
+        }
       }
       return true;
     } catch (error: any) {
-      if (await recover?.(error)) return false;
+      if (await options.recover?.(error)) return false;
       setDispatchNotice({
         kind: "error",
         text: userFacingError(error, "فرمان ارسال انجام نشد."),
@@ -274,7 +274,7 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
     }
   };
 
-  const beginConfirmation = async (waybillId: string, pickup: boolean) => {
+  const beginConfirmation = async (waybillId: string, pickup: boolean, loadingId: string) => {
     const succeeded = await runDispatch(async () => {
       let workstationId = "ACCOUNTING-WEB";
       try {
@@ -286,16 +286,14 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
     }, data => ({
       kind: "success",
       text: data?.authorization?.id ? "مجوز خروج صادر شد." : "تأیید راننده آماده انجام است.",
-    }));
+    }), { loadingId });
     if (succeeded) setSection("confirmation");
   };
 
   const refreshVoid = async (action: ReasonAction) => {
     try {
-      const response = await accountingAPI.getDispatchCandidates();
-      if (!response.data.success || !Array.isArray(response.data.data)) throw new Error("Invalid dispatch response");
-      const candidates = response.data.data;
-      setDispatchCandidates(candidates);
+      if (!action.loadingId) throw new Error("Missing dispatch group");
+      const candidates = await refreshCandidateGroup(action.loadingId);
       const candidate = candidates.find((item: any) => item.loadingId === action.loadingId &&
         item.waybills?.some((waybill: any) => waybill.id === action.id));
       const waybill = candidate?.waybills.find((item: any) => item.id === action.id);
@@ -314,7 +312,8 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
           ? "وضعیت فاکتور فروش به‌روزرسانی شد. شمارهٔ سندها را بررسی و دوباره تأیید کنید."
           : "این بارگیری اکنون فاکتور فروش فعال ندارد. در صورت تأیید دوباره، فقط بارنامه باطل می‌شود." });
       return true;
-    } catch {
+    } catch (error) {
+      if (dispatchCandidateAccessDenied(error)) discardCandidates();
       setReasonAction({ ...action, voidBlocked: true, voidRefreshFailed: true,
         voidRefreshNotice: "دریافت وضعیت جدید اسناد ممکن نشد. برای ادامه وضعیت را دوباره بررسی کنید." });
       return true;
@@ -334,6 +333,7 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
             idempotencyKey: crypto.randomUUID(),
           }),
         "پرونده برای اصلاح علامت‌گذاری شد. بارگیری مربوط را در لجستیک پیگیری کنید.",
+        { loadingId: reasonAction.loadingId },
       );
     if (reasonAction.type === "void")
       succeeded = await runDispatch(
@@ -344,7 +344,7 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
             expectedInvoiceId: reasonAction.invoice?.id ?? null,
           }),
         reasonAction.invoice ? "بارنامه و فاکتور فروش با حفظ سابقه باطل شدند." : "بارنامه با حفظ سابقه باطل شد.",
-        async error => error?.response?.status === 409 && await refreshVoid(reasonAction),
+        { loadingId: reasonAction.loadingId, recover: async error => error?.response?.status === 409 && await refreshVoid(reasonAction) },
       );
     if (reasonAction.type === "replace")
       succeeded = await runDispatch(
@@ -354,12 +354,14 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
             idempotencyKey: crypto.randomUUID(),
           }),
         "بارنامه جایگزین صادر شد.",
+        { loadingId: reasonAction.loadingId },
       );
     if (reasonAction.type === "revoke") {
       succeeded = await runDispatch(
         () =>
           dispatchConfirmationAPI.revokeAuthorization(reasonAction.id, reason),
         "مجوز خروج لغو شد.",
+        { loadingId: reasonAction.loadingId },
       );
       if (succeeded) {
         setConfirmation(null);
@@ -368,7 +370,7 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
     }
     if (reasonAction.type === "reconstruct")
       succeeded = await runDispatch(() => accountingAPI.reconstructLegacyWaybill(reasonAction.id, reason),
-        "نسخه بازسازی‌شده بارنامه با حفظ سابقه ثبت شد.");
+        "نسخه بازسازی‌شده بارنامه با حفظ سابقه ثبت شد.", { loadingId: reasonAction.loadingId });
     if (succeeded) {
       setReasonAction(null);
       setDispatchReason("");
@@ -432,38 +434,41 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
     if (issueActorId.current !== scope.actorId) return;
     setDispatchCandidates(current => current.filter(candidate => candidate.loadingId !== scope.loadingId));
   };
+  async function refreshCandidateGroup(id: string) {
+    const response = await accountingAPI.getDispatchCandidates(id);
+    const rows = response.data.data;
+    if (!response.data.success || !Array.isArray(rows) || rows.some(row => row.loadingId !== id)) {
+      throw new Error("Invalid dispatch group response");
+    }
+    setDispatchCandidates(current => {
+      if (!current.some(candidate => candidate.loadingId === id)) return current;
+      const updated = new Map(rows.map(row => [row.id, row]));
+      const merged = current.flatMap(candidate => {
+        if (candidate.loadingId !== id) return [candidate];
+        const row = updated.get(candidate.id);
+        updated.delete(candidate.id);
+        return row ? [row] : [];
+      });
+      return [...merged, ...Array.from(updated.values())];
+    });
+    setCandidatePage(current => {
+      if (!current) return current;
+      const invoiceActionIds = new Set(current.invoiceActionIds);
+      for (const row of rows) invoiceActionIds.delete(row.id);
+      const eligible = rows.filter(row => current.ids.has(row.id) && row.currentSalesInvoice);
+      const actionRow = eligible.find(row => row.waybills?.some((waybill: any) => waybill.status === "ISSUED")) ?? eligible[0];
+      if (actionRow) invoiceActionIds.add(actionRow.id);
+      return { ...current, invoiceActionIds };
+    });
+    if (selectedLoadingId.current === id) retryDetail(attempt => attempt + 1);
+    return rows;
+  }
   const readIssueGroup = async (scope: LoadingIssueScope, conclusion: LoadingIssueConclusion) => {
     if (groupReads.current.has(scope.key)) return;
     groupReads.current.add(scope.key);
     setIssue(scope, { ...conclusion, read: "pending" });
     try {
-      const response = await accountingAPI.getDispatchCandidates(scope.loadingId);
-      if (issueActorId.current !== scope.actorId) return;
-      const rows = response.data.data;
-      if (!response.data.success || !Array.isArray(rows) || rows.some(row => row.loadingId !== scope.loadingId)) {
-        throw new Error("Invalid dispatch group response");
-      }
-      setDispatchCandidates(current => {
-        if (!current.some(candidate => candidate.loadingId === scope.loadingId)) return current;
-        const updated = new Map(rows.map(row => [row.id, row]));
-        const merged = current.flatMap(candidate => {
-          if (candidate.loadingId !== scope.loadingId) return [candidate];
-          const row = updated.get(candidate.id);
-          updated.delete(candidate.id);
-          return row ? [row] : [];
-        });
-        return [...merged, ...Array.from(updated.values())];
-      });
-      setCandidatePage(current => {
-        if (!current) return current;
-        const invoiceActionIds = new Set(current.invoiceActionIds);
-        for (const row of rows) invoiceActionIds.delete(row.id);
-        const eligible = rows.filter(row => current.ids.has(row.id) && row.currentSalesInvoice);
-        const actionRow = eligible.find(row => row.waybills?.some((waybill: any) => waybill.status === "ISSUED")) ?? eligible[0];
-        if (actionRow) invoiceActionIds.add(actionRow.id);
-        return { ...current, invoiceActionIds };
-      });
-      if (selectedLoadingId.current === scope.loadingId) retryDetail(attempt => attempt + 1);
+      await refreshCandidateGroup(scope.loadingId);
       setIssue(scope, { ...conclusion, read: "ready" });
     } catch (error) {
       if (dispatchCandidateAccessDenied(error)) clearIssueGroup(scope);
@@ -561,6 +566,7 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
     () => api.post(`/accounting/dispatch-candidates/${encodeURIComponent(id)}/pickup-verification/${command}`,
       command === "verify" ? { code: pickupCode } : {}),
     data => ({ kind: "success", text: data?.verified ? "شماره همراه تأیید شد." : "کد به شماره همراه ثبت‌شده در پذیرش ارسال شد." }),
+    { loadingId: dispatchCandidates.find(row => row.id === id)?.loadingId },
   );
   const actionsBlocked = dispatchTimelineStale || dispatchPending;
   const candidatesByLoading = new Map<string, ReferenceCandidate>(
@@ -633,10 +639,9 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
     });
   };
   const refreshReference = async () => {
+    if (!referenceLoadingId) return;
     await runReferenceAction(async () => {
-      const refreshed = await accountingAPI.getDispatchCandidates();
-      const rows = refreshed.data.data || [];
-      setDispatchCandidates(rows);
+      const rows = await refreshCandidateGroup(referenceLoadingId);
       const candidate: ReferenceCandidate | undefined = rows.find((row: ReferenceCandidate) =>
         row.loadingId === referenceLoadingId && row.id === referenceCandidateId);
       if (!candidate?.canManageSepidarLoadingReference) {
@@ -660,6 +665,11 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
     !actionsBlocked && dispatchCapabilities.canManageAccountingCandidates &&
     dispatchCandidates.some(candidate => candidate.loadingId === id) &&
     dispatchCandidates.every(candidate => candidate.loadingId !== id || candidate.canManage);
+  const confirmationLoadingId = confirmation?.waybillId
+    ? dispatchCandidates.find(candidate => candidate.waybills?.some(
+      (waybill: { id: string }) => waybill.id === confirmation.waybillId,
+    ))?.loadingId
+    : undefined;
   const activeWaybillFor = (candidate: any) => candidate.waybills?.find(
     (waybill: any) => waybill.status === "ISSUED" || waybill.status === "EXIT_RECORDED",
   );
@@ -671,9 +681,9 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
       invoiceOnlyRows.set(candidate.loadingId, candidate);
     }
   }
-  const openReason = (type: ReasonAction["type"], id: string) => {
+  const openReason = (type: ReasonAction["type"], id: string, loadingId?: string) => {
     setDispatchReason("");
-    setReasonAction({ type, id });
+    setReasonAction({ type, id, loadingId });
   };
   const rowActions = (candidate: any): ErpAction[] => {
     const waybill = activeWaybillFor(candidate);
@@ -686,7 +696,7 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
       actions.push({ label: "پیگیری بارگیری در لجستیک", icon: FaTruck, href: `/dashboard/logistics/loadings/${encodeURIComponent(candidate.loadingId)}` });
     }
     if (candidate.status === "PENDING" && canManage) {
-      actions.push({ label: "بازگرداندن برای اصلاح", icon: FaReply, tone: "danger", disabled: actionsBlocked, onClick: () => openReason("reject", candidate.id) });
+      actions.push({ label: "بازگرداندن برای اصلاح", icon: FaReply, tone: "danger", disabled: actionsBlocked, onClick: () => openReason("reject", candidate.id, candidate.loadingId) });
     }
     if (waybill?.legacyReconstruction) {
       actions.push({ label: "مشاهده بارنامه بازسازی‌شده", icon: FaEye, disabled: dispatchPending, onClick: async () => {
@@ -711,14 +721,14 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
       if (dispatchCapabilities.canManageAccountingConfirmation) {
         const pickup = ["CUSTOMER_PICKUP", "PERSONAL_PICKUP"].includes(candidate.summary?.driverSource);
         actions.push({ label: pickup ? "صدور مجوز خروج" : "تأیید هویت راننده", icon: pickup ? FaTruck : FaFingerprint,
-          disabled: actionsBlocked, onClick: () => void beginConfirmation(waybill.id, pickup) });
+          disabled: actionsBlocked, onClick: () => void beginConfirmation(waybill.id, pickup, candidate.loadingId) });
       }
       if (canManage) {
         if (!waybill.legacyReconstruction && !waybill.hasWaybillArtifact) {
-          actions.push({ label: "بازسازی بارنامه قدیمی", icon: FaWrench, disabled: actionsBlocked, onClick: () => openReason("reconstruct", waybill.id) });
+          actions.push({ label: "بازسازی بارنامه قدیمی", icon: FaWrench, disabled: actionsBlocked, onClick: () => openReason("reconstruct", waybill.id, candidate.loadingId) });
         }
         actions.push(
-          { label: "صدور نسخه جایگزین", icon: FaRedo, tone: "warning", disabled: actionsBlocked, onClick: () => openReason("replace", waybill.id) },
+          { label: "صدور نسخه جایگزین", icon: FaRedo, tone: "warning", disabled: actionsBlocked, onClick: () => openReason("replace", waybill.id, candidate.loadingId) },
           ...(candidate.currentSalesInvoice && !canManageLoadingInvoices(candidate.loadingId) && !actionsBlocked ? [] : [{
             label: candidate.currentSalesInvoice ? "ابطال بارنامه و فاکتور فروش" : "ابطال بارنامه",
             icon: FaBan, tone: "danger" as const, disabled: actionsBlocked,
@@ -838,7 +848,7 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
                               },
                             },
                           );
-                        }, biometricAttemptNotice)
+                        }, biometricAttemptNotice, { loadingId: confirmationLoadingId })
                       }
                     />
                   ))}
@@ -854,6 +864,7 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
                             confirmation.id,
                           ),
                         "روش جایگزین فعال است. پس از تأیید رمز راننده، تأیید سرپرست گارد لازم است.",
+                        { loadingId: confirmationLoadingId },
                       )
                     }
                   />
@@ -868,6 +879,7 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
                     void runDispatch(
                       () => dispatchConfirmationAPI.verifyOtp(confirmation.id, otpCode),
                       "رمز راننده تأیید شد. تأیید نهایی را سرپرست گارد تکمیل می‌کند.",
+                      { loadingId: confirmationLoadingId },
                     );
                   }}
                 >
@@ -898,6 +910,7 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
                         void runDispatch(
                           () => dispatchConfirmationAPI.resendOtp(confirmation.id),
                           "رمز دوباره ارسال شد.",
+                          { loadingId: confirmationLoadingId },
                         )
                       }
                     />
@@ -921,6 +934,7 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
                         setReasonAction({
                           type: "revoke",
                           id: confirmation.authorization.id,
+                          loadingId: confirmationLoadingId,
                         });
                       }}
                     />

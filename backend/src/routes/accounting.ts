@@ -637,11 +637,10 @@ router.get('/dispatch-candidates', accountingDispatchView, async (req: AuthReque
       }) : [];
       const partnerCaseNumbers = new Map(partnerCases.map(row => [row.id, row.caseNumber]));
       const candidates = await tx.accountingDispatchCandidate.findMany({ where: { id: { in: allowedIds } }, select: {
-        id: true, status: true, createdAt: true, dispositionAt: true, dispositionReason: true,
+        id: true, allocationRevisionId: true, status: true, createdAt: true, dispositionAt: true, dispositionReason: true,
         pickupVerification: { select: { verifiedAt: true } },
         allocationRevision: { select: { snapshot: true, loadingId: true,
-          loading: { select: { sepidarLoadingReference: true, status: true } },
-          lines: { select: { snapshot: true, quantity: true, unit: true } } } },
+          loading: { select: { sepidarLoadingReference: true, status: true } } } },
         waybills: { orderBy: { issuedAt: 'asc' }, select: { id: true, number: true, status: true,
           issuedAt: true, voidedAt: true, replacesWaybillId: true,
           legacyReconstruction: { select: { id: true, createdAt: true } },
@@ -660,22 +659,28 @@ router.get('/dispatch-candidates', accountingDispatchView, async (req: AuthReque
         _max: { issuedAt: true, voidedAt: true },
       });
       const invoiceActivityByLoading = new Map(invoiceActivity.map(invoice => [invoice.loadingId, invoice._max]));
-      const referenceHistory = await tx.accountingAuditLog.findMany({ where: {
-        entityType: 'LogisticsLoading', entityId: { in: [...new Set(candidates.map(candidate => candidate.allocationRevision.loadingId))] },
-        action: { in: sepidarReferenceAuditActions },
-      }, select: { entityId: true, ...sepidarReferenceAuditFields }, orderBy: sepidarReferenceAuditOrder });
-      const historyByLoading = new Map<string, typeof referenceHistory>();
-      for (const entry of referenceHistory) {
-        const entries = historyByLoading.get(entry.entityId!) ?? [];
-        entries.push(entry);
-        historyByLoading.set(entry.entityId!, entries);
-      }
       const time = (value?: Date | null) => value?.getTime() ?? 0;
       const ownerById = new Map(owners.map(owner => [owner.id, owner.allocationRevision]));
+      const readLines = async (rows: Array<{ id: string; allocationRevisionId: string }>) => {
+        const revisionIds = rows.filter(row => ownerById.get(row.id)?.sourceKind === 'SALES_CONTRACT')
+          .map(row => row.allocationRevisionId);
+        const lines = revisionIds.length ? await tx.logisticsAllocationRevisionLine.findMany({
+          where: { revisionId: { in: revisionIds } },
+          select: { revisionId: true, snapshot: true, quantity: true, unit: true },
+        }) : [];
+        const byRevision = new Map<string, typeof lines>();
+        for (const line of lines) {
+          const group = byRevision.get(line.revisionId) ?? [];
+          group.push(line);
+          byRevision.set(line.revisionId, group);
+        }
+        return byRevision;
+      };
+      // Only a contract-number search needs line snapshots beyond the returned page.
+      const searchLines = search ? await readLines(candidates) : undefined;
       const ordered = candidates.map(candidate => {
         const owner = ownerById.get(candidate.id);
         const { allocationRevision, waybills, ...candidateData } = candidate;
-        const lines = owner?.sourceKind === 'SALES_CONTRACT' ? projectAccountingDispatchLines(allocationRevision.lines) : [];
         const invoice = invoiceActivityByLoading.get(allocationRevision.loadingId);
         const lastActivityAt = new Date(Math.max(time(candidate.createdAt), time(candidate.dispositionAt),
           time(invoice?.issuedAt), time(invoice?.voidedAt), ...candidate.waybills.map(waybill => Math.max(
@@ -684,24 +689,51 @@ router.get('/dispatch-candidates', accountingDispatchView, async (req: AuthReque
         return { ...candidateData, lastActivityAt, currentSalesInvoice: currentInvoiceByLoading.get(allocationRevision.loadingId) ?? null, loadingId: allocationRevision.loadingId,
           sepidarLoadingReference: allocationRevision.loading.sepidarLoadingReference,
           loadingStatus: allocationRevision.loading.status,
-          sepidarLoadingReferenceHistory: historyByLoading.get(allocationRevision.loadingId) ?? [],
           canManageSepidarLoadingReference: allocationRevision.loading.status === 'FINALIZED' &&
             !blockedReferenceLoadingIds.has(allocationRevision.loadingId),
           summary: projectAccountingDispatchCandidateSummary(allocationRevision.snapshot),
-          contractNumbers: [...new Set(lines.flatMap(line => line.contractNumber ? [line.contractNumber] : []))],
           partnerCaseNumber: owner?.partnerCaseId ? partnerCaseNumbers.get(owner.partnerCaseId) ?? null : null,
-          lines,
           waybills: waybills.map(({ _count, ...waybill }) => ({
             ...waybill, number: waybill.number.toString(), hasWaybillArtifact: _count.documentArtifacts === 1,
           })),
           canManage: Boolean(owner && canManageOwner(owner)) };
       }).sort((left, right) => right.lastActivityAt.getTime() - left.lastActivityAt.getTime()
         || right.createdAt.getTime() - left.createdAt.getTime() || left.id.localeCompare(right.id));
-      if (!paginated) return { manage, confirmation, candidates: ordered };
+      const contractNumbers = (lines: ReturnType<typeof projectAccountingDispatchLines>) =>
+        [...new Set(lines.flatMap(line => line.contractNumber ? [line.contractNumber] : []))];
+      const hydrate = async (rows: typeof ordered, related: typeof ordered = []) => {
+        const returned = [...rows, ...related];
+        const loadingIds = [...new Set(returned.map(row => row.loadingId))];
+        const [lineGroups, referenceHistory] = await Promise.all([
+          searchLines ?? readLines(returned),
+          loadingIds.length ? tx.accountingAuditLog.findMany({ where: {
+            entityType: 'LogisticsLoading', entityId: { in: loadingIds },
+            action: { in: sepidarReferenceAuditActions },
+          }, select: { entityId: true, ...sepidarReferenceAuditFields }, orderBy: sepidarReferenceAuditOrder }) : [],
+        ]);
+        const historyByLoading = new Map<string, typeof referenceHistory>();
+        for (const entry of referenceHistory) {
+          if (!entry.entityId) continue;
+          const history = historyByLoading.get(entry.entityId) ?? [];
+          history.push(entry);
+          historyByLoading.set(entry.entityId, history);
+        }
+        const project = ({ allocationRevisionId, ...row }: typeof ordered[number]) => {
+          const lines = projectAccountingDispatchLines(lineGroups.get(allocationRevisionId) ?? []);
+          return { ...row, lines, contractNumbers: contractNumbers(lines),
+            sepidarLoadingReferenceHistory: historyByLoading.get(row.loadingId) ?? [] };
+        };
+        return { candidates: rows.map(project), relatedCandidates: related.map(project) };
+      };
+      if (!paginated) return {
+        manage, confirmation, candidates: (await hydrate(ordered)).candidates,
+        relatedCandidates: undefined, invoiceActionCandidateIds: undefined, pagination: undefined,
+      };
       const matches = search ? ordered.filter(row => [
         row.summary.loadingNumber, row.sepidarLoadingReference, row.summary.driverName, row.summary.plate,
         row.summary.customerName, row.summary.projectName, row.summary.projectAddress, row.partnerCaseNumber,
-        ...row.waybills.map(waybill => waybill.number), ...row.contractNumbers,
+        ...row.waybills.map(waybill => waybill.number),
+        ...contractNumbers(projectAccountingDispatchLines(searchLines?.get(row.allocationRevisionId) ?? [])),
       ].some(value => normalizeDispatchSearch(value).includes(search))) : ordered;
       const currentPage = Math.min(page, Math.max(1, Math.ceil(matches.length / pageSize)));
       const start = (currentPage - 1) * pageSize;
@@ -717,8 +749,8 @@ router.get('/dispatch-candidates', accountingDispatchView, async (req: AuthReque
         }
       }
       return {
-        manage, confirmation, candidates: selected,
-        relatedCandidates: ordered.filter(row => loadingIds.has(row.loadingId) && !ids.has(row.id)),
+        manage, confirmation,
+        ...await hydrate(selected, ordered.filter(row => loadingIds.has(row.loadingId) && !ids.has(row.id))),
         invoiceActionCandidateIds: [...invoiceCandidatesByLoading.values()].filter(id => ids.has(id)),
         pagination: { page: currentPage, pageSize, total: matches.length },
       };

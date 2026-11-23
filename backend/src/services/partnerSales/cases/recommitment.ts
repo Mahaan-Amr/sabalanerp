@@ -18,7 +18,7 @@ export async function recordPartnerRecommitment(tx: Prisma.TransactionClient, ca
   const views = await readCurrentPartnerCaseViews(tx, caseId);
   if (!views?.accounting || !views.row.internalRecordId || !views.row.commitmentEventId) throw new Error('شواهد تعهد خرید کامل نیست.');
   const physicalFloor = await validatePartnerCommercialPhysicalFloor(tx, caseId,
-    views.accounting.products.filter(product => product.productType !== 'service'));
+    views.accounting.products.filter(product => product.productType !== 'service'), { allowMissingContractedEvidence: true });
   if (!physicalFloor.ok) throw new Error(physicalFloor.error.message);
   const root = views.row;
   const events = readPersistedPartnerEvents({ id: caseId, internalRecordId: root.internalRecordId! }, rows);

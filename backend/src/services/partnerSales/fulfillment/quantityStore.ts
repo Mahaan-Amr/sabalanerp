@@ -29,9 +29,11 @@ const matchesPartnerEvidenceHash = (fact: PartnerPersistedShipmentEvidence) => {
  * corrections. Caller holds the Case lock; repeat at finality because stock can
  * be reserved while a corrected Contract awaits its approvals. */
 export async function validatePartnerCommercialPhysicalFloor(tx: Prisma.TransactionClient, caseId: string,
-  products: Array<{ productRowId: string; quantity: string; unit: string }>): Promise<Result<undefined>> {
+  products: Array<{ productRowId: string; quantity: string; unit: string }>,
+  options: { allowMissingContractedEvidence?: boolean } = {}): Promise<Result<undefined>> {
   if (!await tx.partnerFulfillmentLineage.count({ where: { caseId } })) return { ok: true, value: undefined };
-  const projection = await readPartnerCorrectionQuantityProjection(tx, caseId);
+  const projection = await (options.allowMissingContractedEvidence ? readPartnerCorrectionQuantityProjection(tx, caseId)
+    : readPartnerShipmentQuantityProjection(tx, caseId));
   for (const row of projection.rows) {
     if (row.health !== 'CURRENT' || !row.quantities) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
     const successor = products.find(product => product.productRowId === row.productRowId);
@@ -195,7 +197,7 @@ async function readQuantityProjection(tx: Prisma.TransactionClient, caseId: stri
               AccountingDispatchCandidateStatus.PENDING, AccountingDispatchCandidateStatus.ACCEPTED,
             ] } } } }, select: { id: true, productRowId: true, partnerLineageId: true, quantity: true } });
           if (allocationLines.every(line => rows.some(row => row.kind === 'ALLOCATION_FINALIZED' &&
-              row.sourceType === 'PARTNER_LOGISTICS_ALLOCATION_REVISION' && row.sourceId === line.id &&
+              row.sourceType === 'PARTNER_LOGISTICS_ALLOCATION_REVISION' && row.sourceId === line.id && row.effectiveAt <= new Date(cutoff) &&
               row.productRowId === line.productRowId && row.partnerLineageId === line.partnerLineageId &&
               row.quantity.equals(line.quantity)))) {
             correctionBindings = new Map(view.accounting.products.filter(product => product.productType !== 'service')

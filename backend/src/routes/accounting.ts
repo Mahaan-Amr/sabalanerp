@@ -101,7 +101,7 @@ import { getEffectiveUserAccess } from '../services/effectiveAccessService';
 import { PartnerAccountingCommandError, PartnerAccountingTechnicalError } from '../services/partnerSales/accounting/errors';
 import { readPartnerSnapshot } from '../services/partnerSales/authorization/readSnapshot';
 import { createAuditedPartnerAuthorization } from '../services/partnerSales/authorization/audited';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { projectAccountingDispatchCandidateSummary, projectAccountingDispatchLines } from '../services/accountingDispatchCandidatePresentation';
 import { readPartnerDispatchAccountingCapability, readPartnerDispatchAccountingViewCapability } from '../services/partnerSales/accounting/capabilities';
 import accountingLedgerRouter from './accountingLedger';
@@ -355,25 +355,54 @@ router.get('/dispatch-waybills/:waybillId/reconstruction/pdf', accountingDispatc
   }
 });
 
+const validLoadingIssueCommandId = (id: unknown): id is string =>
+  typeof id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id);
+
+router.get('/loadings/:loadingId/issue-dispatch-documents/:commandId', accountingDispatchEdit, async (req: WorkspaceRequest & FeatureRequest, res: Response) => {
+  res.setHeader('Cache-Control', 'private, no-store');
+  const { loadingId, commandId } = req.params;
+  if (!validLoadingIssueCommandId(commandId)) return res.status(400).json({ success: false });
+  try {
+    const invoice = await createSalesInvoiceService(prisma).loadingIssueReceipt(
+      { actorId: req.user!.id, workspace: 'accounting' }, loadingId, commandId,
+    );
+    if (!invoice) return res.status(404).json({ success: false, code: 'LOADING_ISSUE_RECEIPT_MISSING' });
+    return res.json({ success: true, data: { status: 'ISSUED', commandId, invoice } });
+  } catch (error) {
+    if (error instanceof SalesInvoiceError) return res.status(error.status).json({ success: false, error: error.message });
+    return dispatchError(res, error);
+  }
+});
+
 router.post('/loadings/:loadingId/issue-dispatch-documents', accountingDispatchEdit, async (req: WorkspaceRequest & FeatureRequest, res: Response) => {
   try {
     const loadingId = req.params.loadingId;
     const invoices = createSalesInvoiceService(prisma, undefined, dispatchDocuments.documentStorage);
     const context = { actorId: req.user!.id, workspace: 'accounting' as const };
+    const { commandId, recovery } = req.body ?? {};
+    if (commandId !== undefined && !validLoadingIssueCommandId(commandId)) {
+      return res.status(400).json({ success: false, error: 'شناسه فرمان صدور معتبر نیست.' });
+    }
+    if (recovery !== undefined && (!recovery || typeof recovery.waybillId !== 'string' ||
+        typeof recovery.invoiceId !== 'string' || typeof recovery.reason !== 'string')) {
+      return res.status(400).json({ success: false, error: 'اسناد باطل‌شده و دلیل صدور مجدد را مشخص کنید.' });
+    }
+    const command = commandId ? { id: commandId, fingerprint: createHash('sha256').update(JSON.stringify(
+      recovery ? [recovery.waybillId, recovery.invoiceId, recovery.reason.trim()] : null,
+    )).digest('hex') } : undefined;
+    if (command) {
+      const invoice = await invoices.loadingIssueReceipt(context, loadingId, command.id, command.fingerprint);
+      if (invoice) return res.json({ success: true, data: { status: 'ISSUED', commandId, invoice } });
+    }
     const invoiceState = await invoices.list(context, loadingId);
     if (invoiceState.invoices.some(invoice => invoice.status === 'INVALIDATED')) {
       throw new LoadingDocumentIssuanceError('فاکتور موجود نامعتبر است؛ ابتدا حسابداری باید آن را تعیین‌تکلیف کند.');
     }
-    const recovery = req.body?.recovery;
     let recoveredWaybillId: string | undefined;
     if (recovery !== undefined) {
-      if (!recovery || typeof recovery.waybillId !== 'string' || typeof recovery.invoiceId !== 'string' ||
-          typeof recovery.reason !== 'string') {
-        return res.status(400).json({ success: false, error: 'اسناد باطل‌شده و دلیل صدور مجدد را مشخص کنید.' });
-      }
       recoveredWaybillId = await recoverLegacyLoadingWaybill(prisma, {
         loadingId, actorId: context.actorId, waybillId: recovery.waybillId,
-        invoiceId: recovery.invoiceId, reason: recovery.reason,
+        invoiceId: recovery.invoiceId, reason: recovery.reason, commandId: command?.id,
       });
     }
     const [loading, cutover, control] = await Promise.all([
@@ -396,7 +425,7 @@ router.post('/loadings/:loadingId/issue-dispatch-documents', accountingDispatchE
       return classifyLoadingDocumentPart(revision, revision.sourceKind === 'PARTNER_CASE' || Boolean(gate && gate.cutoverAt &&
         isShipmentStatementFlowActive(process.env, gate) && isPostCutoverFinalization(revision.finalizedAt, gate.cutoverAt)), legacy);
     });
-    await issueLoadingDocuments({ loadingId, parts, invoicePredecessorId: invoiceState.invoices[0]?.id ?? null,
+    const invoice = await issueLoadingDocuments({ loadingId, parts, invoicePredecessorId: invoiceState.invoices[0]?.id ?? null,
       issueWaybill: async (candidateId, idempotencyKey) => {
         const result = await decideAccountingDispatchCandidate(prisma, { candidateId, action: 'ACCEPT', idempotencyKey,
           actorId: req.user!.id, effectiveAuthority: { actorRole: req.user!.role, workspace: req.workspace,
@@ -416,10 +445,10 @@ router.post('/loadings/:loadingId/issue-dispatch-documents', accountingDispatchE
         await reconstructLegacyWaybill(prisma, { waybillId: candidate.waybills[0].id, actorId: req.user!.id,
           reason: 'ساخت نسخه بازسازی‌شده برای بارنامه قدیمی فاقد فایل' });
       },
-      issueInvoice: async idempotencyKey => { await invoices.issue({ ...context, requireDispatchDocumentGate: true,
-        expectedRevisionIds: parts.map(part => part.revisionId), expectedWaybillId: recoveredWaybillId }, loadingId, idempotencyKey); },
+      issueInvoice: idempotencyKey => invoices.issue({ ...context, requireDispatchDocumentGate: true,
+        expectedRevisionIds: parts.map(part => part.revisionId), expectedWaybillId: recoveredWaybillId }, loadingId, idempotencyKey, command),
     });
-    return res.json({ success: true, data: { status: 'ISSUED' } });
+    return res.json({ success: true, data: { status: 'ISSUED', commandId, invoice } });
   } catch (error) {
     if (error instanceof LoadingDocumentIssuanceError) return res.status(409).json({ success: false, error: error.message });
     if (error instanceof LegacyWaybillReconstructionError) return res.status(409).json({ success: false, error: error.message });

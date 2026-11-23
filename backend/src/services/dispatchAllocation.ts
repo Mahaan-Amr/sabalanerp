@@ -1207,7 +1207,7 @@ export async function readLegacyLoadingRecovery(tx: Tx, loadingId: string, cutov
 }
 
 export const recoverLegacyLoadingWaybill = (prisma: Database, input: {
-  loadingId: string; waybillId: string; invoiceId: string; reason: string; actorId: string;
+  loadingId: string; waybillId: string; invoiceId: string; reason: string; actorId: string; commandId?: string;
 }) => serializable(prisma, async tx => {
   const reason = typeof input.reason === 'string' ? input.reason.trim() : '';
   if (reason.length < 3 || reason.length > 2000) {
@@ -1220,6 +1220,21 @@ export const recoverLegacyLoadingWaybill = (prisma: Database, input: {
   }
   await assertCanonicalDispatchCommandAllowed(tx);
   await lockKeys(tx, [`LOGISTICS_LOADING:${input.loadingId}`, `SALES_INVOICE:${input.loadingId}`]);
+  const idempotencyKey = input.commandId ? `loading-issue-recovery:${input.actorId}:${input.commandId}` : undefined;
+  const fingerprint = digest([input.loadingId, input.waybillId, input.invoiceId, reason]);
+  if (idempotencyKey) {
+    const previous = await tx.accountingDispatchCommand.findFirst({ where: {
+      action: 'RECOVER_LEGACY_LOADING_WAYBILL', idempotencyKey, actorId: input.actorId,
+      candidate: { allocationRevision: { loadingId: input.loadingId } },
+    }, select: { result: true } });
+    if (previous) {
+      const receipt = previous.result as { waybillId: string; fingerprint: string };
+      if (receipt.fingerprint !== fingerprint) {
+        throw new DispatchAllocationConflictError('شناسه فرمان با درخواست قبلی مطابقت ندارد.');
+      }
+      return receipt.waybillId;
+    }
+  }
   const gate = await loadShipmentStatementRuntimeStateUnderLock(tx);
   const control = await tx.shipmentStatementOperationsControl.findUnique({
     where: { id: 'customer-shipment-statements' }, select: { id: true },
@@ -1244,6 +1259,12 @@ export const recoverLegacyLoadingWaybill = (prisma: Database, input: {
   await appendAudit(tx, { aggregateType: 'ACCOUNTING_DISPATCH_WAYBILL', aggregateId: replacement.id,
     eventType: 'WAYBILL_REISSUED_AFTER_VOID', actorId: input.actorId,
     payload: { reason, loadingId: input.loadingId, voidedWaybillId: waybill.id, voidedInvoiceId: invoice.id } });
+  if (idempotencyKey) {
+    await tx.accountingDispatchCommand.create({ data: { candidateId: candidate.id, idempotencyKey,
+      action: 'RECOVER_LEGACY_LOADING_WAYBILL', actorId: input.actorId,
+      result: { waybillId: replacement.id, fingerprint },
+    } });
+  }
   return replacement.id;
 });
 

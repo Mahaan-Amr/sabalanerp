@@ -2,7 +2,7 @@ import { Prisma } from '@prisma/client';
 import express, { type RequestHandler } from 'express';
 import { prisma } from '../lib/prisma';
 import { protect, type AuthRequest } from '../middleware/auth';
-import { FEATURE_PERMISSIONS, FEATURES, requireFeatureAccess, type FeatureRequest } from '../middleware/feature';
+import { FEATURE_PERMISSIONS, FEATURES, getUserFeatures, requireFeatureAccess, type FeatureRequest } from '../middleware/feature';
 import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES, type WorkspaceRequest } from '../middleware/workspace';
 import { AccountingCustomerTreasuryError } from '../services/accountingCustomerTreasury';
 import { AccountingLedgerError, accountingAccessProfileFromPermission } from '../services/accountingLedgerFoundation';
@@ -67,6 +67,13 @@ const stoneReturnPostingAccess = [
 const hasEditAccess = (req: FeatureRequest & WorkspaceRequest) =>
   [req.workspacePermission, req.featurePermission].every(level => level === 'edit' || level === 'admin');
 
+async function canFinalizeStoneReturn(req: AuthRequest & FeatureRequest & WorkspaceRequest) {
+  if (!req.user || !hasEditAccess(req)) return false;
+  const features = await getUserFeatures(req.user.id, req.user.role);
+  return features.some(({ feature, permission }) => feature === FEATURES.ACCOUNTING_CUSTOMER_POSTING_MANAGE
+    && (permission === FEATURE_PERMISSIONS.EDIT || permission === FEATURE_PERMISSIONS.ADMIN));
+}
+
 const logisticsView = [
   protect,
   requireWorkspaceAccess(WORKSPACES.LOGISTICS, WORKSPACE_PERMISSIONS.VIEW),
@@ -86,10 +93,12 @@ accountingStoneReturnsRouter.get('/:id', ...accountingStoneReturnsView, stoneRet
     isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
   }),
   canAllocate: hasEditAccess(req),
+  canFinalize: await canFinalizeStoneReturn(req),
 })));
 accountingStoneReturnsRouter.put('/:id/allocations', ...accountingStoneReturnsEdit, stoneReturnEndpoint(async req => ({
   ...await saveStoneReturnAllocationDraft(prisma, req.params.id, req.user!.id, req.body),
   canAllocate: true,
+  canFinalize: await canFinalizeStoneReturn(req),
 })));
 
 accountingStoneReturnsRouter.get('/:id/posting-context', ...stoneReturnPostingAccess, stoneReturnEndpoint(req =>

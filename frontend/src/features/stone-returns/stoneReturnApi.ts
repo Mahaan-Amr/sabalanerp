@@ -69,6 +69,7 @@ export type StoneReturnReview = {
   allocatedQuantity: string;
   unallocatedQuantity: string;
   canAllocate: boolean;
+  canFinalize: boolean;
   finalization: StoneReturnFinalization | null;
 };
 

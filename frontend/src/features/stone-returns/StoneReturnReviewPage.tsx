@@ -5,8 +5,6 @@ import {
   ErpButton, ErpCard, ErpEmptyState, ErpField, ErpFieldView, ErpInlineState,
   ErpInput, ErpPage, ErpSection, ErpSkeleton, ErpStatus, ErpSummaryGrid, ErpTextarea,
 } from '@/components/erp';
-import { useAuth } from '@/contexts/AuthContext';
-import { hasFeatureAccess } from '@/lib/permissions';
 import { StoneReturnPosting, StoneReturnPostingResult } from './StoneReturnPosting';
 import { userFacingError } from '@/features/dispatch/userFacingError';
 import { normalizeStoneReturnQuantity as quantityInput, stoneReturnQuantityAtoms } from './stoneReturnQuantityInput';
@@ -54,7 +52,6 @@ function StoneReturnCandidateFields({ candidate, quantity, editable, disabled, e
 }
 
 export function StoneReturnReviewPage({ receiptId }: { receiptId: string }) {
-  const { user } = useAuth();
   const [review, setReview] = useState<StoneReturnReview | null>(null);
   const [amounts, setAmounts] = useState<Record<string, string>>({});
   const [reason, setReason] = useState('');
@@ -101,7 +98,7 @@ export function StoneReturnReviewPage({ receiptId }: { receiptId: string }) {
     || review.draft.rows.some(row => quantityInput(row.quantity) !== quantityInput(amounts[candidateKey(row)] ?? '')));
   const canPost = editable && !pending && !draftHasUnsavedChanges && !unavailableRows.length
     && /^0(?:\.0+)?$/.test(review.unallocatedQuantity)
-    && hasFeatureAccess(user, 'accounting_customer_posting_manage', 'edit');
+    && review.canFinalize;
   const hasAllocations = Object.values(amounts).some(amount => quantityInput(amount) && quantityInput(amount) !== '0');
 
   const amountErrors = new Map(review?.candidates.flatMap<readonly [string, string]>(candidate => {

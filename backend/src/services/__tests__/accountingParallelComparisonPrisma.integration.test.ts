@@ -88,6 +88,8 @@ test('independent native posting compares against archived source, retains disag
       const reportCount = await tx.accountingOperationalReconciliation.count({ where: { sourceSystem: snapshotId } });
       const retry = await recordAccountingParallelComparison(tx, command);
       assert.equal(first.id, retry.id); assert.equal(first.outputHash, retry.outputHash);
+      assert.ok(first.reconciledAt instanceof Date);
+      assert.equal(retry.reconciledAt.toISOString(), first.reconciledAt.toISOString());
       assert.equal(await tx.accountingReplacementAuditEntry.count(), audits);
       assert.equal(await tx.accountingOperationalReconciliation.count({ where: { sourceSystem: snapshotId } }), reportCount);
       assert.equal((await manageAccountingParallelDifference(tx, { ...mappingCase, action: 'RESOLVE', cause: 'نگاشت تأیید نشده', resolution: 'تأیید نگاشت و مقایسهٔ دقیق' })).status, 'RESOLVED');

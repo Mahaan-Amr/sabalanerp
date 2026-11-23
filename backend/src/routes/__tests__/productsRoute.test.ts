@@ -152,7 +152,9 @@ test('mounted products router', async (t) => {
     for (const id of ['cm32xkazg000208i92sop3lkn', 'not-a-product-id']) {
       const missing = await get('/' + id, 'read');
       assert.equal(missing.status, 404);
-      assert.equal((await missing.json()).success, false);
+      const payload: unknown = await missing.json();
+      assert.ok(typeof payload === 'object' && payload !== null && 'success' in payload);
+      assert.equal(payload.success, false);
     }
     assert.equal((await get('/' + product.id, 'stats')).status, 403);
   });

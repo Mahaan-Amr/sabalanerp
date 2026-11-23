@@ -38,6 +38,7 @@ interface RenderableContract {
 }
 
 interface NormalizedCut {
+  dispatchHistoricalRate?: string | null;
   type: string;
   code?: string;
   meters: number;
@@ -47,6 +48,7 @@ interface NormalizedCut {
 }
 
 interface NormalizedService {
+  dispatchHistoricalRate?: string | null;
   code?: string;
   sourceId?: string;
   category: string;
@@ -61,6 +63,7 @@ interface NormalizedService {
 }
 
 interface NormalizedProductTool {
+  dispatchHistoricalRate?: string | null;
   code?: string;
   sourceId?: string;
   name: string;
@@ -1131,6 +1134,7 @@ const normalizeProducts = (
       const cutsFromBreakdown: NormalizedCut[] = Array.isArray(product?.cuttingBreakdown)
         ? product.cuttingBreakdown.map((cut: any) => ({
           type: cut?.type === 'cross' ? 'برش عرضی' : 'برش طولی',
+          dispatchHistoricalRate: cut?.dispatchHistoricalRate,
           code: firstText(cut?.code, cut?.sourceCode),
           meters: toNumber(cut?.meters),
           rate: mandatoryCuttingPolicy && cut?.type === 'cross' ? 0 : toNumber(cut?.rate),
@@ -1147,6 +1151,7 @@ const normalizeProducts = (
         : (!product?.smartCutDerivedQuantity && Array.isArray(product?.cutDetails)
           ? product.cutDetails.map((cut: any) => ({
               type: cutTypeLabel(cut),
+              dispatchHistoricalRate: cut?.dispatchHistoricalRate,
               code: firstText(cut?.code, cut?.sourceCode),
               meters: legacyCutMeters(product, cut),
               rate: toNumber(cut?.rate || cut?.cuttingCostPerMeter),
@@ -1191,10 +1196,11 @@ const normalizeProducts = (
         const calculationBase = service?.calculationBase || catalogSubService?.calculationBase;
         const rate = toNumber(service?.subService?.pricePerMeter || catalogSubService?.pricePerMeter);
         const selectedEdgesLabel = selectedEdgeLabels(service);
-        const rateUnitLabel = calculationBase === 'squareMeters' ? 'متر مربع' : 'متر طول';
+        const rateUnitLabel = calculationBase === 'squareMeters' ? 'متر مربع' : calculationBase === 'count' ? 'عدد' : 'متر طول';
         services.push({
           code: firstText(service?.subService?.code, service?.code, service?.sourceCode, catalogSubService?.code),
           sourceId: subServiceId,
+          dispatchHistoricalRate: service?.dispatchHistoricalRate,
           category: selectedEdgesLabel ? 'ابزار' : 'خدمات',
           name: firstText(
             service?.subService?.namePersian,
@@ -1205,7 +1211,7 @@ const normalizeProducts = (
           ),
           selectedEdgesLabel,
           amount,
-          amountLabel: `${toFaNumber(amount, 4)} ${calculationBase === 'squareMeters' ? 'متر مربع' : 'متر'}`,
+          amountLabel: `${toFaNumber(amount, 4)} ${calculationBase === 'squareMeters' ? 'متر مربع' : calculationBase === 'count' ? 'عدد' : 'متر'}`,
           rate,
           rateLabel: rate ? `${toFaNumber(rate)} تومان` : EMPTY,
           rateUnitLabel,
@@ -1229,6 +1235,7 @@ const normalizeProducts = (
         services.push({
           code: finishingCode,
           sourceId: finishingId,
+          dispatchHistoricalRate: product?.dispatchHistoricalFinishingRate,
           category: 'پرداخت سنگ',
           name: product?.finishingName || EMPTY,
           amount: finishingQuantity,
@@ -1259,6 +1266,7 @@ const normalizeProducts = (
           services.push({
             code: firstText(finishing?.code),
             sourceId: firstText(finishing?.finishingId, finishing?.id),
+            dispatchHistoricalRate: finishing?.dispatchHistoricalRate,
             category: 'پرداخت سنگ',
             name: firstText(finishing?.name, EMPTY),
             selectedEdgesLabel: selectedEdgeLabels({ edges: finishing?.targetEdges }),
@@ -1282,6 +1290,7 @@ const normalizeProducts = (
         return {
           code: firstText(tool?.code, tool?.toolCode, tool?.sourceCode),
           sourceId: firstText(tool?.toolId, tool?.id, tool?.sourceId),
+          dispatchHistoricalRate: tool?.dispatchHistoricalRate,
           name: tool?.namePersian || tool?.name || EMPTY,
           selectedEdgesLabel,
           amount,
@@ -2388,6 +2397,12 @@ const buildFlatProductRows = (
   return rows;
 };
 
+function historicalDispatchRate(value: string, unit: string) {
+  const [whole, fraction] = new Prisma.Decimal(value).toFixed().split('.');
+  const formatted = whole.replace(/\B(?=(\d{3})+(?!\d))/g, '٬') + (fraction ? `٫${fraction}` : '');
+  return `${formatted.replace(/\d/g, digit => '۰۱۲۳۴۵۶۷۸۹'[Number(digit)])} / ${unit}`;
+}
+
 /** Dispatch uses the same saved measurement and service rows as contract print. */
 export type DispatchProductPrintRow = Pick<FlatProductRow, 'code' | 'description' | 'category' |
   'length' | 'width' | 'count' | 'linearMeasurement' | 'squareMeasurement' | 'rate' | 'total'>;
@@ -2409,7 +2424,18 @@ export function createDispatchProductRows(contractData: unknown, options: {
       ? buildPartnerProductRows(product, options.partnerDetails, 1, currency, { moneyFractionDigits: 12 })
       : buildFlatProductRows([product, ...children], [], currency, 0, undefined,
           { showTotals: false, accountingDetail: true, moneyFractionDigits: 12 });
+    const historical = [product, ...children].filter(item => !item.frozenPricingBreakdown).flatMap(item => [
+      ...item.cuts.filter(isMeaningfulCut).map(cut => ({ ...cut, category: 'برش', rateUnitLabel: cut.squareMeters === undefined ? 'متر طول' : 'متر مربع' })),
+      ...item.tools.filter(isMeaningfulTool).map(tool => ({ ...tool, category: 'ابزار' })),
+      ...item.services.filter(isMeaningfulService),
+    ]);
     return rows.map(({ code, description, category, length, width, count, linearMeasurement, squareMeasurement, rate, total }) => {
+      const evidenceIndex = historical.findIndex(item => item.category === category);
+      if (evidenceIndex >= 0) {
+        const evidence = historical.splice(evidenceIndex, 1)[0];
+        if (evidence.dispatchHistoricalRate !== undefined) rate = evidence.dispatchHistoricalRate === null
+          ? 'نامشخص' : historicalDispatchRate(evidence.dispatchHistoricalRate, evidence.rateUnitLabel || '');
+      }
       const rateUnit = squareMeasurement ? 'متر مربع' : linearMeasurement ? 'متر طول' : '';
       const displayRate = category === 'برش' && rate && rateUnit && !rate.includes(' / ') ? `${rate} / ${rateUnit}` : rate;
       return { code, description, category, length, width, count, linearMeasurement, squareMeasurement, rate: displayRate, total };

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { Prisma } from '@prisma/client';
+import { Prisma, type PrismaClient } from '@prisma/client';
+import { publishInventoryValuationEvidencePrisma } from '../accountingCustomerTreasuryPrisma';
 import { hashAccountingEvidence } from '../accountingLedgerFoundation';
 import { hashCustomerTreasuryEvidence } from '../accountingCustomerTreasury';
 import { shipmentQuantityEvidenceIntegrityHash } from '../shipmentQuantityProjectionStore';
@@ -88,4 +89,24 @@ test('does not substitute a same-stone loading when the original dispatch eviden
   const result = await loadStoneReturnCandidates(tx, receipt);
   assert.equal(result.candidates.length, 0);
   assert.equal(result.hasUnlinkedOriginals, true);
+});
+
+
+test('publishes original valuation for a physical exit with a canonical persisted quantity', async () => {
+  const { dispatch } = fixture();
+  const tx = {
+    $executeRaw: async () => 1,
+    shipmentQuantityEvidence: { findUnique: async () => ({ ...dispatch, returnEvidenceId: null,
+      contractItem: { ...dispatch.contractItem, product: { stoneTypeCode: 'granite' } } }) },
+    inventoryValuationEvidence: {
+      upsert: async ({ create }: { create: Record<string, unknown> }) => create,
+    },
+  };
+  const db = { $transaction: async (task: (transaction: typeof tx) => Promise<unknown>) => task(tx) } as unknown as PrismaClient;
+  const valuation = await publishInventoryValuationEvidencePrisma(db, {
+    shipmentQuantityEvidenceId: dispatch.id, valuationMethod: 'SPECIFIC_IDENTIFICATION', valuationVersion: 1,
+    inventoryDocumentId: 'warehouse-doc', unitCostRials: 2n, actorId: 'accountant',
+  });
+  assert.equal(valuation.shipmentQuantityEvidenceId, dispatch.id);
+  assert.equal(String(valuation.totalCostRials), '60');
 });

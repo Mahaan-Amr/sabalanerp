@@ -17,10 +17,7 @@ import {
 import { createAccountingLedgerApplication, hashAccountingEvidence, IRR_ROUNDING_RULE_V1 } from './accountingLedgerFoundation';
 import { createAccountingLedgerPrismaRepository } from './accountingLedgerPrismaRepository';
 import { guardPhysicalExitIntegrityHash } from './physicalGateExit';
-import {
-  hasValidPersistedSalesShipmentEvidenceHash,
-  shipmentQuantityEvidenceIntegrityHash,
-} from './shipmentQuantityProjectionStore';
+import { hasValidPersistedSalesShipmentEvidenceHash } from './shipmentQuantityProjectionStore';
 import { generatePdfBufferFromHtml } from '../utils/pdf';
 import { collectedCustomerCheckRials, effectiveCustomerReceiptRials } from './accountingCustomerReceiptBalance';
 import { requireNewCustomerSaleAfterOpening } from './accountingCustomerSaleOpeningGuard';
@@ -214,11 +211,8 @@ export const publishInventoryValuationEvidencePrisma = async (database: PrismaCl
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`inventory-valuation:${input.shipmentQuantityEvidenceId}`}))`;
   const source = await tx.shipmentQuantityEvidence.findUnique({ where: { id: input.shipmentQuantityEvidenceId },
     include: { contractItem: { include: { product: true } } } });
-  const sourceIntegrityHash = source ? shipmentQuantityEvidenceIntegrityHash({ ...source,
-    quantity: source.quantity.toString(), effectiveAt: source.effectiveAt.toISOString(),
-    recordedAt: source.recordedAt.toISOString(), metadata: source.metadata as Record<string, unknown> } as Parameters<typeof shipmentQuantityEvidenceIntegrityHash>[0]) : null;
   const totalCost = source ? source.quantity.mul(input.unitCostRials.toString()) : null;
-  if (!source || !source.contractId || source.returnEvidenceId != null || source.integrityHash !== sourceIntegrityHash
+  if (!source || !source.contractId || source.returnEvidenceId != null || !hasValidPersistedSalesShipmentEvidenceHash(source)
     || !['PHYSICAL_EXIT', 'MANUAL_OUTAGE_EXIT', 'DISPATCH_CORRECTION_POSTED', 'LEGACY_DISPATCHED'].includes(source.kind)
     || !source.contractItem?.product.stoneTypeCode || input.valuationMethod !== 'SPECIFIC_IDENTIFICATION'
     || !Number.isInteger(input.valuationVersion) || input.valuationVersion < 1 || input.inventoryDocumentId.trim().length < 3

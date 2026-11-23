@@ -6,6 +6,8 @@ import express from 'express';
 import { disconnectDatabase, prisma } from '../lib/prisma';
 import salesReports from '../routes/salesReports';
 import { createAuthoritativeSession, SESSION_COOKIE } from '../services/identitySessionService';
+import { buildSalesReport } from '../services/salesReportingService';
+import { encodeSalesReportWorkbook } from '../services/salesReportWorkbook';
 
 const database = new URL(process.env.DATABASE_URL || '');
 assert.ok(['127.0.0.1', 'localhost'].includes(database.hostname) && database.pathname === '/sabalanerp',
@@ -21,7 +23,7 @@ const percentile = (samples: number[], quantile: number) => [...samples].sort((a
 async function seed(tag: string, count: number) {
   const id = runId + '-' + tag;
   const session = await prisma.$transaction(async (tx) => {
-    await tx.department.create({ data: { id, name: id, namePersian: 'آزمون خروجی فروش' } });
+    await tx.department.create({ data: { id, name: id, namePersian: 'آزمون خروجی فروش ' + id } });
     await tx.user.create({ data: { id, username: id, email: id + '@example.invalid', firstName: 'Fixture',
       lastName: tag, password: 'not-a-login', role: 'MANAGER', departmentId: id } });
     await tx.workspacePermission.create({ data: { userId: id, workspace: 'sales', permissionLevel: 'admin', isActive: true } });
@@ -44,6 +46,7 @@ async function seed(tag: string, count: number) {
 async function measure(base: string, reader: string, exporter: string, mode: 'quiet' | 'export') {
   const loop = monitorEventLoopDelay({ resolution: 5 });
   const reads: number[] = [];
+  const httpReads: number[] = [];
   const before = process.memoryUsage();
   let peakHeap = before.heapUsed;
   let peakRss = before.rss;
@@ -58,10 +61,13 @@ async function measure(base: string, reader: string, exporter: string, mode: 'qu
     for (let sample = 0; sample < 125; sample++) {
       const scheduled = startedAt + sample * 20;
       if (performance.now() < scheduled) await delay(scheduled - performance.now());
+      const dispatched = performance.now();
       const response = await fetch(base + '/overview?period=all', { headers: { cookie: reader } });
       assert.equal(response.status, 200);
       await response.arrayBuffer();
-      reads.push(performance.now() - scheduled);
+      const completed = performance.now();
+      reads.push(completed - scheduled);
+      httpReads.push(completed - dispatched);
     }
   };
   const exportFile = async () => {
@@ -81,6 +87,7 @@ async function measure(base: string, reader: string, exporter: string, mode: 'qu
     const [, workbook] = await Promise.all([probeReads(), exportFile()]);
     const mib = 1024 * 1024;
     console.log(JSON.stringify({ mode, rows, reads: reads.length, readP95Ms: percentile(reads, 0.95), readMaxMs: Math.max(...reads),
+      httpReadP95Ms: percentile(httpReads, 0.95), httpReadMaxMs: Math.max(...httpReads),
       eventLoopP95Ms: loop.percentile(95) / 1e6, eventLoopMaxMs: loop.max / 1e6,
       peakRssMiB: peakRss / mib, rssAboveStartMiB: (peakRss - before.rss) / mib,
       peakMainHeapMiB: peakHeap / mib, mainHeapAboveStartMiB: (peakHeap - before.heapUsed) / mib, workbook }));
@@ -88,6 +95,56 @@ async function measure(base: string, reader: string, exporter: string, mode: 'qu
     clearInterval(memory);
     loop.disable();
   }
+}
+
+
+const contractColumns = ['contractNumber', 'customer', 'project', 'status', 'statusDescription', 'amount', 'responsibleSeller', 'realizedSeller'];
+const sections = ['overview', 'contracts', 'customers', 'products', 'finance', 'delivery', 'sellers', 'accountingRegistered'];
+const configuration = { includeTables: true, sections, contractColumns };
+
+async function verifyWorkerDownload(base: string, reader: string, exporter: Awaited<ReturnType<typeof seed>>) {
+  const requestDownload = (cookie: string) => fetch(base + '/export.xlsx', {
+    method: 'POST',
+    headers: { cookie, 'content-type': 'application/json' },
+    body: JSON.stringify({ filters, configuration }),
+  });
+  const unauthorized = await requestDownload('');
+  assert.equal(unauthorized.status, 401);
+  await unauthorized.arrayBuffer();
+
+  const inProgress = requestDownload(exporter.cookie);
+  try {
+    await delay(60);
+    const overlapping = await requestDownload(reader);
+    assert.equal(overlapping.status, 429);
+    assert.equal((await overlapping.json()).code, 'SALES_WORKBOOK_BUSY');
+
+    await prisma.workspacePermission.update({
+      where: { userId_workspace: { userId: exporter.id, workspace: 'sales' } },
+      data: { permissionLevel: 'view' },
+    });
+    const revoked = await inProgress;
+    assert.equal(revoked.status, 403);
+    assert.equal(revoked.headers.get('content-disposition'), null);
+    assert.equal((await revoked.json()).code, 'SALES_WORKBOOK_ACCESS_CHANGED');
+  } finally {
+    await inProgress.catch(() => undefined);
+    await prisma.workspacePermission.update({
+      where: { userId_workspace: { userId: exporter.id, workspace: 'sales' } },
+      data: { permissionLevel: 'admin' },
+    });
+  }
+
+  const response = await requestDownload(exporter.cookie);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('content-disposition'), 'attachment; filename="sales-report.xlsx"');
+  assert.equal(response.headers.get('cache-control'), 'no-store, private');
+  const bytes = Buffer.from(await response.arrayBuffer());
+  const snapshot = await buildSalesReport({ userId: exporter.id, departmentId: exporter.id, role: 'MANAGER',
+    canManage: true, canCompany: false, canOpenSalesSource: true }, filters);
+  const reference = encodeSalesReportWorkbook(snapshot, configuration);
+  assert.deepEqual(bytes, reference);
+  console.log(JSON.stringify({ verified: ['unauthenticated', 'busy', 'in-flight-downgrade', 'authorized-retry', 'byte-parity'], bytes: bytes.length }));
 }
 
 async function main() {
@@ -101,11 +158,14 @@ async function main() {
     const base = 'http://127.0.0.1:' + address.port;
     const warmup = await fetch(base + '/overview?period=all', { headers: { cookie: reader.cookie } });
     assert.equal(warmup.status, 200);
-    await warmup.arrayBuffer();
+    const warmupReport = (await warmup.json()).data;
+    assert.equal(warmupReport.scope.departmentId, reader.id);
+    assert.equal(warmupReport.contracts.length, 20);
     for (const mode of ['quiet', 'export', 'quiet', 'export', 'quiet', 'export'] as const) {
       global.gc?.();
       await measure(base, reader.cookie, exporter.cookie, mode);
     }
+    if (process.argv.includes('--verify-worker')) await verifyWorkerDownload(base, reader.cookie, exporter);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     await prisma.$transaction(async (tx) => {

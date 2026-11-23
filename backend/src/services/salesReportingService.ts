@@ -229,7 +229,7 @@ export const buildSalesReportScope = (access: SalesReportAccess, query: SalesRep
   };
 };
 
-const validateSalesReportScope = async (access: SalesReportAccess, query: SalesReportQuery) => {
+export const validateSalesReportScope = async (access: SalesReportAccess, query: SalesReportQuery) => {
   const scope = buildSalesReportScope(access, query);
   const requestedDepartment = typeof query.departmentId === 'string' && query.departmentId ? query.departmentId : null;
   const requestedSeller = typeof query.sellerId === 'string' && query.sellerId ? query.sellerId : null;

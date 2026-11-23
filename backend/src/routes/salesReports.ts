@@ -1,10 +1,10 @@
 import express, { Response } from 'express';
 import path from 'path';
 import { Prisma } from '@prisma/client';
-import { encodeSalesReportWorkbook } from '../services/salesReportWorkbook';
+import { buildSalesReportWorkbook, SalesReportWorkbookUnavailable, tryAcquireSalesReportWorkbookSlot } from '../services/salesReportWorkbookExport';
 import { protect } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES, WorkspaceRequest } from '../middleware/workspace';
-import { buildSalesReport, getSalesReportSellers, SalesReportAccess } from '../services/salesReportingService';
+import { buildSalesReport, getSalesReportSellers, SalesReportAccess, SalesReportQuery, validateSalesReportScope } from '../services/salesReportingService';
 import { generatePdfFromHtml } from '../utils/pdf';
 import { downloadAndRemoveDocumentPdf } from '../services/documentPdfDownload';
 import { renderReportPdfHeaderTemplate, renderYekanFontFaces } from '../utils/printTemplate';
@@ -215,15 +215,77 @@ router.post('/export.pdf', ...reportAccess, async (req: WorkspaceRequest, res: R
   } catch (error: any) { res.status(400).json({ success: false, error: error.message }); }
 });
 
-router.post('/export.xlsx', ...reportAccess, async (req: WorkspaceRequest, res: Response) => {
+type PreparedSalesWorkbook = { access: SalesReportAccess; sessionId: string | undefined; filters: SalesReportQuery; buffer: Buffer };
+
+router.post('/export.xlsx', ...reportAccess, async (req: WorkspaceRequest, res: Response, next) => {
+  res.setHeader('Cache-Control', 'no-store, private');
+  const release = tryAcquireSalesReportWorkbookSlot();
+  if (!release) {
+    res.setHeader('Retry-After', '2');
+    return res.status(429).json({ success: false, code: 'SALES_WORKBOOK_BUSY' });
+  }
+
+  const controller = new AbortController();
+  let ready = false;
+  const onClose = () => {
+    controller.abort();
+    if (ready) release();
+  };
+  res.once('close', onClose);
   try {
-    const report = await buildSalesReport(accessFor(req), req.body?.filters || {});
-    const config = safeConfig(req.body?.configuration || {});
-    const buffer = encodeSalesReportWorkbook(report, config);
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', 'attachment; filename="sales-report.xlsx"');
-    res.send(buffer);
-  } catch (error: any) { res.status(400).json({ success: false, error: error.message }); }
+    const access = accessFor(req);
+    const sessionId = req.sessionId;
+    const filters = req.body?.filters || {};
+    const { sections, contractColumns, includeTables } = safeConfig(req.body?.configuration || {});
+    const {
+      cards, contracts, customers, products, finance, delivery, sellers, accountingRegistered, permissions,
+    } = await buildSalesReport(access, filters);
+    if (res.destroyed) return;
+
+    const buffer = await buildSalesReportWorkbook({
+      cards, contracts, customers, products, finance, delivery, sellers, accountingRegistered, permissions,
+    }, { sections, contractColumns, includeTables }, controller.signal);
+    if (res.destroyed) return;
+
+    res.locals.salesWorkbook = { access, sessionId, filters, buffer } satisfies PreparedSalesWorkbook;
+    res.once('finish', () => {
+      res.off('close', onClose);
+      release();
+    });
+    ready = true;
+    next();
+  } catch (error) {
+    if (res.destroyed) return;
+    if (error instanceof SalesReportWorkbookUnavailable) {
+      return res.status(503).json({ success: false, code: 'SALES_WORKBOOK_UNAVAILABLE' });
+    }
+    const message = error instanceof Error ? error.message : 'Workbook generation failed';
+    return res.status(400).json({ success: false, error: message });
+  } finally {
+    if (!ready) {
+      res.off('close', onClose);
+      release();
+    }
+  }
+}, ...reportAccess, async (req: WorkspaceRequest, res: Response) => {
+  const { access, sessionId, filters, buffer }: PreparedSalesWorkbook = res.locals.salesWorkbook;
+  const current = accessFor(req);
+  if (req.sessionId !== sessionId || current.userId !== access.userId || current.role !== access.role
+      || current.departmentId !== access.departmentId || current.canManage !== access.canManage
+      || current.canCompany !== access.canCompany) {
+    return res.status(403).json({ success: false, code: 'SALES_WORKBOOK_ACCESS_CHANGED' });
+  }
+  try {
+    await validateSalesReportScope(current, filters);
+  } catch {
+    return res.status(403).json({ success: false, code: 'SALES_WORKBOOK_ACCESS_CHANGED' });
+  }
+  if (res.destroyed) return;
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', 'attachment; filename="sales-report.xlsx"');
+  res.setHeader('Content-Length', buffer.byteLength);
+  res.setTimeout(60_000, () => res.destroy());
+  res.end(buffer);
 });
 
 export default router;

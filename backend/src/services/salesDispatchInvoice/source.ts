@@ -1,4 +1,5 @@
 import { Prisma } from "@prisma/client";
+import { canonicalHash } from "@sabalanerp/partner-sales-contracts";
 import { historicalServicePrintData } from "./historicalServices";
 import { projectLoadedServiceRows, type ServiceQuantityBasis } from "./serviceQuantities";
 import { projectLoadedMaterialRows } from "./materialQuantities";
@@ -149,15 +150,32 @@ export async function readInvoiceSource(
     );
   }
 }
+/** Reconstruct presentation from the exact issued bindings, even after replacement or void.
+ * This path has no authority to issue, validate cargo or change stored evidence. */
+export async function readIssuedInvoicePrint(tx: Prisma.TransactionClient, issued: InvoiceSource) {
+  try {
+    return (await buildInvoiceSource(tx, issued.loadingId, true, issued)).print;
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") return undefined;
+    if (error instanceof Prisma.PrismaClientKnownRequestError || error instanceof Prisma.PrismaClientUnknownRequestError) throw error;
+    if (error instanceof TypeError || error instanceof ReferenceError || error instanceof SyntaxError || error instanceof RangeError) throw error;
+    // Domain readers use ordinary Error for failed evidence verification.
+    // Programming errors and database failures must remain visible to operators.
+    if (!(error instanceof Error)) throw error;
+    return undefined;
+  }
+}
 async function buildInvoiceSource(
   tx: Prisma.TransactionClient,
   loadingId: string,
   includePrint: boolean,
+  issued?: InvoiceSource,
 ): Promise<InvoiceSource> {
   const loading = await tx.logisticsLoading.findUnique({
     where: { id: loadingId },
     include: {
       canonicalAllocationRevisions: {
+        ...(issued ? { where: { id: { in: issued.evidence.map(item => item.revisionId) } } } : {}),
         orderBy: [{ queueTurnId: "asc" }, { revisionNumber: "desc" }],
         include: {
           lines: true,
@@ -182,7 +200,7 @@ async function buildInvoiceSource(
     },
   });
   if (!loading) throw new SalesInvoiceError("بارگیری پیدا نشد.", 404);
-  if (loading.status !== "FINALIZED")
+  if (!issued && loading.status !== "FINALIZED")
     throw new SalesInvoiceError("بارگیری باید نهایی‌شده و فعال باشد.");
   const revisions = [
     ...new Map(
@@ -192,7 +210,7 @@ async function buildInvoiceSource(
         .map((r) => [r.queueTurnId, r]),
     ).values(),
   ].sort((a, b) => a.queueTurnId.localeCompare(b.queueTurnId));
-  if (!revisions.length)
+  if (!revisions.length || (issued && revisions.length !== issued.evidence.length))
     throw new SalesInvoiceError(
       "نسخه نهایی و قیمت‌گذاری‌شده بارگیری موجود نیست.",
     );
@@ -200,7 +218,7 @@ async function buildInvoiceSource(
     schemaVersion: 1,
     loadingId,
     loadingNumber: loading.loadingNumber,
-    customerId: loading.customerId,
+    customerId: (issued?.customerId ?? loading.customerId),
     customerName: "",
     counterparty: "",
     currency: "",
@@ -215,7 +233,7 @@ async function buildInvoiceSource(
     rows: Object.create(null) as Record<string, DispatchProductPrintRow[]>,
     contractedGross: Object.create(null) as Record<string, string>,
     loadedPieceCounts: Object.create(null) as Record<string, string> } : undefined;
-  if (print) {
+  if (print && !issued) {
     const contractIds = revisions.flatMap(revision => revision.lines.flatMap(
       line => line.sourceContractId ? [line.sourceContractId] : [],
     ));
@@ -230,10 +248,13 @@ async function buildInvoiceSource(
   const counterparties = new Set<string>();
   for (const revision of revisions) {
     const candidate = revision.candidate;
-    const waybill = candidate?.waybills.find((w) => w.status !== "VOIDED");
+    const issuedEvidence = issued?.evidence.find(item => item.revisionId === revision.id);
+    const waybill = candidate?.waybills.find((w) => issuedEvidence ? w.id === issuedEvidence.waybillId : w.status !== "VOIDED");
+    if (issued && (!issuedEvidence || issuedEvidence.allocationHash !== revision.integrityHash ||
+        issuedEvidence.waybillHash !== waybill?.integrityHash)) throw new SalesInvoiceError('شواهد تاریخی تخصیص مطابقت ندارد.');
     if (
       !candidate ||
-      candidate.status !== "ACCEPTED" ||
+      (!issued && candidate.status !== "ACCEPTED") ||
       !revision.sealedAt ||
       !waybill
     ) {
@@ -241,22 +262,24 @@ async function buildInvoiceSource(
         "تأیید حسابداری و بارنامه معتبر همه راننده‌های این بارگیری باید کامل شود.",
       );
     }
-    if (waybill.dispatchCorrections.some((c) => c.status !== "POSTED"))
+    if (!issued && waybill.dispatchCorrections.some((c) => c.status !== "POSTED"))
       throw new SalesInvoiceError("گردش اصلاح ارسال هنوز کامل نشده است.");
     if (
-      (await assessBoundAllocationPricingFreshness(tx, revision.id)).status !==
+      !issued && (await assessBoundAllocationPricingFreshness(tx, revision.id)).status !==
       "CURRENT"
     )
       throw new SalesInvoiceError(
         "قیمت تأییدشده بارگیری تغییر کرده؛ ابتدا اصلاح ارسال را تکمیل کنید.",
       );
     const priced = await readBoundPricedAllocation(tx, revision.id, { includeQuantityBasis: includePrint });
+    if (issuedEvidence && sourceHash(priced.pricingVersions) !== sourceHash(issuedEvidence.pricing))
+      throw new SalesInvoiceError('نسخه قیمت تاریخی مطابقت ندارد.');
     if (result.currency && result.currency !== priced.currency)
       throw new SalesInvoiceError("ارز اقلام فاکتور یکسان نیست.");
     result.currency = priced.currency;
     const snapshot = record(revision.snapshot),
       frozenLoading = record(snapshot.loading);
-    if (String(record(frozenLoading.customer).id) !== loading.customerId)
+    if (String(record(frozenLoading.customer).id) !== (issued?.customerId ?? loading.customerId))
       throw new SalesInvoiceError(
         "هویت مشتری بارگیری با نسخه نهایی مطابقت ندارد.",
       );
@@ -304,7 +327,9 @@ async function buildInvoiceSource(
       const financial = await tx.accountingFinancialRecord.findUnique({
         where: { id: financialId },
       });
-      if (!validFinancialRecord(financial))
+      if (issuedEvidence && !issuedEvidence.financialRecordIds.includes(financialId))
+        throw new SalesInvoiceError('سند مالی تاریخی مطابقت ندارد.');
+      if (!financial || (!issued && !validFinancialRecord(financial)))
         throw new SalesInvoiceError("رکورد مالی مبدأ معتبر و تأییدشده نیست.");
       financialIds.push(financialId);
       if ("caseId" in pricing) {
@@ -312,6 +337,15 @@ async function buildInvoiceSource(
           record(financial!.sourceSnapshot).partnerPreparation ||
             financial!.sourceSnapshot,
         );
+        if (issued) {
+          const { owner, evidenceHash, ...preparedEvidence } = preparation;
+          const verifiedHash = await canonicalHash({ schemaVersion: 1, purpose: 'PARTNER_ACCOUNTING_SOURCE', ...preparedEvidence });
+          const readinessHash = await canonicalHash({ schemaVersion: 1, purpose: 'PARTNER_SHIPMENT_PRICING_READY',
+            owner, internalRecordId: preparation.internalRecordId, invoiceRecordId: financialId,
+            financialApprovalEvidenceId: pricing.financialApprovalEvidenceId, preparationEvidenceHash: evidenceHash });
+          if (verifiedHash !== evidenceHash || readinessHash !== pricing.readinessEvidenceHash)
+            throw new SalesInvoiceError('شاهد مالی تاریخی همکار مطابقت ندارد.');
+        }
         const debtor = record(preparation.debtor);
         counterparties.add(
           nonempty(debtor.commercialAccountId, "طرف‌حساب همکار"),
@@ -348,7 +382,7 @@ async function buildInvoiceSource(
         if (
           financial!.contractId !== pricing.contractId ||
           (financial!.customerId &&
-            financial!.customerId !== loading.customerId)
+            financial!.customerId !== (issued?.customerId ?? loading.customerId))
         )
           throw new SalesInvoiceError(
             "طرف‌حساب سند مالی با بارگیری یکسان نیست.",
@@ -359,6 +393,8 @@ async function buildInvoiceSource(
         const expectedSnapshotHash = record(
           evidence.financialApproval,
         ).sourceSnapshotHash;
+        if (issued && !expectedSnapshotHash)
+          throw new SalesInvoiceError('شاهد نسخه مالی تاریخی موجود نیست.');
         if (
           expectedSnapshotHash &&
           expectedSnapshotHash !==
@@ -368,10 +404,11 @@ async function buildInvoiceSource(
             "نسخه مالی ثبت‌شده با شاهد قیمت مصوب مطابقت ندارد.",
           );
         const customer = record(evidence.customer);
-        if (customer.id && customer.id !== loading.customerId)
+        if (customer.id && customer.id !== (issued?.customerId ?? loading.customerId))
           throw new SalesInvoiceError("مشتری قیمت مصوب با بارگیری یکسان نیست.");
-        counterparties.add(loading.customerId);
+        counterparties.add((issued?.customerId ?? loading.customerId));
         result.counterparty = result.customerName;
+        versions.get(pricing.contractId).financialSnapshotCurrency = financial!.currency;
         versions.get(pricing.contractId).financialSnapshot = record(
           financial!.sourceSnapshot,
         );
@@ -397,6 +434,17 @@ async function buildInvoiceSource(
       const source = partner
         ? record(version?.preparation)
         : record(version?.financialSnapshot);
+      if (print && issued && !issued.print?.contacts && !partner && !print.contacts.has(contractId)) {
+        const data = record(source.contractData), project = record(data.project), customer = record(data.customer);
+        const text = (...values: unknown[]) => values.find(value => typeof value === 'string' && value.trim()) as string || '';
+        const savedLine = issued.lines.find(saved => saved.key === line.allocationRevisionLineId);
+        print.contacts.set(contractId, {
+          contractNumber: savedLine?.contractNumber || '', project: savedLine?.project || '',
+          address: text(project.address), customerPhone: text(customer.phone, customer.mobile, customer.workNumber),
+          manager: text(project.projectManagerName, project.managerName, customer.projectManagerName),
+          managerPhone: text(project.projectManagerNumber, project.managerPhone, customer.projectManagerNumber),
+        });
+      }
       const products = partner
         ? version.items
         : record(source.contractData).products;
@@ -407,6 +455,8 @@ async function buildInvoiceSource(
             )
           : null,
       );
+      if (issued && !(product.productRowId || product.rowId))
+        throw new SalesInvoiceError('جزئیات محصول تاریخی موجود نیست.');
       if (print) {
         if (typeof lineSnapshot.loadedPieceCount === 'string') {
           print.loadedPieceCounts[line.allocationRevisionLineId] = lineSnapshot.loadedPieceCount;
@@ -417,13 +467,23 @@ async function buildInvoiceSource(
             stoneCode: product.productCode, stoneName: product.description }] },
             { currency: priced.currency, partnerDetails: product.printDetails });
         } else if (!projectRows) {
-          projectRows = createDispatchProductRows(await historicalServicePrintData(tx, source.contractData, priced.currency, source.currency || record(record(source.contractData).payment).currency), { currency: priced.currency, siblingDispatchRows });
+          projectRows = createDispatchProductRows(await historicalServicePrintData(tx, source.contractData, priced.currency, source.currency || record(record(source.contractData).payment).currency || version?.financialSnapshotCurrency), { currency: priced.currency, siblingDispatchRows });
           contractRows.set(contractId, projectRows);
         }
         const approved = partner ? product.totalPrice : version?.rows?.find(
           (approvedRow: { productRowId: string }) => approvedRow.productRowId === line.productRowId,
         )?.canonicalAllInTotal;
-        if (approved != null) print.contractedGross[line.allocationRevisionLineId] = String(approved);
+        if (approved != null) {
+          // Row totals still carry the frozen financial source currency. Compare
+          // them with the approval in that same currency before allocating any
+          // approved shipment amount; historical service rates are independent.
+          const rowCurrency = partner ? priced.currency : source.currency || record(record(source.contractData).payment).currency || version?.financialSnapshotCurrency;
+          const factor = (currency: string) => ['IRT', 'TOMAN', 'تومان'].includes(String(currency).trim().toUpperCase()) ? 10
+            : ['IRR', 'RIAL', 'ریال'].includes(String(currency).trim().toUpperCase()) ? 1 : undefined;
+          const from = factor(priced.currency), to = factor(rowCurrency);
+          print.contractedGross[line.allocationRevisionLineId] = from && to
+            ? amount(String(approved)).mul(from).div(to).toFixed() : rowCurrency ? '' : String(approved);
+        }
         print.rows[line.allocationRevisionLineId] = projectRows(line.productRowId);
         const contractedQuantity = partner ? product.quantity : version?.rows?.find(
           (approvedRow: { productRowId: string }) => approvedRow.productRowId === line.productRowId,
@@ -511,7 +571,7 @@ async function buildInvoiceSource(
       });
     }
     const correctionHashes: string[] = [];
-    for (const correction of waybill.dispatchCorrections
+    for (const correction of (issued ? [] : waybill.dispatchCorrections)
       .filter((c) => c.status === "POSTED")
       .sort(
         (a, b) =>
@@ -569,6 +629,13 @@ async function buildInvoiceSource(
       }
     }
     for (const line of currentLines) {
+      if (issued) {
+        const frozenLine = issued.lines.find(saved => saved.key === line.key && saved.driverId === revision.queueTurnId);
+        if (!frozenLine || frozenLine.productRowId !== line.productRowId || frozenLine.unit !== line.unit)
+          throw new SalesInvoiceError('ردیف تاریخی تخصیص مطابقت ندارد.');
+        if (line.quantity !== frozenLine.quantity && print?.loadedPieceCounts) delete print.loadedPieceCounts[line.key];
+        Object.assign(line, frozenLine);
+      }
       const projection = materialProjection.get(line.key);
       if (print && projection) {
         const basis = projection.basis ? { ...projection.basis,
@@ -613,6 +680,8 @@ async function buildInvoiceSource(
     throw new SalesInvoiceError(
       "فاکتور باید متعلق به یک مشتری و یک طرف‌حساب باشد.",
     );
-  if (print) result.print = { ...print, contacts: [...print.contacts.values()] };
+  if (issued && (result.lines.length !== issued.lines.length || result.currency !== issued.currency))
+    throw new SalesInvoiceError('ردیف‌های تاریخی کامل نیستند.');
+  if (print) result.print = { ...print, contacts: issued?.print?.contacts ?? [...print.contacts.values()] };
   return result;
 }

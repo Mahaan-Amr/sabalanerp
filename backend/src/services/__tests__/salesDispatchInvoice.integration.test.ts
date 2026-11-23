@@ -561,10 +561,15 @@ async function run() {
         assert.match(invoiceHtml, /امضای تحویل‌گیرنده/);
         const record = await tx.salesDispatchInvoice.findUniqueOrThrow({ where: { id: issued.id } });
         const { print, pdfLayoutVersion: _pdfLayoutVersion, ...legacySnapshot } = record.snapshot as Prisma.JsonObject;
-        let historicalSnapshot = { ...legacySnapshot, print };
+        let historicalSnapshot: Record<string, unknown> = { ...legacySnapshot, print: { ...(print as Prisma.JsonObject), rows: Object.fromEntries(
+          Object.entries((print as any).rows).map(([key, rows]) => [key, (rows as any[]).map(row =>
+            row.category === 'ابزار' ? { ...row, linearMeasurement: '۹۹۹۹', description: 'جزئیات چاپی کهنه' } : row)]),
+        ) } };
         const legacyBytes = Buffer.from("legacy invoice artifact");
+        let missingHistoricalEvidence = false;
         const legacyClient = new Proxy(client, {
           get(target, key, receiver) {
+            if (missingHistoricalEvidence && key === 'accountingFinancialRecord') return { findUnique: async () => null };
             if (key === "salesDispatchInvoice") return {
               findFirst: async () => ({ ...record, snapshot: historicalSnapshot, pdf: legacyBytes, pdfSha256: bytesHash(legacyBytes) }),
             };
@@ -579,6 +584,7 @@ async function run() {
         }), async (snapshot, reason) => Buffer.from(renderSalesInvoice(snapshot, reason)));
         const refreshed = await legacyService.download(ctx, loading.id, issued.id);
         assert.equal(refreshed.number, issued.number);
+        assert.doesNotMatch(Buffer.from(refreshed.bytes).toString(), /جزئیات چاپی کهنه|۹۹۹۹/);
         assert.match(Buffer.from(refreshed.bytes).toString(), /ابزار نیم‌لول[\s\S]*۴۰ \/ متر طول/);
         assert.match(Buffer.from(refreshed.bytes).toString(), /بلوار دکتر حسابی/);
         historicalSnapshot = { ...legacySnapshot, print: undefined };
@@ -734,6 +740,23 @@ async function run() {
           ).toString(),
           /باطل‌شده/,
         );
+        // Later financial invalidation and posted cargo corrections cannot import
+        // their changed quantities into the old invoice's corrected presentation.
+        historicalSnapshot = { ...legacySnapshot, print };
+        const invalidReprint = Buffer.from((await legacyService.download(
+          { ...ctx, workspace: 'logistics' }, loading.id, issued.id,
+        )).bytes).toString();
+        assert.match(invalidReprint, /نامعتبر/);
+        assert.match(invalidReprint, /نیم لول \(جلو، چپ\)[\s\S]*۵۰۰٬۰۰۰ \/ متر طول/);
+        const oldToolRows = invalidReprint.match(/<tr class="operation">[\s\S]*?<\/tr>/g) || [];
+        for (const row of oldToolRows.filter(row => row.includes('ابزار نیم‌لول'))) assert.match(row, /۰٫۸۳۳۳/);
+        await assert.rejects(() => legacyService.download(ctx, loading.id, issued.id, true), /معتبر برای چاپ/);
+        assert.equal(bytesHash((await legacyService.download(ctx, loading.id, issued.id, false, true)).bytes), bytesHash(legacyBytes));
+        assert.equal(bytesHash((await service.download(ctx, loading.id, issued.id, false, true)).bytes), record.pdfSha256);
+        missingHistoricalEvidence = true;
+        const unavailable = Buffer.from((await legacyService.download(ctx, loading.id, issued.id)).bytes).toString();
+        assert.match(unavailable, /جزئیات تاریخی.*نامشخص/);
+        assert.doesNotMatch(unavailable, /۵۰۰٬۰۰۰ \/ متر طول/);
         assert.equal(
           sourceHash(source),
           sourceHash(JSON.parse(JSON.stringify(source))),

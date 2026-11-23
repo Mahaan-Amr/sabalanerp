@@ -1107,7 +1107,16 @@ export const accountingAPI = {
   getCustomerWorkspace: (id: string, params?: { openingBasisAt?: string }) => api.get(`/accounting/ledger/customer-accounts/${encodeURIComponent(id)}`, { params }),
   getCustomerWorkspaceContext: (id: string) => api.get(`/accounting/ledger/customer-accounts/${encodeURIComponent(id)}/context`),
   recordCustomerAccountOperation: (id: string, data: unknown) => api.post(`/accounting/ledger/customer-accounts/${encodeURIComponent(id)}/operations`, data),
-  recordCustomerWorkspaceTreasury: (id: string, data: unknown) => api.post(`/accounting/ledger/customer-accounts/${encodeURIComponent(id)}/treasury`, data),
+  recordCustomerWorkspaceTreasury: (id: string, data: unknown, expected?: { userId: string; sessionId: string }) => api.post(`/accounting/ledger/customer-accounts/${encodeURIComponent(id)}/treasury`, data,
+    expected ? { headers: { 'x-sabalan-expected-user': expected.userId, 'x-sabalan-expected-session': expected.sessionId } } : undefined),
+  getCustomerAllocationCommandStatus: (id: string, data: unknown, expected: { userId: string; sessionId: string }) => api.post(`/accounting/ledger/customer-accounts/${encodeURIComponent(id)}/treasury/status`, data,
+    { headers: { 'x-sabalan-expected-user': expected.userId, 'x-sabalan-expected-session': expected.sessionId } }),
+  discoverCustomerAllocationIntent: (id: string, expected: { userId: string; sessionId: string }) =>
+    api.get(`/accounting/ledger/customer-accounts/${encodeURIComponent(id)}/treasury/allocation-intent`,
+      { headers: { 'x-sabalan-expected-user': expected.userId, 'x-sabalan-expected-session': expected.sessionId } }),
+  customerAllocationIntent: (id: string, action: 'prepare' | 'status' | 'cancel' | 'reconcile', data: unknown, expected: { userId: string; sessionId: string }) =>
+    api.post(`/accounting/ledger/customer-accounts/${encodeURIComponent(id)}/treasury/allocation-intent${action === 'prepare' ? '' : `/${action}`}`, data,
+      { headers: { 'x-sabalan-expected-user': expected.userId, 'x-sabalan-expected-session': expected.sessionId } }),
   attributeCustomerOpening: (id: string, data: unknown) => api.post(`/accounting/ledger/customer-accounts/${encodeURIComponent(id)}/opening-attribution`, data),
   getCustomerAccountProjection: (id: string, params?: { asOf?: string }) => api.get(`/accounting/ledger/customer-profiles/${id}/projection`, { params }),
   exportCustomerStatement: (id: string, format: 'pdf' | 'xlsx', asOf: string) => api.get(`/accounting/ledger/customer-profiles/${id}/export.${format}`, { params: { asOf }, responseType: 'blob' }),
@@ -1231,6 +1240,8 @@ export const accountingAPI = {
     api.get('/accounting/dashboard/workspace', { params }),
   getFinancialTrend: (range: '1m' | '3m' | '6m' | '1y') => api.get('/accounting/financial-trend', { params: { range } }),
   getDispatchCandidates: () => api.get('/accounting/dispatch-candidates'),
+  registerSepidarLoadingReference: (loadingId: string, data: { value: string | null; expectedVersion: string | null; reason?: string }) =>
+    api.post(`/accounting/loadings/${encodeURIComponent(loadingId)}/sepidar-reference`, data),
   issueLoadingDocuments: (loadingId: string, recovery?: { waybillId: string; invoiceId: string; reason: string }) =>
     api.post(`/accounting/loadings/${encodeURIComponent(loadingId)}/issue-dispatch-documents`, recovery ? { recovery } : undefined),
   reconstructLegacyWaybill: (waybillId: string, reason: string) => api.post(`/accounting/dispatch-waybills/${encodeURIComponent(waybillId)}/reconstruct-legacy`, { reason }),

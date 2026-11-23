@@ -30,7 +30,7 @@ for (const scenario of [
     discountEntryMode="AMOUNT_TOMAN" discountPercentInput={0} hasMatchingDiscountRange
     onDiscountAmountChange={() => {}} onDiscountPercentChange={() => {}} onDiscountEntryModeChange={() => {}}
     showPaymentEntryModal={false} setShowPaymentEntryModal={() => {}} />);
-  const buttons = [...html.matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/g)];
+  const buttons = Array.from(html.matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/g));
   for (const label of ['افزودن پرداخت', 'ایجاد پرداخت جدید']) {
     const button = buttons.find(match => match[2].includes(label));
     assert.ok(button, `${label} exists`);

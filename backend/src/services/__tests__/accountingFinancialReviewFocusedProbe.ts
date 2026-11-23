@@ -29,7 +29,7 @@ async function run() {
     const start = performance.now();
     const financial = await listFinancialRecords(query, actor);
     assert.equal(financial.total, 1); assert.equal(financial.items[0].id, recordId);
-    assert.equal(financial.items[0].partnerContext?.customerContractNumber, '100999');
+    assert.equal(financial.items[0].partnerContext?.customerContractNumber, '900001');
     const audit = await listAuditLogs({ recordId, pageSize: 100 }, actor);
     assert.deepEqual(new Set(audit.items.map(row => row.id)), new Set(['review-valid', 'review-legacy-unknown']));
     const elapsedMs = Math.round(performance.now() - start);

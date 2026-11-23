@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 
-const id = 'partner-accounting:5a11d03abd0ece495a335b337d94b2b8d9d726b73715abeff6c3e6b3592f2c52:replacement:2d8dadce-7015-40e3-a14d-ed45b0f11fe8';
+const id = 'partner-accounting:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:replacement:00000000-0000-4000-8000-000000000001';
 const href = `/dashboard/accounting/invoice-candidates/${encodeURIComponent(id)}`;
 const user = { id: 'historical-admin', username: 'reviewer', firstName: 'حسابدار', lastName: 'آزمون',
   role: 'ADMIN', isActive: true, permissions: { features: [] } };
@@ -12,7 +12,7 @@ async function installReview(page: Page, wrongRecord = false, expectedId = id) {
     ? JSON.parse(readFileSync(process.env.ACCOUNTING_REVIEW_FIXTURE_OUTPUT, 'utf8'))
     : { financial: { success: true, data: { items: [{ id, sourceKind: 'PARTNER_INTERNAL_RECORD', status: 'DRAFT',
       amount: '200', currency: 'IRR', createdAt: '2026-11-18T05:59:59.172Z',
-      partnerContext: { caseId: 'historical-case', caseNumber: '100999', internalRecordNumber: 'test',
+      partnerContext: { caseId: 'historical-case', caseNumber: '900001', internalRecordNumber: 'test',
         debtor: { displayName: 'طرف حساب آزمون' } }, invoiceItems: [], receivables: [], taxRecords: [] }],
       total: 1, page: 1, pageSize: 1, actionAvailability: { approve: true } } },
       audit: { success: true, data: { items: [], total: 0 } } };
@@ -43,7 +43,7 @@ async function installReview(page: Page, wrongRecord = false, expectedId = id) {
   return { fixture, before, requests, writes };
 }
 
-test('100999 opens by direct URL, refresh and client navigation with one canonical identity', async ({ page }, testInfo) => {
+test('900001 opens by direct URL, refresh and client navigation with one canonical identity', async ({ page }, testInfo) => {
   const state = await installReview(page);
   const assertLoaded = async () => {
     await expect(page.getByRole('heading', { name: 'مبلغ و وضعیت', exact: true })).toBeVisible();
@@ -61,7 +61,7 @@ test('100999 opens by direct URL, refresh and client navigation with one canonic
   await expect(link).toBeVisible();
   await link.click();
   await assertLoaded();
-  await page.screenshot({ path: testInfo.outputPath('contract-100999-financial-review.png'), fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath('contract-900001-financial-review.png'), fullPage: true });
   expect(state.writes).toEqual([]);
   expect(JSON.stringify(state.fixture)).toBe(state.before);
 });

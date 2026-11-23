@@ -117,3 +117,77 @@ test('rollback reconstructs a lost coordination unit only from authenticated che
   await assert.rejects(()=>recoverUnit({unit:destination,id:'lost',checkpoint:{...checkpoint,remoteVerified:false},readArchive:()=>{throw Error('must not decrypt');}}),/verified/);
  } finally {fs.rmSync(root,{recursive:true,force:true});}
 });
+
+test('incident capture and activation require the preflight receipt even when replacement files agree',async()=>{
+ const {execFileSync}=await import('node:child_process');
+ const {createHash}=await import('node:crypto');
+ const digest=bytes=>createHash('sha256').update(bytes).digest('hex');
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'clamav-receipt-pin-'));
+ try {
+  const id='incident-target-pin',bank=path.join(root,'bank'),unit=path.join(root,'unit');
+  const candidate=path.join(root,'candidate'),image='sha256:'+'a'.repeat(64),targetImage='sha256:'+'b'.repeat(64);
+  for(const dir of [bank,unit,candidate])fs.mkdirSync(dir);
+  fs.writeFileSync(path.join(bank,'daily.cvd'),'original-bank');
+  fs.writeFileSync(path.join(unit,'config.tar'),'config');
+  const receiptFile=path.join(unit,'target.json'),archive=path.join(unit,'target-bank.tar');
+  const writeTarget=contents=>{
+   fs.writeFileSync(path.join(candidate,'daily.cvd'),contents);
+   execFileSync('tar',['-cpf',archive,'-C',candidate,'.']);
+   const receipt=JSON.stringify({image:targetImage,bankSha256:digest(fs.readFileSync(archive))});
+   fs.writeFileSync(receiptFile,receipt);
+   return digest(receipt);
+  };
+  const target={image:targetImage,receiptSha256:writeTarget('qualified-target')};
+  const replacement={...target,receiptSha256:writeTarget('replacement-target')};
+  await assert.rejects(captureUnit({bank,unit,id,image,target}),/receipt differs from preflight/);
+  assert.equal(fs.existsSync(path.join(unit,'unit.json')),false);
+  const captured=await captureUnit({bank,unit,id,image,target:replacement});
+  const entries={...captured.files,'unit.json':{sha256:digest(fs.readFileSync(path.join(unit,'unit.json'))),
+   size:fs.statSync(path.join(unit,'unit.json')).size}};
+  const checkpoint={deploymentId:id,localVerified:true,remoteVerified:true,rollbackReleaseSet:{clamav:image},
+   manifest:{components:Object.entries(entries).map(([file,entry])=>({path:'recovery-coordination/clamav-checkpoint-'+id+'/'+file,...entry}))}};
+  await assert.rejects(restoreUnit({bank,unit,id,checkpoint,archive:'target-bank.tar',target}),/receipt differs from preflight/);
+  assert.equal(fs.readFileSync(path.join(bank,'daily.cvd'),'utf8'),'original-bank');
+  await restoreUnit({bank,unit,id,checkpoint,archive:'target-bank.tar',target:replacement,beforeMutation:async()=>{
+   writeTarget('changed after activation checks');
+  }});
+  assert.equal(fs.readFileSync(path.join(bank,'daily.cvd'),'utf8'),'replacement-target');
+ } finally {fs.rmSync(root,{recursive:true,force:true});}
+});
+
+test('the authenticated capture time keeps exact original evidence verifiable after slow remote readback', async () => {
+ const {createHash}=await import('node:crypto');
+ const {verifyIncidentCapture}=await import('../../backend/scripts/clamav-checkpoint.mjs');
+ const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
+ const now=Date.now();
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'clamav-capture-time-'));
+ try {
+  const id='slow-readback',bank=path.join(root,'bank'),unit=path.join(root,'unit');
+  const image='sha256:'+'a'.repeat(64);
+  fs.mkdirSync(bank); fs.mkdirSync(unit);
+  const bankFiles={};
+  for (const name of ['main','daily','bytecode']) {
+   const file=name+'.cvd';
+   fs.writeFileSync(path.join(bank,file),name);
+   bankFiles[file]=hash(name);
+  }
+  fs.writeFileSync(path.join(unit,'config.tar'),'config');
+  const snapshot={kind:'DEGRADED_CLAMAV_INCIDENT_V1',image,engine:'1.4.6',
+   checkedAt:new Date(now-120000).toISOString(),versions:{main:63,daily:28190,bytecode:339},
+   bankFiles,configArchiveSha256:hash('config'),issues:['SIGNATURES_STALE'],reopenOriginal:false};
+  const bytes=JSON.stringify(snapshot);
+  fs.writeFileSync(path.join(unit,'incident-snapshot.json'),bytes);
+  const unitMetadata=await captureUnit({bank,unit,id,image});
+  const unitFile=path.join(unit,'unit.json');
+  const entries={...unitMetadata.files,'unit.json':{sha256:hash(fs.readFileSync(unitFile)),size:fs.statSync(unitFile).size}};
+  const checkpoint={deploymentId:id,localVerified:true,remoteVerified:true,rollbackReleaseSet:{clamav:image},
+   manifest:{components:Object.entries(entries).map(([file,entry])=>({path:'recovery-coordination/clamav-checkpoint-'+id+'/'+file,...entry}))}};
+  const input={unit,id,checkpoint,snapshotSha256:hash(bytes),now:now+5400000};
+  const at=await verifyIncidentCapture(input);
+  assert.ok(at>=now && at<now+60000);
+  await assert.rejects(()=>verifyIncidentCapture({...input,snapshotSha256:'0'.repeat(64)}),/snapshot.*binding/i);
+  await assert.rejects(()=>verifyIncidentCapture({...input,checkpoint:{...checkpoint,remoteVerified:false}}),/verified coordinated checkpoint/);
+  fs.writeFileSync(unitFile,JSON.stringify({...unitMetadata,incidentCapturedAt:new Date(now-30000).toISOString()}));
+  await assert.rejects(()=>verifyIncidentCapture(input),/encrypted checkpoint manifest/);
+ } finally {fs.rmSync(root,{recursive:true,force:true});}
+});

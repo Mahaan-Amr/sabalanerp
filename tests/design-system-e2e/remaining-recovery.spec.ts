@@ -35,8 +35,7 @@ test('remaining recovery error keeps every row and shows exact chain guidance on
       payment: { payments: [{ id: 'remaining-recovery-payment', method: 'CASH_CARD', amount: 23071875,
         paymentDate: '1405/06/05', status: 'WILL_BE_PAID' }], currency: 'تومان', totalContractAmount: 23071875 },
       discount: null, signature: null
-    } }));
-  }, products);
+    } });
   await scopeContractNavigationFixture(page);
   await page.goto('/dashboard/sales/contracts/create?fresh=1&returnTo=contract&step=8', { waitUntil: 'domcontentloaded' });
   const submit = page.getByRole('button', { name: 'ثبت قرارداد', exact: true });

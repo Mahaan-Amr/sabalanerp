@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { PrismaClient, type Prisma } from '@prisma/client';
 import { customerManagementCapabilities, previewCustomerDeletion, deleteCustomerInTransaction, CustomerManagementError } from '../crmCustomerManagement';
 import { seedAuthorizationCase } from './partnerAuthorizationFixture';
@@ -19,6 +21,34 @@ async function user(tx: Prisma.TransactionClient, role: 'ADMIN' | 'MANAGER' | 'U
 async function partner(tx: Prisma.TransactionClient) { const id = await user(tx); await tx.partnerProfile.create({ data: { id, userId: id, state: 'ACTIVE' } }); await tx.$executeRaw`SELECT set_config('sabalan.partner_crm_profile', ${id}, true)`; return id; }
 const blocked = (code: string) => (error: unknown) => error instanceof CustomerManagementError && error.code === code;
 const command = (actorId: string, customerId: string, previewToken: string) => ({ actorId, customerId, previewToken, reason: 'ثبت آزمایشی بدون سابقه', confirmed: true });
+
+test('the restricted runtime creates a Customer and its card after the protected migration', () => fixture(async (tx, admin) => {
+  const migration = readFileSync(path.resolve(__dirname, '../../../prisma/migrations/20261120120000_grant_runtime_customer_card_insert/migration.sql'), 'utf8');
+  await tx.$executeRaw`ALTER ROLE sabalan_application_runtime NOLOGIN`;
+  await tx.$executeRaw`REVOKE INSERT ON public.crm_customer_cards FROM sabalan_application_runtime`;
+  await tx.$executeRaw`GRANT SELECT, DELETE ON public.crm_customer_cards TO sabalan_application_runtime`;
+  await tx.$executeRawUnsafe(migration);
+  const [dormant] = await tx.$queryRaw<Array<{ canInsert: boolean }>>`
+    SELECT has_table_privilege('sabalan_application_runtime', 'public.crm_customer_cards', 'INSERT') AS "canInsert"`;
+  assert.equal(dormant.canInsert, false);
+
+  await tx.$executeRaw`ALTER ROLE sabalan_application_runtime LOGIN`;
+  await tx.$executeRaw`SAVEPOINT incomplete_runtime_acl`;
+  await tx.$executeRaw`REVOKE DELETE ON public.crm_customer_cards FROM sabalan_application_runtime`;
+  await assert.rejects(tx.$executeRawUnsafe(migration), /CRM_CUSTOMER_CARD_RUNTIME_ACL_UNEXPECTED/);
+  await tx.$executeRaw`ROLLBACK TO SAVEPOINT incomplete_runtime_acl`;
+  await tx.$executeRaw`GRANT SELECT, INSERT ON public.crm_customers TO sabalan_application_runtime`;
+  await tx.$executeRaw`GRANT SELECT ON public.crm_customer_retained_history, public.sales_contracts, public.partner_sale_cases
+    TO sabalan_application_runtime`;
+  await tx.$executeRawUnsafe(migration);
+  await tx.$executeRawUnsafe(migration);
+  await tx.$executeRaw`SET LOCAL ROLE sabalan_application_runtime`;
+  const customer = await tx.crmCustomer.create({ data: { firstName: 'مشتری', lastName: 'آزمون', ownerUserId: admin } });
+  assert.equal((await tx.crmCustomerCard.findUniqueOrThrow({ where: { customerId: customer.id } })).customerId, customer.id);
+  await tx.$executeRaw`SAVEPOINT orphan_card`;
+  await assert.rejects(tx.crmCustomerCard.create({ data: { customerId: randomUUID() } }), { code: 'P2003' });
+  await tx.$executeRaw`ROLLBACK TO SAVEPOINT orphan_card`;
+}));
 
 test('unified Admin scope includes both identities, management response excludes private work', () => fixture(async (tx, admin) => {
   const owner = await partner(tx);

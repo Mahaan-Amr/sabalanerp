@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { verifyUnit } from '../../scripts/clamav-checkpoint.mjs';
+import { boundIncidentTarget, verifyUnit } from '../../scripts/clamav-checkpoint.mjs';
 import path from 'node:path';
 import { disconnectDatabase, prisma } from '../lib/prisma';
 import {
@@ -13,6 +13,7 @@ import {
   type CheckpointObject,
 } from '../services/deploymentCheckpointStorage';
 import { createRecoveryPackage, validateRecoveryPackage } from '../services/systemRecoveryEngine';
+import { assertProtectedRoleCheckpointBoundary, configuredProtectedDatabaseRoleRecovery } from '../services/protectedDatabaseRoleRecovery';
 import { RECOVERY_COORDINATION_DIR, RECOVERY_ROOT } from '../services/recoveryRuntime';
 import { readRecoveryHostIdentity } from '../services/deploymentRecoveryHostIdentity';
 import {inspectOriginalHostRemoteRetention} from '../services/deploymentRemoteRetention';
@@ -57,7 +58,11 @@ const main = async () => {
   const targetCommit = required('DEPLOYMENT_TARGET_COMMIT');
   const remoteRoot = required('DEPLOYMENT_REMOTE_MOUNT');
   const clamavUnit = path.join(RECOVERY_COORDINATION_DIR, `clamav-checkpoint-${deploymentId}`);
-  if (process.env.DEPLOYMENT_CLAMAV_REPAIR === 'true') await verifyUnit({ unit: clamavUnit, id: deploymentId });
+  const reports = process.env.DEPLOYMENT_REPORT_DIR || '/app/deployment-reports';
+  const target = process.env.DEPLOYMENT_CLAMAV_OPERATION === 'incident-recovery'
+    ? boundIncidentTarget(JSON.parse(await fs.promises.readFile(path.join(reports, 'active-deployment-session.json'), 'utf8')))
+    : undefined;
+  if (process.env.DEPLOYMENT_CLAMAV_REPAIR === 'true') await verifyUnit({ unit: clamavUnit, id: deploymentId, target });
   const localKey = await readSecret('DEPLOYMENT_LOCAL_ROLLBACK_KEY');
   const remotePublicKey = await readConfiguredFile('DEPLOYMENT_REMOTE_RECOVERY_PUBLIC_KEY');
   const packagesRoot = path.join(RECOVERY_ROOT, 'packages');
@@ -96,6 +101,11 @@ const main = async () => {
   const preUploadLocalRetention = await enforceLocalCheckpointRetention(packagesRoot, remoteRoot, deploymentId, preUploadRemoteRetention);
   const remoteCapacity = await remote.assertAvailable(capacity.requiredRemoteBytes);
 
+  const protectedDatabaseRoles = configuredProtectedDatabaseRoleRecovery();
+  const assertRoleCheckpointBoundary = () => assertProtectedRoleCheckpointBoundary({
+    prisma, coordinationDir: RECOVERY_COORDINATION_DIR, id: deploymentId, phase: 'SERVICES_DRAINED',
+  });
+  if (protectedDatabaseRoles) await assertRoleCheckpointBoundary();
   const result = await createRecoveryPackage({
     operationId: deploymentId,
     packageType: 'COMPLETE',
@@ -104,9 +114,11 @@ const main = async () => {
       { keyId: 'remote-recovery', publicKeyPem: remotePublicKey },
     ],
     prisma,
+    protectedDatabaseRoles,
     onProgress: async (progress) => console.log(JSON.stringify({ event: 'checkpoint-progress', progress })),
   });
-  const localValidation = await validateRecoveryPackage({ sourcePath: result.destination, passphrase: localKey, prisma, verifyRestore: true });
+  const localValidation = await validateRecoveryPackage({ sourcePath: result.destination, passphrase: localKey, prisma, verifyRestore: true, protectedDatabaseRoles });
+  if (protectedDatabaseRoles) await assertRoleCheckpointBoundary();
   if (!localValidation.compatibility.compatible) throw new Error('DEPLOYMENT_CHECKPOINT_INCOMPATIBLE');
 
   const objectKey = `${releaseId}/${deploymentId}.sabrec`;
@@ -160,7 +172,7 @@ const main = async () => {
   };
 
   if (process.env.DEPLOYMENT_CLAMAV_REPAIR === 'true') {
-    await verifyUnit({ unit: clamavUnit, id: deploymentId, checkpoint: { ...metadata, manifest: localValidation.manifest } });
+    await verifyUnit({ unit: clamavUnit, id: deploymentId, target, checkpoint: { ...metadata, manifest: localValidation.manifest } });
   }
 
   const transportMetadata=checkpointMetadataTransport(metadata);

@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
+import { configuredProtectedDatabaseRoleRecovery } from './protectedDatabaseRoleRecovery';
 import { assertRuntimeControlOwnership } from './runtimeControlOwnership';
 
 const known = {
@@ -13,6 +14,104 @@ const known = {
 export const protectedBridgeMigrationNames: readonly string[] = Object.freeze(Object.keys(known));
 const pickupSourceName = '20261116100000_customer_pickup_driver_source';
 const pickupDispatchName = '20261116100100_customer_pickup_dispatch';
+const personalPickupSourceName = '20261118120000_personal_pickup_source';
+const personalPickupDispatchName = '20261118120100_personal_pickup_dispatch';
+const customerCardInsertName = '20261120120000_grant_runtime_customer_card_insert';
+const retireAttachmentScanStatusName = '20261117120000_retire_attachment_scan_status';
+const partnerReadinessProjectionName = '20261117160000_partner_release_readiness_completed_projection';
+const allocationControllerTransitionName = '20261116133000_customer_allocation_controller_transition';
+const protectPartnerNumberReservationName = '20261120121000_protect_partner_number_reservation';
+const runtimeDisclosureRevisionName = '20261120122000_protect_runtime_disclosure_revision';
+const runtimeReferenceRowLocksName = '20261120123000_protect_runtime_reference_row_locks';
+const runtimeDispatchPermissionsName = '20261120124000_runtime_dispatch_permissions';
+const runtimeDriverAssignmentName = '20261120125000_runtime_driver_assignment_permissions';
+const runtimePartnerReceiptName = '20261120126000_runtime_partner_receipt_permissions';
+const runtimePartnerInquiryEvidenceName = '20261120127000_runtime_partner_inquiry_evidence_locks';
+const nextReleaseCatalog = {
+  '20261116120000_customer_allocation_intents': {
+    tables: ['accounting_customer_allocation_intents'],
+    functions: ['protect_allocation_intent_evidence'],
+  },
+  '20261116121000_bind_allocation_intent_result': {
+    tables: ['accounting_customer_commands', 'accounting_customer_allocation_intents'],
+    functions: ['bind_customer_allocation_intent_result', 'verify_customer_allocation_intent_result'],
+  },
+  '20261116122000_serialize_customer_allocation_reservations': {
+    tables: ['accounting_customer_allocation_fences'], functions: [],
+  },
+  '20261116123000_cancel_unreceived_allocation_intents': {
+    tables: ['accounting_customer_commands'], functions: ['serialize_customer_allocation_parent'],
+  },
+  '20261116124000_serialize_allocation_command_keys': {
+    tables: ['accounting_customer_command_key_fences', 'accounting_customer_allocation_intents'],
+    functions: ['serialize_customer_command_key_within', 'serialize_customer_allocation_intent_insert'],
+  },
+  '20261116130000_grouped_allocation_child_lineage': {
+    tables: ['accounting_settlement_allocations'], functions: ['verify_grouped_allocation_child'],
+  },
+  '20261116131000_customer_allocation_closed_control': {
+    tables: ['customer_allocation_release_control'], functions: ['keep_customer_allocation_control_closed'],
+  },
+  '20261116132000_close_grouped_allocation_child_backstop': {
+    tables: ['accounting_settlement_allocations'], functions: ['require_active_grouped_allocation_child'],
+  },
+  [allocationControllerTransitionName]: {
+    tables: ['customer_allocation_release_control', 'customer_allocation_release_audit'],
+    functions: ['guard_customer_allocation_control', 'guard_customer_allocation_audit',
+      'customer_allocation_controller_lock', 'customer_allocation_controller_activate'],
+  },
+  [retireAttachmentScanStatusName]: {
+    tables: ['support_ticket_attachments', 'accounting_archive_evidence', 'hr_employment_contract_documents', 'purchasing_attachments'],
+    functions: [],
+  },
+  '20261117130000_store_dispatch_exit_otp_code': {
+    tables: ['dispatch_otp_challenges'], functions: [],
+  },
+  '20261117140000_customer_allocation_controller_closure': {
+    tables: ['customer_allocation_release_control', 'customer_allocation_release_audit'],
+    functions: ['customer_allocation_controller_close'],
+  },
+  '20261117150000_customer_allocation_runtime_admission': {
+    tables: ['customer_allocation_release_control', 'accounting_settlement_allocations'],
+    functions: ['customer_allocation_runtime_admitted'],
+  },
+  [partnerReadinessProjectionName]: { tables: [], functions: [] },
+  [protectPartnerNumberReservationName]: {
+    tables: ['partner_commercial_numbers', 'partner_sale_cases', 'sabalan_to_partner_sale_records', 'sales_contracts'],
+    functions: ['partner_reserve_number'],
+  },
+  [customerCardInsertName]: {
+    tables: ['crm_customer_cards', 'crm_customers'], functions: ['guard_customer_card_membership', 'init_customer_card'],
+  },
+  [runtimeDisclosureRevisionName]: {
+    tables: ['performance_disclosure_revision', 'performance_policy_versions', 'performance_criterion_versions',
+      'performance_template_versions', 'performance_cycles', 'performance_evaluations', 'performance_evaluation_sections',
+      'performance_drafts', 'performance_submissions', 'performance_reviews', 'performance_accepted_results',
+      'performance_export_receipts', 'performance_consequence_handoffs', 'performance_privacy_cases'],
+    functions: ['performance_guard_canonical_write', 'performance_preserve_first_write'],
+  },
+  [runtimeReferenceRowLocksName]: {
+    tables: ['external_driver_documents', 'external_vehicle_documents', 'partner_commercial_accounts', 'partner_commercial_numbers', 'partner_duplicate_customer_matches', 'partner_identity_evidence', 'partner_terms_policies', 'simple_performance_profiles'],
+    functions: ['protect_runtime_reference_row'],
+  },
+  [runtimeDispatchPermissionsName]: {
+    tables: ['logistics_loading_lines', 'shipment_quantity_evidence'],
+    functions: ['protect_runtime_loading_line_write', 'prevent_shipment_quantity_evidence_mutation'],
+  },
+  [runtimeDriverAssignmentName]: {
+    tables: ['driver_vehicle_assignments', 'external_driver_vehicle_assignments'],
+    functions: ['protect_runtime_driver_assignment_identity'],
+  },
+  [runtimePartnerReceiptName]: {
+    tables: ['partner_case_events', 'partner_payment_installments', 'partner_payment_plans', 'partner_retail_receipt_allocations', 'partner_retail_receipts'],
+    functions: ['protect_runtime_partner_receipt_assembly'],
+  },
+  [runtimePartnerInquiryEvidenceName]: {
+    tables: ['partner_conversion_dispositions', 'partner_inquiry_approvals', 'partner_inquiry_assignments',
+      'partner_profile_responder_assignments', 'sales_contract_draft_audits', 'sales_contract_seller_audits'],
+    functions: ['protect_runtime_reference_row'],
+  },
+};
 // This is the exact source delta from the retained 2026-11-12 production
 // release. It is intentionally separate from the frozen historical bootstrap.
 const currentRelease = {
@@ -40,10 +139,36 @@ const currentRelease = {
   '20261115131000_accounting_private_marker_index': ['31ab2f1cd447819b9f1863337c230fe1c23959eb01e260232f54e044d0bdba30', 1],
   [pickupSourceName]: ['37ebbfab7f1c7dde67450e9117bcc54ea186835e9cc1b448f0e8c97a3229122a', 1],
   [pickupDispatchName]: ['1ae2687716e07ecdc08b4c89aa2dd21c3399ed3853d4e7a1124b4932131268a9', 6],
+  [retireAttachmentScanStatusName]: ['9fad9a9544c0c5da8fe58b4f636c2b35ad420fd871c3a7392e12911c5fd4ab91', 5],
+  '20261116120000_customer_allocation_intents': ['b6213e3838399149f6c61da9ae079abb0a6eb1afcbba7bd46e247a9bd0d225ea', 6],
+  '20261116121000_bind_allocation_intent_result': ['04c84e72ee82adc229bc1c5c2fe131998058d5357f0efaa17f958afcb77dac08', 4],
+  '20261116122000_serialize_customer_allocation_reservations': ['a21cc1a12f8bfae622302c39d258ca881c0be2847e1329cae70f9baa5d272670', 1],
+  '20261116123000_cancel_unreceived_allocation_intents': ['f46bae03614df7d3dfca3e611bedc91f597f87571bc94142e251a7763340ff12', 3],
+  '20261116124000_serialize_allocation_command_keys': ['2f2f1742ea48a8e11bb8b9db4829532278af27356af4308df03264b9248d6e99', 5],
+  '20261116130000_grouped_allocation_child_lineage': ['64b0e0bae723c37775e9d67b36dc607c156fa9d02476d132f925e1011fb64135', 5],
+  '20261116131000_customer_allocation_closed_control': ['a2d5edfe312f2e85d2a17e0deb26c6d7838534cf40713a741349b1e65bf2131c', 4],
+  '20261116132000_close_grouped_allocation_child_backstop': ['bc83e4c5dbf13051374ebaaab5bb1a5b75682b6044eb179ac03e94a971c18c90', 2],
+  [allocationControllerTransitionName]: ['8f8389793094eb9ea72abb292a419e0ac547412c44559c6a2c03e00b06bc5cdc', 18],
+  '20261117130000_store_dispatch_exit_otp_code': ['375715f6a9930906e9cfae9b5bfbd59c4e4371d5d70587ec651de81afb7e2353', 1],
+  '20261117140000_customer_allocation_controller_closure': ['3f063d8699ce903cecab90eb22dc1fa9f4bf3aeda8bd37176f9e2ea602efcb72', 6],
+  '20261117150000_customer_allocation_runtime_admission': ['bf469b3fa2d29be6f5bc3cfa5a34c0851a6f14ec546d9560039aa52cc682e0b4', 6],
+  [partnerReadinessProjectionName]: ['76c5f34dc094e9c15b879cb6eda417e347fd1118864c5c6207070cc78c190fe0', 3],
+  '20261118100000_sepidar_loading_reference': ['a117dd1bbb05c3d4ad96edc5204864f36b4617328ff68d671b9a4b0d7360e757', 2],
+  [personalPickupSourceName]: ['02d234097b5a2d70cbfeebbf36a9bc0dedbfe3a316ef936c38d0160eca15286f', 1],
+  [personalPickupDispatchName]: ['acbf6c974b30a77cfb0131d30fd3d960e0523053ee21a7d777ca759ea7539a3d', 5],
+  [customerCardInsertName]: ['2123e56ded01fbe3f01e046e3425dcba4f4cc96d1a01fcfcb78070d944f97baa', 1],
+  [protectPartnerNumberReservationName]: ['3719c6d5f57a69ade6fa88310068943bc945e075a504463eecef08a81c82b02d', 3],
+  [runtimeDisclosureRevisionName]: ['79e5cd2c01edbfd88c56d671e73cd7eec80961b38f9ccb343c38f61451eacfc2', 4],
+
+  [runtimeReferenceRowLocksName]: ['85364edd5944addeb6606ba5ad6209e0f0d4bd5bcd71a492715469b91c1d1688', 2],
+  [runtimeDispatchPermissionsName]: ['9b895b031f0a369ac65cd1011afd6e8a9b53294d5d3034b2f55ad8929df18dbb', 4],
+  [runtimeDriverAssignmentName]: ['3a1329ef8fb845b5ac18f03224e4b0d596a414918f29a0dfaa62c00fe443eb6b', 1],
+  [runtimePartnerReceiptName]: ['7983529ea9ea7995598e300bb99f35dbfd6959a278488bc4b230898ea04d1257', 3],
+  [runtimePartnerInquiryEvidenceName]: ['c31b8cc6d35b468d0165fb4ab676213ba0b1c3d1aa32f94dfe51ec25e776e2e4', 1],
 } as const;
 export const protectedCurrentReleaseNames: readonly string[] = Object.freeze(Object.keys(currentRelease));
 // Each release extends the ledger while preserving the prior release-set hashes.
-const protectedReleaseEpochEnds = Object.freeze([12, 22, 24]);
+const protectedReleaseEpochEnds = Object.freeze([12, 22, 24, 25, 35, 36, 37, 38, 41, 42, 43, 44, 45, 46, 47, 48, 49]);
 const releaseSetSha256 = (files: CurrentFile[], index: number) => sha(files.slice(0,
   protectedReleaseEpochEnds.find(end => index < end)!).map(file => file.sha256).join('\n'));
 
@@ -82,17 +207,21 @@ export function compileProtectedCurrentRelease(files: ReadonlyArray<readonly [st
     if (!Buffer.isBuffer(bytes) || sha(bytes) !== sha256) failure('PROTECTED_CURRENT_RELEASE_SQL_IDENTITY_MISMATCH');
     const sql = bytes.toString('utf8');
     let statements = splitCurrentReleaseSql(sql);
-    if (name === '20261108000100_start_new_waybill_numbers_at_one') {
-      if (statements.length !== 4 || statements[0] !== 'BEGIN;' || statements[3] !== 'COMMIT;') {
+    if (name === '20261108000100_start_new_waybill_numbers_at_one'
+      || name === retireAttachmentScanStatusName || name === protectPartnerNumberReservationName) {
+      const opening = statements[0]?.replace(/^(?:--[^\r\n]*\r?\n\s*)+/, '');
+      if (statements.length !== expectedCount + 2 || opening !== 'BEGIN;' || statements.at(-1) !== 'COMMIT;') {
         failure('PROTECTED_CURRENT_RELEASE_TRANSACTION_WRAPPER_UNPROVEN');
       }
-      // The byte-pinned source wraps the same two statements in a transaction;
+      // The byte-pinned source wraps its statements in a transaction;
       // this runner supplies that transaction together with its history receipt.
       statements = statements.slice(1, -1);
     }
     if (statements.length !== expectedCount || statements.some(statement => /^\s*(BEGIN|COMMIT|ROLLBACK)\s*;/i.test(statement))) {
       failure('PROTECTED_CURRENT_RELEASE_STATEMENTS_UNPROVEN');
     }
+    const reviewedScope = nextReleaseCatalog[name as keyof typeof nextReleaseCatalog];
+    if (reviewedScope) return { name, sha256, statements, ...reviewedScope };
     const tables = [...new Set([
       ...[...sql.matchAll(/\b(?:CREATE|ALTER)\s+TABLE\s+"?([A-Za-z_][A-Za-z_0-9]*)"?/gi)].map(match => match[1]),
       ...(names.indexOf(name) >= protectedReleaseEpochEnds[0]
@@ -182,7 +311,10 @@ async function assertLease(tx: Prisma.TransactionClient, owner: Owner, shareLock
   }
 }
 
-async function catalog(tx: Prisma.TransactionClient, input: { tables: string[]; functions: string[]; pickupSource?: boolean }) {
+async function catalog(tx: Prisma.TransactionClient, input: {
+  tables: string[]; functions: string[]; pickupSource?: boolean; personalPickupSource?: boolean; partnerReadinessProjection?: boolean;
+  appliedNames?: ReadonlySet<string>;
+}) {
   const tables = await tx.$queryRaw<Array<{ name: string; details: unknown }>>(Prisma.sql`
     SELECT c.relname AS name, jsonb_build_object('kind',c.relkind,'persistence',c.relpersistence,'owner',pg_get_userbyid(c.relowner),
       'rls',c.relrowsecurity,'forceRls',c.relforcerowsecurity,'replicaIdentity',c.relreplident,
@@ -217,8 +349,12 @@ async function catalog(tx: Prisma.TransactionClient, input: { tables: string[]; 
     FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public'
       AND p.proname IN (${Prisma.join(input.functions)}) ORDER BY p.proname`) : [];
   if (tables.length !== input.tables.length || functions.length !== input.functions.length) failure('PROTECTED_BRIDGE_SCHEMA_UNPROVEN');
-  const pickupSource = input.pickupSource ? { pickupSource: await pickupSourceProof(tx, true) } : {};
-  return sha(JSON.stringify(canonical({ tables, functions, ...pickupSource })));
+  const pickupSource = input.pickupSource
+    ? { pickupSource: await pickupSourceProof(tx, input.personalPickupSource ? 'PERSONAL_PICKUP' : 'CUSTOMER_PICKUP') } : {};
+  const partnerReadinessProjection = input.partnerReadinessProjection
+    ? { partnerReadinessProjection: await partnerReadinessProjectionProof(tx) } : {};
+  const runtimeAcl = input.appliedNames ? await protectedCurrentReleaseRuntimeAclProof(tx, input.appliedNames) : undefined;
+  return sha(JSON.stringify(canonical({ tables, functions, ...pickupSource, ...partnerReadinessProjection, ...runtimeAcl })));
 }
 
 /** Also required when discovery finds no pending work. A successful no-op
@@ -276,18 +412,184 @@ const quantityNames = new Set([protectedCurrentReleaseNames[1], protectedCurrent
 const dutyName = protectedCurrentReleaseNames[9], waybillName = protectedCurrentReleaseNames[10];
 function currentCatalogScope(files: CurrentFile[], through: number) {
   const applied = files.slice(0, through + 1);
-  return { tables: [...new Set(applied.flatMap(file => file.tables))].sort(),
-    functions: [...new Set(applied.flatMap(file => file.functions))].sort(),
-    pickupSource: applied.some(file => file.name === pickupSourceName) };
+  const appliedNames = new Set(applied.map(file => file.name));
+  const functions = new Set(applied.flatMap(file => file.functions));
+  if (applied.some(file => file.name === allocationControllerTransitionName)) {
+    functions.delete('keep_customer_allocation_control_closed');
+  }
+  return { appliedNames, tables: [...new Set(applied.flatMap(file => file.tables))].sort(),
+    functions: [...functions].sort(),
+    pickupSource: applied.some(file => file.name === pickupSourceName),
+    personalPickupSource: applied.some(file => file.name === personalPickupSourceName),
+    partnerReadinessProjection: applied.some(file => file.name === partnerReadinessProjectionName) };
 }
 
-async function pickupSourceProof(tx: Prisma.TransactionClient, after: boolean) {
+type CatalogGrant = { grantee: string; privilege: string; grantable: boolean; grantor: string };
+type RuntimeAclObject = {
+  kind: 'table' | 'function'; name: string; owner: string; securityDefiner: boolean;
+  columnAcl: boolean; ownerPrivileges: string[]; grants: CatalogGrant[];
+};
+type RuntimeAclCatalog = {
+  $queryRaw<T>(query: TemplateStringsArray | Prisma.Sql, ...values: unknown[]): Promise<T>;
+};
+
+/** Check the live ACL before committing a receipt, and again when proving a retry.
+ * The protected role cutover can legally change these exact table grants once.
+ * Both admitted states commit to the same reviewed policy. */
+export async function protectedCurrentReleaseRuntimeAclProof(tx: RuntimeAclCatalog,
+  appliedNames: ReadonlySet<string>, env: NodeJS.ProcessEnv = process.env) {
+  if (!appliedNames.has(customerCardInsertName)) return undefined;
+
+  const tableGrants: Record<string, string[]> = { crm_customer_cards: ['DELETE', 'INSERT', 'SELECT'] };
+  const routineDefiners: Record<string, boolean> = { guard_customer_card_membership: false, init_customer_card: false };
+  if (appliedNames.has(protectPartnerNumberReservationName)) {
+    tableGrants.partner_commercial_numbers = ['SELECT'];
+    routineDefiners.partner_reserve_number = true;
+  }
+  if (appliedNames.has(runtimeDisclosureRevisionName)) {
+    tableGrants.performance_disclosure_revision = ['SELECT', 'UPDATE'];
+    routineDefiners.performance_guard_canonical_write = true;
+    routineDefiners.performance_preserve_first_write = false;
+  }
+  if (appliedNames.has(runtimeReferenceRowLocksName)) {
+    Object.assign(tableGrants, {
+      external_driver_documents: ['INSERT', 'SELECT', 'UPDATE'],
+      external_vehicle_documents: ['INSERT', 'SELECT', 'UPDATE'],
+      partner_commercial_accounts: ['INSERT', 'SELECT', 'UPDATE'],
+      partner_commercial_numbers: ['SELECT', 'UPDATE'],
+      partner_duplicate_customer_matches: ['INSERT', 'SELECT', 'UPDATE'],
+      partner_identity_evidence: ['SELECT', 'UPDATE'],
+      partner_terms_policies: ['SELECT', 'UPDATE'],
+      simple_performance_profiles: ['INSERT', 'SELECT', 'UPDATE'],
+    });
+    routineDefiners.protect_runtime_reference_row = false;
+  }
+
+  if (appliedNames.has(runtimeDispatchPermissionsName)) {
+    Object.assign(tableGrants, {
+      logistics_loading_lines: ['DELETE', 'INSERT', 'SELECT', 'UPDATE'],
+      shipment_quantity_evidence: ['DELETE', 'INSERT', 'SELECT', 'UPDATE'],
+    });
+    routineDefiners.protect_runtime_loading_line_write = false;
+    routineDefiners.prevent_shipment_quantity_evidence_mutation = false;
+  }
+  if (appliedNames.has(runtimeDriverAssignmentName)) {
+    Object.assign(tableGrants, {
+      driver_vehicle_assignments: ['INSERT', 'SELECT', 'UPDATE'],
+      external_driver_vehicle_assignments: ['INSERT', 'SELECT', 'UPDATE'],
+    });
+    routineDefiners.protect_runtime_driver_assignment_identity = false;
+  }
+  if (appliedNames.has(runtimePartnerReceiptName)) {
+    Object.assign(tableGrants, {
+      partner_case_events: ['INSERT', 'SELECT', 'UPDATE'],
+      partner_payment_installments: ['INSERT', 'SELECT', 'UPDATE'],
+      partner_payment_plans: ['INSERT', 'SELECT', 'UPDATE'],
+      partner_retail_receipt_allocations: ['INSERT', 'SELECT', 'UPDATE'],
+      partner_retail_receipts: ['INSERT', 'SELECT', 'UPDATE'],
+    });
+    routineDefiners.protect_runtime_partner_receipt_assembly = false;
+  }
+
+  if (appliedNames.has(runtimePartnerInquiryEvidenceName)) {
+    Object.assign(tableGrants, {
+      partner_conversion_dispositions: ['INSERT', 'SELECT', 'UPDATE'],
+      partner_inquiry_approvals: ['INSERT', 'SELECT', 'UPDATE'],
+      partner_inquiry_assignments: ['INSERT', 'SELECT', 'UPDATE'],
+      partner_profile_responder_assignments: ['INSERT', 'SELECT', 'UPDATE'],
+      sales_contract_draft_audits: ['INSERT', 'SELECT', 'UPDATE'],
+      sales_contract_seller_audits: ['INSERT', 'SELECT', 'UPDATE'],
+    });
+    routineDefiners.protect_runtime_reference_row = false;
+  }
+
+  const split = configuredProtectedDatabaseRoleRecovery(env);
+  const runtime = split?.roles.runtime ?? 'sabalan_application_runtime';
+  const [identity] = await tx.$queryRaw<Array<{ admitted: boolean; owner: string; database: string; login: boolean }>>`
+    SELECT current_user AS owner, current_database() AS database, runtime.rolcanlogin AS login,
+      (current_user = session_user AND control.rolname = session_user AND control.rolsuper AND control.rolcanlogin
+        AND NOT (runtime.rolsuper OR runtime.rolcreatedb OR runtime.rolcreaterole OR runtime.rolinherit
+          OR runtime.rolreplication OR runtime.rolbypassrls)
+        AND runtime.rolconfig IS NULL AND (runtime.rolcanlogin OR auth.rolpassword IS NULL)
+        AND NOT EXISTS (SELECT FROM pg_catalog.pg_auth_members WHERE member = runtime.oid OR roleid = runtime.oid)
+        AND NOT EXISTS (SELECT FROM pg_catalog.pg_db_role_setting WHERE setrole = runtime.oid)
+        AND NOT EXISTS (SELECT FROM pg_catalog.pg_shdepend
+          WHERE refclassid = 'pg_catalog.pg_authid'::regclass AND refobjid = runtime.oid AND deptype = 'o')) AS admitted
+    FROM pg_catalog.pg_roles runtime JOIN pg_catalog.pg_authid auth USING (oid)
+    JOIN pg_catalog.pg_database db ON db.datname = current_database()
+    JOIN pg_catalog.pg_roles control ON control.oid = db.datdba
+    WHERE runtime.rolname = ${runtime}
+  `;
+  if (!identity?.admitted || identity.login !== Boolean(split) || (split && identity.database !== split.source)) {
+    failure('PROTECTED_CURRENT_RELEASE_RUNTIME_ROLE_UNPROVEN');
+  }
+
+  const objects = await tx.$queryRaw<RuntimeAclObject[]>(Prisma.sql`
+    WITH objects AS (
+      SELECT 'table' AS kind, c.relname AS name, c.relowner AS owner, c.relacl AS acl, 'r'::"char" AS code,
+        false AS security_definer, EXISTS (SELECT FROM pg_catalog.pg_attribute a
+          WHERE a.attrelid = c.oid AND a.attacl IS NOT NULL) AS column_acl
+      FROM pg_catalog.pg_class c WHERE c.relnamespace = 'public'::regnamespace AND c.relkind IN ('r', 'p')
+        AND c.relname IN (${Prisma.join(Object.keys(tableGrants))})
+      UNION ALL
+      SELECT 'function', p.proname, p.proowner, p.proacl, 'f'::"char", p.prosecdef, false
+      FROM pg_catalog.pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.prokind = 'f'
+        AND p.pronargs = 0 AND p.proname IN (${Prisma.join(Object.keys(routineDefiners))})
+    )
+    SELECT kind, name, pg_catalog.pg_get_userbyid(owner) AS owner, security_definer AS "securityDefiner",
+      column_acl AS "columnAcl", ARRAY(SELECT d.privilege_type
+        FROM pg_catalog.aclexplode(pg_catalog.acldefault(code, owner)) d WHERE d.grantee = owner) AS "ownerPrivileges",
+      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'grantee', CASE WHEN a.grantee = 0 THEN '' ELSE pg_catalog.pg_get_userbyid(a.grantee) END,
+        'privilege', a.privilege_type, 'grantable', a.is_grantable, 'grantor', pg_catalog.pg_get_userbyid(a.grantor)))
+        FROM pg_catalog.aclexplode(COALESCE(acl, pg_catalog.acldefault(code, owner))) a), '[]'::jsonb) AS grants
+    FROM objects
+  `);
+  const grantKey = (grant: CatalogGrant) => JSON.stringify([grant.grantee, grant.privilege, grant.grantable, grant.grantor]);
+  if (objects.length !== Object.keys(tableGrants).length + Object.keys(routineDefiners).length) {
+    failure('PROTECTED_CURRENT_RELEASE_RUNTIME_ACL_DRIFT');
+  }
+  for (const object of objects) {
+    const expected: CatalogGrant[] = object.ownerPrivileges.map(privilege =>
+      ({ grantee: identity.owner, privilege, grantable: false, grantor: identity.owner }));
+    if (object.kind === 'table' && split) {
+      expected.push(...tableGrants[object.name].map(privilege =>
+        ({ grantee: runtime, privilege, grantable: false, grantor: identity.owner })));
+    }
+    if (object.kind === 'function' && !routineDefiners[object.name]) {
+      expected.push({ grantee: '', privilege: 'EXECUTE', grantable: false, grantor: identity.owner });
+    }
+    if (object.owner !== identity.owner || object.columnAcl
+      || object.securityDefiner !== (object.kind === 'function' && routineDefiners[object.name])
+      || JSON.stringify(object.grants.map(grantKey).sort()) !== JSON.stringify(expected.map(grantKey).sort())) {
+      failure('PROTECTED_CURRENT_RELEASE_RUNTIME_ACL_DRIFT');
+    }
+  }
+  return { runtimeAcl: { tableGrants, routineDefiners } };
+}
+
+async function partnerReadinessProjectionProof(tx: Prisma.TransactionClient) {
+  const [view] = await tx.$queryRaw<Array<{ definition: string; owner: string; options: string[] }>>`
+    SELECT pg_get_viewdef(relation.oid, false) AS definition, pg_get_userbyid(relation.relowner) AS owner,
+      relation.reloptions AS options
+    FROM pg_class relation
+    JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+    WHERE namespace.nspname = 'public' AND relation.relname = 'partner_release_readiness_completed'
+      AND relation.relkind = 'v' AND relation.relowner = (SELECT oid FROM pg_roles WHERE rolname = current_user)
+      AND relation.reloptions = ARRAY['security_barrier=true']
+  `;
+  if (!view?.definition) failure('PROTECTED_CURRENT_RELEASE_PARTNER_READINESS_VIEW_UNPROVEN');
+  return view;
+}
+
+async function pickupSourceProof(tx: Prisma.TransactionClient, lastLabel: 'EXTERNAL' | 'CUSTOMER_PICKUP' | 'PERSONAL_PICKUP') {
   const rows = await tx.$queryRaw<Array<{ label: string }>>`
     SELECT e.enumlabel::text AS label FROM pg_enum e JOIN pg_type t ON t.oid=e.enumtypid
     JOIN pg_namespace n ON n.oid=t.typnamespace
     WHERE n.nspname='public' AND t.typname='GuardDriverSource' ORDER BY e.enumsortorder`;
   const labels = rows.map(row => row.label);
-  const expected = after ? ['INTERNAL', 'EXTERNAL', 'CUSTOMER_PICKUP'] : ['INTERNAL', 'EXTERNAL'];
+  const orderedLabels = ['INTERNAL', 'EXTERNAL', 'CUSTOMER_PICKUP', 'PERSONAL_PICKUP'];
+  const expected = orderedLabels.slice(0, orderedLabels.indexOf(lastLabel) + 1);
   if (labels.length !== expected.length || labels.some((label, index) => label !== expected[index])) {
     failure('PROTECTED_CURRENT_RELEASE_PICKUP_SOURCE_UNPROVEN');
   }
@@ -370,12 +672,12 @@ async function sequenceProof(tx: Prisma.TransactionClient, after: boolean) {
 }
 
 type RetryProof = { quantityProofSha256: string | null; dutyRows: string | null; sequenceProofSha256: string | null;
-  pickupDispatchRows?: string };
+  pickupDispatchRows?: string; personalPickupDispatchRows?: string };
 export function assertProtectedCurrentReleaseRetryEvidence(receipt: any, owner: Owner, observed: RetryProof) {
   if (typeof receipt?.deploymentId !== 'string' || !receipt.deploymentId
     || typeof receipt.releaseId !== 'string' || !receipt.releaseId) failure('PROTECTED_CURRENT_RELEASE_HISTORY_UNPROVEN');
   if (receipt.deploymentId !== owner.deploymentId || receipt.releaseId !== owner.releaseId) return;
-  for (const key of ['quantityProofSha256', 'dutyRows', 'sequenceProofSha256', 'pickupDispatchRows'] as const) {
+  for (const key of ['quantityProofSha256', 'dutyRows', 'sequenceProofSha256', 'pickupDispatchRows', 'personalPickupDispatchRows'] as const) {
     if (receipt[key] !== observed[key]) failure('PROTECTED_CURRENT_RELEASE_RETRY_DATA_DRIFT');
   }
 }
@@ -407,7 +709,9 @@ export async function applyProtectedCurrentRelease(database: PrismaClient, input
       if (receipt?.format !== 'sabalan-protected-current-release/v1' || receipt.sqlSha256 !== file.sha256
         || receipt.order !== files.indexOf(file) || receipt.releaseSetSha256 !== releaseSetSha256(files, files.indexOf(file))
         || (file.name === pickupDispatchName && (typeof receipt.pickupDispatchRows !== 'string'
-          || !/^\d+:\d+$/.test(receipt.pickupDispatchRows)))) {
+          || !/^\d+:\d+$/.test(receipt.pickupDispatchRows)))
+        || (file.name === personalPickupDispatchName && (typeof receipt.personalPickupDispatchRows !== 'string'
+          || !/^\d+:\d+$/.test(receipt.personalPickupDispatchRows)))) {
         failure('PROTECTED_CURRENT_RELEASE_HISTORY_UNPROVEN');
       }
       const sameOperation = receipt.deploymentId === owner.deploymentId && receipt.releaseId === owner.releaseId;
@@ -419,6 +723,9 @@ export async function applyProtectedCurrentRelease(database: PrismaClient, input
       if (sameOperation && file.name === pickupDispatchName) {
         observed.pickupDispatchRows = await pickupDispatchRows(tx);
         await assertPickupDispatchSchema(tx);
+      }
+      if (sameOperation && file.name === personalPickupDispatchName) {
+        observed.personalPickupDispatchRows = await pickupDispatchRows(tx);
       }
       assertProtectedCurrentReleaseRetryEvidence(receipt, owner, observed);
       if (file === files[completed - 1] && receipt.catalogSha256 !== await catalog(tx, currentCatalogScope(files, completed - 1))) {
@@ -443,15 +750,18 @@ export async function applyProtectedCurrentRelease(database: PrismaClient, input
       const beforeDuty = file.name === dutyName ? await dutyProof(tx, false) : null;
       if (file.name === waybillName) await sequenceProof(tx, false);
       // PostgreSQL permits use of an added enum label only after its DDL has
-      // committed. The two pinned pickup files use the ordinary per-file commits.
-      if (file.name === pickupSourceName) await pickupSourceProof(tx, false);
-      const beforePickup = file.name === pickupDispatchName ? await pickupDispatchRows(tx) : null;
+      // committed. Each pinned pickup pair uses the ordinary per-file commits.
+      if (file.name === pickupSourceName) await pickupSourceProof(tx, 'EXTERNAL');
+      if (file.name === personalPickupSourceName) await pickupSourceProof(tx, 'CUSTOMER_PICKUP');
+      const pickupDispatch = file.name === pickupDispatchName;
+      const personalPickupDispatch = file.name === personalPickupDispatchName;
+      const beforePickup = pickupDispatch || personalPickupDispatch ? await pickupDispatchRows(tx) : null;
       for (const statement of file.statements) { assertBoundary(); await tx.$executeRawUnsafe(statement); }
       if (beforeQuantity && beforeQuantity !== await quantityProof(tx, file, false)) failure('PROTECTED_CURRENT_RELEASE_QUANTITY_CHANGED');
       if (beforeDuty !== null && beforeDuty !== await dutyProof(tx, true)) failure('PROTECTED_CURRENT_RELEASE_DUTY_ROWS_CHANGED');
       if (beforePickup !== null) {
         if (beforePickup !== await pickupDispatchRows(tx)) failure('PROTECTED_CURRENT_RELEASE_PICKUP_ROWS_CHANGED');
-        await assertPickupDispatchSchema(tx);
+        if (pickupDispatch) await assertPickupDispatchSchema(tx);
       }
       const sequenceProofSha256 = file.name === waybillName ? await sequenceProof(tx, true) : null;
       const catalogSha256 = await catalog(tx, currentCatalogScope(files, index));
@@ -460,7 +770,8 @@ export async function applyProtectedCurrentRelease(database: PrismaClient, input
         releaseSetSha256: releaseSetSha256(files, index), order: index, catalogSha256,
         deploymentId: owner.deploymentId, releaseId: owner.releaseId,
         quantityProofSha256: beforeQuantity, dutyRows: beforeDuty, sequenceProofSha256,
-        ...(beforePickup !== null && { pickupDispatchRows: beforePickup }) });
+        ...(pickupDispatch && { pickupDispatchRows: beforePickup }),
+        ...(personalPickupDispatch && { personalPickupDispatchRows: beforePickup }) });
       await tx.$executeRaw`INSERT INTO public._prisma_migrations (id,checksum,finished_at,migration_name,logs,started_at,applied_steps_count)
         VALUES (${randomUUID()},${file.sha256},clock_timestamp(),${file.name},${receipt},clock_timestamp(),1)`;
       assertBoundary();

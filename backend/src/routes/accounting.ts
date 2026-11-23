@@ -85,7 +85,7 @@ import { renderDispatchDocumentPdf } from '../documents/dispatch/dispatchDocumen
 import { versionedDispatchDocumentFiles } from '../services/dispatchFileRuntime';
 import { getStatementAdjustmentArtifactPreparer } from '../services/statementAdjustmentRuntime';
 import { resolveNarrowFeatureAccess } from '../services/narrowFeatureAccess';
-import { ContractLifecycleRequestKind } from '@prisma/client';
+import { ContractLifecycleRequestKind, Prisma } from '@prisma/client';
 import { mayDirectlyPerformContractLifecycleAction, type ContractLifecycleAction } from '../services/contractLifecyclePolicy';
 import {
   ContractLifecycleBlockedError,
@@ -540,11 +540,15 @@ router.get('/dispatch-evidence-exceptions', accountingDispatchView, async (_req:
   catch (error) { return dispatchError(res, error); }
 });
 
+const sepidarReferenceAuditActions = ['REGISTER_SEPIDAR_LOADING_REFERENCE', 'CORRECT_SEPIDAR_LOADING_REFERENCE'];
+const sepidarReferenceAuditOrder = [{ createdAt: 'desc' }, { id: 'desc' }] satisfies Prisma.AccountingAuditLogOrderByWithRelationInput[];
+const sepidarReferenceAuditFields = { id: true, beforeState: true, afterState: true, actorId: true, createdAt: true, note: true } as const;
+
 router.get('/dispatch-candidates', accountingDispatchView, async (req: AuthRequest, res: Response) => {
   try {
     const { manage, candidates } = await readPartnerSnapshot(prisma, async tx => {
       const owners = await tx.accountingDispatchCandidate.findMany({ orderBy: { id: 'asc' }, select: {
-        id: true, allocationRevision: { select: { sourceKind: true, partnerCaseId: true } },
+        id: true, allocationRevision: { select: { sourceKind: true, partnerCaseId: true, loadingId: true } },
       } });
       const authority = createAuditedPartnerAuthorization(tx, { actorId: req.user!.id, purpose: 'ACCOUNTING', channel: 'LIST' }, {
         correlationId: String(req.get('X-Correlation-Id') || randomUUID()), reason: 'بررسی دسترسی فهرست اسناد ارسال پرونده همکار',
@@ -570,13 +574,20 @@ router.get('/dispatch-candidates', accountingDispatchView, async (req: AuthReque
       const manage = await resolveNarrowFeatureAccess(tx, { userId: req.user!.id, role: req.user!.role,
         workspace: WORKSPACES.ACCOUNTING, feature: FEATURES.ACCOUNTING_DISPATCH_CANDIDATES_MANAGE,
         requiredPermission: FEATURE_PERMISSIONS.EDIT });
+      const canManageOwner = (owner: typeof owners[number]['allocationRevision']) => manage.allowed &&
+        (owner.sourceKind === 'SALES_CONTRACT' || (owner.sourceKind === 'PARTNER_CASE' &&
+          owner.partnerCaseId !== null && writablePartnerCases.has(owner.partnerCaseId)));
+      const blockedReferenceLoadingIds = new Set(owners.filter(owner => !canManageOwner(owner.allocationRevision))
+        .map(owner => owner.allocationRevision.loadingId));
       const allowedIds = owners.flatMap(owner => owner.allocationRevision.sourceKind === 'SALES_CONTRACT'
         || (owner.allocationRevision.sourceKind === 'PARTNER_CASE' && owner.allocationRevision.partnerCaseId
           && allowedPartnerCases.has(owner.allocationRevision.partnerCaseId)) ? [owner.id] : []);
       const candidates = await tx.accountingDispatchCandidate.findMany({ where: { id: { in: allowedIds } }, select: {
         id: true, status: true, createdAt: true, dispositionAt: true, dispositionReason: true,
         pickupVerification: { select: { verifiedAt: true } },
-        allocationRevision: { select: { snapshot: true, loadingId: true, lines: { select: { snapshot: true, quantity: true, unit: true } } } },
+        allocationRevision: { select: { snapshot: true, loadingId: true,
+          loading: { select: { sepidarLoadingReference: true, status: true } },
+          lines: { select: { snapshot: true, quantity: true, unit: true } } } },
         waybills: { orderBy: { issuedAt: 'asc' }, select: { id: true, number: true, status: true,
           issuedAt: true, voidedAt: true, replacesWaybillId: true,
           legacyReconstruction: { select: { id: true, createdAt: true } },
@@ -594,6 +605,16 @@ router.get('/dispatch-candidates', accountingDispatchView, async (req: AuthReque
         _max: { issuedAt: true, voidedAt: true },
       });
       const invoiceActivityByLoading = new Map(invoiceActivity.map(invoice => [invoice.loadingId, invoice._max]));
+      const referenceHistory = await tx.accountingAuditLog.findMany({ where: {
+        entityType: 'LogisticsLoading', entityId: { in: [...new Set(candidates.map(candidate => candidate.allocationRevision.loadingId))] },
+        action: { in: sepidarReferenceAuditActions },
+      }, select: { entityId: true, ...sepidarReferenceAuditFields }, orderBy: sepidarReferenceAuditOrder });
+      const historyByLoading = new Map<string, typeof referenceHistory>();
+      for (const entry of referenceHistory) {
+        const entries = historyByLoading.get(entry.entityId!) ?? [];
+        entries.push(entry);
+        historyByLoading.set(entry.entityId!, entries);
+      }
       const time = (value?: Date | null) => value?.getTime() ?? 0;
       const ownerById = new Map(owners.map(owner => [owner.id, owner.allocationRevision]));
       return { manage, candidates: candidates.map(candidate => {
@@ -604,10 +625,15 @@ router.get('/dispatch-candidates', accountingDispatchView, async (req: AuthReque
           time(invoice?.issuedAt), time(invoice?.voidedAt), ...candidate.waybills.map(waybill => Math.max(
             time(waybill.issuedAt), time(waybill.voidedAt), time(waybill.legacyReconstruction?.createdAt), time(waybill.physicalExit?.recordedAt),
           ))));
-        return { ...candidateData, lastActivityAt, currentSalesInvoice: currentInvoiceByLoading.get(allocationRevision.loadingId) ?? null, loadingId: allocationRevision.loadingId, summary: projectAccountingDispatchCandidateSummary(allocationRevision.snapshot),
+        return { ...candidateData, lastActivityAt, currentSalesInvoice: currentInvoiceByLoading.get(allocationRevision.loadingId) ?? null, loadingId: allocationRevision.loadingId,
+          sepidarLoadingReference: allocationRevision.loading.sepidarLoadingReference,
+          loadingStatus: allocationRevision.loading.status,
+          sepidarLoadingReferenceHistory: historyByLoading.get(allocationRevision.loadingId) ?? [],
+          canManageSepidarLoadingReference: allocationRevision.loading.status === 'FINALIZED' &&
+            !blockedReferenceLoadingIds.has(allocationRevision.loadingId),
+          summary: projectAccountingDispatchCandidateSummary(allocationRevision.snapshot),
           lines: owner?.sourceKind === 'SALES_CONTRACT' ? projectAccountingDispatchLines(allocationRevision.lines) : [],
-          canManage: manage.allowed && Boolean(owner && (owner.sourceKind === 'SALES_CONTRACT'
-          || (owner.sourceKind === 'PARTNER_CASE' && owner.partnerCaseId && writablePartnerCases.has(owner.partnerCaseId)))) };
+          canManage: Boolean(owner && canManageOwner(owner)) };
       }).sort((left, right) => right.lastActivityAt.getTime() - left.lastActivityAt.getTime()
         || right.createdAt.getTime() - left.createdAt.getTime() || left.id.localeCompare(right.id)) };
     });
@@ -615,6 +641,80 @@ router.get('/dispatch-candidates', accountingDispatchView, async (req: AuthReque
     return res.json({ success: true, data: candidates.map((candidate) => ({ ...candidate,
       waybills: candidate.waybills.map((waybill) => ({ ...waybill, number: waybill.number.toString() })) })) });
   } catch (error) { return dispatchError(res, error); }
+});
+
+router.post('/loadings/:loadingId/sepidar-reference', accountingDispatchEdit, async (req: WorkspaceRequest & FeatureRequest, res: Response) => {
+  const raw = req.body?.value;
+  if (raw !== null && typeof raw !== 'string') return res.status(400).json({ success: false, error: 'شماره بارگیری سپیدار را وارد کنید.' });
+  const value = (raw === null ? null : raw.trim().replace(/[۰-۹]/g, digit => String(digit.charCodeAt(0) - 1776))
+    .replace(/[٠-٩]/g, digit => String(digit.charCodeAt(0) - 1632))) || null;
+  if (value !== null && !/^[0-9]{1,64}$/.test(value)) return res.status(400).json({ success: false, error: 'شماره بارگیری سپیدار باید فقط رقم باشد.' });
+  const expectedVersion = req.body?.expectedVersion ?? null;
+  if (expectedVersion !== null && (typeof expectedVersion !== 'string' || expectedVersion.length === 0 || expectedVersion.length > 64))
+    return res.status(400).json({ success: false, error: 'نسخه شماره قبلی معتبر نیست.' });
+  const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
+  if (reason.length > 200) return res.status(400).json({ success: false, error: 'دلیل باید کوتاه باشد.' });
+  try {
+    const result = await prisma.$transaction(async tx => {
+      const loadingId = req.params.loadingId;
+      const candidates = await tx.accountingDispatchCandidate.findMany({
+        where: { allocationRevision: { loadingId } },
+        select: { allocationRevision: { select: { sourceKind: true, partnerCaseId: true } } },
+      });
+      if (!candidates.length) return 'missing' as const;
+      const partnerCases = [...new Set(candidates.flatMap(candidate => candidate.allocationRevision.sourceKind === 'PARTNER_CASE'
+        ? candidate.allocationRevision.partnerCaseId ? [candidate.allocationRevision.partnerCaseId] : [''] : []))].sort();
+      if (partnerCases.length) {
+        if (partnerCases.includes('')) return 'missing' as const;
+        const authority = createAuditedPartnerAuthorization(tx, { actorId: req.user!.id, purpose: 'ACCOUNTING', channel: 'API' }, {
+          correlationId: String(req.get('X-Correlation-Id') || randomUUID()), reason: 'ثبت شماره بارگیری سپیدار',
+        });
+        for (const caseId of partnerCases) {
+          if (!(await authority.authorize('ACCOUNTING_WRITE', { kind: 'CASE', id: caseId })).ok) return 'missing' as const;
+        }
+      } else {
+        await tx.$queryRaw`SELECT id FROM users WHERE id = ${req.user!.id} FOR UPDATE`;
+        await tx.$queryRaw`SELECT revision FROM effective_authorization_state WHERE id = 1 FOR UPDATE`;
+      }
+      if (!await readPartnerDispatchAccountingCapability(tx, req.user!.id)) return 'missing' as const;
+      const [loading] = await tx.$queryRaw<{ status: string; sepidarLoadingReference: string | null }[]>
+        `SELECT status, "sepidarLoadingReference" FROM logistics_loadings WHERE id = ${loadingId} FOR UPDATE`;
+      if (!loading) return 'missing' as const;
+      if (loading.status !== 'FINALIZED') return 'not-finalized' as const;
+      const before = loading.sepidarLoadingReference;
+      const priorReference = await tx.accountingAuditLog.findFirst({ where: {
+        entityType: 'LogisticsLoading', entityId: loadingId,
+        action: { in: sepidarReferenceAuditActions },
+      }, select: { id: true, createdAt: true }, orderBy: sepidarReferenceAuditOrder });
+      if (expectedVersion !== (priorReference?.id ?? null)) return 'stale' as const;
+      if (before === null && !value) return 'empty' as const;
+      const initial = before === null && !priorReference;
+      if (!initial && !reason) return 'reason-required' as const;
+      if (before === value) return 'unchanged' as const;
+      const updated = await tx.logisticsLoading.updateMany({ where: { id: loadingId, status: 'FINALIZED' },
+        data: { sepidarLoadingReference: value } });
+      if (!updated.count) return 'stale' as const;
+      // The database transaction timestamp can precede a writer that finished while this request waited.
+      const createdAt = new Date(Math.max(Date.now(), (priorReference?.createdAt.getTime() ?? 0) + 1));
+      const auditEntry = await tx.accountingAuditLog.create({ data: {
+        action: initial ? 'REGISTER_SEPIDAR_LOADING_REFERENCE' : 'CORRECT_SEPIDAR_LOADING_REFERENCE', actorId: req.user!.id,
+        entityType: 'LogisticsLoading', entityId: loadingId, beforeState: { sepidarLoadingReference: before },
+        afterState: { sepidarLoadingReference: value }, note: initial ? `شماره بارگیری سپیدار: ${value}` : reason, createdAt,
+      }, select: sepidarReferenceAuditFields });
+      return { initial, auditEntry };
+    });
+    if (result === 'missing') return res.sendStatus(404);
+    if (result === 'not-finalized') return res.status(409).json({ success: false, error: 'بارگیری نهایی نشده است.' });
+    if (result === 'stale') return res.status(409).json({ success: false, code: 'SEPIDAR_REFERENCE_STALE', error: 'شماره این بارگیری تغییر کرده است. صفحه را به‌روز کنید.' });
+    if (result === 'empty') return res.status(400).json({ success: false, error: 'شماره بارگیری سپیدار را وارد کنید.' });
+    if (result === 'reason-required') return res.status(400).json({ success: false, code: 'SEPIDAR_REFERENCE_REASON_REQUIRED', error: 'دلیل اصلاح شماره بارگیری سپیدار الزامی است.' });
+    if (result === 'unchanged') return res.status(400).json({ success: false, error: 'شماره تغییری نکرده است.' });
+    return res.status(result.initial ? 201 : 200).json({ success: true, data: { value, auditEntry: result.auditEntry } });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')
+      return res.status(409).json({ success: false, error: 'این شماره برای بارگیری دیگری ثبت شده است.' });
+    return dispatchError(res, error);
+  }
 });
 
 router.post('/dispatch-candidates/:id/pickup-verification/:command', accountingDispatchEdit, async (req: WorkspaceRequest & FeatureRequest, res: Response) => {

@@ -39,6 +39,8 @@ services:
       dockerfile: backend/Dockerfile
       network: host
       args:
+        RECOVERY_POSTGRES_IMAGE: ${RECOVERY_POSTGRES_IMAGE:-postgres:15-alpine}
+        RECOVERY_POSTGRES_IMAGE_ID: ${RECOVERY_POSTGRES_IMAGE_ID:-unattested}
         PERFORMANCE_SOURCE_COMMIT: ${PERFORMANCE_SOURCE_COMMIT}
         PERFORMANCE_SOURCE_HASH: ${PERFORMANCE_SOURCE_HASH}
         DEBIAN_MIRROR: ${DEBIAN_MIRROR:-http://deb.debian.org/debian}
@@ -54,7 +56,7 @@ services:
     environment:
       NODE_ENV: production
       PORT: 5000
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public&connection_limit=${BACKEND_DB_CONNECTION_LIMIT:-10}&pool_timeout=${BACKEND_DB_POOL_TIMEOUT_SECONDS:-10}&application_name=${DATABASE_APPLICATION_NAME:-sabalanerp-backend}
+      DATABASE_URL: postgresql://${BACKEND_DATABASE_USER:-${POSTGRES_USER}}:${BACKEND_DATABASE_PASSWORD:-${POSTGRES_PASSWORD}}@postgres:5432/${POSTGRES_DB}?schema=public&connection_limit=${BACKEND_DB_CONNECTION_LIMIT:-10}&pool_timeout=${BACKEND_DB_POOL_TIMEOUT_SECONDS:-10}&application_name=${DATABASE_APPLICATION_NAME:-sabalanerp-backend}
       JWT_SECRET: ${JWT_SECRET}
       PERSONNEL_PERFORMANCE_ENCRYPTION_KEY_ID: ${PERSONNEL_PERFORMANCE_ENCRYPTION_KEY_ID}
       PERSONNEL_PERFORMANCE_ENCRYPTION_KEY_BASE64: ${PERSONNEL_PERFORMANCE_ENCRYPTION_KEY_BASE64}
@@ -113,6 +115,7 @@ services:
       PUBLIC_APP_URL: ${PUBLIC_APP_URL}
       PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
       RECOVERY_STORAGE_DIR: /app/storage/recovery
+      SYSTEM_RECOVERY_OWNER_PUBLIC_KEY_FILE: /run/deployment-secrets/system-recovery-owner-public.pem
       RECOVERY_COORDINATION_DIR: /app/recovery-coordination
       INQUIRY_RECOVERY_SOURCE_DIR: /app/recovery-sources/inquiry
       INQUIRY_RECOVERY_COORDINATED: "true"
@@ -132,6 +135,7 @@ services:
       - backend_storage_performance_exports:/app/storage/performance-exports
       - backend_uploads:/app/uploads
       - backend_recovery:/app/storage/recovery
+      - ${DEPLOYMENT_SECRET_DIR:-./deploy/secrets}/system-recovery-owner-public.pem:/run/deployment-secrets/system-recovery-owner-public.pem:ro
       - recovery_coordination:/app/recovery-coordination
       - inquiry_data:/app/recovery-sources/inquiry
       - ${DEPLOYMENT_SECRET_DIR:-./deploy/secrets}/partner-release-trust-public.der:/run/deployment-secrets/partner-release-trust-public.der:ro
@@ -155,6 +159,8 @@ services:
     restart: "no"
     environment:
       BACKEND_RUNTIME_ROLE: control
+      DEPLOYMENT_CHECKPOINT_RUNTIME_USER: ${BACKEND_DATABASE_USER:-${POSTGRES_USER}}
+      DATABASE_URL: postgresql://${DEPLOYMENT_DATABASE_USER:-${POSTGRES_USER}}:${DEPLOYMENT_DATABASE_PASSWORD:-${POSTGRES_PASSWORD}}@postgres:5432/${POSTGRES_DB}?schema=public&connection_limit=${BACKEND_DB_CONNECTION_LIMIT:-10}&pool_timeout=${BACKEND_DB_POOL_TIMEOUT_SECONDS:-10}&application_name=${DATABASE_APPLICATION_NAME:-sabalanerp-backend}
       DEPLOYMENT_LOCAL_ROLLBACK_KEY_FILE: /run/deployment-secrets/local-rollback-key
       DEPLOYMENT_REMOTE_RECOVERY_PUBLIC_KEY_FILE: /run/deployment-secrets/remote-recovery-public.pem
       DEPLOYMENT_REMOTE_MOUNT: /app/deployment-remote

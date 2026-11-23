@@ -1,0 +1,61 @@
+# تخصیص گروهی مشتری — طرح A تأییدشده
+
+مرجع خواسته، تأیید صریح صاحب محصول برای «A · جدول قابل ویرایش» و تصویر پیوست در همین گفتگو است. فرمان شروع implement در ۲۰۲۶/۱۱/۰۵ صادر شد. مرزهای آزمون تأییدشده: رابط حسابدار در مرورگر و فرمان عمومی تخصیص گروهی. مبنای بازبینی تأییدشده `d9b3caab` است.
+
+## رفتار نهایی
+
+در همان پرونده مشتری، «تخصیص به بدهی» و بخش «تخصیص»، میز طرح A را باز می‌کنند: سه جمع فشرده، منابع وجه در بالای صفحه، جدول قابل ویرایش با بدهی‌های گروه‌بندی‌شده زیر قرارداد و یک مرور نهایی برای همه سهم‌ها. قرارداد بدون بدهی قطعی همچنان دیده می‌شود؛ افتتاحیه و بدهی مستقل گروه خود را دارند. مبلغ قرارداد مقصد تسویه نیست.
+
+واحد این میز و مرور نهایی تومان است؛ یک رقم اعشار معادل یک ریال و محاسبه با BigInt حفظ می‌شود. منابع انتخابی به ترتیب نمایش سهم پیشنهادی می‌دهند و سقف مصرف مستقل دارند. «تکمیل مانده انتخاب‌شده» فقط پیش‌نویس می‌سازد. تاریخ، دوره باز، قاعده معتبر، دلیل حداقل۸ نویسه، مرجع و تأیید صریح حسابدار برای ثبت لازم‌اند. تغییر اطلاعات تأیید را باطل می‌کند.
+
+فرمان موجود `recordCustomerWorkspaceTreasury` با `sourceAllocations` استفاده می‌شود؛ مالک دفترکل، سقف منابع و بدهی، کتاب، مشتری، صلاحیت ابزار، قفل هم‌زمانی، ثبت یکپارچه، تاریخ اثر، سابقه و برگشت تخصیص تغییر نکرده‌اند. تغییر runtime بک‌اند یا migration نداریم.
+
+کلیک تخصیص از دریافت، همان منبع را به میز می‌آورد. پیش‌نویس با تغییر بخش‌های پرونده باقی می‌ماند. در تعارض۴۰۹، مانده تازه خوانده می‌شود و مبلغ‌های واردشده حفظ می‌شوند؛ منابع بدون مانده با اقدام صریح کنار می‌روند. نتیجه نامشخص شبکه، درخواست را قفل و همان payload و idempotency key را برای تلاش دوباره حفظ می‌کند. موفقیت ثبت همراه شکست بازخوانی، فقط بازخوانی را قابل تکرار می‌کند و فرمان مالی دوباره ارسال نمی‌شود.
+
+اطلاعات آموزشی، شبیه‌سازی، نوار تعویض طرح، طرح‌های B/C و فرمان اجرای prototype وارد نسخه اصلی نمی‌شوند. منبع اولیه نمونه‌ها در شاخه محلی `codex/prototype-customer-allocation-ux`، کامیت `d0e2019f7d8f78f8eebae3ec526e730fa664827c` محفوظ است. لینک قبلی `?variant=A` به میز واقعی می‌رسد؛ `sample=demo` هیچ داده فرضی به نسخه اصلی اضافه نمی‌کند. مسیر مستقیم جدید `?tab=allocation` است.
+
+## آزمون و محیط
+
+- چرخه اول TDD: نبود میز در مرورگر، سپس ارسال موفق یک فرمان برای چند منبع/بدهی با سهم‌های معلوم.
+- چرخه دوم: نداشتن راه ادامه پس از تمام‌شدن هم‌زمان منبع، سپس حفظ مبالغ و حذف صریح منبع بدون مانده.
+- آزمون بزرگ‌نمایی۲۰۰٪، دسترسی‌ناپذیری انتهای پنجره مشترک را نشان داد. ErpSheet برای modal ارتفاع فرزند را به فضای والد ثابت و دارای padding محدود می‌کند؛ دیگر viewport unit با zoom دو بار بزرگ نمی‌شود. آزمون مرورگر پس از اصلاح موفق شد؛ کنترل‌های فوکوس، pending و Escape موجود حفظ شدند.
+- آزمون فرمان عمومی با پایگاه موقت harness موجود روی PostgreSQL همان `sabalanerp-local`، دقت یک ریال، دو بدهی، دریافت و CREDIT، برگشت یکپارچه در شکست و بازپخش بدون ثبت اضافه را اثبات کرد. کلاینت و داده در finally پاک می‌شوند.
+- در شروع، frontend به نام DNS ناموجود `backend` وصل بود؛ فقط اتصال محلی آن به backend-candidate سالم در همان شبکه پروژه برقرار شد. سپس ورود واقعی با پاسخ نگهداری متوقف بود. lease، checkpoint، maintenance، تنظیمات استقرار و داده تولیدی تغییر نکردند. آزمون‌های قرارداد رابط از fixture جلسه در مرز HTTP استفاده می‌کنند؛ آزمون جداگانه real API همچنان ورود واقعی دارد.
+- وابستگی‌های میزبان و دو بسته محلی در working tree ناقص/حذف‌شده بودند. برای ساخت و آزمون، نسخه موقت بیرون مخزن از HEAD و تغییرات همین کار با وابستگی‌های lockfile آماده شد؛ فایل‌های حذف‌شده کاربر در working tree بازگردانده یا commit نشدند. هیچ سرور، کانتینر یا پروژه Compose دیگری ساخته نشد.
+
+## نتایج نهایی
+
+| بررسی | نتیجه |
+| --- | --- |
+| مجموعه کامل مالی مشتری، پرونده و treasury: چهار فایل `accountingCustomerFinance.integration.test.ts`، `accountingCustomerWorkspace.integration.test.ts`، `accountingCustomerTreasuryPrisma.integration.test.ts` و `accountingCustomerTreasury.test.ts` با `--test-concurrency=1` | ۲۷ موفق، صفر شکست و صفر skip؛ پایگاه‌های harness روی PostgreSQL موجود و cleanup در finally |
+| اجرای کامل اولیه سه فایل مرورگر مشتری | ۱۹ موفق؛ یک شکست در ورود واقعی به‌علت پاسخ نگهداری محیط، پیش از رسیدن به پرونده مشتری |
+| اجرای نهایی تمام سناریوهای قراردادی سه فایل مرورگر پس از اصلاحات بازبینی | ۲۰ موفق؛ شامل هفت سناریوی تخصیص و حفظ همه عملیات قبلی. آزمون real API بدون تغییر در کد باقی است و به‌علت مانع محیطی شناخته‌شده با `--grep-invert "real local API"` از این اجرای مجدد کنار گذاشته شد |
+| حالت روشن/تیره، عرض۳۹۰px، zoom۲۰۰٪، axe و پنجره مرور تخصیص | موفق؛ تصاویر محلی `test-results/accounting-ledger/customer-allocation-A-desktop.png` و `customer-allocation-A-mobile.png` |
+| TypeScript محدود به پرونده و ماژول‌های جدید در frontend موجود | موفق |
+| `npm run build:frontend` روی نسخه موقت HEAD به‌همراه تمام تغییرات نهایی فرانت‌اند همین کار | موفق؛ کامپایل، بررسی نوع‌های کامل، تولید۱۴۱ صفحه و خروجی نهایی. هشدارهای lint موجود مانع ساخت نشدند |
+| `npm run design-system:check`، foundation و adoption | موفق؛۲۵ آزمون foundation و۱۴ آزمون adoption؛ baseline یا allowlist تغییر نکرد |
+| `npm run architecture:check` | موفق؛ مالکیت Prisma runtime حفظ شده است |
+
+فرمان استاندارد `npm run test:design-system:e2e -- shared-operational-overlays.spec.ts` اجرا شد، اما preflight آن نبود سرویس با نام دقیق `backend` را در Compose گزارش و پیش از آزمون متوقف شد؛ backend-candidate سالم جای شرط این فرمان معرفی یا guard آن تضعیف نشد. پذیرش سراسری Docker و آزمون ورود واقعی موفق اعلام نمی‌شوند. آزمون‌های مرورگر قراردادی فوق به همان frontend موجود و پاسخ‌های fixture در مرز HTTP محدودند؛ آزمون‌های فرمان مالی جداگانه روی PostgreSQL واقعی اجرا شدند. هیچ نگهداری، lease یا کنترل انتشار برای آزمون دور زده نشد.
+
+در چرخه اصلاح بازبینی، دو آزمون ابتدا شکست خوردند: «نتیجه نامشخص → بستن مرور → بازخوانی عمومی → ادامه همان درخواست» و «۵۰۳ → تلاش مجدد →۴۰۹ → اصلاح مبلغ». بازخوانی اکنون زیرشاخه موجود پرونده را mounted نگه می‌دارد و در خطای خواندن، داده را حذف نمی‌کند؛ درخواست قفل‌شده همان payload/key را حفظ می‌کند. پاسخ قطعی۴xx حالت نامشخص را پاک و تأیید را باطل می‌کند. هر دو آزمون در اجرای نهایی موفق‌اند.
+
+## Standards
+
+بازبینی مستقل از مبنای `d9b3caab`، یک تخلف قابل اقدام در حفظ درخواست نامشخص هنگام بازخوانی و یک پیشنهاد غیرمسدودکننده برای یکسان‌کردن انتخاب دوره/قاعده یافت. هر دو در `0630c4db` اصلاح شدند. بازخوانی مستقل diff اصلاحات، حفظ هویت درخواست و استفاده از helper مشترک برای زمینه مالی را تأیید کرد؛ یافته مادی بازی باقی نماند. بازبین فقط کد را خواند و آزمون‌های بالا توسط عامل اجرا شدند.
+
+**جمع Standards: یک یافته استاندارد و یک پیشنهاد نگهداری اصلاح‌شده؛ صفر یافته باز.**
+
+## Spec
+
+بازبینی مستقل، دو نقص بازیابی یافت: ازبین‌رفتن درخواست نامشخص با بازخوانی عمومی، و قفل‌ماندن فرم پس از رد قطعی تلاش مجدد. هر دو در `0630c4db` اصلاح و با آزمون مرورگر پوشش داده شدند. بازخوانی مستقل، رفع هر دو و نبود نقص مشخص تازه در تطابق با خواسته را تأیید کرد. چیدمان A، تومان، دقت یک ریال، گروه‌بندی بدهی و استفاده از مالک مالی موجود حفظ شده‌اند.
+
+**جمع Spec: دو یافته اصلاح‌شده؛ صفر یافته باز.**
+
+## Compatibility recheck — 2026-11-16
+
+The integration based on main `cc4f5de23693df54ed7c94f564d4680351d8c852` must not be merged or activated as a working grouped-allocation feature yet. The focused real-database test `accountingCustomerFinance.integration.test.ts` / `a grouped receipt and independent credit plan` was run twice against isolated databases created by the existing local PostgreSQL harness. Both runs rejected before mutation with `CUSTOMER_SOURCE_SHARES_CLOSED` from `requireCustomerSourceSharesWithin`; the fixture harness owns its test database cleanup. The 21 browser fixture scenarios passed previously, but mocked HTTP responses do not establish financial-command acceptance.
+
+The local database has all 461 checkpoint migrations applied with none unfinished, and both the nullable `treasuryTransactionId` and `creditItemId` columns exist. Thus this failure is not a missing local migration. Main intentionally keeps customer source-share commands closed after retirement of the online staging schema; see `docs/operations/protected-candidate-online-retirement.md`.
+
+The retained-reader risk is concrete, although the old-reader probe was not an execution of the installed production image: `reports/qa/production-old-reader-credit-overlap-20261018.md` records Prisma P2032 when a credit-funded allocation has a null treasury transaction reference. The legacy schema at `a2c75f1027a069e91837ff433e1c91cdc7746798` requires that field, whereas the current schema permits null. Source-share activation therefore needs a separately reviewed compatibility and protected rollback plan, including fresh exact production/rollback identities, a populated-data rehearsal with the actual retained reader, compatible handling of already-open browser forms, and proof that acknowledged writes survive candidate admission or verified rollback under the existing protected gates. Historical component results and successful mocked UI tests do not supply that proof. Do not bypass the command guard or weaken lease, checkpoint, remote verification, or rollback gates.

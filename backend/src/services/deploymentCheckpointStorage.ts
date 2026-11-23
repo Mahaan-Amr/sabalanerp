@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { sha256File } from './recoveryCrypto';
+import { qaNativeCheckpointChecksum, usesQaNativeReadback } from './qaNativeCheckpointReadback';
 import { hasHealthyIndependentCheckpointDrill, hasHealthyRemoteRecoveryPoint, planLocalCheckpointCleanup, planRemoteCheckpointRetention, type LocalCheckpointArtifact } from './deploymentCheckpointPolicy';
 import { readOnlineCheckpointDirectory, assertOnlineCheckpointDirectoryUnchanged, removeVerifiedOnlineCheckpointDirectory, type OnlineDirectoryEvidence } from './onlineCheckpointDirectory';
 
@@ -24,7 +25,7 @@ export type CheckpointObject = {
   onlineDirectoryEvidence?: OnlineDirectoryEvidence;
   localVerified?: boolean;
   manifestReadable?: boolean;
-  manifest?: { packageType?: string };
+  manifest?: import('./deploymentCheckpointPolicy').RemoteCheckpointArtifact['manifest'];
   compatibility?: { local?: { compatible?: boolean } };
 };
 
@@ -53,6 +54,7 @@ type FilesystemRemoteCheckpointStoreOptions = {
 const transientRemoteStorageCodes = new Set(['EIO', 'ESTALE', 'ENOTCONN', 'ECONNRESET', 'ETIMEDOUT']);
 
 const remoteCheckpointChecksum = async (filePath: string): Promise<string> => {
+  if (usesQaNativeReadback()) return qaNativeCheckpointChecksum(filePath);
   const hash = createHash('sha256');
   // Larger bounded reads let SSHFS pipeline requests across a high-latency link.
   // Every byte still participates in the independently read-back checksum.
@@ -463,6 +465,7 @@ export const enforceFilesystemRemoteRetention = async (root: string, activeDeplo
     sourceMachineUuidSha256: artifact.sourceMachineUuidSha256,
     sourceKernelBootIdSha256: artifact.sourceKernelBootIdSha256,
     lastDrill: artifact.lastDrill,
+    manifest: artifact.manifest,
     onlineDirectoryEvidence: artifact.onlineDirectoryEvidence,
     active: artifact.id === activeDeploymentId || artifact.active === true,
     incidentOpen: artifact.incidentOpen === true || localHolds.has(artifact.id),

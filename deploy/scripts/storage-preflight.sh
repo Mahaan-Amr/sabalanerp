@@ -74,6 +74,7 @@ node "$operations_root/deploy/scripts/storage-preflight.mjs" \
   --journal-root "$report_root" \
   --document "$coordination_root/deployment-checkpoint.json" \
   --document "$coordination_root/pending-restore.json" \
+  --document "$coordination_root/customer-allocation-active-retention.json" \
   --document "$report_root/active-deployment-session.json" \
   --audit "$report_root/storage-cleanup-local.jsonl" "$@"
 ssh -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \

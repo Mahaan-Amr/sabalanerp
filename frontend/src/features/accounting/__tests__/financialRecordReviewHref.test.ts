@@ -3,15 +3,15 @@ import test from 'node:test';
 import { financialRecordReviewHref, financialRecordReviewId, accountingReviewReturn } from '../financialRecordReviewHref';
 import { FinancialReviewRequestGuard, loadFinancialReview, canSubmitFinancialReview } from '../financialReviewRequestGuard';
 
-test('contract 100999 review uses its persisted identity for reads, audit and approval', async () => {
-  const id = 'partner-accounting:5a11d03abd0ece495a335b337d94b2b8d9d726b73715abeff6c3e6b3592f2c52:replacement:2d8dadce-7015-40e3-a14d-ed45b0f11fe8';
-  const url = new URL(financialRecordReviewHref(id, '/dashboard/accounting/contracts/partner/case-100999'), 'https://example.test');
+test('contract 900001 review uses its persisted identity for reads, audit and approval', async () => {
+  const id = 'partner-accounting:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:replacement:00000000-0000-4000-8000-000000000001';
+  const url = new URL(financialRecordReviewHref(id, '/dashboard/accounting/contracts/partner/case-900001'), 'https://example.test');
   const segment = url.pathname.split('/').at(-1)!;
   const recordId = financialRecordReviewId(segment)!;
-  const guard = new FinancialReviewRequestGuard(); guard.select('reviewer:100999');
+  const guard = new FinancialReviewRequestGuard(); guard.select('reviewer:900001');
   let auditReads = 0;
-  const result = await loadFinancialReview({ owner: 'reviewer:100999', recordId,
-    epoch: guard.begin('reviewer:100999')!, guard,
+  const result = await loadFinancialReview({ owner: 'reviewer:900001', recordId,
+    epoch: guard.begin('reviewer:900001')!, guard,
     fetchRecord: async () => {
       const query = new URLSearchParams({ recordId });
       assert(!query.toString().includes('%253A'), 'API request must not encode the colon twice');
@@ -21,10 +21,10 @@ test('contract 100999 review uses its persisted identity for reads, audit and ap
   });
   assert.equal(result?.kind, 'loaded', 'the real record/audit chain must not report the existing record as missing');
   assert.equal(auditReads, 1);
-  assert(canSubmitFinancialReview({ owner: 'reviewer:100999', recordId, payloadId: id, loading: false, busy: false,
-    review: { owner: 'reviewer:100999', record: { id }, canApprove: true } }));
-  assert(!canSubmitFinancialReview({ owner: 'reviewer:100999', recordId, payloadId: segment, loading: false, busy: false,
-    review: { owner: 'reviewer:100999', record: { id }, canApprove: true } }));
+  assert(canSubmitFinancialReview({ owner: 'reviewer:900001', recordId, payloadId: id, loading: false, busy: false,
+    review: { owner: 'reviewer:900001', record: { id }, canApprove: true } }));
+  assert(!canSubmitFinancialReview({ owner: 'reviewer:900001', recordId, payloadId: segment, loading: false, busy: false,
+    review: { owner: 'reviewer:900001', record: { id }, canApprove: true } }));
 });
 
 test('route decoding preserves distinct stored IDs and rejects malformed escapes', () => {

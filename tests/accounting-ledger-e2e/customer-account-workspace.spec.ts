@@ -1,5 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
-const login = async (page: Page) => {
+import { installAccountingSessionFixture } from './support/accountingSessionFixture';
+const login = async (page: Page, real = false) => {
+  if (!real) { await installAccountingSessionFixture(page); return; }
   await page.goto('/login');
   await page.getByRole('textbox', { name: 'ایمیل، نام کاربری یا شماره تماس' }).fill('admin');
   await page.locator('input[type="password"]').fill('admin123');
@@ -105,7 +107,7 @@ test('eye action opens readable customer workspace and carries the selected cust
 });
 
 test('real local API includes CRM-only customers and loads customer detail without creating financial rows', async ({ page }) => {
-  await login(page);
+  await login(page, true);
   await page.goto('/dashboard/accounting/customer-accounts');
   await expect(page.getByRole('heading', { name: 'حساب‌های مالی مشتریان', exact: true })).toBeVisible();
   const action = page.getByRole('link', { name: 'مشاهده حساب مشتری' }).first();

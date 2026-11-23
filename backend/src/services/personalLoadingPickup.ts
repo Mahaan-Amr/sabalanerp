@@ -56,24 +56,26 @@ export async function selectLoadingTransport(db: PrismaClient, input: {
   return outcome;
 }
 
-/** Preserve personal selection history when the draft is discarded. */
-export async function retirePersonalLoadingDraft(tx: Prisma.TransactionClient, loadingId: string, actorId: string) {
+/** Preserve personal selection history when the draft is cancelled or discarded. */
+export async function retirePersonalLoadingDraft(
+  tx: Prisma.TransactionClient, loadingId: string, actorId: string, reason = 'حذف پیش‌نویس بارگیری',
+) {
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`LOGISTICS_LOADING:${loadingId}`}))`;
   const loading = await tx.logisticsLoading.findUniqueOrThrow({ where: { id: loadingId }, include: { guardQueueTurns: true } });
   if (!loading.guardQueueTurns.some(turn => turn.driverSource === 'PERSONAL_PICKUP')) return false;
-  if (loading.status !== 'DRAFT') throw new GuardQueueConflictError('فقط پیش‌نویس بارگیری قابل حذف است.');
+  if (loading.status !== 'DRAFT') throw new GuardQueueConflictError('وضعیت بارگیری تغییر کرده است. صفحه را به‌روز کنید.');
   await tx.logisticsAllocationDraft.deleteMany({ where: { loadingId } });
   const at = new Date();
   for (const turn of loading.guardQueueTurns.filter(turn => turn.status === 'RESERVED_FOR_LOADING')) {
     const personal = turn.driverSource === 'PERSONAL_PICKUP';
     const updated = await tx.guardDriverQueueTurn.update({ where: { id: turn.id }, data: personal
-      ? { status: 'CLOSED_WITHOUT_LOADING', closedAt: at, closedBy: actorId, closureReason: 'حذف پیش‌نویس بارگیری' }
+      ? { status: 'CLOSED_WITHOUT_LOADING', closedAt: at, closedBy: actorId, closureReason: reason }
       : { status: 'AVAILABLE_FOR_LOADING', loadingId: null, reservedAt: null, reservedBy: null } });
     await appendQueueEvent(tx, { turnId: turn.id, eventType: personal ? 'CLOSED_WITHOUT_LOADING' : 'RESERVATION_RELEASED',
-      fromStatus: turn.status, toStatus: updated.status, actorId, reason: 'حذف پیش‌نویس بارگیری', payload: { loadingId } });
+      fromStatus: turn.status, toStatus: updated.status, actorId, reason, payload: { loadingId } });
   }
   await tx.logisticsLoading.update({ where: { id: loadingId }, data: { status: 'CANCELLED', cancelledAt: at,
-    cancelledBy: actorId, cancellationReason: 'حذف پیش‌نویس بارگیری' } });
+    cancelledBy: actorId, cancellationReason: reason } });
   return true;
 }
 

@@ -97,9 +97,13 @@ async function main() {
       } });
       const unrelated = await tx.salesContract.create({ data: { contractNumber: `UNSELECTED-${randomUUID()}`,
         title: 'Unselected', titlePersian: 'انتخاب نشده', content: '', customerId: customer.id, departmentId: department.id, createdBy: actorId, responsibleSellerId: actorId } });
-      if (process.env.PERSONAL_PICKUP_HTTP === '1') return {
-        actorId, contractNumber: contract.contractNumber, loadingId: loading.id, itemId: item.id, unrelatedNumber: unrelated.contractNumber,
-      };
+      if (process.env.PERSONAL_PICKUP_HTTP === '1') {
+        const cancellable = await tx.logisticsLoading.create({ data: {
+          loadingNumber: `PERSONAL-CANCEL-${randomUUID()}`, customerId: customer.id, projectId: project.id, createdBy: actorId,
+        } });
+        return { actorId, contractNumber: contract.contractNumber, loadingId: loading.id, itemId: item.id,
+          unrelatedNumber: unrelated.contractNumber, cancellableId: cancellable.id };
+      }
       const select = (mode: 'PERSONAL' | 'DRIVERS') => selectLoadingTransport(client, { loadingId: loading.id, actorId, mode });
       const first = await select('PERSONAL'); assert.ok(first.turn);
       assert.equal((await select('PERSONAL')).turn?.id, first.turn.id);

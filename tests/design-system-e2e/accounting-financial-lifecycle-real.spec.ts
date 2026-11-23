@@ -3,16 +3,20 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { expect, test, type Response } from '@playwright/test';
 
-const directory = process.env.ACCOUNTING_REAL_100999_LIFECYCLE_QA_DIR;
-const caseId = 'partner-recovery-2d9483cb-f2f8-40e2-b3b5-189136c98fe4';
-const contractPath = `/dashboard/accounting/contracts/partner/${caseId}`;
+const directory = process.env.ACCOUNTING_REAL_LIFECYCLE_QA_DIR;
 
-test('register and financially approve a new draft for copied contract 100999', async ({ page, baseURL }) => {
-  test.skip(!directory, 'Requires the isolated local restore of contract 100999.');
+test('register and financially approve a new draft for a copied contract', async ({ page, baseURL }) => {
+  test.skip(!directory, 'Requires an isolated local restore with the affected contract.');
   test.setTimeout(180_000);
   expect(new URL(baseURL!).hostname).toMatch(/^(localhost|127\.0\.0\.1)$/);
   const { database } = JSON.parse(readFileSync(`${directory}/database.json`, 'utf8'));
-  expect(database).toMatch(/^contract100999_qa_[a-f0-9]{10}$/);
+  const expected = JSON.parse(readFileSync(`${directory}/expected-record.json`, 'utf8'));
+  const { caseId, customerContractNumber: contractNumber } = expected;
+  expect(typeof caseId === 'string' && caseId.length > 0).toBe(true);
+  expect(typeof contractNumber).toBe('string');
+  expect(contractNumber).toMatch(/^\d+$/);
+  expect(database).toMatch(new RegExp(`^contract${contractNumber}_qa_[a-f0-9]{10}$`));
+  const contractPath = `/dashboard/accounting/contracts/partner/${encodeURIComponent(caseId)}`;
   const services = execFileSync('docker', ['compose', '-f', 'docker-compose.local.yml', 'ps', '--format', 'json'], { encoding: 'utf8' })
     .trim().split('\n').map(line => JSON.parse(line));
   expect(services.length).toBeGreaterThan(0);
@@ -22,7 +26,6 @@ test('register and financially approve a new draft for copied contract 100999', 
   expect(owner.phase).toBe('ACTIVE');
   expect(owner.initialDatabase.name).toBe(database);
   const login = JSON.parse(readFileSync(`${directory}/login.private.json`, 'utf8'));
-  const expected = JSON.parse(readFileSync(`${directory}/expected-record.json`, 'utf8'));
   const evidence: Record<string, unknown> = {};
   async function mutation(path: string, action: string, trigger: () => Promise<unknown>) {
     const responsePromise = page.waitForResponse(response =>
@@ -36,7 +39,7 @@ test('register and financially approve a new draft for copied contract 100999', 
     expect(body.success ?? body.ok ?? true).toBe(true);
   }
   const internal = (response: Response) => response.request().method() === 'GET' &&
-    new URL(response.url()).pathname === `/api/accounting/contracts/partner/${caseId}/internal`;
+    new URL(response.url()).pathname === `/api/accounting/contracts/partner/${encodeURIComponent(caseId)}/internal`;
 
   await page.goto('/login');
   await page.locator('input[name="identifier"]').fill(login.identifier);
@@ -46,14 +49,14 @@ test('register and financially approve a new draft for copied contract 100999', 
   const initial = page.waitForResponse(internal);
   await page.goto(contractPath);
   const original = (await (await initial).json()).data;
-  expect(original.partnerContext.customerContractNumber).toBe('100999');
+  expect(original.partnerContext.customerContractNumber).toBe(contractNumber);
   const previousDraftId = expected.id;
   expect(original.id).toBe(previousDraftId);
   expect(original.status).toBe('DRAFT');
   await page.getByRole('button', { name: 'رکوردهای مالی', exact: true }).click();
   await page.getByRole('button', { name: 'حذف پیش‌نویس', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'حذف پیش‌نویس رکورد مالی' });
-  await dialog.getByRole('textbox', { name: 'دلیل' }).fill('آزمون چرخه ثبت قرارداد ۱۰۰۹۹۹ در پایگاه داده ایزوله');
+  await dialog.getByRole('textbox', { name: 'دلیل' }).fill('آزمون چرخه ثبت قرارداد در پایگاه داده ایزوله');
   await mutation('/api/accounting/actions', 'deleteExistingDraft', () =>
     dialog.getByRole('button', { name: 'حذف پیش‌نویس', exact: true }).click());
   await page.getByRole('button', { name: 'خلاصه', exact: true }).click();
@@ -82,7 +85,7 @@ test('register and financially approve a new draft for copied contract 100999', 
   expect(draft.currency).toBe(original.currency);
 
   await review.click();
-  const invoiceNumber = `QA-100999-${randomUUID().slice(0, 8)}`;
+  const invoiceNumber = `QA-${randomUUID().slice(0, 8)}`;
   await page.getByRole('textbox', { name: 'شماره فاکتور سیستمی', exact: true }).fill(invoiceNumber);
   expect(String(draft.amount)).toMatch(/^\d+$/);
   expect(['IRT', 'IRR']).toContain(draft.currency);
@@ -107,7 +110,7 @@ test('register and financially approve a new draft for copied contract 100999', 
   const { data } = await audit.json();
   expect(data.items.filter((row: { action: string }) => row.action === 'APPROVE_FINANCIAL_INVOICE')).toHaveLength(1);
   writeFileSync(`${directory}/lifecycle-result.json`, JSON.stringify({
-    ...evidence, success: true, contractNumber: '100999', recordId, previousDraftId,
+    ...evidence, success: true, contractNumber, recordId, previousDraftId,
     status: issued.status, systemInvoiceNumber: issued.systemInvoiceNumber, amount: issued.amount,
     currency: issued.currency, approvalAuditCount: 1,
   }, null, 2), { mode: 0o600 });

@@ -2736,6 +2736,10 @@ _Avoid_: showing only one piece area when multiple source pieces are consumed, a
 A logistics-owned execution document that records what was actually loaded for shipment from one customer project, including the selected contract rows, loaded amounts, driver or vehicle details, and resulting remaining amounts.
 _Avoid_: treating بارگیری as the customer-facing برنامه تحویل, or editing the sales delivery promise when logistics is recording actual shipment
 
+**شماره بارگیری سپیدار**:
+The external Sepidar reference for one whole بارگیری, shared across its Accounting dispatch rows. It is distinct from the Sabalan loading number, waybill number, numbered sales dispatch invoice, and financial record's system invoice number.
+_Avoid_: assigning a different reference to each dispatch row, or treating an internal document number as the Sepidar loading reference
+
 **محدوده بارگیری**:
 Each بارگیری belongs to exactly one customer project and may include deliverable rows from multiple sales contracts for that same project.
 _Avoid_: mixing multiple customer projects in one بارگیری, even when the same driver or vehicle carries them together
@@ -5444,6 +5448,10 @@ _Avoid_: کسر همه رکوردهای عملیاتی بدون تطبیق، ی�
 **سهم منبع در تخصیص مشتری**:
 مبلغ تأییدشده مصرف هر جزء دریافت یا قلم اعتبار مستقل برای یک بدهی قطعی همان مشتری؛ در دریافت چندابزاری، نقد، حواله، کارت‌خوان و هر چک منشأ مستقل دارند و اصلاح یا برگشت یک جزء به سهم سایر اجزا تعمیم داده نمی‌شود.
 _Avoid_: تخصیص بدون منشأ، تلقی کل مبلغ رسید به‌عنوان مبلغ هر ابزار، یا بی‌اعتبارکردن وجه نقد به علت برگشت چک همان رسید
+
+**برنامه تخصیص مشتری**:
+مجموعه سهم‌های پیشنهادی منابع اعتبار یک مشتری برای بدهی‌های قطعی مشخص همان مشتری، که پیش از ثبت به تأیید حسابدار می‌رسد؛ قرارداد زمینه گروه‌بندی بدهی‌هاست و مبلغ قرارداد به‌تنهایی بدهی قابل تخصیص نیست.
+_Avoid_: دریافت تازه، مصرف خودکار اعتبار با ایجاد بدهی، یا تخصیص به مبلغ کل قرارداد بدون قلم بدهی قطعی
 
 **وجه قابل استرداد مشتری**:
 باقی‌مانده مؤثر منبع معتبر مشتری که پس از تخصیص‌ها، اصلاحات و استردادهای قبلی، پرداخت واقعی از آن مجاز است؛ اعتبار چکی پیش از وصول وجه قابل استرداد نیست و اعتبار مستقل تأییدشده می‌تواند با دلیل و سند پرداخت مسترد شود.

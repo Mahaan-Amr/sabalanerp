@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import { FaEye, FaFileExcel, FaFilePdf, FaMoneyBillWave, FaSync } from 'react-icons/fa';
 import { ErpBadge, ErpButton, ErpCard, ErpDisclosure, ErpEmptyState, ErpField, ErpInlineState, ErpInput, ErpPresentationProvider, ErpSection, ErpSegmentedControl, ErpSheet, ErpSummaryGrid, ErpWorkspacePage, type ErpAction } from '@/components/erp';
 import { accountingAPI } from '@/lib/api';
@@ -16,8 +16,9 @@ import CustomerAccountAnalytics from '@/features/accounting/CustomerAccountAnaly
 import CustomerReceiptTrace from '@/features/accounting/CustomerReceiptTrace';
 import { customerAccountInsights } from '@/features/accounting/customerAccountInsights';
 import workspaceStyles from '@/features/accounting/customerAccountWorkspace.module.css';
+import CustomerAllocationWorkspace from '@/features/accounting/CustomerAllocationWorkspace';
 
-type Tab = 'overview' | 'items' | 'contracts' | 'records' | 'receipts' | 'statement' | 'analytics';
+type Tab = 'overview' | 'allocation' | 'items' | 'contracts' | 'records' | 'receipts' | 'statement' | 'analytics';
 function AccountCards<T>({ items, render, empty }: { items: T[]; render: (item: T, index: number) => ReactNode; empty: string }) {
   const [page, setPage] = useState(1);
   if (!items.length) return <ErpEmptyState title={empty} />;
@@ -29,6 +30,7 @@ function AccountCards<T>({ items, render, empty }: { items: T[]; render: (item: 
 }
 export default function CustomerAccountDetailPage() {
   const params = useParams<{ id: string }>();
+  const searchParams = useSearchParams();
   const accountId = decodeURIComponent(params.id);
   const [data, setData] = useState<CustomerAccount>();
   const [loading, setLoading] = useState(true);
@@ -36,7 +38,8 @@ export default function CustomerAccountDetailPage() {
   const [success, setSuccess] = useState<string>();
   const [tab, setTab] = useState<Tab>('overview');
   const [search, setSearch] = useState('');
-  const [operation, setOperation] = useState<{ kind: AccountOperationKind; allocationId?: string }>();
+  const [operation, setOperation] = useState<{ kind: Exclude<AccountOperationKind, 'ALLOCATION'>; allocationId?: string }>();
+  const [allocationSource, setAllocationSource] = useState<{ key: string; revision: number }>();
   const [exporting, setExporting] = useState(false);
   const [evidence, setEvidence] = useState<unknown>();
   const [evidenceLoading, setEvidenceLoading] = useState(false);
@@ -49,10 +52,10 @@ export default function CustomerAccountDetailPage() {
     const request = ++sequence.current;
     setLoading(true); setError(null);
     try { const response = await accountingAPI.getCustomerWorkspace(accountId); if (request === sequence.current) setData(response.data.data); }
-    catch (reason) { if (request === sequence.current) { setData(undefined); setError(accountingFailureMessage(reason, 'پرونده مالی مشتری بارگیری نشد.')); } }
+    catch (reason) { if (request === sequence.current) setError(accountingFailureMessage(reason, 'پرونده مالی مشتری بارگیری نشد.')); }
     finally { if (request === sequence.current) setLoading(false); }
   }, [accountId]);
-  useEffect(() => { setData(undefined); setTab('overview'); setSuccess(undefined); setOperation(undefined); setItemId(undefined); setOperationsOpen(false); setEvidence(undefined); setSearch(''); setItemSearch(''); setItemFilter('open'); void load(); return () => { sequence.current++; }; }, [load]);
+  useEffect(() => { setData(undefined); setTab(searchParams.get('tab') === 'allocation' || searchParams.get('variant') === 'A' ? 'allocation' : 'overview'); setAllocationSource(undefined); setSuccess(undefined); setOperation(undefined); setItemId(undefined); setOperationsOpen(false); setEvidence(undefined); setSearch(''); setItemSearch(''); setItemFilter('open'); void load(); return () => { sequence.current++; }; }, [load, searchParams]);
   const download = async (format: 'pdf' | 'xlsx') => {
     if (!data?.profile || exporting) return;
     setExporting(true); setError(null);
@@ -63,7 +66,17 @@ export default function CustomerAccountDetailPage() {
     } catch (reason) { setError(accountingFailureMessage(reason, 'خروجی صورتحساب ساخته نشد.')); }
     finally { setExporting(false); }
   };
-  const openOperation = (kind: AccountOperationKind, allocationId?: string) => { setOperationsOpen(false); setSuccess(undefined); setOperation({ kind, allocationId }); };
+  const openOperation = (kind: AccountOperationKind, allocationId?: string) => {
+    setOperationsOpen(false); setSuccess(undefined);
+    if (kind === 'ALLOCATION') { setTab('allocation'); return; }
+    setOperation({ kind, allocationId });
+  };
+  const refreshAllocation = async () => {
+    const request = ++sequence.current;
+    const response = await accountingAPI.getCustomerWorkspace(accountId);
+    if (request !== sequence.current) throw new Error('بازخوانی تازه‌تری برای این پرونده در جریان است.');
+    setData(response.data.data); setError(null);
+  };
   const openEvidence = async (voucherId: string) => {
     setEvidenceLoading(true); setError(null);
     try { const response = await accountingAPI.getLedgerVoucherEvidence(voucherId, 'بررسی سند و مستندات از پرونده مالی مشتری'); setEvidence(response.data.data); }
@@ -90,22 +103,24 @@ export default function CustomerAccountDetailPage() {
     {loading && <ErpInlineState kind="empty" title="در حال بارگیری پرونده مالی…" />}
     {error && <ErpInlineState kind="error" title={error} action={{ label: 'تلاش دوباره', onClick: () => void load() }} />}
     {success && <ErpInlineState kind="success" title={success} />}
-    {data && !loading && <>
+    {/* Refresh keeps mounted drafts and their unresolved command identities. */}
+    {data && <>
       <div className="flex flex-wrap gap-2">
         {data.capabilities.canManageTreasury && <><ErpButton label="ثبت دریافت" icon={FaMoneyBillWave} tone="success" variant="solid" onClick={() => openOperation('RECEIPT')} /><ErpButton label="تخصیص به بدهی" onClick={() => openOperation('ALLOCATION')} /></>}
         {(operations.length > 0 || data.capabilities.canExport) && <ErpButton label="سایر عملیات" tone="neutral" onClick={() => setOperationsOpen(true)} />}
         <ErpButton label="به‌روزرسانی" icon={FaSync} tone="neutral" onClick={() => void load()} />
       </div>
-      <ErpCard className={workspaceStyles.summary}>
+      {tab !== 'allocation' && <ErpCard className={workspaceStyles.summary}>
         <div className={workspaceStyles.balance}><span className="text-xs sds-text-secondary">مانده · {accountBalanceLabel(data.netBalanceRials)}</span><strong>{accountMoney(data.netBalanceRials)}</strong></div>
         <div><span className="text-sm sds-text-secondary">بدهی باز قطعی</span><strong>{accountMoney(data.debitOpenRials ?? data.receivableRials)}</strong>{insight && BigInt(insight.overdueRials) > BigInt(0) && <ErpBadge tone="danger">{accountMoney(insight.overdueRials)} معوق</ErpBadge>}</div>
         <div><span className="text-sm sds-text-secondary">دریافت آماده تخصیص</span><strong className={workspaceStyles.success}>{accountMoney(data.unallocatedCreditRials)}</strong></div>
-      </ErpCard>
+      </ErpCard>}
       <ErpSegmentedControl value={tab} onChange={setTab} options={[
-        {value:'overview',label:'خلاصه'}, {value:'items',label:'بدهی و اعتبار'}, {value:'receipts',label:'دریافت‌ها و چک‌ها'},
+        {value:'overview',label:'خلاصه'}, {value:'allocation',label:'تخصیص'}, {value:'items',label:'بدهی و اعتبار'}, {value:'receipts',label:'دریافت‌ها و چک‌ها'},
         {value:'contracts',label:'قراردادها',count:data.contracts.length,countTone:'neutral'}, {value:'records',label:'رکوردها و دریافتنی‌ها',count:data.financialRecords.length,countTone:'neutral'},
         {value:'statement',label:'ریزگردش'}, {value:'analytics',label:'تحلیل'},
       ]} />
+      <div hidden={tab !== 'allocation'}><CustomerAllocationWorkspace key={accountId} accountId={accountId} account={data} onRefresh={refreshAllocation} sourceSelection={allocationSource} /></div>
       {tab === 'analytics' && <CustomerAccountAnalytics account={data} />}
       {tab === 'items' && <>
         <ErpField label="جستجوی بدهی و اعتبار"><ErpInput type="search" value={itemSearch} onChange={event => setItemSearch(event.target.value)} placeholder="فاکتور یا قرارداد" /></ErpField>
@@ -153,7 +168,7 @@ export default function CustomerAccountDetailPage() {
         <ErpSection title="سوابق دریافتنی عملیاتی" description="این سوابق با اقلام قطعی دفتر مالی بالا جمع نمی‌شوند."><AccountCards items={data.receivables} empty="رکورد عملیاتی جداگانه‌ای ثبت نشده است" render={row => <ErpCard key={row.id} className="p-4"><div className="flex flex-wrap justify-between gap-3"><strong>{contractName(row.contractId)}</strong><StatusBadge status={row.status} label={accountStatusLabels[row.status] || row.status} /></div><ErpSummaryGrid columns={3} items={[{ label: 'مانده', value: accountMoney(row.remainingAmount, row.currency) }, { label: 'دریافت‌شده', value: accountMoney(row.paidAmount, row.currency) }, { label: 'سررسید', value: dateFa(row.dueDate) }]} /><div className="mt-3"><ErpButton label="رسیدگی دریافتنی" href={`/dashboard/accounting/receivables?recordId=${row.id}`} tone="neutral" /></div></ErpCard>} /></ErpSection>
       </>}
       {tab === 'receipts' && <>
-        <CustomerReceiptTrace account={data} onAllocate={() => openOperation('ALLOCATION')} onItem={setItemId} onEvidence={id => void openEvidence(id)} evidenceLoading={evidenceLoading} />
+        <CustomerReceiptTrace account={data} onAllocate={receiptId => { setAllocationSource(current => ({ key: `receipt:${receiptId}`, revision: (current?.revision || 0) + 1 })); openOperation('ALLOCATION'); }} onItem={setItemId} onEvidence={id => void openEvidence(id)} evidenceLoading={evidenceLoading} />
         {Boolean(data.receiptHistory?.length) && <ErpSection title="سابقه دریافت‌های تطبیق‌شده"><AccountCards items={data.receiptHistory || []} empty="" render={row => <ErpCard key={row.id} className="space-y-3 p-4">
           <strong>دریافت {dateFa(row.occurredAt)} · تطبیق {dateFa(row.resolutionOccurredAt)}</strong><ErpSummaryGrid items={[{ label: 'مبلغ اولیه', value: accountMoney(row.amountRials) }, { label: 'مبلغ مؤثر هنگام تطبیق', value: accountMoney(row.effectiveAmountRials) }]} />
           <ErpButton label="سند دریافت اولیه" tone="neutral" onClick={() => void openEvidence(row.postedVoucherId)} disabled={evidenceLoading} />

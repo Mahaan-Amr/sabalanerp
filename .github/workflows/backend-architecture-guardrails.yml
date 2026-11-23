@@ -42,6 +42,9 @@ jobs:
         env:
           NODE_OPTIONS: --max-old-space-size=4096
       - run: npm run build:backend
+        env:
+          # Match the compiler heap used by the backend Docker build.
+          NODE_OPTIONS: --max-old-space-size=3072
       - run: npm run test:personnel-performance-operations
       - name: Diagnose deployment Compose rendering
         run: |

@@ -7,6 +7,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { validateQaNetworkNamespace, validateQaRenderedConfig, validateQaRenderedMounts, validateQaRuntimeEnvironment, validateQaTargetBinding } from '../../deploy/scripts/qa-rehearsal-target.mjs';
+import { withQaOwnerKeyUid } from './qa-fixtures.mjs';
 
 const repositoryRoot = path.resolve(fileURLToPath(new URL('../../', import.meta.url)));
 
@@ -39,8 +40,8 @@ const qaEnvironment = {
   TAXPAYER_BROKER_URL: '',
 };
 
-function renderedConfig(overrides = {}) {
-  const output = execFileSync('docker', ['compose', '--profile', 'deployment', '-p', 'sabalanerp', '-f', 'docker-compose.rehearsal.yml', 'config', '--format', 'json'], {
+function renderedConfig(overrides = {}, compose = 'docker-compose.rehearsal.yml') {
+  const output = execFileSync('docker', ['compose', '--profile', 'deployment', '-p', 'sabalanerp', '-f', compose, 'config', '--format', 'json'], {
     cwd: repositoryRoot,
     env: { ...process.env, ...qaEnvironment, QA_REHEARSAL_FAIL_BACKEND_COMMIT: '',
       QA_REHEARSAL_FAIL_BACKEND_SOURCE_HASH: '', ...overrides, DEPLOYMENT_QA_REHEARSAL_PLAN_SHA256:'a'.repeat(64) },
@@ -58,6 +59,45 @@ test('real rehearsal Compose graph isolates business services and scopes ingress
   assert.deepEqual(config.networks.qa_ingress.driver_opts,
     { 'com.docker.network.bridge.enable_ip_masquerade': 'false' });
   assert.doesNotThrow(() => validateQaRenderedConfig(config));
+});
+
+test('scanner-free rehearsal has no scanner on the graph and still isolates application egress', () => {
+  const options = { scannerRetained: false };
+  const config = renderedConfig({}, 'docker-compose.rehearsal-scanner-free.yml');
+  assert.equal(config.services.clamav, undefined);
+  assert.equal(config.services.backend.depends_on?.clamav, undefined);
+  assert.equal(config.volumes.clamav_database, undefined);
+  assert.equal(config.services.deployment.volumes.some(volume => volume.target === '/app/recovery-sources/clamav'), false);
+  assert.doesNotThrow(() => validateQaRenderedConfig(config, undefined, options));
+  assert.throws(() => validateQaRenderedConfig(config));
+  config.services.backend.networks.qa_ingress = null;
+  assert.throws(() => validateQaRenderedConfig(config, undefined, options));
+});
+
+test('the protected controller selects QA runtime Compose through activation and rollback', {
+  skip: process.platform === 'win32' && 'requires a POSIX shell',
+}, () => {
+  const source = fs.readFileSync(path.join(repositoryRoot, 'deploy/scripts/deploy.sh'), 'utf8');
+  const select = /^runtime_compose_file\(\) \{[\s\S]*?^\}/m.exec(source)?.[0];
+  assert.ok(select);
+  const qa = 'docker-compose.rehearsal.yml';
+  const scannerFree = 'docker-compose.rehearsal-scanner-free.yml';
+  for (const [file, legacy, activation, rollback, expected] of [
+    [qa, '0', '', '0', qa],
+    [qa, '0', '/private/evidence', '0', scannerFree],
+    [qa, '1', '/private/evidence', '0', qa],
+    [qa, '0', '', '1', scannerFree],
+    [qa, '1', '', '1', qa],
+    ['docker-compose.prod.yml', '0', '', '1', 'docker-compose.prod.yml'],
+  ]) {
+    const output = execFileSync('sh', ['-eu', '-c', select + '\n' + 'runtime_compose_file'], {
+      encoding: 'utf8',
+      env: { ...process.env, OPERATIONS_ROOT: repositoryRoot, DEPLOYMENT_MAINTENANCE_UPLOAD_POLICY: '',
+        COMPOSE_FILE: file, LEGACY_RELEASE_GRAPH: legacy,
+        ALLOCATION_EVIDENCE_DIR: activation, CUSTOMER_ALLOCATION_CURRENT_DATA_ROLLBACK: rollback },
+    });
+    assert.equal(output.trim(), expected);
+  }
 });
 
 test('QA backend healthcheck uses real readiness except for the exact sealed candidate identity', async () => {
@@ -109,7 +149,7 @@ test('QA selector refuses a ClamAV host-gateway alias reintroduced by an overrid
   assert.throws(() => validateQaRenderedConfig(config));
 });
 
-test('real rehearsal graph binds every deployment recovery volume to the QA project', () => {
+test('real rehearsal graphs bind each deployment recovery volume to the QA project', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-real-mount-test-'));
   try {
     const qaRoot = path.join(root, 'qa');
@@ -119,23 +159,35 @@ test('real rehearsal graph binds every deployment recovery volume to the QA proj
     for (const dir of [qaRoot, secretDir, remoteDir, reportDir]) fs.mkdirSync(dir);
     const trust = path.join(secretDir, 'partner-release-trust-public.der');
     fs.writeFileSync(trust, 'QA-only public trust fixture');
-    const config = renderedConfig();
+    const ownerPublic = path.join(secretDir, 'system-recovery-owner-public.pem');
+    fs.writeFileSync(ownerPublic, '-----BEGIN PUBLIC KEY-----\nQA-fixture\n'); fs.chmodSync(ownerPublic, 0o444);
     const sources = {
       '/run/deployment-secrets/partner-release-trust-public.der': trust,
+      '/run/deployment-secrets/system-recovery-owner-public.pem': ownerPublic,
       '/run/deployment-secrets': secretDir,
       '/app/deployment-remote': remoteDir,
       '/app/deployment-reports': reportDir,
     };
-    for (const service of Object.values(config.services)) {
-      for (const volume of service.volumes ?? []) {
-        if (Object.hasOwn(sources, volume.target)) volume.source = sources[volume.target];
-      }
-    }
     const environment = { ...qaEnvironment, DEPLOYMENT_SECRET_DIR: secretDir,
       DEPLOYMENT_REMOTE_MOUNT_HOST: remoteDir, DEPLOYMENT_REPORT_DIR_HOST: reportDir };
-    assert.doesNotThrow(() => validateQaRenderedMounts(config, {
-      qaRoot, repositoryRoot, environment,
-    }));
+    for (const [compose, scannerRetained] of [
+      ['docker-compose.rehearsal.yml', true], ['docker-compose.rehearsal-scanner-free.yml', false],
+    ]) {
+      const config = renderedConfig({}, compose);
+      for (const service of Object.values(config.services)) {
+        for (const volume of service.volumes ?? []) {
+          if (Object.hasOwn(sources, volume.target)) volume.source = sources[volume.target];
+        }
+      }
+      withQaOwnerKeyUid(ownerPublic, 0, () => {
+        assert.doesNotThrow(() => validateQaRenderedMounts(config, {
+          qaRoot, repositoryRoot, environment, scannerRetained,
+        }));
+        assert.throws(() => validateQaRenderedMounts(config, {
+          qaRoot, repositoryRoot, environment, scannerRetained: !scannerRetained,
+        }));
+      });
+    }
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -185,8 +237,11 @@ test('QA target refuses an escaped rendered secret bind and symlinked custody so
     fs.mkdirSync(outside);
     const trust = path.join(secretDir, 'partner-release-trust-public.der');
     fs.writeFileSync(trust, 'QA-only public trust fixture');
+    const ownerPublic = path.join(secretDir, 'system-recovery-owner-public.pem');
+    fs.writeFileSync(ownerPublic, '-----BEGIN PUBLIC KEY-----\nQA-fixture\n'); fs.chmodSync(ownerPublic, 0o444);
     const sources = {
       '/run/deployment-secrets/partner-release-trust-public.der': trust,
+      '/run/deployment-secrets/system-recovery-owner-public.pem': ownerPublic,
       '/run/deployment-secrets': secretDir,
       '/app/deployment-remote': remoteDir,
       '/app/deployment-reports': reportDir,
@@ -198,16 +253,18 @@ test('QA target refuses an escaped rendered secret bind and symlinked custody so
     const secret = volumes.find(volume => volume.target === '/run/deployment-secrets');
     const env = { ...qaEnvironment, DEPLOYMENT_SECRET_DIR: secretDir,
       DEPLOYMENT_REMOTE_MOUNT_HOST: remoteDir, DEPLOYMENT_REPORT_DIR_HOST: reportDir };
-    assert.doesNotThrow(() => validateQaRenderedMounts(config, { qaRoot, repositoryRoot, environment: env }));
-    clamav.type = 'bind'; clamav.source = outside;
-    assert.throws(() => validateQaRenderedMounts(config, { qaRoot, repositoryRoot, environment: env }));
-    clamav.type = 'volume'; clamav.source = 'clamav_database';
-    secret.source = outside;
-    assert.throws(() => validateQaRenderedMounts(config, { qaRoot, repositoryRoot, environment: env }));
-    fs.symlinkSync(outside, path.join(qaRoot, 'linked-secrets'), process.platform === 'win32' ? 'junction' : 'dir');
-    env.DEPLOYMENT_SECRET_DIR = path.join(qaRoot, 'linked-secrets');
-    secret.source = env.DEPLOYMENT_SECRET_DIR;
-    assert.throws(() => validateQaRenderedMounts(config, { qaRoot, repositoryRoot, environment: env }));
+    withQaOwnerKeyUid(ownerPublic, 0, () => {
+      assert.doesNotThrow(() => validateQaRenderedMounts(config, { qaRoot, repositoryRoot, environment: env }));
+      clamav.type = 'bind'; clamav.source = outside;
+      assert.throws(() => validateQaRenderedMounts(config, { qaRoot, repositoryRoot, environment: env }));
+      clamav.type = 'volume'; clamav.source = 'clamav_database';
+      secret.source = outside;
+      assert.throws(() => validateQaRenderedMounts(config, { qaRoot, repositoryRoot, environment: env }));
+      fs.symlinkSync(outside, path.join(qaRoot, 'linked-secrets'), process.platform === 'win32' ? 'junction' : 'dir');
+      env.DEPLOYMENT_SECRET_DIR = path.join(qaRoot, 'linked-secrets');
+      secret.source = env.DEPLOYMENT_SECRET_DIR;
+      assert.throws(() => validateQaRenderedMounts(config, { qaRoot, repositoryRoot, environment: env }));
+    });
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -224,14 +281,19 @@ test('QA target refuses a directory in place of the Partner trust public-key fil
     fs.mkdirSync(repositoryRoot);
     fs.mkdirSync(secretDir);
     fs.writeFileSync(trust, 'public test fixture');
+    const ownerPublic = path.join(secretDir, 'system-recovery-owner-public.pem');
+    fs.writeFileSync(ownerPublic, '-----BEGIN PUBLIC KEY-----\nQA-fixture\n'); fs.chmodSync(ownerPublic, 0o444);
     const config = { services: { backend: { volumes: renderedConfig().services.backend.volumes.map(volume =>
       volume.target === '/run/deployment-secrets/partner-release-trust-public.der'
-        ? { ...volume, source: trust } : volume) } } };
+        ? { ...volume, source: trust } : volume.target === '/run/deployment-secrets/system-recovery-owner-public.pem'
+          ? { ...volume, source: ownerPublic } : volume) } } };
     const env = { ...qaEnvironment, DEPLOYMENT_SECRET_DIR: secretDir };
-    assert.doesNotThrow(() => validateQaRenderedMounts(config, { qaRoot, repositoryRoot, environment: env }));
-    fs.rmSync(trust);
-    fs.mkdirSync(trust);
-    assert.throws(() => validateQaRenderedMounts(config, { qaRoot, repositoryRoot, environment: env }));
+    withQaOwnerKeyUid(ownerPublic, 0, () => {
+      assert.doesNotThrow(() => validateQaRenderedMounts(config, { qaRoot, repositoryRoot, environment: env }));
+      fs.rmSync(trust);
+      fs.mkdirSync(trust);
+      assert.throws(() => validateQaRenderedMounts(config, { qaRoot, repositoryRoot, environment: env }));
+    });
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

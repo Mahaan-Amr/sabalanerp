@@ -14,9 +14,14 @@ import { publishNotificationEvent } from './notificationService';
 import { decryptPerformanceExportArtifact, encryptPerformanceExportArtifact, performanceExportKeyFromEnvironment, performanceExportStorageDirectory } from './personnelPerformanceDisclosureStore';
 import { verifyRestoredFiles } from './deploymentRestoreEvidence';
 import { verifyRecoveredApplicationPayloads } from './deploymentDrillApplicationKeys';
+import { PROTECTED_DATABASE_ROLE_COMPONENT, applyProtectedDatabaseRoles, captureProtectedDatabaseRoles, promoteProtectedDatabaseStage, verifyPromotedProtectedDatabaseRoles,
+  type ProtectedDatabaseRoleRecovery, type RoleSnapshot } from './protectedDatabaseRoleRecovery';
 import { captureRecoveryBusinessProof, type RecoveryBusinessTableProof } from './deploymentRecoveryDataProof';
 import { adoptRecoveryStagedInquiry, captureInquiryBusinessProof, verifyInquiryTransformation,
   type InquiryBusinessProof, type InquiryTransformation } from './inquiryMigrationPlan';
+import { applicationRecoveryStageRole, prepareApplicationRecoveryStage, retireApplicationRecoveryStageRole } from './applicationRecoveryStage';
+import { nativePostgresCliConnection } from './nativePostgresCli';
+import { migrateRecoveryArchivePrivately } from './privateRecoveryPostgres';
 
 const execFileAsync = promisify(execFile);
 const PACKAGES_DIR = path.join(RECOVERY_ROOT, 'packages');
@@ -131,10 +136,11 @@ const databaseConfig = (databaseUrl = process.env.DATABASE_URL || '') => {
 
 const databaseArgs = (databaseUrl: string, database?: string) => {
   const config = databaseConfig(databaseUrl);
+  const native = nativePostgresCliConnection(databaseUrl, database);
   return {
     config,
-    connection: ['--host', config.host, '--port', config.port, '--username', config.user, '--dbname', database || config.database],
-    env: { ...process.env, PGPASSWORD: config.password },
+    connection: ['--dbname', native.url],
+    env: { ...process.env, ...native.environment },
   };
 };
 
@@ -142,16 +148,16 @@ const safeDatabaseName = (prefix: string) => `${prefix}_${crypto.randomBytes(6).
 
 const psql = async (databaseUrl: string, database: string, sql: string) => {
   const args = databaseArgs(databaseUrl, database);
-  await execFileAsync('psql', [...args.connection, '--set', 'ON_ERROR_STOP=1', '--command', sql], {
+  return execFileAsync('psql', [...args.connection, '--set', 'ON_ERROR_STOP=1', '--command', sql], {
     env: args.env,
     windowsHide: true,
     maxBuffer: 4 * 1024 * 1024,
   });
 };
 
-const createDatabase = async (databaseUrl: string, name: string) => {
+const createDatabase = async (databaseUrl: string, name: string, protectedStage = false) => {
   const config = databaseConfig(databaseUrl);
-  await psql(databaseUrl, 'postgres', `CREATE DATABASE "${name.replace(/"/g, '""')}"`);
+  await psql(databaseUrl, 'postgres', `CREATE DATABASE "${name.replace(/"/g, '""')}"${protectedStage ? ' CONNECTION LIMIT 0' : ''}`);
   return { ...config, database: name };
 };
 
@@ -185,18 +191,20 @@ export const withSystemRecoveryDatabaseClient = async <T>(database: string, work
   return withRecoveryDatabaseClient(databaseUrlWithName(configured, database), work);
 };
 
-const dumpDatabase = async (databaseUrl: string, destination: string) => {
+const dumpDatabase = async (databaseUrl: string, destination: string, snapshot?: string) => {
   const args = databaseArgs(databaseUrl);
-  await execFileAsync('pg_dump', [...args.connection, '--format=custom', '--no-owner', '--no-privileges', '--file', destination], {
+  await execFileAsync('pg_dump', [...args.connection, '--format=custom', '--no-owner', '--no-privileges',
+    ...(snapshot ? ['--snapshot', snapshot] : []), '--file', destination], {
     env: args.env,
     windowsHide: true,
     maxBuffer: 4 * 1024 * 1024,
   });
 };
 
-const restoreDatabase = async (databaseUrl: string, database: string, source: string) => {
+const restoreDatabase = async (databaseUrl: string, database: string, source: string, section?: 'pre-data' | 'data' | 'post-data') => {
   const args = databaseArgs(databaseUrl, database);
-  await execFileAsync('pg_restore', [...args.connection, '--no-owner', '--no-privileges', '--exit-on-error', source], {
+  await execFileAsync('pg_restore', [...args.connection, '--no-owner', '--no-privileges', '--exit-on-error',
+    ...(section ? [`--section=${section}`] : []), source], {
     env: args.env,
     windowsHide: true,
     maxBuffer: 8 * 1024 * 1024,
@@ -405,7 +413,7 @@ const extractRecoveryArchive = async (archivePath: string, payloadRoot: string) 
     }
   }
   const verbose = await execFileAsync('tar', ['-tvzf', archivePath], { windowsHide: true, maxBuffer: 32 * 1024 * 1024 });
-  if (verbose.stdout.split(/\r?\n/).some((line) => /^[lh]/.test(line))) {
+  if (verbose.stdout.split(/\r?\n/).some((line) => line.length > 0 && !/^[-d]/.test(line))) {
     throw Object.assign(new Error('Recovery archive links are not permitted.'), { code: 'UNSAFE_RECOVERY_ARCHIVE' });
   }
   await execFileAsync('tar', ['-xzf', archivePath, '-C', payloadRoot, '--no-same-owner', '--no-same-permissions'], { windowsHide: true });
@@ -416,12 +424,35 @@ export const currentPostgresVersion = async (prisma: PrismaClient) => {
   return result[0]?.version || 'unknown';
 };
 
+async function readProtectedRoleSnapshot(payloadRoot: string, manifest: RecoveryManifest,
+  scope?: ProtectedDatabaseRoleRecovery | null): Promise<RoleSnapshot | undefined> {
+  if (manifest?.format !== 'sabalan-recovery' || !Array.isArray(manifest.components)) {
+    throw new Error('Invalid protected checkpoint manifest.');
+  }
+  const components = manifest.components.filter(item => item.path === PROTECTED_DATABASE_ROLE_COMPONENT);
+  if (!scope && !components.length) return undefined;
+  if (!scope || components.length !== 1 || manifest.packageType !== 'COMPLETE') {
+    throw new Error('Protected role checkpoint scope is missing or differs from this recovery package.');
+  }
+  const component = components[0];
+  const bytes = await fs.promises.readFile(path.join(payloadRoot, PROTECTED_DATABASE_ROLE_COMPONENT));
+  if (bytes.length !== component.size || crypto.createHash('sha256').update(bytes).digest('hex') !== component.sha256) {
+    throw new Error('Protected role checkpoint component failed integrity validation.');
+  }
+  const snapshot = JSON.parse(bytes.toString('utf8')) as RoleSnapshot;
+  if (snapshot?.version !== 1 || snapshot.sourceDatabase !== scope.source) {
+    throw new Error('The role snapshot does not match the protected checkpoint database identity.');
+  }
+  return snapshot;
+}
+
 export const createRecoveryPackage = async (input: {
   operationId: string;
   packageType: RecoveryPackageType;
   passphrase?: string;
   recipients?: Array<{ keyId: string; passphrase: string } | { keyId: string; publicKeyPem: string }>;
   prisma: PrismaClient;
+  protectedDatabaseRoles?: ProtectedDatabaseRoleRecovery;
   onProgress: (progress: number) => Promise<void>;
 }) => {
   await ensureDirectories();
@@ -431,11 +462,18 @@ export const createRecoveryPackage = async (input: {
   const sanitized = input.packageType === 'SANITIZED_TEST';
   let sanitizedDatabase: string | null = null;
   try {
+    if (sanitized && input.protectedDatabaseRoles) throw new Error('Protected role checkpoints must be complete.');
     await fs.promises.mkdir(path.dirname(databaseDump), { recursive: true });
     await input.onProgress(10);
     if (sanitized) {
       const sourceDump = path.join(jobRoot, 'source.dump');
       await dumpDatabase(process.env.DATABASE_URL || '', sourceDump);
+    } else if (input.protectedDatabaseRoles) {
+      const databaseUrl = process.env.DATABASE_URL || '';
+      const roles = await captureProtectedDatabaseRoles(databaseUrl, input.protectedDatabaseRoles.roles,
+        snapshot => dumpDatabase(databaseUrl, databaseDump, snapshot));
+      if (roles.sourceDatabase !== input.protectedDatabaseRoles.source) throw new Error('Protected checkpoint database identity changed.');
+      await fs.promises.writeFile(path.join(payloadRoot, PROTECTED_DATABASE_ROLE_COMPONENT), JSON.stringify(roles), { mode: 0o600 });
     } else {
       await dumpDatabase(process.env.DATABASE_URL || '', databaseDump);
     }
@@ -524,9 +562,11 @@ export const recoveryPackagePath = (source: string, storageName: string) =>
 
 export const validateRecoveryPackage = async (input: {
   sourcePath: string;
+  expectedChecksum?: string;
   passphrase: string;
   prisma: PrismaClient;
   verifyRestore?: boolean;
+  protectedDatabaseRoles?: ProtectedDatabaseRoleRecovery | null;
   verifyApplicationPayloads?: boolean;
   verifyBusinessData?: boolean;
 }) => {
@@ -538,7 +578,7 @@ export const validateRecoveryPackage = async (input: {
   let businessDataProof: RecoveryBusinessTableProof[] | undefined;
   let inquiryBusinessProof:InquiryBusinessProof|undefined;
   try {
-    await decryptRecoveryArchive(input.sourcePath, archivePath, input.passphrase);
+    await decryptRecoveryArchive(input.sourcePath, archivePath, input.passphrase, input.expectedChecksum);
     await fs.promises.mkdir(payloadRoot, { recursive: true });
     await extractRecoveryArchive(archivePath, payloadRoot);
     // Only this job's fully extracted intermediate is retired. The encrypted
@@ -561,6 +601,9 @@ export const validateRecoveryPackage = async (input: {
         throw Object.assign(new Error(`Recovery component failed integrity validation: ${component.path}`), { code: 'RECOVERY_INTEGRITY_FAILED' });
       }
     }
+    const protectedRoles = input.protectedDatabaseRoles !== undefined || input.verifyRestore
+      ? await readProtectedRoleSnapshot(payloadRoot, manifest, input.protectedDatabaseRoles)
+      : undefined;
     const compatibility = recoveryCompatibility({
       sourceFormatVersion: manifest.formatVersion,
       sourceAppVersion: manifest.appVersion,
@@ -575,9 +618,13 @@ export const validateRecoveryPackage = async (input: {
       }
       inquiryBusinessProof=await captureInquiryBusinessProof(path.join(payloadRoot,'inquiry','inquiry.db'));
       stagedDatabase = safeDatabaseName('sabalan_checkpoint_verify');
-      await createDatabase(process.env.DATABASE_URL || '', stagedDatabase);
+      await createDatabase(process.env.DATABASE_URL || '', stagedDatabase, Boolean(protectedRoles));
       await restoreDatabase(process.env.DATABASE_URL || '', stagedDatabase, path.join(payloadRoot, 'database', 'main.dump'));
-      const stagedClient = new PrismaClient({ datasources: { db: { url: databaseUrlWithName(process.env.DATABASE_URL || '', stagedDatabase) } } });
+      const stagedUrl = databaseUrlWithName(process.env.DATABASE_URL || '', stagedDatabase);
+      if (protectedRoles && input.protectedDatabaseRoles) {
+        await applyProtectedDatabaseRoles(stagedUrl, input.protectedDatabaseRoles.roles, protectedRoles, input.protectedDatabaseRoles.source);
+      }
+      const stagedClient = new PrismaClient({ datasources: { db: { url: stagedUrl } } });
       try {
         await stagedClient.$queryRawUnsafe('SELECT 1');
         await validateStoredFileReferences(stagedClient, payloadRoot);
@@ -598,6 +645,7 @@ type RestoreJournal = {
   operationId: string;
   phase: 'STAGED' | 'FILES_PROMOTED' | 'DATABASE_PROMOTED';
   stagedDatabase: string;
+  applicationStageRole?: string;
   safetyDatabase: string;
   currentDatabase: string;
   safetyFilesRoot: string;
@@ -933,8 +981,21 @@ export const stageAndPromoteRecovery = async (input: {
   bootstrapPassword?: string;
   applyMigrations?: boolean;
   preservePackage?: boolean;
+  prepareProtectedStage?: (client: PrismaClient) => Promise<void>;
+  protectedDatabaseRoles?: ProtectedDatabaseRoleRecovery & { assertBoundary(): Promise<void> };
+  applicationRecoveryRoles?: ProtectedDatabaseRoleRecovery & {
+    assertBoundary(): Promise<void>;
+    prepareStage?(client: PrismaClient): Promise<void>;
+  };
   onProgress: (progress: number) => Promise<void>;
 }) => {
+  if (input.protectedDatabaseRoles && input.applicationRecoveryRoles) {
+    throw new Error('Application recovery and checkpoint recovery scopes are mutually exclusive.');
+  }
+  if (input.applicationRecoveryRoles && input.packageType === 'SANITIZED_TEST'
+    && (process.env.NODE_ENV === 'production' || process.env.ALLOW_SANITIZED_RECOVERY !== 'true')) {
+    throw Object.assign(new Error('Sanitized test restore is disabled in this environment.'), { code: 'SANITIZED_RESTORE_DISABLED' });
+  }
   assertNoUnclosedContinuousWalOwners(RECOVERY_COORDINATION_DIR);
   await ensureDirectories();
   const jobRoot = await fs.promises.mkdtemp(path.join(WORK_DIR, `restore-${input.operationId}-`));
@@ -944,10 +1005,13 @@ export const stageAndPromoteRecovery = async (input: {
   const stagedDatabase = safeDatabaseName('sabalan_restore');
   const safetyDatabase = safeDatabaseName('sabalan_safety');
   const safetyFilesRoot = path.join(RECOVERY_ROOT, 'safety', input.operationId);
+  const roleScope = input.applicationRecoveryRoles || input.protectedDatabaseRoles;
+  let applicationStage: Awaited<ReturnType<typeof prepareApplicationRecoveryStage>> | undefined;
   const journal: RestoreJournal = {
     operationId: input.operationId,
     phase: 'STAGED',
     stagedDatabase,
+    applicationStageRole: input.applicationRecoveryRoles ? applicationRecoveryStageRole(stagedDatabase) : undefined,
     safetyDatabase,
     currentDatabase: config.database,
     safetyFilesRoot,
@@ -966,25 +1030,62 @@ export const stageAndPromoteRecovery = async (input: {
   };
   try {
     await writeRestoreJournal(journal);
-    await decryptRecoveryArchive(input.sourcePath, archivePath, input.passphrase);
+    await decryptRecoveryArchive(input.sourcePath, archivePath, input.passphrase, input.checksum);
     await fs.promises.mkdir(payloadRoot, { recursive: true });
     await extractRecoveryArchive(archivePath, payloadRoot);
     await fs.promises.unlink(archivePath);
+    const manifest = JSON.parse(await fs.promises.readFile(path.join(payloadRoot, 'manifest.json'), 'utf8')) as RecoveryManifest;
+    if (manifest.format !== 'sabalan-recovery' || manifest.packageType !== input.packageType || !Array.isArray(manifest.components)) {
+      throw new Error('Recovery manifest differs from the approved application package.');
+    }
+    const protectedRoles = input.applicationRecoveryRoles ? undefined
+      : await readProtectedRoleSnapshot(payloadRoot, manifest, input.protectedDatabaseRoles);
+    if (protectedRoles && (input.packageType !== 'COMPLETE' || input.applyMigrations !== false)) {
+      throw new Error('Protected role recovery requires an exact-schema rollback.');
+    }
     await input.onProgress(20);
-    await createDatabase(process.env.DATABASE_URL || '', stagedDatabase);
-    await restoreDatabase(process.env.DATABASE_URL || '', stagedDatabase, path.join(payloadRoot, 'database', 'main.dump'));
+    await roleScope?.assertBoundary();
+    await createDatabase(process.env.DATABASE_URL || '', stagedDatabase, Boolean(protectedRoles || roleScope));
     const stagedUrl = databaseUrlWithName(process.env.DATABASE_URL || '', stagedDatabase);
-    if (input.applyMigrations !== false) await migrateDatabase(stagedUrl);
+    if (input.applicationRecoveryRoles) {
+      applicationStage = await prepareApplicationRecoveryStage(process.env.DATABASE_URL || '', stagedDatabase,
+        input.applicationRecoveryRoles, path.join(jobRoot, 'trusted-control-data.dump'));
+    }
+    const restoreUrl = applicationStage?.loginUrl || stagedUrl;
+    let restoreDump = path.join(payloadRoot, 'database', 'main.dump');
+    if (applicationStage && input.applicationRecoveryRoles) {
+      const migrated = await migrateRecoveryArchivePrivately({ sourceDump: restoreDump, workDirectory: jobRoot,
+        applyMigrations: input.applyMigrations !== false, databaseSemantics: applicationStage.databaseSemantics,
+        assertBoundary: input.applicationRecoveryRoles.assertBoundary,
+        verifyCurrentSchema: applicationStage.verifyMigratedSchema });
+      restoreDump = migrated.dumpPath;
+    }
+    if (applicationStage?.authorityDataPath) {
+      await restoreDatabase(restoreUrl, stagedDatabase, restoreDump, 'pre-data');
+      await restoreDatabase(restoreUrl, stagedDatabase, restoreDump, 'data');
+      await restoreDatabase(restoreUrl, stagedDatabase, applicationStage.authorityDataPath, 'data');
+      await restoreDatabase(restoreUrl, stagedDatabase, restoreDump, 'post-data');
+    } else {
+      await restoreDatabase(restoreUrl, stagedDatabase, restoreDump);
+    }
+    if (protectedRoles && input.protectedDatabaseRoles) {
+      await input.protectedDatabaseRoles.assertBoundary();
+      await applyProtectedDatabaseRoles(stagedUrl, input.protectedDatabaseRoles.roles, protectedRoles, input.protectedDatabaseRoles.source);
+    }
+    if (input.applyMigrations !== false && !applicationStage) await migrateDatabase(restoreUrl);
+    await applicationStage?.verifySchema();
     if (input.packageType === 'SANITIZED_TEST') {
       if (process.env.NODE_ENV === 'production' || process.env.ALLOW_SANITIZED_RECOVERY !== 'true') {
         throw Object.assign(new Error('Sanitized test restore is disabled in this environment.'), { code: 'SANITIZED_RESTORE_DISABLED' });
       }
       if (!input.bootstrapPassword) throw new Error('Bootstrap password is required.');
-      await createSanitizedBootstrapAdmin(stagedUrl, input.bootstrapPassword);
+      await createSanitizedBootstrapAdmin(restoreUrl, input.bootstrapPassword);
     }
-    const stagedClient = new PrismaClient({ datasources: { db: { url: stagedUrl } } });
+    const stagedClient = new PrismaClient({ datasources: { db: { url: restoreUrl } } });
     try {
       await stagedClient.$queryRaw`SELECT 1`;
+      await input.applicationRecoveryRoles?.prepareStage?.(stagedClient);
+      if (input.protectedDatabaseRoles) await input.prepareProtectedStage?.(stagedClient);
       await validateStoredFileReferences(stagedClient, payloadRoot);
       await stagedClient.authSession.updateMany({
         where: { revokedAt: null },
@@ -993,6 +1094,9 @@ export const stageAndPromoteRecovery = async (input: {
     } finally {
       await stagedClient.$disconnect();
     }
+    // A metadata callback must not introduce privileged definitions either.
+    await applicationStage?.verifySchema();
+    await applicationStage?.finalize();
     if (input.applyMigrations !== false) {
       // Source/component verification precedes the owned transformation of a
       // private SQLite stage. Old-image rollback retains its original schema.
@@ -1008,6 +1112,7 @@ export const stageAndPromoteRecovery = async (input: {
     }
     await writeRestoreJournal(journal);
     await input.onProgress(50);
+    await roleScope?.assertBoundary();
     await pauseInquiryForRecovery(input.operationId);
     const mappings = [
       ...FILE_RECOVERY_MAPPINGS.map(({ payloadPath, livePath, safetyName }) => [payloadPath, livePath, safetyName] as const),
@@ -1019,6 +1124,7 @@ export const stageAndPromoteRecovery = async (input: {
     journal.phase = 'FILES_PROMOTED';
     await writeRestoreJournal(journal);
     await input.onProgress(70);
+    await roleScope?.assertBoundary();
     const current = config.database.replace(/"/g, '""');
     const staged = stagedDatabase.replace(/"/g, '""');
     const safety = safetyDatabase.replace(/"/g, '""');
@@ -1027,12 +1133,16 @@ export const stageAndPromoteRecovery = async (input: {
       'postgres',
       `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname IN ('${current.replace(/'/g, "''")}', '${staged.replace(/'/g, "''")}') AND pid <> pg_backend_pid()`,
     );
-    await psql(process.env.DATABASE_URL || '', 'postgres', `ALTER DATABASE "${current}" RENAME TO "${safety}"`);
-    try {
-      await psql(process.env.DATABASE_URL || '', 'postgres', `ALTER DATABASE "${staged}" RENAME TO "${current}"`);
-    } catch (error) {
-      await psql(process.env.DATABASE_URL || '', 'postgres', `ALTER DATABASE "${safety}" RENAME TO "${current}"`).catch(() => undefined);
-      throw error;
+    if (protectedRoles || applicationStage) {
+      await promoteProtectedDatabaseStage(process.env.DATABASE_URL || '', stagedDatabase, safetyDatabase);
+    } else {
+      await psql(process.env.DATABASE_URL || '', 'postgres', `ALTER DATABASE "${current}" RENAME TO "${safety}"`);
+      try {
+        await psql(process.env.DATABASE_URL || '', 'postgres', `ALTER DATABASE "${staged}" RENAME TO "${current}"`);
+      } catch (error) {
+        await psql(process.env.DATABASE_URL || '', 'postgres', `ALTER DATABASE "${safety}" RENAME TO "${current}"`).catch(() => undefined);
+        throw error;
+      }
     }
     journal.phase = 'DATABASE_PROMOTED';
     await writeRestoreJournal(journal);
@@ -1042,11 +1152,30 @@ export const stageAndPromoteRecovery = async (input: {
       await fs.promises.rm(SANITIZED_MARKER_PATH, { force: true });
     }
     await input.onProgress(90);
-    return { promoted: true, journal };
+      const protectedScope = roleScope;
+      const verificationRoles = applicationStage?.trustedRoles || protectedRoles;
+    return { promoted: true, journal, ...(verificationRoles && protectedScope ? {
+      verifyPromotedRoles: () => verifyPromotedProtectedDatabaseRoles(
+        process.env.DATABASE_URL || '', protectedScope.roles, verificationRoles, protectedScope.source),
+    } : {}) };
   } catch (error) {
     const currentJournal = fs.existsSync(RESTORE_JOURNAL_PATH)
       ? JSON.parse(await fs.promises.readFile(RESTORE_JOURNAL_PATH, 'utf8')) as RestoreJournal
       : journal;
+    if (roleScope && currentJournal.phase === 'FILES_PROMOTED') {
+      // A failed client response can follow a committed rename. Leave an
+      // ambiguous journal for startup recovery instead of reverting live files.
+      const status = await psql(process.env.DATABASE_URL || '', 'postgres', `
+        COPY (SELECT CASE
+          WHEN EXISTS (SELECT FROM pg_database WHERE datname = '${safetyDatabase}')
+            AND NOT EXISTS (SELECT FROM pg_database WHERE datname = '${stagedDatabase}') THEN 'promoted'
+          WHEN EXISTS (SELECT FROM pg_database WHERE datname = '${stagedDatabase}')
+            AND NOT EXISTS (SELECT FROM pg_database WHERE datname = '${safetyDatabase}') THEN 'staged'
+          ELSE 'unknown' END) TO STDOUT
+      `);
+      if (status.stdout.trim() === 'promoted') return { promoted: true, journal: currentJournal };
+      if (status.stdout.trim() !== 'staged') throw error;
+    }
     if (currentJournal.phase === 'DATABASE_PROMOTED') {
       // The promoted database stays behind the inquiry restart marker until
       // startup replays every post-checkpoint erasure and finalizes recovery.
@@ -1060,22 +1189,42 @@ export const stageAndPromoteRecovery = async (input: {
       for (const [safetyName, destination] of mappings) {
         await restoreDirectoryFromSafety(path.join(safetyFilesRoot, safetyName), destination);
       }
-      await dropDatabase(process.env.DATABASE_URL || '', stagedDatabase);
-      await fs.promises.rm(RESTORE_JOURNAL_PATH, { force: true });
     }
+    await applicationStage?.cleanup();
+    if (journal.applicationStageRole) {
+      await retireApplicationRecoveryStageRole(process.env.DATABASE_URL || '', stagedDatabase, journal.applicationStageRole);
+    }
+    await dropDatabase(process.env.DATABASE_URL || '', stagedDatabase);
+    await fs.promises.rm(RESTORE_JOURNAL_PATH, { force: true });
     await resumeInquiryAfterRecovery();
     throw error;
   } finally {
+    await applicationStage?.cleanup();
     await fs.promises.rm(jobRoot, { recursive: true, force: true });
   }
 };
 
 export const readRestoreJournal = async (): Promise<RestoreJournal | null> => {
+  let stat: fs.Stats;
   try {
-    return JSON.parse(await fs.promises.readFile(RESTORE_JOURNAL_PATH, 'utf8')) as RestoreJournal;
-  } catch {
-    return null;
+    stat = await fs.promises.lstat(RESTORE_JOURNAL_PATH);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
   }
+  if (!stat.isFile()) throw new Error('RECOVERY_RESTORE_JOURNAL_INVALID');
+  const contents = await fs.promises.readFile(RESTORE_JOURNAL_PATH, 'utf8');
+  let journal: RestoreJournal;
+  try {
+    journal = JSON.parse(contents);
+  } catch {
+    throw new Error('RECOVERY_RESTORE_JOURNAL_INVALID');
+  }
+  if (!journal || typeof journal.operationId !== 'string' || !journal.operationId
+    || !['STAGED', 'FILES_PROMOTED', 'DATABASE_PROMOTED'].includes(journal.phase)) {
+    throw new Error('RECOVERY_RESTORE_JOURNAL_INVALID');
+  }
+  return journal;
 };
 
 export const finalizePromotedRecovery = async (prisma: PrismaClient, journal: RestoreJournal) => {
@@ -1165,8 +1314,14 @@ export const rollbackInterruptedRecovery = async (journal: RestoreJournal) => {
     ...FILE_RECOVERY_MAPPINGS.map(({ safetyName, livePath }) => [safetyName, livePath] as const),
     ['inquiry', INQUIRY_SOURCE_DIR],
   ] as const;
-  for (const [safetyName, destination] of mappings) {
-    await restoreDirectoryFromSafety(path.join(journal.safetyFilesRoot, safetyName), destination);
+  try {
+    for (const [safetyName, destination] of mappings) {
+      await restoreDirectoryFromSafety(path.join(journal.safetyFilesRoot, safetyName), destination);
+    }
+  } finally {
+    if (journal.applicationStageRole) {
+      await retireApplicationRecoveryStageRole(process.env.DATABASE_URL || '', journal.stagedDatabase, journal.applicationStageRole);
+    }
   }
   await dropDatabase(process.env.DATABASE_URL || '', journal.stagedDatabase);
   await fs.promises.rm(journal.safetyFilesRoot, { recursive: true, force: true });

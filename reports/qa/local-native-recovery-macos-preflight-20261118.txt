@@ -25,7 +25,7 @@ No checkpoint, host proof, abandonment receipt, container replacement or new own
 
 Additional acceptance blockers
 Host TCP 5000 is held by ControlCenter / AirPlay. An HTTP readiness request to 127.0.0.1:5000 returns AirTunes 403, not a Sabalan readiness response. Any later local port adjustment must remain loopback-only and must not disable AirPlay or change production ingress.
-The current local sales_contracts database has no contractNumber 100999. Earlier browser acceptance used synthetic data with the affected technical identifier and must not be presented as full live-backend acceptance of the real contract. A real unmocked test needs an isolated approved copy or faithful local import after guarded runtime recovery.
+The affected contract is absent from the local sales_contracts database. Earlier browser acceptance used a synthetic fixture and must not be presented as full live-backend acceptance of the real contract. A real unmocked test needs an isolated approved copy or faithful local import after guarded runtime recovery.
 
 Preservation
 All work in this preflight was observational except writing local evidence/report files. Existing source edits, containers, volumes, original native state and historical checkpoints remain intact. No production connection, publication, restart, migration, financial approval, lock removal or gate bypass occurred in this preflight turn.

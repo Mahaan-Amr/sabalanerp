@@ -1,14 +1,14 @@
 import express, { Response } from 'express';
 import path from 'path';
 import { Prisma } from '@prisma/client';
-import * as XLSX from 'xlsx';
+import { encodeSalesReportWorkbook } from '../services/salesReportWorkbook';
 import { protect } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES, WorkspaceRequest } from '../middleware/workspace';
 import { buildSalesReport, getSalesReportSellers, SalesReportAccess } from '../services/salesReportingService';
 import { generatePdfFromHtml } from '../utils/pdf';
 import { downloadAndRemoveDocumentPdf } from '../services/documentPdfDownload';
 import { renderReportPdfHeaderTemplate, renderYekanFontFaces } from '../utils/printTemplate';
-import { formatMoney, roundMoneyFields } from '../utils/money';
+import { formatMoney } from '../utils/money';
 
 const router = express.Router();
 import { prisma } from '../lib/prisma';
@@ -219,32 +219,7 @@ router.post('/export.xlsx', ...reportAccess, async (req: WorkspaceRequest, res: 
   try {
     const report = await buildSalesReport(accessFor(req), req.body?.filters || {});
     const config = safeConfig(req.body?.configuration || {});
-    const workbook = XLSX.utils.book_new();
-    const add = (name: string, rows: any[]) => XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(rows), name.slice(0, 31));
-    if (config.sections.includes('overview')) add('نمای کلی', [roundMoneyFields(report.cards, ['grossRealized', 'adjustments', 'netRealized', 'pipelineValue', 'lostValue'])]);
-    if (config.sections.includes('contracts') && config.includeTables) add('قراردادها', report.contracts.map((row: any) => roundMoneyFields(Object.fromEntries(config.contractColumns.map((column) => [column, row[column === 'status' ? 'statusLabel' : column]])), ['amount'])));
-    if (config.sections.includes('customers')) add('مشتریان', report.customers.map((row: any) => roundMoneyFields(row, ['value'])));
-    if (config.sections.includes('products')) add('محصولات', report.products.map((row: any) => roundMoneyFields(row, ['value'])));
-    if (config.sections.includes('finance')) add('پرداخت و وصول', [roundMoneyFields({ ...report.finance, coverage: `${report.finance.coverage.coveredContracts}/${report.finance.coverage.totalContracts}` }, ['plannedPaymentAmount', 'receivedAmount', 'receivableAmount'])]);
-    if (config.sections.includes('delivery')) add('تحویل و بارگیری', [{ ...report.delivery, coverage: `${report.delivery.coverage.coveredContracts}/${report.delivery.coverage.totalContracts}` }]);
-    if (config.sections.includes('sellers') && report.permissions.canViewSellerComparisons) add('فروشندگان', report.sellers.map((row: any) => roundMoneyFields(row, ['pipelineValue', 'realizedValue', 'adjustments', 'netRealized'])));
-    if (config.sections.includes('accountingRegistered') && report.permissions.canViewSellerComparisons) {
-      if (!report.accountingRegistered.available) throw new Error('Accounting data is unavailable');
-      add('ثبت حسابداری فروشندگان', [
-        ...report.accountingRegistered.rows.map((row: any) => roundMoneyFields({ seller: row.name, contractCount: row.contractCount, totalAmountRial: row.totalAmount }, ['totalAmountRial'])),
-        ...(report.accountingRegistered.unassigned ? [roundMoneyFields({ seller: 'فروشندهٔ قطعی تخصیص‌نیافته', contractCount: report.accountingRegistered.unassigned.contractCount, totalAmountRial: report.accountingRegistered.unassigned.totalAmount }, ['totalAmountRial'])] : []),
-        roundMoneyFields({ seller: 'جمع کل', contractCount: report.accountingRegistered.contractCount, totalAmountRial: report.accountingRegistered.totalAmount }, ['totalAmountRial']),
-      ]);
-      add('جزئیات ثبت حسابداری', report.accountingRegistered.details.map((row: any) => roundMoneyFields({
-        contractNumber: row.contractNumber,
-        customer: row.customer,
-        realizedSeller: row.sellerName,
-        financiallyApprovedAt: row.financiallyApprovedAt,
-        amountRial: row.amount,
-        status: row.hasConflict ? 'تعارض رکورد مالی' : 'معتبر',
-      }, ['amountRial'])));
-    }
-    const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+    const buffer = encodeSalesReportWorkbook(report, config);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', 'attachment; filename="sales-report.xlsx"');
     res.send(buffer);

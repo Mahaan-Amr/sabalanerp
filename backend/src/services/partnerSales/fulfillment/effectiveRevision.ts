@@ -19,4 +19,3 @@ export async function hasEffectivePartnerLoadingRevision(tx: Prisma.TransactionC
     parsed.data.owner.caseId === owner.caseId && parsed.data.owner.revision === owner.revision &&
     parsed.data.owner.integrityHash === owner.integrityHash;
 }
-

@@ -1,11 +1,11 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { canonicalHash } from '@sabalanerp/partner-sales-contracts';
-import { historicalAccountingFixture, writerBoundAccountingFixture } from './partnerAccountingHistoricalReadFixture';
+import { historicalAccountingFixture, writerBoundAccountingFixture, type HistoricalAccountingFixtureIdentity } from './partnerAccountingHistoricalReadFixture';
 const json = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value));
 
 export async function seedHistoricalAccountingRead(database: PrismaClient, password = 'HistoricalAccountingQa2026!', writerBound = false,
-  identity: { invoiceId?: string; customerContractNumber?: string } = {}): Promise<{
+  identity: HistoricalAccountingFixtureIdentity = {}): Promise<{
   fixture: Awaited<ReturnType<typeof historicalAccountingFixture>> | Awaited<ReturnType<typeof writerBoundAccountingFixture>>;
   actorId: string; username: string; password: string;
 }> {
@@ -55,7 +55,7 @@ export async function seedHistoricalAccountingRead(database: PrismaClient, passw
       }
       await tx.accountingFinancialRecord.create({ data: { ...f.invoice, status: 'DRAFT', kind: 'INVOICE_CANDIDATE',
         sourceSnapshot: json(f.invoice.sourceSnapshot), metadata: json(f.invoice.metadata), createdBy: 'historical-admin' } });
-      await tx.effectiveAuthorizationState.create({ data: { id: 1, revision: 1 } });
+      await tx.effectiveAuthorizationState.upsert({ where: { id: 1 }, create: { id: 1, revision: 1 }, update: {} });
     });
 
     return { fixture: f, actorId: 'historical-admin', username: 'historical-admin', password };

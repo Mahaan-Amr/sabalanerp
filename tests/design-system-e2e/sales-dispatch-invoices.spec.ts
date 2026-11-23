@@ -32,6 +32,69 @@ const reply = (route: Route, data: unknown) =>
     body: JSON.stringify({ success: true, data }),
   });
 const candidateList = /\/api\/accounting\/dispatch-candidates(?:\?.*)?$/;
+
+for (const denial of ["command", "refresh"] as const) {
+  test(`dispatch closes private void information when access is denied during the ${denial}`, async ({ page }) => {
+    await loginAsAdmin(page);
+    let groupReads = 0;
+    await page.route(candidateList, route => {
+      if (new URL(route.request().url()).searchParams.has("loadingId")) {
+        groupReads++;
+        return route.fulfill({ status: 403, json: { success: false, error: "محتوای خصوصی ۹۱۷۲۱۳" } });
+      }
+      return route.fulfill({ json: { success: true, capabilities: {
+        canManageAccountingCandidates: true, canManageAccountingConfirmation: false,
+      }, data: [{
+        id: "private-candidate", loadingId: "private-loading", status: "ACCEPTED", canManage: true,
+        summary: { driverName: "راننده خصوصی آزمون", loadingNumber: "91" },
+        currentSalesInvoice: { id: "private-invoice", number: "917213" },
+        waybills: [{ id: "private-waybill", number: "42", status: "ISSUED", hasWaybillArtifact: true }],
+      }] } });
+    });
+    await page.route("**/api/accounting/dispatch-waybills/private-waybill/void", route =>
+      route.fulfill({ status: denial === "command" ? 403 : 409, json: { success: false, error: "محتوای خصوصی ۹۱۷۲۱۳" } }));
+    await page.goto("/dashboard/accounting/dispatch");
+    const row = page.getByRole("row").filter({ hasText: "راننده خصوصی آزمون" });
+    await row.getByRole("button", { name: "ابطال بارنامه و فاکتور فروش", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "ابطال بارنامه و فاکتور فروش", exact: true });
+    await expect(dialog).toContainText("917213");
+    await dialog.getByRole("textbox", { name: "دلیل تصمیم" }).fill("دلیل خصوصی آزمون");
+    await dialog.getByRole("button", { name: "تأیید و ثبت" }).click();
+    await expect(page.getByText("دسترسی به اطلاعات ارسال مجاز نیست.", { exact: true })).toBeVisible();
+    await expect(dialog).toHaveCount(0);
+    await expect(row).toHaveCount(0);
+    await expect(page.getByText(/917213|۹۱۷۲۱۳|دلیل خصوصی آزمون/)).toHaveCount(0);
+    expect(groupReads).toBe(denial === "command" ? 0 : 1);
+  });
+}
+
+test("dispatch preserves the permitted confirmation when the candidate group is denied", async ({ page }) => {
+  await loginAsAdmin(page);
+  await page.route(candidateList, route => {
+    if (new URL(route.request().url()).searchParams.has("loadingId")) {
+      return route.fulfill({ status: 403, json: { success: false } });
+    }
+    return route.fulfill({ json: { success: true, capabilities: {
+      canManageAccountingCandidates: false, canManageAccountingConfirmation: true,
+    }, data: [{
+      id: "confirmation-candidate", loadingId: "confirmation-loading", status: "ACCEPTED", canManage: false,
+      summary: { driverName: "راننده مجاز آزمون", loadingNumber: "29", driverSource: "CUSTOMER_PICKUP" },
+      waybills: [{ id: "confirmation-waybill", number: "43", status: "ISSUED", hasWaybillArtifact: true }],
+    }] } });
+  });
+  await page.route("**/api/dispatch-confirmation/waybills/confirmation-waybill/sessions", route => reply(route, {
+    id: "confirmation-session", waybillId: "confirmation-waybill", method: "PERSONAL_PICKUP_ACCOUNTING",
+    status: "CONFIRMED", authorization: { id: "confirmation-authorization" },
+  }));
+  await page.goto("/dashboard/accounting/dispatch");
+  await page.getByRole("row").filter({ hasText: "راننده مجاز آزمون" })
+    .getByRole("button", { name: "صدور مجوز خروج", exact: true }).click();
+  await expect(page.getByText("مجوز خروج صادر شد.", { exact: true })).toBeVisible();
+  await expect(page.getByText("مجوز خروج برای گارد صادر شده است.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "لغو مجوز خروج", exact: true })).toBeEnabled();
+  await expect(page.getByText("راننده مجاز آزمون", { exact: true })).toHaveCount(0);
+});
+
 const replyWithIssueReceipt = (route: Route, invoice: { id: string; number: string }) =>
   reply(route, { status: "ISSUED", commandId: route.request().postDataJSON().commandId, invoice });
 

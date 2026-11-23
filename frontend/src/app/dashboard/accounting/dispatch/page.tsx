@@ -33,11 +33,12 @@ import { formatNumericInputText, normalizeDigits } from "@/lib/numberFormat";
 import { useAuth } from "@/contexts/AuthContext";
 import { useWorkspace, WORKSPACES } from "@/contexts/WorkspaceContext";
 import { useActorScopedHttp } from "@/hooks/useActorScopedHttp";
+import { createDispatchRegistryReads } from "@/features/accounting/dispatchRegistryReads";
 import { clearOtherActorLoadingIssues, forgetLoadingIssue, rememberLoadingIssue, storedLoadingIssue,
   type LoadingIssueRequest } from "@/features/accounting/pendingLoadingIssue";
 
 type DispatchNotice = { kind: "success" | "error"; text: string };
-type LoadingIssueScope = { actorId: string; loadingId: string; key: string };
+type LoadingIssueScope = { actorId: string; loadingId: string; key: string; registryScope: number };
 type LoadingIssueConclusion =
   | { status: "rejected"; text: string }
   | { status: "confirmed"; invoice: { id: string; number: string } };
@@ -48,6 +49,10 @@ type LoadingIssueState =
 
 const errorStatus = (error: unknown) => (error as { response?: { status?: number } })?.response?.status;
 const errorCode = (error: unknown) => (error as { response?: { data?: { code?: string } } })?.response?.data?.code;
+const lostDispatchIdentity = (error: unknown) => errorStatus(error) === 401 || errorCode(error) === "AUTH_CONTEXT_CHANGED"
+  || (error as { code?: unknown })?.code === "AUTH_CONTEXT_CHANGED";
+const dispatchAccessDenied = (error: unknown) => lostDispatchIdentity(error) || errorStatus(error) === 403;
+const dispatchDeniedNotice = { kind: "error", text: "دسترسی به اطلاعات ارسال مجاز نیست." } as const;
 const loadingIssueKey = (actorId: string, loadingId: string) => JSON.stringify([actorId, loadingId]);
 type DispatchSection = "candidates" | "confirmation" | "cases";
 type ReferenceAuditEntry = {
@@ -68,10 +73,6 @@ type ReferenceCandidate = {
 };
 type ReferenceError = { text: string; stale?: boolean; reason?: boolean };
 const referenceLabel = "شماره بارگیری سپیدار";
-const dispatchCandidateAccessDenied = (error: unknown) => {
-  const status = errorStatus(error);
-  return status === 401 || status === 403;
-};
 type ReasonAction = {
   type: "reject" | "void" | "replace" | "revoke" | "reconstruct";
   id: string;
@@ -92,6 +93,15 @@ const dispatchStatusLabels: Record<string, string> = {
 };
 const quantityUnitLabels: Record<string, string> = { meter: "متر طول", squareMeter: "متر مربع", count: "عدد", ton: "تن" };
 const dispatchPageSize = 50;
+const normalizeDispatchSearch = (value: unknown) => normalizeDigits(String(value ?? ""))
+  .toLowerCase().replace(/ي/g, "ی").replace(/ك/g, "ک").trim();
+const matchesDispatchSearch = (candidate: any, query: string) => !query || [
+  candidate.summary?.loadingNumber, candidate.sepidarLoadingReference, candidate.summary?.driverName, candidate.summary?.plate,
+  candidate.summary?.customerName, candidate.summary?.projectName, candidate.summary?.projectAddress, candidate.partnerCaseNumber,
+  ...(candidate.waybills || []).map((waybill: any) => waybill.number),
+  ...(candidate.lines || []).map((line: any) => line.contractNumber),
+  ...(candidate.contractNumbers || []),
+].some(value => normalizeDispatchSearch(value).includes(query));
 
 export default function AccountingDispatchPage() {
   const { user, loading: authLoading } = useAuth();
@@ -131,7 +141,8 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
   const [referenceReason, setReferenceReason] = useState("");
   const [referenceError, setReferenceError] = useState<ReferenceError | null>(null);
   const [loading, setLoading] = useState(true);
-  const [dispatchCandidates, setDispatchCandidates] = useState<any[]>([]);
+  const registry = useMemo(() => createDispatchRegistryReads<any>(), []);
+  const [{ rows: dispatchCandidates, page: candidatePage }, setRegistry] = useState<ReturnType<typeof registry.discard>>({ rows: [] });
   const referenceCandidate: ReferenceCandidate | undefined = dispatchCandidates.find(
     candidate => candidate.id === referenceCandidateId,
   );
@@ -139,14 +150,12 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
   const [detailRead, setDetailRead] = useState<{ key: string; value: DispatchDocumentCase | null }>();
   const [detailAttempt, retryDetail] = useState(0);
   const [page, setPage] = useState(1);
-  const [candidatePage, setCandidatePage] = useState<{
-    ids: Set<string>; invoiceActionIds: Set<string>; page: number; total: number;
-  }>();
-  const registryRequest = useRef(0);
   const showTimeline = section === "cases";
   const registrySearch = showTimeline ? "" : search.trim();
   const [dispatchReason, setDispatchReason] = useState("");
   const [reasonAction, setReasonAction] = useState<ReasonAction | null>(null);
+  const currentReasonAction = useRef(reasonAction);
+  currentReasonAction.current = reasonAction;
   const [dispatchTimelineStale, setDispatchTimelineStale] = useState(false);
   const [dispatchPending, setDispatchPending] = useState(false);
   const dispatchPendingRef = useRef(false);
@@ -154,6 +163,7 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
     null,
   );
   const [confirmation, setConfirmation] = useState<any>(null);
+  const confirmationScope = useRef(0);
   const [otpCode, setOtpCode] = useState("");
   const [pickupCode, setPickupCode] = useState("");
   const [dispatchCapabilities, setDispatchCapabilities] = useState({
@@ -162,14 +172,41 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
   });
   const confirmationActions = confirmationActionsFor(confirmation || {});
   const discardCandidates = useCallback(() => {
-    setDispatchCandidates([]);
-    setCandidatePage(undefined);
+    setRegistry(registry.discard());
+    setLoading(false);
     setDetailCandidateId(null);
     setDetailRead(undefined);
     setReferenceTarget(null);
     setReferenceDetail(undefined);
-    setReasonAction(null);
+    setReferenceInput("");
+    setReferenceAmount("");
+    setReferenceExpected(null);
+    setReferenceVersion(null);
+    setReferenceReason("");
+    setReferenceError(null);
+    setVoidInvoiceLoadingId(null);
+    setPickupCode("");
+    setLoadingIssues({});
+    if (currentReasonAction.current?.type !== "revoke") {
+      setReasonAction(null);
+      setDispatchReason("");
+    }
+    setDispatchCapabilities(current => ({ ...current, canManageAccountingCandidates: false }));
+  }, [registry]);
+  const discardConfirmation = useCallback(() => {
+    confirmationScope.current++;
+    setConfirmation(null);
+    setOtpCode("");
+    if (currentReasonAction.current?.type === "revoke") {
+      setReasonAction(null);
+      setDispatchReason("");
+    }
+    setDispatchCapabilities(current => ({ ...current, canManageAccountingConfirmation: false }));
   }, []);
+  const discardIdentity = useCallback(() => {
+    discardCandidates();
+    discardConfirmation();
+  }, [discardCandidates, discardConfirmation]);
 
   useEffect(() => {
     if (!referenceCandidateId) return;
@@ -186,35 +223,56 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
   }, [api, referenceCandidateId, referenceWaybillId]);
 
   const loadDispatch = useCallback(async () => {
-    const request = ++registryRequest.current;
+    const request = registry.beginList();
+    const confirmationAtStart = confirmationScope.current;
+    const applyCapabilities = (capabilities: typeof dispatchCapabilities) => {
+      if (confirmationAtStart === confirmationScope.current && !capabilities.canManageAccountingConfirmation) discardConfirmation();
+      setDispatchCapabilities(current => ({
+        ...capabilities,
+        canManageAccountingConfirmation: confirmationAtStart === confirmationScope.current
+          ? capabilities.canManageAccountingConfirmation : current.canManageAccountingConfirmation,
+      }));
+    };
     setLoading(true);
     setDispatchNotice(null);
     try {
       const response = showTimeline
         ? await accountingAPI.getDispatchCandidates()
         : await accountingAPI.getDispatchCandidatePage(page, dispatchPageSize, registrySearch);
-      if (request !== registryRequest.current) return;
       const { data = [], relatedCandidates = [], invoiceActionCandidateIds = [], pagination } = response.data;
-      setDispatchCandidates([...data, ...relatedCandidates]);
-      setCandidatePage(pagination ? {
-        ids: new Set(data.map((row: { id: string }) => row.id)), invoiceActionIds: new Set(invoiceActionCandidateIds),
-        page: pagination.page, total: pagination.total,
-      } : undefined);
+      const query = normalizeDispatchSearch(registrySearch);
+      const next = registry.acceptList(request, {
+        rows: [...data, ...relatedCandidates],
+        page: pagination ? {
+          ids: new Set(data.map((row: { id: string }) => row.id)), invoiceActionIds: new Set(invoiceActionCandidateIds),
+          page: pagination.page, total: pagination.total,
+        } : undefined,
+      }, candidate => matchesDispatchSearch(candidate, query));
+      if (!next) return;
+      setRegistry(next);
       if (response.data.capabilities) {
-        setDispatchCapabilities(response.data.capabilities);
+        applyCapabilities(response.data.capabilities);
       } else {
         const capabilities = await dispatchConfirmationAPI.getCapabilities().catch(() => null);
-        if (request !== registryRequest.current) return;
-        if (capabilities?.data.success) setDispatchCapabilities(capabilities.data.data);
+        if (!registry.isCurrentList(request)) return;
+        if (capabilities?.data.success) applyCapabilities(capabilities.data.data);
       }
       retryDetail(attempt => attempt + 1);
     } catch (error: any) {
-      if (request !== registryRequest.current) return;
-      if (dispatchCandidateAccessDenied(error)) {
+      if (!registry.isCurrentList(request)) return;
+      if (lostDispatchIdentity(error)) {
+        discardIdentity();
+        setDispatchNotice(dispatchDeniedNotice);
+        return;
+      }
+      if (dispatchAccessDenied(error)) {
         discardCandidates();
+        const capabilityRead = registry.beginList();
         const capabilities = await dispatchConfirmationAPI.getCapabilities().catch(() => null);
-        if (request !== registryRequest.current) return;
-        setDispatchCapabilities(capabilities?.data.success ? capabilities.data.data : {
+        if (!registry.isCurrentList(capabilityRead)) return;
+        applyCapabilities(capabilities?.data.success ? {
+          ...capabilities.data.data, canManageAccountingCandidates: false,
+        } : {
           canManageAccountingCandidates: false,
           canManageAccountingConfirmation: false,
         });
@@ -225,21 +283,24 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
         text: userFacingError(error, "اطلاعات ارسال حسابداری دریافت نشد."),
       });
     } finally {
-      if (request === registryRequest.current) setLoading(false);
+      if (registry.isCurrentList(request)) setLoading(false);
     }
-  }, [accountingAPI, dispatchConfirmationAPI, discardCandidates, page, registrySearch, showTimeline]);
+  }, [accountingAPI, dispatchConfirmationAPI, discardCandidates, discardConfirmation, discardIdentity, page, registry, registrySearch, showTimeline]);
 
   const runDispatch = async (
     command: () => Promise<any>,
     notice: string | ((data: any) => DispatchNotice),
-    options: { loadingId?: string; recover?: (error: any) => Promise<boolean> } = {},
+    options: { loadingId?: string; confirmation?: boolean; recover?: (error: any) => Promise<boolean> } = {},
   ): Promise<boolean> => {
     if (dispatchPendingRef.current) return false;
+    const currentScope = () => options.confirmation ? confirmationScope.current : registry.currentScope();
+    const requestScope = currentScope();
     dispatchPendingRef.current = true;
     setDispatchPending(true);
     setDispatchNotice(null);
     try {
       const response = await command();
+      if (requestScope !== currentScope()) return false;
       setDispatchNotice(typeof notice === "string" ? { kind: "success", text: notice } : notice(response.data?.data));
       if (response.data?.data?.id && response.data?.data?.waybillId)
         setConfirmation(response.data.data);
@@ -256,12 +317,27 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
         try {
           await refreshCandidateGroup(options.loadingId);
         } catch (error) {
-          if (dispatchCandidateAccessDenied(error)) discardCandidates();
-          // Confirmation-only actors may not have permission to list candidates.
+          if (lostDispatchIdentity(error)) {
+            discardIdentity();
+            setDispatchNotice(dispatchDeniedNotice);
+            return false;
+          }
+          // A confirmation may be lawful even when the actor cannot read candidate rows.
+          if (dispatchAccessDenied(error)) discardCandidates();
         }
       }
       return true;
     } catch (error: any) {
+      if (lostDispatchIdentity(error)) discardIdentity();
+      else if (dispatchAccessDenied(error)) {
+        if (options.confirmation) discardConfirmation();
+        else discardCandidates();
+      }
+      if (dispatchAccessDenied(error)) {
+        setDispatchNotice(dispatchDeniedNotice);
+        return false;
+      }
+      if (requestScope !== currentScope()) return false;
       if (await options.recover?.(error)) return false;
       setDispatchNotice({
         kind: "error",
@@ -286,21 +362,29 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
     }, data => ({
       kind: "success",
       text: data?.authorization?.id ? "مجوز خروج صادر شد." : "تأیید راننده آماده انجام است.",
-    }), { loadingId });
+    }), { loadingId, confirmation: true });
     if (succeeded) setSection("confirmation");
   };
 
   const refreshVoid = async (action: ReasonAction) => {
+    const scope = registry.currentScope();
     try {
       if (!action.loadingId) throw new Error("Missing dispatch group");
       const candidates = await refreshCandidateGroup(action.loadingId);
+      if (scope !== registry.currentScope()) return true;
       const candidate = candidates.find((item: any) => item.loadingId === action.loadingId &&
         item.waybills?.some((waybill: any) => waybill.id === action.id));
       const waybill = candidate?.waybills.find((item: any) => item.id === action.id);
       const invoice = candidate?.currentSalesInvoice ?? null;
       const canManage = candidate?.canManage && (!invoice || candidates.every((item: any) =>
         item.loadingId !== action.loadingId || item.canManage));
-      if (waybill?.status !== "ISSUED" || !canManage) {
+      if (!canManage) {
+        setReasonAction(null);
+        setDispatchReason("");
+        setDispatchNotice(dispatchDeniedNotice);
+        return true;
+      }
+      if (waybill?.status !== "ISSUED") {
         setReasonAction({ ...action, invoice, voidBlocked: true, voidRefreshFailed: false,
           voidRefreshNotice: "این بارنامه دیگر قابل ابطال نیست. هیچ سندی با این درخواست باطل نشد." });
         return true;
@@ -313,7 +397,13 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
           : "این بارگیری اکنون فاکتور فروش فعال ندارد. در صورت تأیید دوباره، فقط بارنامه باطل می‌شود." });
       return true;
     } catch (error) {
-      if (dispatchCandidateAccessDenied(error)) discardCandidates();
+      if (dispatchAccessDenied(error)) {
+        if (lostDispatchIdentity(error)) discardIdentity();
+        else discardCandidates();
+        setDispatchNotice(dispatchDeniedNotice);
+        return true;
+      }
+      if (scope !== registry.currentScope()) return true;
       setReasonAction({ ...action, voidBlocked: true, voidRefreshFailed: true,
         voidRefreshNotice: "دریافت وضعیت جدید اسناد ممکن نشد. برای ادامه وضعیت را دوباره بررسی کنید." });
       return true;
@@ -361,7 +451,7 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
         () =>
           dispatchConfirmationAPI.revokeAuthorization(reasonAction.id, reason),
         "مجوز خروج لغو شد.",
-        { loadingId: reasonAction.loadingId },
+        { loadingId: reasonAction.loadingId, confirmation: true },
       );
       if (succeeded) {
         setConfirmation(null);
@@ -381,18 +471,10 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
     void loadDispatch();
   }, [loadDispatch]);
 
-  const normalize = (value: unknown) => normalizeDigits(String(value ?? ""))
-    .toLowerCase().replace(/ي/g, "ی").replace(/ك/g, "ک").trim();
-  const query = normalize(search);
+  const query = normalizeDispatchSearch(search);
   const filteredCandidates = dispatchCandidates.filter(candidate => {
     if (candidatePage) return candidatePage.ids.has(candidate.id);
-    if (!query) return true;
-    const values = [candidate.summary?.loadingNumber, candidate.sepidarLoadingReference, candidate.summary?.driverName, candidate.summary?.plate,
-      candidate.summary?.customerName, candidate.summary?.projectName, candidate.summary?.projectAddress, candidate.partnerCaseNumber,
-      ...(candidate.waybills || []).map((waybill: any) => waybill.number),
-      ...(candidate.lines || []).map((line: any) => line.contractNumber),
-      ...(candidate.contractNumbers || [])];
-    return values.some(value => normalize(value).includes(query));
+    return matchesDispatchSearch(candidate, query);
   });
   const selectedCandidate = dispatchCandidates.find(candidate => candidate.id === detailCandidateId);
   const selectedId = selectedCandidate?.id;
@@ -422,56 +504,79 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
     groupSnapshot.current = { rows: group, version: previousGroup.version + 1 };
   }
   const issueScope: LoadingIssueScope | null = loadingId
-    ? { actorId, loadingId, key: loadingIssueKey(actorId, loadingId) }
+    ? { actorId, loadingId, key: loadingIssueKey(actorId, loadingId), registryScope: registry.currentScope() }
     : null;
   const issue = issueScope ? loadingIssues[issueScope.key] : undefined;
+  const isCurrentIssue = (scope: LoadingIssueScope) =>
+    issueActorId.current === scope.actorId && registry.currentScope() === scope.registryScope;
   const setIssue = (scope: LoadingIssueScope, state: LoadingIssueState) => {
-    if (issueActorId.current === scope.actorId) {
+    if (isCurrentIssue(scope)) {
       setLoadingIssues(current => ({ ...current, [scope.key]: state }));
     }
   };
   const clearIssueGroup = (scope: LoadingIssueScope) => {
-    if (issueActorId.current !== scope.actorId) return;
-    setDispatchCandidates(current => current.filter(candidate => candidate.loadingId !== scope.loadingId));
+    if (!isCurrentIssue(scope)) return;
+    const result = registry.acceptGroup(registry.beginGroup(), scope.loadingId, []);
+    if (result?.snapshot) setRegistry(result.snapshot);
+    if (selectedLoadingId.current === scope.loadingId) {
+      setDetailCandidateId(null);
+      setDetailRead(undefined);
+      setPickupCode("");
+    }
+    setReferenceTarget(current => current?.loadingId === scope.loadingId ? null : current);
+    setVoidInvoiceLoadingId(current => current === scope.loadingId ? null : current);
+    if (currentReasonAction.current?.type !== "revoke" && currentReasonAction.current?.loadingId === scope.loadingId) {
+      setReasonAction(null);
+      setDispatchReason("");
+    }
+    setLoadingIssues(current => {
+      const remaining = { ...current };
+      delete remaining[scope.key];
+      return remaining;
+    });
   };
   async function refreshCandidateGroup(id: string) {
-    const response = await accountingAPI.getDispatchCandidates(id);
-    const rows = response.data.data;
-    if (!response.data.success || !Array.isArray(rows) || rows.some(row => row.loadingId !== id)) {
-      throw new Error("Invalid dispatch group response");
+    const read = registry.beginGroup();
+    try {
+      const response = await accountingAPI.getDispatchCandidates(id);
+      const rows = response.data.data;
+      if (!response.data.success || !Array.isArray(rows) || rows.some(row => row.loadingId !== id)) {
+        throw new Error("Invalid dispatch group response");
+      }
+      const result = registry.acceptGroup(read, id, rows);
+      if (!result) throw new Error("Dispatch group read superseded");
+      if (result.snapshot) {
+        setRegistry(result.snapshot);
+        if (selectedLoadingId.current === id) retryDetail(attempt => attempt + 1);
+      }
+      return result.rows;
+    } catch (error) {
+      if (!dispatchAccessDenied(error)) {
+        const fresher = registry.newerGroupRows(read, id);
+        if (fresher) return fresher;
+        if (read.scope !== registry.currentScope()) throw new Error("Dispatch group read superseded");
+      }
+      throw error;
     }
-    setDispatchCandidates(current => {
-      if (!current.some(candidate => candidate.loadingId === id)) return current;
-      const updated = new Map(rows.map(row => [row.id, row]));
-      const merged = current.flatMap(candidate => {
-        if (candidate.loadingId !== id) return [candidate];
-        const row = updated.get(candidate.id);
-        updated.delete(candidate.id);
-        return row ? [row] : [];
-      });
-      return [...merged, ...Array.from(updated.values())];
-    });
-    setCandidatePage(current => {
-      if (!current) return current;
-      const invoiceActionIds = new Set(current.invoiceActionIds);
-      for (const row of rows) invoiceActionIds.delete(row.id);
-      const eligible = rows.filter(row => current.ids.has(row.id) && row.currentSalesInvoice);
-      const actionRow = eligible.find(row => row.waybills?.some((waybill: any) => waybill.status === "ISSUED")) ?? eligible[0];
-      if (actionRow) invoiceActionIds.add(actionRow.id);
-      return { ...current, invoiceActionIds };
-    });
-    if (selectedLoadingId.current === id) retryDetail(attempt => attempt + 1);
-    return rows;
   }
   const readIssueGroup = async (scope: LoadingIssueScope, conclusion: LoadingIssueConclusion) => {
-    if (groupReads.current.has(scope.key)) return;
+    if (!isCurrentIssue(scope) || groupReads.current.has(scope.key)) return;
     groupReads.current.add(scope.key);
     setIssue(scope, { ...conclusion, read: "pending" });
     try {
       await refreshCandidateGroup(scope.loadingId);
       setIssue(scope, { ...conclusion, read: "ready" });
     } catch (error) {
-      if (dispatchCandidateAccessDenied(error)) clearIssueGroup(scope);
+      if (lostDispatchIdentity(error)) {
+        discardIdentity();
+        setDispatchNotice(dispatchDeniedNotice);
+        return;
+      }
+      if (dispatchAccessDenied(error)) {
+        clearIssueGroup(scope);
+        setDispatchNotice(dispatchDeniedNotice);
+        return;
+      }
       setIssue(scope, { ...conclusion, read: "failed" });
     } finally {
       groupReads.current.delete(scope.key);
@@ -484,27 +589,28 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
         typeof result.invoice?.id !== "string" || typeof result.invoice?.number !== "string") {
       throw new Error("Invalid dispatch issue receipt");
     }
-    if (issueActorId.current === scope.actorId) {
+    if (isCurrentIssue(scope)) {
       forgetLoadingIssue(scope.actorId, scope.loadingId, command.id);
       void readIssueGroup(scope, { status: "confirmed", invoice: { id: result.invoice.id, number: result.invoice.number } });
     }
   };
   const readIssueReceipt = async (scope: LoadingIssueScope, command: LoadingIssueRequest) => {
+    if (!isCurrentIssue(scope)) return;
     try {
       const response = await accountingAPI.getLoadingDocumentIssueReceipt(scope.loadingId, command.id);
       confirmIssueReceipt(scope, command, response.data.data);
     } catch (error) {
-      if (dispatchCandidateAccessDenied(error)) {
-        if (issueActorId.current === scope.actorId) forgetLoadingIssue(scope.actorId, scope.loadingId, command.id);
-        clearIssueGroup(scope);
-        setIssue(scope, { status: "rejected", text: "مجوز دریافت رسید صدور اسناد بارگیری را ندارید." });
+      if (dispatchAccessDenied(error)) {
+        if (lostDispatchIdentity(error)) discardIdentity();
+        else clearIssueGroup(scope);
+        setDispatchNotice(dispatchDeniedNotice);
         return;
       }
       setIssue(scope, { status: "unknown", command, receiptMissing: errorCode(error) === "LOADING_ISSUE_RECEIPT_MISSING" });
     }
   };
   const handleIssue = async (scope: LoadingIssueScope, command: LoadingIssueRequest, receiptOnly = false) => {
-    if (dispatchPendingRef.current || issueActorId.current !== scope.actorId) return;
+    if (dispatchPendingRef.current || !isCurrentIssue(scope)) return;
     if (!receiptOnly) {
       const previous = storedLoadingIssue(scope.actorId, scope.loadingId);
       if (previous && previous.id !== command.id) {
@@ -526,12 +632,16 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
         confirmIssueReceipt(scope, command, response.data.data);
       } catch (error) {
         const status = errorStatus(error);
-        if (dispatchCandidateAccessDenied(error)) {
-          if (issueActorId.current === scope.actorId) forgetLoadingIssue(scope.actorId, scope.loadingId, command.id);
-          clearIssueGroup(scope);
-          setDispatchNotice({ kind: "error", text: userFacingError(error, "مجوز صدور اسناد بارگیری را ندارید.") });
+        if (dispatchAccessDenied(error)) {
+          if (lostDispatchIdentity(error)) discardIdentity();
+          else {
+            if (isCurrentIssue(scope)) forgetLoadingIssue(scope.actorId, scope.loadingId, command.id);
+            clearIssueGroup(scope);
+          }
+          setDispatchNotice(dispatchDeniedNotice);
         } else if (status && status >= 400 && status < 500 && status !== 408) {
-          if (issueActorId.current === scope.actorId) forgetLoadingIssue(scope.actorId, scope.loadingId, command.id);
+          if (!isCurrentIssue(scope)) return;
+          forgetLoadingIssue(scope.actorId, scope.loadingId, command.id);
           const conclusion = { status: "rejected", text: userFacingError(error, "صدور اسناد بارگیری کامل نشد.") } as const;
           if (status === 409) void readIssueGroup(scope, conclusion);
           else setIssue(scope, conclusion);
@@ -600,12 +710,19 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
     && sepidarCheckAmount({ amount: referenceAmount, currency: "IRR" }) === expectedReferenceAmount;
   const runReferenceAction = async (action: () => Promise<void>, onFailure: (error: unknown) => void) => {
     if (dispatchPendingRef.current) return;
+    const scope = registry.currentScope();
     dispatchPendingRef.current = true;
     setDispatchPending(true);
     try {
       await action();
     } catch (error) {
-      onFailure(error);
+      if (dispatchAccessDenied(error)) {
+        if (lostDispatchIdentity(error)) discardIdentity();
+        else discardCandidates();
+        setDispatchNotice(dispatchDeniedNotice);
+      } else if (scope === registry.currentScope()) {
+        onFailure(error);
+      }
     } finally {
       dispatchPendingRef.current = false;
       setDispatchPending(false);
@@ -615,18 +732,25 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
     if (!referenceLoadingId || dispatchTimelineStale || referenceError?.stale) return;
     if (checkingReferenceAmount && !referenceAmountMatches) return;
     await runReferenceAction(async () => {
+      const scope = registry.currentScope();
       setReferenceError(null);
       const saved = await accountingAPI.registerSepidarLoadingReference(referenceLoadingId, {
         value: referenceInput.trim() ? referenceInput : null,
         expectedVersion: referenceVersion,
         reason: referenceIsCorrection ? referenceReason : undefined,
       });
+      if (scope !== registry.currentScope()) return;
       const { value, auditEntry } = saved.data.data as { value: string | null; auditEntry: ReferenceAuditEntry };
-      setDispatchCandidates(current => current.map(candidate => candidate.loadingId === referenceLoadingId ? {
+      const rows = registry.rowsForGroup(referenceLoadingId).map(candidate => ({
         ...candidate,
         sepidarLoadingReference: value,
-        sepidarLoadingReferenceHistory: [auditEntry, ...(candidate.sepidarLoadingReferenceHistory ?? [])],
-      } : candidate));
+        sepidarLoadingReferenceHistory: [auditEntry, ...(candidate.sepidarLoadingReferenceHistory ?? [])
+          .filter((event: ReferenceAuditEntry) => event.id !== auditEntry.id)],
+      }));
+      if (rows.length) {
+        const result = registry.acceptGroup(registry.beginGroup(), referenceLoadingId, rows);
+        if (result?.snapshot) setRegistry(result.snapshot);
+      }
       setReferenceTarget(null);
       setDispatchNotice({ kind: "success", text: referenceIsCorrection ? "شماره بارگیری سپیدار اصلاح شد." : "شماره بارگیری سپیدار ثبت شد." });
     }, error => {
@@ -641,7 +765,9 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
   const refreshReference = async () => {
     if (!referenceLoadingId) return;
     await runReferenceAction(async () => {
+      const scope = registry.currentScope();
       const rows = await refreshCandidateGroup(referenceLoadingId);
+      if (scope !== registry.currentScope()) return;
       const candidate: ReferenceCandidate | undefined = rows.find((row: ReferenceCandidate) =>
         row.loadingId === referenceLoadingId && row.id === referenceCandidateId);
       if (!candidate?.canManageSepidarLoadingReference) {
@@ -652,14 +778,7 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
       setReferenceExpected(candidate.sepidarLoadingReference);
       setReferenceVersion(candidate.sepidarLoadingReferenceHistory?.[0]?.id ?? null);
       setReferenceError(null);
-    }, error => {
-      if (dispatchCandidateAccessDenied(error)) {
-        discardCandidates();
-        setDispatchNotice({ kind: "error", text: "دسترسی به اطلاعات بارگیری مجاز نیست." });
-        return;
-      }
-      setReferenceError({ text: userFacingError(error, "تازه‌سازی انجام نشد."), stale: true });
-    });
+    }, error => setReferenceError({ text: userFacingError(error, "تازه‌سازی انجام نشد."), stale: true }));
   };
   const canManageLoadingInvoices = (id: string) =>
     !actionsBlocked && dispatchCapabilities.canManageAccountingCandidates &&
@@ -848,7 +967,7 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
                               },
                             },
                           );
-                        }, biometricAttemptNotice, { loadingId: confirmationLoadingId })
+                        }, biometricAttemptNotice, { loadingId: confirmationLoadingId, confirmation: true })
                       }
                     />
                   ))}
@@ -864,7 +983,7 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
                             confirmation.id,
                           ),
                         "روش جایگزین فعال است. پس از تأیید رمز راننده، تأیید سرپرست گارد لازم است.",
-                        { loadingId: confirmationLoadingId },
+                        { loadingId: confirmationLoadingId, confirmation: true },
                       )
                     }
                   />
@@ -879,7 +998,7 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
                     void runDispatch(
                       () => dispatchConfirmationAPI.verifyOtp(confirmation.id, otpCode),
                       "رمز راننده تأیید شد. تأیید نهایی را سرپرست گارد تکمیل می‌کند.",
-                      { loadingId: confirmationLoadingId },
+                      { loadingId: confirmationLoadingId, confirmation: true },
                     );
                   }}
                 >
@@ -910,7 +1029,7 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
                         void runDispatch(
                           () => dispatchConfirmationAPI.resendOtp(confirmation.id),
                           "رمز دوباره ارسال شد.",
-                          { loadingId: confirmationLoadingId },
+                          { loadingId: confirmationLoadingId, confirmation: true },
                         )
                       }
                     />
@@ -949,7 +1068,7 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
           workspace="accounting"
           onStaleChange={setDispatchTimelineStale}
           tableFilter={item => !query || [item.loadingNumber, referenceForLoading(item.loadingId), item.driverName, operationalStatusLabel(item.status)]
-            .some(value => normalize(value).includes(query))}
+            .some(value => normalizeDispatchSearch(value).includes(query))}
           tableColumns={[{ id: "sepidar", header: referenceLabel, cell: item => <bdi>{referenceForLoading(item.loadingId) ?? "—"}</bdi> }]}
           tableRowActions={item => referenceAction(dispatchCandidates.find(candidate =>
             candidate.loadingId === item.loadingId && candidate.id === item.accountingCandidateId))}

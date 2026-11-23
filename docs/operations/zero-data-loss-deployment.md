@@ -226,8 +226,8 @@ The [isolated restore and rollback rehearsal procedures](zero-data-loss-recovery
 
 ### Phase 6 — Recovery drills and operational acceptance
 
-- Automate monthly isolated remote restore verification.
-- Define and rehearse the quarterly supervised runbook.
+- Provide isolated remote restore verification and an optional timer.
+- Keep the supervised deployment and rollback rehearsal available on demand.
 - Prove interruption recovery at every journal phase.
 - Accept production use only after zero acknowledged-write loss, deterministic rollback, retention safety, and concurrency tests pass.
 

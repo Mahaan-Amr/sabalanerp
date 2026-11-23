@@ -81,7 +81,10 @@ residual-risk decisions for dependency advisories must be owned and closed; do
 not use `npm audit fix --force`, a waiver hidden in a signature, or a manifest/lock
 change by an uncoordinated writer.
 
-## 3. Rehearse recovery and fail-closed gates
+## 3. Prove recovery for Partner Sales activation
+
+These requirements apply to the governed Partner Sales activation package.
+Ordinary code deployment follows [ADR-0144](../adr/0144-make-product-qa-and-periodic-drills-independent-of-release.md).
 
 Follow `zero-data-loss-recovery-drills.md` on a non-public isolated recovery host.
 Never aim the drill at production data, volumes, DNS, or Compose identity. The
@@ -95,7 +98,7 @@ database/storage counts and checksums, migration/schema result, smoke gates,
 acknowledged-write reconciliation, journal hashes, durations, and cleanup result.
 Run `deployment-rehearsal-record.js` only with the three isolated evidence paths
 documented by the recovery runbook. Missing, stale, mismatched, or failed drill
-evidence blocks release.
+evidence blocks approval of the Partner Sales activation package.
 
 The rehearsal must demonstrate all ADR-0039 boundaries: the lease and checkpoint
 precede mutation; remote verification is complete; no public write is accepted in
@@ -179,8 +182,8 @@ The publisher is append-only and fails closed for a non-completed deployment,
 identity drift, `NO_GO`, expiry, missing approval, or a second publication. Its
 deployment ID is the `verifiedPackageId` supplied to the Admin activation action.
 
-Only a fresh `GO` package may be handed to an authorized production operator for
-a separate deployment instruction. That operator must still execute the complete
+Hand a fresh `GO` package to the authorized operator when the deployment is intended
+to qualify Partner Sales for activation. That operator must still execute the complete
 zero-data-loss deployment state machine. The package never opens traffic itself,
 and the deployment's mandatory gates independently fail closed.
 

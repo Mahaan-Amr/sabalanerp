@@ -86,7 +86,13 @@ for(const scenario of ['qualification','remote-tamper','post-mutation','rollback
    assert.ok(legacy('--preflight')>=0&&legacy('--forward')>legacy('--preflight')&&legacy('--assert-resolved')>legacy('--forward'));
    assert.ok(closure>legacy('--assert-resolved')&&checkpoint>closure,'checkpoint requires resolved signal and native closure');
    assert.ok(hostStage('BEFORE_CHECKPOINT')>closure&&hostStage('BEFORE_CHECKPOINT')<checkpoint,'independent retention must precede checkpoint');
-   if(failure==='remote-tamper')assert.equal(hostStage('AFTER_CHECKPOINT'),-1,'failed checkpoint cannot retire remote data');
+   if(failure==='remote-tamper'){
+    assert.equal(hostStage('AFTER_CHECKPOINT'),-1,'failed checkpoint cannot retire remote data');
+    for(const phase of ['LOCAL_CHECKPOINT_VERIFIED','REMOTE_CHECKPOINT_VERIFIED','MUTATION_STARTED']){
+     assert.equal(includes('DEPLOYMENT_PHASE='+phase).length,0,'failed checkpoint cannot record '+phase);
+    }
+    assert.equal(includes('dist/scripts/deployment-owned-migrations.js').length,0,'failed checkpoint cannot run owned migrations');
+   }
    else assert.ok(hostStage('AFTER_CHECKPOINT')>checkpoint,'retention after capture must follow verified checkpoint');
   }
   const activation=commands.findIndex(c=>c.args.includes('scripts/clamav-checkpoint.mjs')&&c.args.at(-1)==='activate');

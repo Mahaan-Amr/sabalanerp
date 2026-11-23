@@ -197,6 +197,8 @@ const rollbackEnvironment={PERFORMANCE_RELEASE_COMMIT:'a'.repeat(40),PERFORMANCE
   } else throw Error('Unexpected retention command');
   return;
  }
+ // This simulates a predecessor image carrying the old recency blocker.
+ if(a.includes('dist/scripts/deployment-drill-preflight.js'))process.exit(49);
  if(a.includes('dist/scripts/deployment-checkpoint.js')){
   installTsHook();const {encryptRecoveryArchive,decryptRecoveryArchive}=require(path.join(repository,'backend/src/services/recoveryCrypto.ts'));
   const payload=path.join(root,'payload');fs.mkdirSync(path.join(payload,'recovery-coordination'),{recursive:true});
@@ -247,7 +249,7 @@ const rollbackEnvironment={PERFORMANCE_RELEASE_COMMIT:'a'.repeat(40),PERFORMANCE
   else if(!text.includes('pg_terminate_backend')&&!text.includes('HR_HIRING_ANTIVIRUS_COMMAND'))throw Error('Unexpected exec');
   return;
  }
- const allowed=['validate-production-environment','deployment-drill-preflight','deployment-notify','deployment-gates','deployment-finalize-recovery','deployment-inquiry','dry-run-contract-product-graph-migration','audit-hr-onboarding-task-retirement','migrate-all-contract-product-graphs','reconcile-contract-financial-evidence'];
+ const allowed=['validate-production-environment','deployment-notify','deployment-gates','deployment-finalize-recovery','deployment-inquiry','dry-run-contract-product-graph-migration','audit-hr-onboarding-task-retirement','migrate-all-contract-product-graphs','reconcile-contract-financial-evidence'];
  if(a.includes('dist/scripts/deployment-notify.js')&&a.includes('retry-blocker')&&failure==='before-maintenance')process.exit(22);
  if(allowed.some(script=>a.includes('dist/scripts/'+script+'.js')))return;
  throw Error('Unexpected fixture CLI operation: '+JSON.stringify(a));

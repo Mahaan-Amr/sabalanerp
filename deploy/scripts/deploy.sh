@@ -1352,7 +1352,6 @@ refresh_performance_database_identity
 
 node "${OPERATIONS_ROOT}/deploy/scripts/dispatch-volume-preflight.mjs" "${ENV_FILE}" "${COMPOSE_FILE}"
 run_backend node dist/scripts/validate-production-environment.js
-run_backend node dist/scripts/deployment-drill-preflight.js
 python3 "${OPERATIONS_ROOT}/deploy/scripts/legacy-backend-signal.py" --preflight \
   "${REPO_ROOT}/${COMPOSE_FILE}" "${ENV_FILE}" "${DEPLOYMENT_PREVIOUS_BACKEND_IMAGE}" \
   "${REPO_ROOT}/.deploy-state/legacy-backend-drain-${DEPLOYMENT_ID}.json"

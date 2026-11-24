@@ -178,7 +178,7 @@ function createHttpApplication({ runtimeRole, isShuttingDown }: {
       credentials: true,
     }),
   );
-  app.use(morgan("combined", { skip: req => Boolean(accountingOperationalRoute(req.url)) }));
+  app.use(morgan("combined", { skip: req => Boolean(accountingOperationalRoute(req.url, req.method)) }));
   app.use(express.json({ limit: "10mb" }));
   app.use(express.urlencoded({ extended: true }));
   app.use(normalizeStructuredNumeralsMiddleware);

@@ -15,7 +15,7 @@ export const errorHandler = (
   let error = { ...err };
   error.message = err.message;
 
-  if (accountingOperationalRoute(req.originalUrl)) reportAccountingRequestFailure(res, err);
+  if (accountingOperationalRoute(req.originalUrl, req.method)) reportAccountingRequestFailure(res, err);
   else console.error(err);
 
   // Mongoose bad ObjectId

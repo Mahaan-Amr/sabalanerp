@@ -105,3 +105,84 @@ test('an interrupted request and server outcomes each record one classified atte
     await new Promise<void>(resolve => server.close(() => resolve()));
   }
 });
+
+test('dashboard reads and the exact reviewable view receive distinct fixed route labels', async () => {
+  const records: Array<{ route: string; requestId: string }> = [];
+  const middleware = createAccountingRequestObserver('local', record => records.push(record));
+  const server = createServer((request, response) => {
+    middleware(request, response, () => response.end());
+  }).listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address !== 'string');
+    const origin = `http://127.0.0.1:${address.port}`;
+    const requests = [
+      ['/api/accounting/dashboard?search=PRIVATE', '/api/accounting/dashboard'],
+      ['/api/accounting/dashboard/workspace?search=PRIVATE', '/api/accounting/dashboard/workspace'],
+      ['/api/accounting/dashboard/change?search=PRIVATE', '/api/accounting/dashboard/change'],
+      ['/api/accounting/contracts/?pageSize=50&view=reviewable&search=PRIVATE', '/api/accounting/contracts?view=reviewable'],
+      ['/api/accounting/contracts?view=reviewable&view=PRIVATE', '/api/accounting/contracts'],
+      ['/api/accounting/contracts?view=reviewable&view%5B0%5D=PRIVATE', '/api/accounting/contracts'],
+      ['/api/accounting/contracts?view=PRIVATE', '/api/accounting/contracts'],
+    ];
+    for (const [path, route] of requests) {
+      const response = await fetch(origin + path);
+      await response.text();
+      assert.deepEqual([records.at(-1)?.route, records.at(-1)?.requestId], [route, response.headers.get('x-accounting-request-id')]);
+    }
+    assert.equal(records.length, requests.length);
+    assert.doesNotMatch(JSON.stringify(records), /PRIVATE/);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+});
+
+test('duty and notification read records retain fixed labels and database failure codes', async () => {
+  const records: Array<{ route: string; requestId: string; outcome: string; code?: string }> = [];
+  const middleware = createAccountingRequestObserver('local', record => records.push(record));
+  const server = createServer((request, response) => {
+    middleware(request, response, () => {
+      const code = request.url?.includes('/unread-count') ? 'P2028' : request.url?.includes('/summary') ? 'P2024' : undefined;
+      if (code) {
+        reportAccountingRequestFailure(response, { code, message: 'PRIVATE' });
+        response.statusCode = 500;
+      }
+      response.end();
+    });
+  }).listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address !== 'string');
+    const origin = `http://127.0.0.1:${address.port}`;
+    const reads = [
+      ['/api/duties/workspaces/PRIVATE/duties?view=assigned', '/api/duties/workspaces/:workspace/duties', 'success', undefined],
+      ['/api/hr-duties/workspaces/PRIVATE/duties?view=history&search=PRIVATE', '/api/duties/workspaces/:workspace/duties?view=history', 'success', undefined],
+      ['/api/duties/workspaces/PRIVATE/summary?search=PRIVATE', '/api/duties/workspaces/:workspace/summary', 'pool_timeout', 'P2024'],
+      ['/api/notifications/?cursor=PRIVATE', '/api/notifications', 'success', undefined],
+      ['/api/notifications/metadata?workspace=PRIVATE', '/api/notifications/metadata', 'success', undefined],
+      ['/api/notifications/unread-count?workspace=PRIVATE', '/api/notifications/unread-count', 'transaction_expired', 'P2028'],
+    ];
+    for (const [path, route, outcome, code] of reads) {
+      const response = await fetch(origin + path);
+      await response.text();
+      const record = records.at(-1);
+      assert.match(response.headers.get('x-accounting-request-id') ?? '', /^[0-9a-f-]{36}$/);
+      assert.deepEqual([record?.route, record?.requestId, record?.outcome, record?.code],
+        [route, response.headers.get('x-accounting-request-id'), outcome, code]);
+    }
+    for (const path of ['/api/notifications/unread-count', '/api/duties/workspaces/PRIVATE/summary']) {
+      const response = await fetch(origin + path, { method: 'POST' });
+      await response.text();
+      assert.equal(response.headers.get('x-accounting-request-id'), null);
+      assert.equal(response.headers.get('x-accounting-outcome'), null);
+    }
+    assert.equal(records.length, reads.length);
+    assert.doesNotMatch(JSON.stringify(records), /PRIVATE/);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+});

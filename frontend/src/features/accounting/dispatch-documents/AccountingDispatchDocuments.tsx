@@ -279,6 +279,8 @@ export default function AccountingDispatchDocuments({
   ) : session.detailStatus === 'loading' ? <ErpLoading /> : session.detailStatus === 'error' ? (
     <ErpInlineState kind="error" title="جزئیات این پرونده دریافت نشد."
       actions={[{ label: "تلاش دوباره برای جزئیات", onClick: session.retryDetail }]} />
+  ) : view.pageNeedsReload && !view.visibleCases.length ? (
+    <ErpEmptyState title="ردیف‌های این صفحه را تکمیل کنید" />
   ) : view.visibleCases.length ? (
     <ErpEmptyState title="یک پرونده را انتخاب کنید" />
   ) : (
@@ -390,13 +392,20 @@ export default function AccountingDispatchDocuments({
                     onSelect={() => { setSheet(null); setSelectedId(item.id); }}
                   />
                 ))}
-                {!view.visibleCases.length && (
+                {!view.visibleCases.length && !view.pageNeedsReload && (
                   <p className="py-5 text-center text-sm text-[var(--sds-text-secondary)]">
                     موردی در فیلتر «{filterLabels[filter]}» نیست.
                   </p>
                 )}
               </div>
-              {totalPages > 1 && (
+              {view.pageNeedsReload && !stale && (
+                <ErpButton label="تکمیل ردیف‌های این صفحه" variant="outline" className="mt-3"
+                  disabled={loading || pending} onClick={() => {
+                    if (session.page > totalPages) session.selectPage(totalPages);
+                    else void load();
+                  }} />
+              )}
+              {totalPages > 1 && session.page <= totalPages && (
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   <ErpButton label="صفحهٔ قبل" variant="ghost" disabled={loading || pending || session.page <= 1}
                     onClick={() => session.selectPage(session.page - 1)} />

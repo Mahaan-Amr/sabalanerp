@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import express from 'express';
+import type { Prisma } from '@prisma/client';
 import accountingRouter from '../../routes/accounting';
 import { prisma } from '../../lib/prisma';
 import { createAuthoritativeSession, SESSION_COOKIE } from '../identitySessionService';
@@ -33,8 +34,8 @@ async function main() {
     const base = `http://127.0.0.1:${address.port}/api/accounting`;
     const headers = { Cookie: `${SESSION_COOKIE}=${token}`, 'x-sabalan-expected-user': actorId,
       'x-sabalan-expected-session': session.id };
-    const get = async (route: string) => {
-      const response = await fetch(`${base}${route}`, { headers });
+    const get = async (route: string, signal?: AbortSignal) => {
+      const response = await fetch(`${base}${route}`, { headers, signal });
       const body = await response.json() as { success?: boolean; data?: any; error?: string };
       assert.equal(response.status, 200, `${route}: ${JSON.stringify(body).slice(0, 500)}`);
       assert.equal(body.success, true, route);
@@ -135,6 +136,48 @@ async function main() {
       assert.equal(response.status, 200, `${route}: ${JSON.stringify(body).slice(0, 300)}`);
       assert.equal(body.success, true, route);
     }
+    const preparationRoute = '/contracts?view=all&sourceKind=PARTNER_INTERNAL_RECORD&page=1&pageSize=100';
+    const paperDecisions = () => prisma.effectiveAuthorizationAudit.count({ where: {
+      actorId, action: 'ACCOUNTING_WRITE', purpose: 'ACCOUNTING', channel: 'API', allowed: true,
+      reason: 'بررسی امکان ثبت امضای کاغذی مشتری قرارداد همکار',
+    } });
+    const beforePaperDecisions = await paperDecisions();
+    let markHeld!: () => void, release!: () => void;
+    const held = new Promise<void>(resolve => { markHeld = resolve; });
+    const hold = new Promise<void>(resolve => { release = resolve; });
+    const transaction = prisma.$transaction.bind(prisma);
+    let captureFirst = true;
+    // Hold the actual HTTP request's fully evaluated Partner transaction just
+    // before commit. Its concurrent peer must finish preparation and signature
+    // authorization without waiting on any of those held resource fences.
+    prisma.$transaction = ((work: (tx: Prisma.TransactionClient) => Promise<unknown>,
+      options?: { isolationLevel?: Prisma.TransactionIsolationLevel }) => {
+      if (!captureFirst || typeof work !== 'function' || options?.isolationLevel !== 'RepeatableRead') {
+        return transaction(work, options);
+      }
+      captureFirst = false;
+      return transaction(async tx => {
+        const result = await work(tx);
+        markHeld();
+        await hold;
+        return result;
+      }, options);
+    }) as typeof prisma.$transaction;
+    const first = get(preparationRoute);
+    try {
+      await Promise.race([held, first.then(() => { throw new Error('First preparation request did not hold its snapshot'); })]);
+      const second = await get(preparationRoute, AbortSignal.timeout(10_000));
+      assert.ok(second.items.some((row: { preparationOnly?: boolean }) => row.preparationOnly));
+      release();
+      const firstResult = await first;
+      assert.deepEqual(firstResult.items.map((row: { contractId: string }) => row.contractId),
+        second.items.map((row: { contractId: string }) => row.contractId), 'overlapping preparation results agree');
+    } finally {
+      release();
+      try { await first; } finally { prisma.$transaction = transaction; }
+    }
+    assert.ok(await paperDecisions() >= beforePaperDecisions + 2, 'each preparation read records its paper-signature authority');
+
     const concurrentReads = [get('/contracts?view=reviewable&page=1&pageSize=100'),
       get('/dashboard?range=3m')];
     await prisma.salesContract.create({ data: { id: 'accounting-447-mutation', contractNumber: 'accounting-447-mutation',

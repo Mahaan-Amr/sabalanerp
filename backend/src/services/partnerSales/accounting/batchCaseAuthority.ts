@@ -82,7 +82,7 @@ export async function batchAccountingCaseAuthority(tx: Prisma.TransactionClient,
   // Preserve that decision time through the same fenced Case membership.
   const signatureSource: AuthorizationSource<PartnerActionV2> = { read: (actor, root) =>
     read(actor, root, readPartnerAccountingScopedAuthority) };
-  return { source, preparationSource, signatureSource };
+  return { source, preparationSource, signatureSource, hasCase: (caseId: string) => byCase.has(caseId) };
 }
 
 export type AccountingCaseAuthority = Awaited<ReturnType<typeof batchAccountingCaseAuthority>>;

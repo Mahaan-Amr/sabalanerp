@@ -284,19 +284,22 @@ async function nextSequence(tx: Transaction, caseId: string) {
   return (maximum._max.sequence ?? 0) + 1;
 }
 
-export async function currentPricingEvidenceIsValid(tx: Transaction, owner: RevisionRef) {
+export async function currentPricingEvidenceIsValid(tx: Transaction, owner: RevisionRef, lock: 'UPDATE' | 'SHARE' = 'UPDATE') {
+  // Accounting projections already fence the owning Case. Share the evidence
+  // rows with other snapshots while still excluding row updates and deletes.
+  const evidenceLock = Prisma.raw(lock === 'SHARE' ? 'FOR SHARE OF a, r' : 'FOR UPDATE OF a, r');
   await tx.$queryRaw`SELECT a.id
     FROM partner_inquiry_usages u
     JOIN partner_inquiry_approvals a ON a.id = u."approvalId"
     JOIN partner_inquiry_rows r ON r.id = a."rowId"
     WHERE u."caseId" = ${owner.caseId} AND u."caseRevision" = ${owner.revision}
-    ORDER BY a.id FOR UPDATE OF a, r`;
+    ORDER BY a.id ${evidenceLock}`;
   await tx.$queryRaw`SELECT a.id
     FROM partner_material_inquiry_usages u
     JOIN partner_inquiry_approvals a ON a.id = u."approvalId"
     JOIN partner_inquiry_rows r ON r.id = a."rowId"
     WHERE u."caseId" = ${owner.caseId} AND u."caseRevision" = ${owner.revision}
-    ORDER BY a.id FOR UPDATE OF a, r`;
+    ORDER BY a.id ${evidenceLock}`;
   const [bindings, usages, materialUsages, now] = await Promise.all([
     tx.partnerCaseRowBinding.count({ where: { caseId: owner.caseId, revision: owner.revision } }),
     tx.partnerInquiryUsage.findMany({ where: { caseId: owner.caseId, caseRevision: owner.revision },

@@ -215,6 +215,13 @@ export async function readPartnerCommercialState(tx: Tx, caseId: string,
   return (await readPartnerCommercialDetails(tx, caseId, response, presentation))?.commercial;
 }
 
+/** Commercial evidence for an audited Accounting snapshot that already holds
+ * the shared Case fence. The owning Case also fences Inquiry successor writes. */
+export async function readAccountingCommercialState(tx: Tx, caseId: string): Promise<PartnerCommercialState | undefined> {
+  const value = await readPartnerCommercialDetailsInternal(tx, caseId, undefined, undefined, { sharePricingEvidence: true });
+  return value && 'commercial' in value ? value.commercial : undefined;
+}
+
 /** Reuse only inside this authorized read transaction. The public state reader
  * continues to load current evidence on every independent invocation. */
 export async function readPartnerCommercialDetails(tx: Tx, caseId: string,
@@ -225,13 +232,14 @@ export async function readPartnerCommercialDetails(tx: Tx, caseId: string,
 }
 
 export async function readPartnerCommercialEditingDetails(tx: Tx, caseId: string) {
-  const value = await readPartnerCommercialDetailsInternal(tx, caseId, undefined, undefined, true);
+  const value = await readPartnerCommercialDetailsInternal(tx, caseId, undefined, undefined, { navigationOnly: true });
   return value && 'editingStatus' in value ? value : undefined;
 }
 
 async function readPartnerCommercialDetailsInternal(tx: Tx, caseId: string,
   response?: 'READY' | 'PARTIAL' | 'WAITING' | 'REJECTED' | 'EXPIRED',
-  presentation?: { complete: boolean; resubmittedWaiting: boolean }, navigationOnly = false) {
+  presentation?: { complete: boolean; resubmittedWaiting: boolean },
+  { navigationOnly = false, sharePricingEvidence = false } = {}) {
   const root = await tx.partnerSaleCase.findUnique({ where: { id: caseId }, include: { customerContract: true, profile: { select: { userId: true } } } });
   const contract = root?.customerContract;
   if (!root || !contract || !isPartnerCommercialFlow(contract)) return undefined;
@@ -247,7 +255,7 @@ async function readPartnerCommercialDetailsInternal(tx: Tx, caseId: string,
   }
   const final = contract.status === 'SIGNED';
   const validPricing = root.pricingState === 'READY_TO_FINALIZE' && (final || await currentPricingEvidenceIsValid(tx,
-    { caseId, revision: root.headRevision, integrityHash: root.integrityHash }));
+    { caseId, revision: root.headRevision, integrityHash: root.integrityHash }, sharePricingEvidence ? 'SHARE' : 'UPDATE'));
   const salesApproved = contract.salesApprovalRevision === contract.commercialRevision;
   const customerAccepted = contract.customerAcceptanceRevision === contract.commercialRevision;
   const expired = contract.status === 'EXPIRED' || partnerDeadlinePassed(contract);

@@ -1,4 +1,4 @@
-import { readPartnerCommercialState } from '../cases/commercialLifecycle';
+import { readAccountingCommercialState, readPartnerCommercialState } from '../cases/commercialLifecycle';
 import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { RevisionRefSchema, type PartnerCommercialState } from '@sabalanerp/partner-sales-contracts';
@@ -188,6 +188,14 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
   const committedCases = new Set<string>();
   const finalCases = new Set<string>();
   const commercialByCase = new Map<string, PartnerCommercialState>();
+  const sharesCaseFence = Boolean(actor && !selection.focusedCaseId);
+  const readCommercial = sharesCaseFence ? readAccountingCommercialState : readPartnerCommercialState;
+  const readCommercialForCase = async (caseId: string) => {
+    if (sharesCaseFence && !caseAuthority?.hasCase(caseId)) {
+      throw new Error('Accounting commercial evidence requires a fenced Case');
+    }
+    return commercialByCase.get(caseId) ?? readCommercial(database, caseId);
+  };
   const frozenCases = new Set<string>();
   const preparationByInvoice = new Map<string, PartnerFinancialPreparation>();
   const conflict = () => new PartnerAccountingCommandError('INTEGRITY_CONFLICT', 'شواهد صورتحساب همکار نیاز به بررسی دارد؛ پرونده را در حسابداری بررسی کنید.');
@@ -218,7 +226,7 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
         if (!current?.accounting) throw conflict();
         currentAccountingByCase.set(row.id, current.accounting);
         if (current.row.state === 'COMMITTED') committedCases.add(row.id);
-        const commercial = await readPartnerCommercialState(database, row.id);
+        const commercial = await readCommercialForCase(row.id);
         if (commercial) commercialByCase.set(row.id, commercial);
         if (current.row.state === 'COMMITTED' && (!commercial || commercial.status === 'FINAL')) finalCases.add(row.id);
         if (await partnerPredecessorIsFrozen(database, row.id, current.row.headRevision)) frozenCases.add(row.id);
@@ -352,6 +360,7 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
     actorId: actor?.userId ?? null,
     caseAuthority,
     commercialForCase: (caseId: string) => commercialByCase.get(caseId),
+    readCommercialForCase,
     partnerAccountingIncluded: authorizedInvoices.length > 0,
     authorizedPartnerInternalIds: allowedInternalIds,
     contextualize,

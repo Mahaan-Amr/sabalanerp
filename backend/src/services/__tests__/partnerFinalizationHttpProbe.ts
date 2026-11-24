@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import express from 'express';
 import type { AddressInfo } from 'node:net';
 import { prisma } from '../../lib/prisma';
@@ -174,6 +175,15 @@ async function main() {
       await prisma.workspacePermission.create({ data: { userId: readerId, workspace: 'accounting', permissionLevel: 'view', grantedBy: accountantId } });
       await prisma.featurePermission.create({ data: { userId: readerId, workspace: 'accounting',
         feature: 'accounting_dispatch_candidates_view', permissionLevel: 'view', grantedBy: accountantId } });
+      // The workspace view bridges to Partner Case reads unless the Case audience denies them.
+      const denyPartnerAccounting = (principalId: string, action: 'ACCOUNTING_READ' | 'ACCOUNTING_WRITE', label: string) =>
+        prisma.effectiveActionGrant.create({ data: {
+          id: `${principalId}-${label}`, principalKind: 'USER', principalId, subjectUserId: principalId,
+          domain: 'PARTNER', action, rootKind: 'CASE', purpose: 'ACCOUNTING', scope: 'COMPANY',
+          effect: 'DENY', grantedBy: accountantId, reason: 'آزمون محدودیت مخاطب سند همکار',
+          correlationId: `${expected.caseId}-${label}`,
+        } });
+      await denyPartnerAccounting(readerId, 'ACCOUNTING_READ', 'waybill-audience');
       const readerSession = await createAuthoritativeSession(prisma, readerId,
         { ipAddress: '127.0.0.1', userAgent: 'isolated-334-waybill-only' });
       const fetchArtifact = (artifactId: string, token: string) => fetch(`${base}/api/accounting/dispatch-waybills/${waybillId}/artifacts/${artifactId}`,
@@ -189,22 +199,41 @@ async function main() {
       const combinedDenied = await request(`/api/accounting/dispatch-candidates/${candidateId}/document-read-model?waybillId=${waybillId}`,
         'GET', undefined, readerSession.token);
       assert.equal(combinedDenied.status, 404, 'the combined model is wholesale-sensitive');
-      let otp = '';
+      // The schema-only database omits the disabled cutover singleton rows from migrations.
+      const cutoverId = 'customer-shipment-statements';
+      await prisma.shipmentStatementCutover.create({ data: { id: cutoverId, enabled: false } });
+      await prisma.shipmentStatementOperationsControl.create({ data: { id: cutoverId, paused: true,
+        reason: 'Disabled ordinary-document cutover in the isolated Partner fixture.' } });
+      const loadingInvoice = await request('/api/accounting/loadings/' + loadingId + '/issue-dispatch-documents',
+        'POST', { commandId: randomUUID() }, accountingSession.token);
+      assert.equal(loadingInvoice.status, 200, JSON.stringify(loadingInvoice.body));
       const confirmation = new DispatchConfirmationService(prisma, {
         connector: new DeterministicBiometricSimulator(),
         vault: new ProtectedTemplateVault({ activeKeyId: 'test', keys: { test: Buffer.alloc(32, 7) } }),
         otpSecret: 'issue-334-isolated-dispatch-confirmation-secret',
-        sendOtp: async message => { otp = message.code; },
+        sendOtp: async () => assert.fail('Successful simulated biometrics must not send an OTP'),
       });
+      const enrollment = await prisma.driverBiometricEnrollment.findFirstOrThrow({
+        where: { externalDriverId: driver.id, status: 'ACTIVE' }, select: { id: true },
+      });
+      await confirmation.deactivateEnrollment({ enrollmentId: enrollment.id, actorId,
+        reason: 'جایگزینی ثبت اولیه راننده با الگوی آزمایش' });
+      await confirmation.enrollInternalDriver({ personnelId: 'external:' + driver.id,
+        confirmationPhone: driver.phone, actorId, templates: ['RIGHT_INDEX', 'LEFT_INDEX'].map(finger => ({
+          finger, format: 'ISO-19794-2', material: Buffer.from('isolated-template-' + finger),
+          image: { material: Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 1]), mimeType: 'image/png', width: 2, height: 2 },
+          deviceEvidence: {}, provenance: 'APPROVED_CONNECTOR',
+        })) });
       const confirmationSession = await confirmation.startSession({ waybillId, actorId: accountantId,
         workstationId: 'ISSUE-334-ACCOUNTING-DESK' });
-      assert.ok(otp, 'the external-driver confirmation must issue an OTP');
-      await confirmation.verifyOtp({ sessionId: confirmationSession.id, code: otp, actorId: accountantId });
-      const authorization = await confirmation.approveByGuard({ sessionId: confirmationSession.id,
-        guardActorId: actorId, reauthenticatedAt: new Date() });
+      assert.equal(confirmationSession.method, 'EXTERNAL_BIOMETRIC');
+      const verification = await confirmation.verifyInternalBiometric({ sessionId: confirmationSession.id, actorId: accountantId });
+      const authorization = verification.authorization;
+      assert.ok(authorization, 'the enrolled external driver must get an exit authorization');
       await prisma.effectiveActionGrant.updateMany({ where: { principalId: accountantId, domain: 'PARTNER',
         action: 'ACCOUNTING_WRITE', revokedAt: null }, data: { revokedAt: new Date(), revokedBy: accountantId,
         revocationReason: 'آزمون لغو دسترسی نوشتن اسناد', revocationCorrelationId: `${expected.caseId}-revoke-document-write` } });
+      await denyPartnerAccounting(accountantId, 'ACCOUNTING_WRITE', 'document-write-denied');
       const deniedReplay = await request(`/api/accounting/dispatch-candidates/${candidateId}/decision`, 'POST', { action: 'ACCEPT' },
         accountingSession.token, `${expected.caseId}-issue-documents`);
       assert.equal(deniedReplay.status, 403, 'idempotent Partner document commands must recheck current Case write authority');
@@ -223,6 +252,7 @@ async function main() {
       await prisma.effectiveActionGrant.updateMany({ where: { principalId: accountantId, domain: 'PARTNER',
         action: 'ACCOUNTING_READ', revokedAt: null }, data: { revokedAt: new Date(), revokedBy: accountantId,
         revocationReason: 'آزمون لغو دسترسی سند عمده', revocationCorrelationId: `${expected.caseId}-revoke-statement` } });
+      await denyPartnerAccounting(accountantId, 'ACCOUNTING_READ', 'statement-audience-denied');
       assert.equal((await fetchArtifact(statement.id, accountingSession.token)).status, 404,
         'every statement access rechecks current Case authority');
       assert.equal((await fetchArtifact(waybill.id, accountingSession.token)).status, 200,

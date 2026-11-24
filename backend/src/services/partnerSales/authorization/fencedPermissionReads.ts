@@ -22,8 +22,8 @@ export function createFencedPartnerPermissionReader(tx: Prisma.TransactionClient
 function memoizeReads<Delegate extends object>(delegate: Delegate): Delegate {
   const reads = new Map<string, Promise<unknown>>();
   return new Proxy(delegate, { get(table, method, receiver) {
-    const value = Reflect.get(table, method, receiver);
-    if (method !== 'findUnique' && method !== 'findMany') return value;
+    const value: unknown = Reflect.get(table, method, receiver);
+    if (typeof value !== 'function' || (method !== 'findUnique' && method !== 'findMany')) return value;
     return (...args: unknown[]) => {
       const key = JSON.stringify([method, args]);
       let read = reads.get(key);

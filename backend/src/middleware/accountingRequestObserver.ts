@@ -3,7 +3,9 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { accountingReadTiming, type AccountingReadTimings, type AccountingReadWork } from '../services/accountingReadTiming';
 
 const accountingRoutes = [
-  [/^\/api\/accounting\/dashboard(?:\/(?:change|workspace))?$/, '/api/accounting/dashboard'],
+  [/^\/api\/accounting\/dashboard$/, '/api/accounting/dashboard'],
+  [/^\/api\/accounting\/dashboard\/workspace$/, '/api/accounting/dashboard/workspace'],
+  [/^\/api\/accounting\/dashboard\/change$/, '/api/accounting/dashboard/change'],
   [/^\/api\/accounting\/financial-trend$/, '/api/accounting/financial-trend'],
   [/^\/api\/accounting\/receivables$/, '/api/accounting/receivables'],
   [/^\/api\/accounting\/payments$/, '/api/accounting/payments'],
@@ -20,9 +22,36 @@ const accountingRoutes = [
   [/^\/files\/accounting-contracts(?:\/.*)?$/, '/files/accounting-contracts/:path'],
 ] as const;
 
-export function accountingOperationalRoute(url: string | undefined) {
-  const path = (url ?? '').split('?', 1)[0].replace(/\/$/, '').toLowerCase();
-  return accountingRoutes.find(([pattern]) => pattern.test(path))?.[1];
+const relatedReadRoutes = [
+  [/^\/api\/(?:hr-)?duties\/workspaces\/[^/]+\/duties$/, '/api/duties/workspaces/:workspace/duties'],
+  [/^\/api\/(?:hr-)?duties\/workspaces\/[^/]+\/summary$/, '/api/duties/workspaces/:workspace/summary'],
+  [/^\/api\/notifications$/, '/api/notifications'],
+  [/^\/api\/notifications\/metadata$/, '/api/notifications/metadata'],
+  [/^\/api\/notifications\/unread-count$/, '/api/notifications/unread-count'],
+] as const;
+
+function hasExactView(search: string, view: 'reviewable' | 'history') {
+  const query = new URLSearchParams(search);
+  const views = query.getAll('view');
+  return views.length === 1 && views[0] === view && ![...query.keys()].some(key => key.startsWith('view['));
+}
+
+export function accountingOperationalRoute(url: string | undefined, method?: string) {
+  const target = url ?? '';
+  const [pathname] = target.split('?', 1);
+  const path = pathname.replace(/\/$/, '').toLowerCase();
+  const route = accountingRoutes.find(([pattern]) => pattern.test(path))?.[1];
+  if (method !== 'GET') return route;
+
+  const readRoute = route ?? relatedReadRoutes.find(([pattern]) => pattern.test(path))?.[1];
+  const search = target.slice(pathname.length);
+  if (readRoute === '/api/accounting/contracts' && hasExactView(search, 'reviewable')) {
+    return '/api/accounting/contracts?view=reviewable';
+  }
+  if (readRoute === '/api/duties/workspaces/:workspace/duties' && hasExactView(search, 'history')) {
+    return '/api/duties/workspaces/:workspace/duties?view=history';
+  }
+  return readRoute;
 }
 
 type DatabaseFailure = 'P2024' | 'P2028' | 'P2034' | '40P01' | '40001';
@@ -93,7 +122,7 @@ export function createAccountingRequestObserver(
 ) {
   const commit = accountingMeasurementCommit(sourceCommit);
   return (request: IncomingMessage, response: ServerResponse, next: () => void) => {
-    const route = accountingOperationalRoute(request.url);
+    const route = accountingOperationalRoute(request.url, request.method);
     if (!route) return next();
 
     requestFailures.set(response, undefined);

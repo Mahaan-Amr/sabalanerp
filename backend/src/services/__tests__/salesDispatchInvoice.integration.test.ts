@@ -17,6 +17,7 @@ import { renderDispatchDocumentHtml } from "../../documents/dispatch/dispatchDoc
 import { renderSalesInvoice } from "../salesDispatchInvoice/render";
 import { freezeSalesInvoiceCorrection } from "../salesDispatchInvoice/correction";
 import { issueLoadingDocuments } from "../loadingDocumentIssuance";
+import { readDispatchDocumentQueueSummary } from "../dispatchDocuments/queueSummary";
 import { assertDispatchDocumentsMigrationTarget } from "./dispatchDocumentsTemporaryDatabase";
 import {
   approvedPricingRowIntegrityHash,
@@ -404,6 +405,20 @@ async function run() {
         assert.equal(source.drivers.length, 2);
         assert.equal(source.grossAmount, "25.000000000000");
         assert.equal(source.netAmount, "20.000000000000");
+        const queueCandidates = await tx.accountingDispatchCandidate.findMany({
+          where: { id: { in: candidates } },
+          select: {
+            id: true, status: true, allocationRevisionId: true, waybills: { select: { id: true } },
+            allocationRevision: { select: { loadingId: true, snapshot: true } },
+          },
+        });
+        const queue = await readDispatchDocumentQueueSummary(tx, queueCandidates.map(row => ({
+          ...row, loadingId: row.allocationRevision.loadingId, canManage: true,
+        })), new Map(queueCandidates.map(row => [row.id, row.allocationRevision.snapshot])),
+        { state: 'ISSUED', page: 1, pageSize: 50 });
+        assert.equal(queue.rows.length, 2);
+        assert.ok(queue.rows.every(row => row.total.amount === '10.000000000000' && row.total.currency === 'TOMAN'),
+          'each driver summary preserves the exact priced allocation and original currency');
         assert.equal(source.lines[0].width, "0.4");
         assert.match(source.lines[0].label, /سنگ مصوب/);
         const waybillSource = await new PrismaDispatchDocumentSourceReader(client, "dispatch-test", "chromium-pdf-v1")

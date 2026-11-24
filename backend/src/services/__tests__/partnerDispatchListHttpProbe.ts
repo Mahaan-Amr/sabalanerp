@@ -92,6 +92,22 @@ async function main() {
     const hiddenGroup = await fetchCandidates(hiddenLoadingId);
     assert.equal(hiddenGroup.status, 200);
     assert.deepEqual((await hiddenGroup.json() as any).data, [], 'a filtered read cannot disclose an unauthorized loading');
+    const documents = await fetch(`${base}/dispatch-candidates?documentQueue=READY&pageSize=1`, { headers });
+    assert.equal(documents.status, 200);
+    assert.equal(documents.headers.get('X-Dispatch-Documents-Permission'), 'MANAGE');
+    const queue = (await documents.json() as any).data;
+    assert.equal(queue.counts.READY, body.data.length, 'visible queue counts exclude unauthorized case existence');
+    assert.equal(queue.rows.length, 1);
+    assert.deepEqual(queue.rows[0].total, { amount: 'UNKNOWN', currency: 'IRR' });
+    assert.ok(queue.rows.every((row: any) => !('allocationRevision' in row) && !('waybills' in row) && !('contracts' in row)));
+    const documentsGroup = async (id: string) => {
+      const result = await fetch(`${base}/dispatch-candidates?${new URLSearchParams({ documentQueue: 'GROUP', loadingId: id })}`, { headers });
+      assert.equal(result.status, 200);
+      return (await result.json() as any).data.rows;
+    };
+    assert.deepEqual((await documentsGroup(loadingId)).map((row: any) => row.id).sort(),
+      [expected.ordinary, expected.allowed].sort(), 'only authorized sibling summaries refresh after a loading command');
+    assert.deepEqual(await documentsGroup(hiddenLoadingId), []);
     assert.equal(body.data.find((row: any) => row.id === expected.ordinary)?.canManage, true,
       'ordinary candidates retain workspace-level mutation availability');
     assert.equal(body.data.find((row: any) => row.id === expected.allowed)?.canManage, true,

@@ -1,6 +1,7 @@
 import { DispatchPickupVerificationError, processPickupVerification, requirePickupVerification } from '../services/dispatchPickupVerification';
 import smsService from '../services/smsService';
 import { reportAccountingRequestFailure } from '../middleware/accountingRequestObserver';
+import { isDispatchDocumentQueueState, readDispatchDocumentQueueSummary } from '../services/dispatchDocuments/queueSummary';
 import { prisma } from '../lib/prisma';
 import { createSalesInvoiceRouter } from '../services/salesDispatchInvoice/routes';
 import { createSalesInvoiceService } from '../services/salesDispatchInvoice/service';
@@ -582,6 +583,10 @@ const normalizeDispatchSearch = (value: unknown) => String(value ?? '').toLowerC
 router.get('/dispatch-candidates', accountingDispatchView, async (req: AuthRequest, res: Response) => {
   const loadingId = typeof req.query.loadingId === 'string' ? req.query.loadingId.trim() : undefined;
   if (req.query.loadingId !== undefined && !loadingId) return res.sendStatus(400);
+  const documentQueue = req.query.documentQueue;
+  if (documentQueue !== undefined && (documentQueue === 'GROUP'
+    ? !loadingId || req.query.page !== undefined || req.query.pageSize !== undefined || req.query.search !== undefined
+    : !isDispatchDocumentQueueState(documentQueue) || !!loadingId || req.query.search !== undefined)) return res.sendStatus(400);
   const paginated = req.query.page !== undefined || req.query.pageSize !== undefined || req.query.search !== undefined;
   const page = Number(req.query.page ?? 1);
   const pageSize = Number(req.query.pageSize ?? 50);
@@ -591,7 +596,7 @@ router.get('/dispatch-candidates', accountingDispatchView, async (req: AuthReque
     || typeof searchInput !== 'string' || searchInput.length > 200)) return res.sendStatus(400);
   const search = normalizeDispatchSearch(searchInput);
   try {
-    const { manage, confirmation, candidates, relatedCandidates, invoiceActionCandidateIds, pagination } = await readPartnerSnapshot(prisma, async tx => {
+    const { manage, confirmation, candidates, relatedCandidates, invoiceActionCandidateIds, pagination, documentSummary } = await readPartnerSnapshot(prisma, async tx => {
       const owners = await tx.accountingDispatchCandidate.findMany({
         where: loadingId ? { allocationRevision: { loadingId } } : undefined,
         orderBy: { id: 'asc' }, select: {
@@ -629,9 +634,14 @@ router.get('/dispatch-candidates', accountingDispatchView, async (req: AuthReque
           owner.partnerCaseId !== null && writablePartnerCases.has(owner.partnerCaseId)));
       const blockedReferenceLoadingIds = new Set(owners.filter(owner => !canManageOwner(owner.allocationRevision))
         .map(owner => owner.allocationRevision.loadingId));
+      // A Partner profile never receives internal wholesale documents even when a residual
+      // grant permits the generic dispatch registry or a physical waybill.
+      const documentPartnerProfile = documentQueue && await tx.partnerProfile.findUnique({
+        where: { userId: req.user!.id }, select: { id: true },
+      });
       const allowedIds = owners.flatMap(owner => owner.allocationRevision.sourceKind === 'SALES_CONTRACT'
         || (owner.allocationRevision.sourceKind === 'PARTNER_CASE' && owner.allocationRevision.partnerCaseId
-          && allowedPartnerCases.has(owner.allocationRevision.partnerCaseId)) ? [owner.id] : []);
+          && !documentPartnerProfile && allowedPartnerCases.has(owner.allocationRevision.partnerCaseId)) ? [owner.id] : []);
       const partnerCases = allowedPartnerCases.size ? await tx.partnerSaleCase.findMany({
         where: { id: { in: [...allowedPartnerCases] } }, select: { id: true, caseNumber: true },
       }) : [];
@@ -699,6 +709,13 @@ router.get('/dispatch-candidates', accountingDispatchView, async (req: AuthReque
           canManage: Boolean(owner && canManageOwner(owner)) };
       }).sort((left, right) => right.lastActivityAt.getTime() - left.lastActivityAt.getTime()
         || right.createdAt.getTime() - left.createdAt.getTime() || left.id.localeCompare(right.id));
+      if (documentQueue === 'GROUP' || isDispatchDocumentQueueState(documentQueue)) return {
+        manage, confirmation, candidates: undefined, relatedCandidates: undefined, invoiceActionCandidateIds: undefined, pagination: undefined,
+        documentSummary: await readDispatchDocumentQueueSummary(
+          tx, ordered, new Map(candidates.map(row => [row.id, row.allocationRevision.snapshot])),
+          { state: documentQueue, page, pageSize },
+        ),
+      };
       const contractNumbers = (lines: ReturnType<typeof projectAccountingDispatchLines>) =>
         [...new Set(lines.flatMap(line => line.contractNumber ? [line.contractNumber] : []))];
       const hydrate = async (rows: typeof ordered, related: typeof ordered = []) => {
@@ -727,7 +744,7 @@ router.get('/dispatch-candidates', accountingDispatchView, async (req: AuthReque
       };
       if (!paginated) return {
         manage, confirmation, candidates: (await hydrate(ordered)).candidates,
-        relatedCandidates: undefined, invoiceActionCandidateIds: undefined, pagination: undefined,
+        relatedCandidates: undefined, invoiceActionCandidateIds: undefined, pagination: undefined, documentSummary: undefined,
       };
       const matches = search ? ordered.filter(row => [
         row.summary.loadingNumber, row.sepidarLoadingReference, row.summary.driverName, row.summary.plate,
@@ -750,12 +767,17 @@ router.get('/dispatch-candidates', accountingDispatchView, async (req: AuthReque
       }
       return {
         manage, confirmation,
+        documentSummary: undefined,
         ...await hydrate(selected, ordered.filter(row => loadingIds.has(row.loadingId) && !ids.has(row.id))),
         invoiceActionCandidateIds: [...invoiceCandidatesByLoading.values()].filter(id => ids.has(id)),
         pagination: { page: currentPage, pageSize, total: matches.length },
       };
     });
     res.setHeader('X-Dispatch-Documents-Permission', manage.allowed ? 'MANAGE' : 'VIEW');
+    if (documentSummary) {
+      res.setHeader('Cache-Control', 'private, no-store');
+      return res.json({ success: true, data: documentSummary });
+    }
     return res.json({ success: true, data: candidates, relatedCandidates, invoiceActionCandidateIds, pagination, capabilities: {
       canManageAccountingCandidates: manage.allowed,
       canManageAccountingConfirmation: confirmation.allowed,

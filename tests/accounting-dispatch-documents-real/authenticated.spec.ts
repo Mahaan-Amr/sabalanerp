@@ -9,7 +9,7 @@ const credentials = {
 const login = async (page: Page, role: keyof typeof credentials) => {
   await page.goto('/login');
   await page.getByRole('textbox', { name: 'ایمیل، نام کاربری یا شماره تماس' }).fill(credentials[role].identifier);
-  await page.getByRole('textbox', { name: 'رمز عبور', exact: true }).fill(credentials[role].password);
+  await page.locator('input[name="password"]').fill(credentials[role].password);
   await Promise.all([
     page.waitForURL(/\/dashboard$/),
     page.getByRole('button', { name: 'ورود', exact: true }).click(),
@@ -31,6 +31,8 @@ test('MANAGE authority is projected by the mounted backend and exposes decision 
   expect(response.status()).toBe(200);
   expect(response.headers()['x-dispatch-documents-permission']).toBe('MANAGE');
   await expect(page.getByRole('heading', { name: 'اسناد ارسال مشتری' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'پذیرش و صدور اسناد', exact: true })).toHaveCount(0);
+  await page.getByLabel('صف پرونده‌های اسناد ارسال').getByRole('button').first().click();
   await expect(page.getByRole('button', { name: 'پذیرش و صدور اسناد', exact: true })).toBeVisible();
 });
 

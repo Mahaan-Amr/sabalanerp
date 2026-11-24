@@ -38,6 +38,8 @@ export type DispatchDocumentContract = {
 
 export type DispatchDocumentCase = {
   id: string;
+  loadingId?: string;
+  waybillId?: string;
   canManage: boolean;
   state: DispatchDocumentFilter;
   customerName: string;
@@ -56,6 +58,10 @@ export type DispatchDocumentWorkspace = {
   permission: DispatchDocumentPermission;
   cases: DispatchDocumentCase[];
   retrievedAt: string;
+  counts?: Record<DispatchDocumentFilter, number>;
+  relatedCases?: DispatchDocumentCase[];
+  page?: number;
+  pageSize?: number;
 };
 
 export type DispatchDocumentView = {
@@ -85,12 +91,12 @@ export function buildDispatchDocumentView(
   if (workspace.permission === 'UNAUTHORIZED') {
     return { counts: emptyCounts(), visibleCases: [], selectedCase: null, permission: workspace.permission };
   }
-  const counts = workspace.cases.reduce((result, item) => {
+  const counts = workspace.counts ?? workspace.cases.reduce((result, item) => {
     result[item.state] += 1;
     return result;
   }, emptyCounts());
   const visibleCases = workspace.cases.filter((item) => item.state === filter);
-  const selectedCase = visibleCases.find((item) => item.id === selectedId) || visibleCases[0] || null;
+  const selectedCase = visibleCases.find((item) => item.id === selectedId) || null;
   return { counts, visibleCases, selectedCase, permission: workspace.permission };
 }
 

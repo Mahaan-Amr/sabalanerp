@@ -5,6 +5,8 @@ import { PathnameContext, SearchParamsContext } from 'next/dist/shared/lib/hooks
 import { AuthProvider, useAuth } from '../../src/contexts/AuthContext';
 import { ThemeProvider } from '../../src/contexts/ThemeContext';
 import { WorkspaceProvider } from '../../src/contexts/WorkspaceContext';
+import { SessionContinuationHost } from '../../src/components/SessionContinuationHost';
+import { authAPI } from '../../src/lib/api';
 import DashboardLayout from '../../src/app/dashboard/layout';
 
 const router: AppRouterInstance = {
@@ -30,6 +32,7 @@ function Fixture() {
             <button onClick={() => setPathname('/dashboard/crm')}>CRM workspace</button>
             <button onClick={() => setPathname('/dashboard/sales')}>Sales workspace</button>
             <button onClick={() => void changeActor()}>Change actor</button>
+            <button onClick={() => void authAPI.getMe().catch(() => undefined)}>Check session</button>
             <button onClick={() => void logout()}>Sign out</button>
             <DashboardLayout><p>Active dashboard route</p></DashboardLayout>
           </WorkspaceProvider>
@@ -41,6 +44,6 @@ function Fixture() {
 
 createRoot(document.getElementById('fixture')!).render(
   <AppRouterContext.Provider value={router}>
-    <AuthProvider><Fixture /></AuthProvider>
+    <AuthProvider><SessionContinuationHost><Fixture /></SessionContinuationHost></AuthProvider>
   </AppRouterContext.Provider>,
 );

@@ -21,22 +21,23 @@ const routePaths = [
   partnerManagementPath,
 ];
 
+const [bundle] = buildSync({
+  bundle: true,
+  entryPoints: ['frontend/e2e/fixtures/workspace-navigation.tsx'],
+  platform: 'browser',
+  format: 'iife',
+  jsx: 'automatic',
+  tsconfig: 'frontend/tsconfig.json',
+  write: false,
+  loader: { '.module.css': 'empty' },
+  define: {
+    'process.env': '{}',
+    'process.env.NODE_ENV': '"production"',
+    'process.env.NEXT_PUBLIC_API_URL': '"/api"',
+  },
+}).outputFiles;
+
 test('Partner Sales requests follow the current sidebar and signed-in actor', async () => {
-  const [bundle] = buildSync({
-    bundle: true,
-    entryPoints: ['frontend/e2e/fixtures/workspace-navigation.tsx'],
-    platform: 'browser',
-    format: 'iife',
-    jsx: 'automatic',
-    tsconfig: 'frontend/tsconfig.json',
-    write: false,
-    loader: { '.module.css': 'empty' },
-    define: {
-      'process.env': '{}',
-      'process.env.NODE_ENV': '"production"',
-      'process.env.NEXT_PUBLIC_API_URL': '"/api"',
-    },
-  }).outputFiles;
   const browser = await chromium.launch({ channel: 'chrome', headless: true });
 
   try {
@@ -162,6 +163,118 @@ test('Partner Sales requests follow the current sidebar and signed-in actor', as
     await expect(sidebar).toHaveCount(0);
     assert.deepEqual(pageErrors, []);
   } finally {
+    await browser.close();
+  }
+});
+
+async function resumeSession(page) {
+  await page.getByRole('button', { name: 'Check session' }).click();
+  const form = page.locator('[data-sabalan-session-continuation]');
+  await form.locator('#continuation-identifier').fill('accountant');
+  await form.locator('#continuation-password').fill('fixture');
+  await form.getByRole('button', { name: 'ورود و ادامهٔ فرم' }).click();
+  await expect(form).toHaveCount(0);
+}
+
+async function openContinuationFixture(browser, handlers) {
+  const page = await browser.newPage();
+  const actor = { id: 'fixture-accountant', role: 'ACCOUNTANT' };
+  let session = 0;
+  let sessionExpired = false;
+  await page.route(origin + '/**', async route => {
+    const url = new URL(route.request().url());
+    switch (url.pathname) {
+      case accountingPath:
+        return route.fulfill({ contentType: 'text/html', body: '<div id="fixture"></div>' });
+      case '/api/auth/me':
+        if (sessionExpired && route.request().headers()['x-correlation-id']) {
+          return route.fulfill({ status: 401, json: { success: false } });
+        }
+        return route.fulfill({ json: { success: true, data: actor, session: { id: `session-${session}` } } });
+      case '/api/auth/login':
+        assert.equal(route.request().postDataJSON().expectedUserId, actor.id);
+        session++;
+        sessionExpired = false;
+        return route.fulfill({ json: { success: true, data: { user: actor }, session: { id: `session-${session}` } } });
+      case '/api/dashboard/profile':
+        return route.fulfill({ json: { success: true, data: actor } });
+      case '/api/system-recovery/environment':
+        return handlers.environment(route);
+      case '/api/workspace-permissions/user-workspaces':
+        return route.fulfill({ json: { success: true, data: [{ workspace: 'accounting', permission: 'view' }] } });
+      case '/api/dashboard/route-availability':
+        return handlers.routeAvailability(route);
+      default:
+        return route.abort();
+    }
+  });
+  await page.goto(origin + accountingPath);
+  await page.addScriptTag({ content: bundle.text });
+  return {
+    page,
+    async resume() {
+      sessionExpired = true;
+      await resumeSession(page);
+    },
+  };
+}
+
+test('a denied dashboard route stays hidden during a same-owner recheck', async () => {
+  const browser = await chromium.launch({ channel: 'chrome', headless: true });
+  const recheck = Promise.withResolvers();
+  let routeChecks = 0;
+  try {
+    const { page, resume } = await openContinuationFixture(browser, {
+      environment: route => route.fulfill({ json: { success: true, data: { sanitizedEnvironment: false } } }),
+      routeAvailability: async route => {
+        const initial = ++routeChecks === 1;
+        if (!initial) await recheck.promise;
+        return route.fulfill({ json: { success: true, data: { allowed: !initial } } });
+      },
+    });
+    const denial = page.getByRole('heading', { name: 'دسترسی به این بخش مجاز نیست' });
+    const children = page.getByText('Active dashboard route');
+    await expect(denial).toBeVisible();
+    await resume();
+    await expect.poll(() => routeChecks).toBe(2);
+    await expect(denial).toBeVisible({ timeout: 1500 });
+    await expect(children).toHaveCount(0);
+    recheck.resolve();
+    await expect(children).toBeVisible();
+  } finally {
+    recheck.resolve();
+    await browser.close();
+  }
+});
+
+test('an interrupted environment check is retried once after the owner resumes', async () => {
+  const browser = await chromium.launch({ channel: 'chrome', headless: true });
+  const initialCheck = Promise.withResolvers();
+  let environmentChecks = 0;
+  try {
+    const { page, resume } = await openContinuationFixture(browser, {
+      environment: async route => {
+        const initial = ++environmentChecks === 1;
+        if (initial) await initialCheck.promise;
+        return route.fulfill({ json: { success: true, data: { sanitizedEnvironment: !initial } } });
+      },
+      routeAvailability: route => route.fulfill({ json: { success: true, data: { allowed: true } } }),
+    });
+    const warning = page.getByText('محیط آزمایشی با داده‌های پاک‌سازی‌شده — استفاده عملیاتی ممنوع');
+    await expect.poll(() => environmentChecks).toBe(1);
+    await resume();
+    await expect(warning).toBeVisible({ timeout: 1500 });
+    initialCheck.resolve();
+    await page.waitForLoadState('networkidle');
+    await expect(warning).toBeVisible();
+    const profile = page.waitForResponse(response => new URL(response.url()).pathname === '/api/dashboard/profile');
+    await resume();
+    await profile;
+    await page.waitForLoadState('networkidle');
+    await expect(warning).toBeVisible();
+    assert.equal(environmentChecks, 2);
+  } finally {
+    initialCheck.resolve();
     await browser.close();
   }
 });

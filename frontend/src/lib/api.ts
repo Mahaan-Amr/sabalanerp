@@ -378,7 +378,7 @@ export const supportTicketsAPI = {
 };
 
 export const systemRecoveryAPI = {
-  getEnvironment: () => api.get('/system-recovery/environment'),
+  getEnvironment: (request?: Pick<AxiosRequestConfig, 'signal'>) => api.get('/system-recovery/environment', request),
   getState: () => api.get('/system-recovery'),
   createBackup: (data: { packageType: 'COMPLETE' | 'SANITIZED_TEST'; adminPassword: string; passphrase: string }) =>
     api.post('/system-recovery/backups', data),

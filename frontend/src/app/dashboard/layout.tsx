@@ -87,6 +87,11 @@ interface DashboardLayoutProps {
   children: React.ReactNode;
 }
 
+interface RouteAvailability {
+  allowed: boolean;
+  reason: string | null;
+}
+
 const captureSupportOrigin = () => {
   // Legacy Contract diagnostics do not prove their original owner/session.
   // Omit them from this new envelope; the original domain journal is untouched.
@@ -155,7 +160,10 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const [topbarHeight, setTopbarHeight] = useState(64);
   const [loading, setLoading] = useState(true);
   const [sanitizedEnvironment, setSanitizedEnvironment] = useState(false);
-  const [routeAvailability, setRouteAvailability] = useState<{ allowed: boolean; reason: string | null } | null>(null);
+  const [checkedRoute, setCheckedRoute] = useState<(RouteAvailability & {
+    pathname: string;
+    userId: string | undefined;
+  }) | null>(null);
   const [supportCaptureOpen, setSupportCaptureOpen] = useState(false);
   const [sensitiveCaptureConsent, setSensitiveCaptureConsent] = useState(false);
   const [sensitiveCandidateItems, setSensitiveCandidateItems] = useState<SensitiveCandidateItem[]>([]);
@@ -193,6 +201,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const hasMobileBottomNavigation = isHrWorkspace || showsSalesMobileNavigation || isCrmWorkspace;
   const isWorkspaceDetail = pathname !== "/dashboard";
   const effectiveHrFeatures = user?.permissions?.features || [];
+  const routeAvailability = checkedRoute?.pathname === pathname ? checkedRoute : null;
   const deniesHrRoute = Boolean(isHrWorkspace && routeAvailability?.allowed === false);
   const isTaskScopedDutyRoute = /\/duties(?:\/|$)/.test(pathname);
   const deniesWorkspaceRoute = deniesDashboardWorkspaceRoute({
@@ -205,26 +214,35 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const deniesFeatureRoute = Boolean(!isHrWorkspace && routeAvailability?.allowed === false);
 
   useEffect(() => {
+    setCheckedRoute(null);
     if (isTaskScopedDutyRoute) {
-      setRouteAvailability(null);
       return;
     }
     let controller = new AbortController();
     const checkRoute = (signal: AbortSignal) => {
+      const recordAvailability = (availability: RouteAvailability) => {
+        if (!signal.aborted) {
+          setCheckedRoute({ ...availability, pathname, userId: browserSessionContinuation.expectedUserId() });
+        }
+      };
       dashboardAPI.getRouteAvailability(pathname, { signal })
-        .then((response) => { if (!signal.aborted) setRouteAvailability(response.data.data); })
-        .catch(() => {
-          if (!signal.aborted) setRouteAvailability({
-            allowed: false,
-            reason: 'بررسی دسترسی انجام نشد. پشتیبان سامانه باید وضعیت سرور را بررسی کند.',
-          });
-        });
+        .then((response) => recordAvailability(response.data.data))
+        .catch(() => recordAvailability({
+          allowed: false,
+          reason: 'بررسی دسترسی انجام نشد. پشتیبان سامانه باید وضعیت سرور را بررسی کند.',
+        }));
     };
-    setRouteAvailability(null);
     const unsubscribe = browserSessionContinuation.subscribe(() => {
       controller.abort();
-      if (browserSessionContinuation.expectedUserId() && !browserSessionContinuation.snapshot()) {
-        setRouteAvailability(null);
+      const owner = browserSessionContinuation.expectedUserId();
+      if (!owner) {
+        setCheckedRoute(null);
+      } else if (!browserSessionContinuation.snapshot()) {
+        setCheckedRoute(previous =>
+          previous?.pathname === pathname && previous.userId === owner && !previous.allowed
+            ? previous
+            : null,
+        );
         controller = new AbortController();
         checkRoute(controller.signal);
       }
@@ -364,6 +382,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
   useEffect(() => {
     let controller = new AbortController();
+    let environmentVerified = false;
 
     async function checkAuth(signal: AbortSignal, initial: boolean) {
       try {
@@ -378,10 +397,11 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         }
         setUser(response.data.data);
         setNavigationProfileVerified(true);
-        if (initial) {
-          const recoveryEnvironment = await systemRecoveryAPI.getEnvironment();
+        if (!environmentVerified) {
+          const recoveryEnvironment = await systemRecoveryAPI.getEnvironment({ signal });
           if (!signal.aborted) {
             setSanitizedEnvironment(Boolean(recoveryEnvironment.data.data.sanitizedEnvironment));
+            environmentVerified = true;
           }
         }
       } catch (error) {

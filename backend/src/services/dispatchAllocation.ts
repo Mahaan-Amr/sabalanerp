@@ -812,19 +812,29 @@ export const finalizeCanonicalLoadingAllocations = async (prisma: Database, inpu
   loadingId: string; idempotencyKey: string; actorId: string; effectiveAuthority: unknown;
   expected?: RevisionRef; correlationId?: string; reason?: string;
 }) => serializable(prisma, async (tx) => {
-  await assertCanonicalDispatchCommandAllowed(tx);
   const idempotencyKey = required(input.idempotencyKey, 'idempotencyKey');
+  const actor = { actorId: input.actorId, correlationId: input.correlationId || randomUUID(), reason: input.reason };
+  // Accounting reconciliation also takes the Partner and authority fences before the loading.
+  const source = await preparePartnerLoadingQueueChange(tx, { ...input, ...actor }, 'FINALIZE');
+  if (!source.ok) return { partnerFailure: source.error };
+  await assertCanonicalDispatchCommandAllowed(tx);
   await lockKeys(tx, [`LOGISTICS_LOADING:${input.loadingId}`]);
-  const sourceOwner = await tx.logisticsLoading.findUnique({ where: { id: input.loadingId }, select: { sourceKind: true } });
-  if (sourceOwner?.sourceKind === 'PARTNER_CASE') {
-    const source = await preparePartnerLoadingQueueChange(tx, { ...input,
-      correlationId: input.correlationId || randomUUID() }, 'FINALIZE');
-    if (!source.ok) return { partnerFailure: source.error };
-    if (source.value.sourceKind !== 'PARTNER_CASE') return { partnerFailure: partnerError('INTEGRITY_CONFLICT') };
+  // A locking read under Serializable retries if the root was changed while we waited.
+  const [sourceOwner] = await tx.$queryRaw<Array<Pick<Prisma.LogisticsLoadingGetPayload<object>,
+    'sourceKind' | 'partnerCaseId' | 'partnerDeliveryId'>>>`
+    SELECT "sourceKind", "partnerCaseId", "partnerDeliveryId"
+    FROM logistics_loadings WHERE id = ${input.loadingId} FOR UPDATE`;
+  if (!sourceOwner) throw new DispatchAllocationValidationError('Loading was not found.');
+  if (sourceOwner.sourceKind !== source.value.sourceKind) return { partnerFailure: partnerError('INTEGRITY_CONFLICT') };
+  if (source.value.sourceKind === 'PARTNER_CASE') {
+    if (sourceOwner.partnerCaseId !== source.value.owner.caseId || sourceOwner.partnerDeliveryId !== source.value.deliveryId) {
+      return { partnerFailure: partnerError('INTEGRITY_CONFLICT') };
+    }
     const canonical = await createPartnerFulfillmentAdapter(createPrismaPartnerFulfillmentRepository({ database: tx,
-      actorId: input.actorId, correlationId: input.correlationId || randomUUID(), reason: input.reason }))
+      ...actor }))
       .readLoadingSource(source.value.owner, source.value.deliveryId);
     if (!canonical.ok) return { partnerFailure: canonical.error };
+    if (await canonicalHash(canonical.value) !== source.value.sourceHash) return { partnerFailure: partnerError('INTEGRITY_CONFLICT') };
     let pricing;
     try { pricing = await readPartnerApprovedShipmentPricing(tx, canonical.value); }
     catch (error) {

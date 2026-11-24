@@ -4,7 +4,7 @@ import { Prisma, type PrismaClient } from '@prisma/client';
 import { RevisionRefSchema, type PartnerCommercialState } from '@sabalanerp/partner-sales-contracts';
 import { createAuditedPartnerAuthorization } from '../authorization/audited';
 import { appendAuthorizationDecisions, type AuthorizationDecisionAudit } from '../../effectiveAuthorization/audit';
-import { readPartnerAccountingScopedAuthority, resolvePartnerAccountingScopedAuthority } from '../authorization/centralAuthority';
+import { resolvePartnerAccountingScopedAuthority } from '../authorization/centralAuthority';
 import { readCurrentPartnerCaseViews, readPartnerRevisionProjections } from '../cases/lifecycle';
 import { PARTNER_INTERNAL_ACCOUNTING_SOURCE, matchesFinancialPreparation, preparePartnerFinancialSource, type PartnerFinancialPreparation, type PartnerAccountingSource } from './source';
 import { subtract } from '../reporting/money';
@@ -20,7 +20,7 @@ import { assertPartnerAccountingWitnesses as assertWitnesses, readPartnerReceiva
 import { assertPartnerTaxEvidence, assertSinglePartnerTaxRecord } from './taxEvidence';
 import { resolveCurrentSabalanPlan, resolveInvoiceSabalanPlan } from './sabalanPlanEvidence';
 import { readAuthorizedPartnerAuditWitnesses } from '../../accountingReadProjection';
-import { batchAccountingCaseAuthority } from './batchCaseAuthority';
+import { batchAccountingCaseAuthority, type AccountingCaseAuthority } from './batchCaseAuthority';
 import { groupPaymentsByReceivable } from './groupPaymentsByReceivable';
 import { financialReviewOwners } from './financialReviewSelection';
 import { startAccountingReadPhase } from '../../accountingReadTiming';
@@ -80,9 +80,9 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
   let canManagePayments = false;
   let canManageTax = false;
   let actorAuthority: ReturnType<typeof resolvePartnerAccountingScopedAuthority> | undefined;
-  const resolveActorAuthority = selection.focusedCaseId ? resolvePartnerAccountingScopedAuthority : readPartnerAccountingScopedAuthority;
-  const readActorAuthority: typeof resolvePartnerAccountingScopedAuthority = (tx, input) =>
-    actorAuthority ??= resolveActorAuthority(tx, input);
+  const readFocusedActorAuthority: typeof resolvePartnerAccountingScopedAuthority = (tx, input) =>
+    actorAuthority ??= resolvePartnerAccountingScopedAuthority(tx, input);
+  let caseAuthority: AccountingCaseAuthority | undefined;
   if (actor && !selection.ordinaryOnly) {
     const finishAuthorization = startAccountingReadPhase('authorization');
     // The central actor grants and workspace bridge are identical for every
@@ -91,11 +91,10 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
     const decisions: AuthorizationDecisionAudit[] = [];
     const authorityCases = reviewOwners ? cases.filter(row => reviewOwners.internalRecordIds.has(row.internalRecordId)
       || reviewOwners.contractIds.has(row.customerContractId)) : cases;
-    const evidenceSource = selection.focusedCaseId ? undefined
-      : await batchAccountingCaseAuthority(database, actor.userId, authorityCases.map(row => row.id));
+    if (!selection.focusedCaseId) caseAuthority = await batchAccountingCaseAuthority(database, actor.userId, authorityCases.map(row => row.id));
     const authority = createAuditedPartnerAuthorization(database, { actorId: actor.userId, purpose: 'ACCOUNTING', channel: 'LIST' },
-      { correlationId: randomUUID(), reason: 'بررسی دسترسی اقدامات حسابداری پرونده' }, undefined, readActorAuthority,
-      async decision => { decisions.push(decision); }, evidenceSource);
+      { correlationId: randomUUID(), reason: 'بررسی دسترسی اقدامات حسابداری پرونده' }, undefined, readFocusedActorAuthority,
+      async decision => { decisions.push(decision); }, caseAuthority?.source);
     for (const row of authorityCases) {
       if ((await authority.authorize('ACCOUNTING_READ', { kind: 'CASE', id: row.id })).ok) {
         allowedInternalIds.push(row.internalRecordId);
@@ -351,7 +350,7 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
   finishPopulation();
   return { database,
     actorId: actor?.userId ?? null,
-    readActorAuthority,
+    caseAuthority,
     commercialForCase: (caseId: string) => commercialByCase.get(caseId),
     partnerAccountingIncluded: authorizedInvoices.length > 0,
     authorizedPartnerInternalIds: allowedInternalIds,

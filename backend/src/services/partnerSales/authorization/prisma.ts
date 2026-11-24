@@ -33,14 +33,11 @@ export type PartnerCaseRecordTarget =
  * a PrismaClient or commits/disconnects. Unsupported roots fail closed. */
 export function prismaAuthorizationSource<Action extends PartnerActionV2>(tx: Prisma.TransactionClient,
   resolveAuthority: ResolvePartnerAuthority<Action>, target?: PartnerAuthorizationTarget,
-  mode: 'COMMAND' | 'RESPONDER_SNAPSHOT' | 'ACCOUNTING_SNAPSHOT' = 'COMMAND'): AuthorizationSource<Action> {
+  mode: 'COMMAND' | 'RESPONDER_SNAPSHOT' = 'COMMAND'): AuthorizationSource<Action> {
   return { read: async (actorId, root) => {
     const lockResources = mode === 'COMMAND';
-    if (mode === 'RESPONDER_SNAPSHOT' && (root.kind !== 'INQUIRY' || target)) {
+    if (!lockResources && (root.kind !== 'INQUIRY' || target)) {
       throw new Error('Responder snapshot authority requires a plain inquiry root');
-    }
-    if (mode === 'ACCOUNTING_SNAPSHOT' && (root.kind !== 'CASE' || target)) {
-      throw new Error('Accounting snapshot authority requires a fenced Case root');
     }
     let resource: AuthorizationEvidence['resource'] = null;
     let profileId = root.kind === 'PROFILE' ? root.id : null;
@@ -61,7 +58,7 @@ export function prismaAuthorizationSource<Action extends PartnerActionV2>(tx: Pr
         : (await tx.partnerInquiry.findUnique({ where: { id: root.id }, select: { profileId: true } }))?.profileId ?? null;
     }
     if (root.kind === 'CASE') {
-      if (lockResources) await tx.$queryRaw`SELECT id FROM partner_sale_cases WHERE id = ${root.id} FOR UPDATE`;
+      await tx.$queryRaw`SELECT id FROM partner_sale_cases WHERE id = ${root.id} FOR UPDATE`;
       const sale = await tx.partnerSaleCase.findUnique({ where: { id: root.id }, select: { profileId: true, customerContractId: true } });
       profileId = sale && (!sale.customerContractId || !await partnerContractWasDeleted(tx, sale.customerContractId)) ? sale.profileId : null;
     }

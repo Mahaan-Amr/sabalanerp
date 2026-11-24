@@ -107,7 +107,6 @@ import {
 import { executePartnerCollectionAction } from './partnerSales/accounting/paymentCommands';
 import { withAccountingReadScope, type AccountingReadActor, type AccountingReadScope } from './partnerSales/accounting/readScope';
 import { createAuditedPartnerAuthorization } from './partnerSales/authorization/audited';
-import { readPartnerAccountingScopedAuthority } from './partnerSales/authorization/centralAuthority';
 import { readPartnerSnapshot } from './partnerSales/authorization/readSnapshot';
 import { batchAccountingCaseAuthority } from './partnerSales/accounting/batchCaseAuthority';
 import { appendAuthorizationDecisions, type AuthorizationDecisionAudit } from './effectiveAuthorization/audit';
@@ -1853,15 +1852,12 @@ export const getAccountingDashboardChange = async (query: any = {}, actor: Accou
     {
       const cases = await database.partnerSaleCase.findMany({ where: { internalRecordId: { not: null },
         customerContractId: { not: null } }, select: { id: true, internalRecordId: true }, orderBy: { id: 'asc' } });
-      let actorAuthority: ReturnType<typeof readPartnerAccountingScopedAuthority> | undefined;
-      const readActorAuthority: typeof readPartnerAccountingScopedAuthority = (tx, input) =>
-        actorAuthority ??= readPartnerAccountingScopedAuthority(tx, input);
       const decisions: AuthorizationDecisionAudit[] = [];
-      const evidenceSource = await batchAccountingCaseAuthority(database, actor.userId, cases.map(row => row.id));
+      const { source } = await batchAccountingCaseAuthority(database, actor.userId, cases.map(row => row.id));
       const authority = createAuditedPartnerAuthorization(database,
         { actorId: actor.userId, purpose: 'ACCOUNTING', channel: 'LIST' },
         { correlationId: randomUUID(), reason: 'بررسی تغییر دسترسی داشبورد حسابداری' },
-        undefined, readActorAuthority, async decision => { decisions.push(decision); }, evidenceSource);
+        undefined, undefined, async decision => { decisions.push(decision); }, source);
       for (const row of cases) {
         if (row.internalRecordId && (await authority.authorize('ACCOUNTING_READ', { kind: 'CASE', id: row.id })).ok) {
           allowedInternalIds.push(row.internalRecordId);

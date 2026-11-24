@@ -3,8 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import type { PartnerCommercialState } from '@sabalanerp/partner-sales-contracts';
 import { createAuditedPartnerAuthorization } from '../authorization/audited';
-import { resolvePartnerAccountingScopedAuthority } from '../authorization/centralAuthority';
-import { prismaAuthorizationSource } from '../authorization/prisma';
+import type { AccountingCaseAuthority } from './batchCaseAuthority';
 import { hasSharedOperationAuthority } from '../authorization/sharedOperationAuthority';
 import { readPartnerCommercialState } from '../cases/commercialLifecycle';
 import { projectPartnerInternalContent, projectPartnerInternalSummary, partnerInternalPhysicalFacts } from './internalDocumentContent';
@@ -18,14 +17,11 @@ const object = (value: unknown): Record<string, any> => value && typeof value ==
 /** A read-only preparation projection, never a persisted financial record.
  * Retail rates, totals and customer payment terms are not returned. */
 export async function readPartnerPreparationDocument(tx: Prisma.TransactionClient, actorId: string, caseId: string,
-  presentation: 'detail' | 'list' = 'detail',
-  accountingAuthority: typeof resolvePartnerAccountingScopedAuthority = resolvePartnerAccountingScopedAuthority,
-  commercialInSnapshot?: PartnerCommercialState) {
-  // List callers already fenced the Case, Profile and Users in the shared
-  // Accounting scope. Taking command locks here would upgrade those fences.
-  const source = presentation === 'list' ? prismaAuthorizationSource(tx, accountingAuthority, undefined, 'ACCOUNTING_SNAPSHOT') : undefined;
+  list?: { caseAuthority: AccountingCaseAuthority; commercial?: PartnerCommercialState }) {
+  const presentation = list ? 'list' : 'detail';
+  const source = list?.caseAuthority.preparationSource;
   const allowed = await createAuditedPartnerAuthorization(tx, { actorId, purpose: 'ACCOUNTING', channel: 'LIST' },
-    { correlationId: randomUUID() }, undefined, accountingAuthority, undefined, source).authorize('ACCOUNTING_READ', { kind: 'CASE', id: caseId });
+    { correlationId: randomUUID() }, undefined, undefined, undefined, source).authorize('ACCOUNTING_READ', { kind: 'CASE', id: caseId });
   if (!allowed.ok) return null;
   const root = await tx.partnerSaleCase.findUnique({ where: { id: caseId }, include: {
     head: true, internalRecord: true, customerContract: true, trackingCode: true,
@@ -33,11 +29,11 @@ export async function readPartnerPreparationDocument(tx: Prisma.TransactionClien
     customer: { select: partnerCustomerPrintSelect },
   } });
   if (!root?.internalRecord || !root.customerContract) return null;
-  const commercial = commercialInSnapshot ?? await readPartnerCommercialState(tx, caseId);
+  const commercial = list?.commercial ?? await readPartnerCommercialState(tx, caseId);
   if (!commercial) return null;
   const write = !root.customerContract.isInactive && commercial.status === 'FINAL' && (await createAuditedPartnerAuthorization(tx,
     { actorId, purpose: 'ACCOUNTING', channel: 'API' }, { correlationId: randomUUID(), reason: 'بررسی امکان ثبت مالی قرارداد قطعی همکار' },
-    undefined, accountingAuthority, undefined, source)
+    undefined, undefined, undefined, source)
     .authorize('ACCOUNTING_WRITE', { kind: 'CASE', id: caseId })).ok &&
     await hasSharedOperationAuthority(tx, actorId, 'accounting', 'accounting_invoice_candidates_manage');
   const owner = { caseId, revision: root.headRevision, integrityHash: root.integrityHash };
@@ -60,7 +56,7 @@ export async function readPartnerPreparationDocument(tx: Prisma.TransactionClien
       productRowId: String(row.productRowId), description: String(row.description), quantity: String(row.quantity),
       unit: String(row.unit), unitPrice: '0', totalPrice: '0',
     }));
-  return { customerSignature: await readPartnerCustomerSignature(tx, caseId, actorId, presentation === 'list' ? 'ACCOUNTING_SNAPSHOT' : 'COMMAND'), id: root.internalRecord.id, preparationOnly: true, amountKnown, commercial, canRegister: write,
+  return { customerSignature: await readPartnerCustomerSignature(tx, caseId, actorId, list?.caseAuthority.signatureSource), id: root.internalRecord.id, preparationOnly: true, amountKnown, commercial, canRegister: write,
     caseState: root.state, isInactive: root.customerContract.isInactive, owner, status: 'DRAFT', amount: content.totals?.payable ?? '0',
     receivedAmount: '0', remainingAmount: content.totals?.payable ?? '0', currency: 'IRT', createdAt: root.createdAt,
     systemInvoiceNumber: null, systemInvoiceDate: null, sepidarAmount: null, metadata: undefined,
@@ -98,6 +94,8 @@ export async function listPartnerPreparationDocuments(actorId: string, lifecycle
 export async function listPartnerPreparationDocumentsInScope(scope: AccountingReadScope, actorId: string,
   lifecycleView: 'active' | 'inactive' | 'pending' = 'active',
   reviewable?: { existingInternalIds: readonly string[] }) {
+    const caseAuthority = scope.caseAuthority;
+    if (!caseAuthority) throw new Error('Partner preparation list requires a fenced Accounting Case scope');
     const pending = lifecycleView === 'pending' ? await scope.database.contractLifecycleRequest.findMany({
       where: { status: 'PENDING' }, select: { contractId: true } }) : [];
     const roots = await scope.database.partnerSaleCase.findMany({ where: { commercialFlowVersion: 1,
@@ -107,8 +105,9 @@ export async function listPartnerPreparationDocumentsInScope(scope: AccountingRe
       select: { id: true }, orderBy: { id: 'asc' } });
     const documents: NonNullable<Awaited<ReturnType<typeof readPartnerPreparationDocument>>>[] = [];
     for (const root of roots) {
-      const document = await readPartnerPreparationDocument(scope.database, actorId, root.id, 'list', scope.readActorAuthority,
-        scope.commercialForCase(root.id));
+      const document = await readPartnerPreparationDocument(scope.database, actorId, root.id, {
+        caseAuthority, commercial: scope.commercialForCase(root.id),
+      });
       if (document) documents.push(document);
     }
     return documents;

@@ -137,9 +137,18 @@ function monitor(page) {
 }
 
 const validId = value => /^(?:[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/.test(value ?? '') ? value : undefined;
+const reviewableDefaults = {
+  lifecycleView: 'active', status: 'ALL', sourceStatus: 'ALL', sourceKind: 'ALL',
+  taxStatus: 'ALL', search: '', dateFrom: '', dateTo: '', sort: '',
+};
 function matchesRead(response, scenario, origin) {
   const url = new URL(response.url());
   if (response.request().method() !== 'GET' || url.pathname !== scenario.api || url.origin !== origin) return false;
+  if ([...url.searchParams.keys()].some(key => key.includes('['))) return false;
+  if (scenario.name === 'reviewable-list' && !Object.entries(reviewableDefaults).every(([key, value]) => {
+    const values = url.searchParams.getAll(key);
+    return values.length === 0 || values.length === 1 && values[0] === value;
+  })) return false;
   return Object.entries({ view: scenario.view ?? null, ...scenario.query }).every(([key, expected]) => {
     const values = url.searchParams.getAll(key);
     return expected === null ? values.length === 0 : values.length === 1 && values[0] === expected;
@@ -222,7 +231,7 @@ async function readyRegister(page, data, scenario) {
   return { state: items.length ? 'rows' : 'empty', page: pageNumber, pageSize, total, rows: items.length };
 }
 
-async function readyDashboard(page, data) {
+async function readyDashboard(page, data, queueReady) {
   const { workspace, trend, trendError } = data;
   if (trendError) throw Error('CHART_UNAVAILABLE');
   if (!Array.isArray(workspace?.queues?.contracts) || !Array.isArray(workspace?.deadlines?.items)
@@ -241,9 +250,13 @@ async function readyDashboard(page, data) {
     : page.getByText('در خلاصهٔ فعلی اقدام فوری برای قراردادها پیدا نشد.', { exact: true })));
   const metrics = page.getByRole('region', { name: 'شاخص‌های عملیاتی حسابداری', exact: true });
   await Promise.all([
-    ...queue,
+    Promise.all(queue).then(queueReady),
     visible(page.getByRole('heading', { name: 'سررسیدها', exact: true })),
-    visible(metrics),
+    visible(workspace.deadlines.items.length
+      ? page.getByRole('link', { name: /· سررسید / }).nth(workspace.deadlines.items.length - 1)
+      : page.getByText('موردی در این فیلتر وجود ندارد', { exact: true })),
+    visible(metrics.getByRole('link', { name: /^قراردادهای قابل بررسی/ })
+      .getByText(fa(workspace.commandCenter.reviewableContracts.count), { exact: true })),
     visible(hasChart ? chart.locator('div[aria-busy="false"] svg.recharts-surface:has(.recharts-area-curve[d])')
       : chart.getByText('هنوز رویداد مالی معناداری برای این بازه ثبت نشده است.', { exact: true })),
   ]);
@@ -289,7 +302,11 @@ async function measureFirstRead(page, config, scenario, result) {
       } else {
         const data = await readData(page, response, config, scenario, result);
         if (scenario.register) result.data = await readyRegister(page, data, scenario);
-        else if (scenario.name === 'dashboard') result.data = await readyDashboard(page, data);
+        else if (scenario.name === 'dashboard') {
+          result.data = await readyDashboard(page, data, () => { result.firstActionMs = elapsed(); });
+          result.completeMs = elapsed();
+          return;
+        }
         else result.data = await readyDutyQueue(page, data);
       }
       result.firstActionMs = elapsed();
@@ -307,7 +324,7 @@ async function measureFirstRead(page, config, scenario, result) {
   for (const outcome of [navigation, ...reads]) {
     if (outcome.status === 'rejected') throw outcome.reason;
   }
-  result.completeMs = Math.max(result.firstActionMs, result.summaryReadyMs ?? 0);
+  result.completeMs ??= Math.max(result.firstActionMs, result.summaryReadyMs ?? 0);
 }
 
 async function sample(browser, config, scenario, command) {
@@ -440,7 +457,7 @@ async function run() {
   }));
   await writeFile(config.output, JSON.stringify({
     format: 'sabalan-accounting-browser-timing/v1', started, commit: config.commit, workload: config.workload,
-    run: config.run, concurrency: config.concurrency, actorClass: 'authorized-accountant', metrics, results,
+    run: config.run, concurrency: config.concurrency, actorClass: 'authenticated', metrics, results,
   }, null, 2) + '\n', { flag: 'wx' });
   if (results.some(sample => sample.failed) || Object.values(metrics).some(surface => surface.target?.passed === false)) process.exitCode = 2;
 }

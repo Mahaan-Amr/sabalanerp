@@ -1,4 +1,5 @@
 import type { NextFunction, Request, Response } from 'express';
+import { reportAccountingRequestFailure } from './accountingRequestObserver';
 
 /** Express 4 does not forward rejected async handlers to error middleware. */
 export const asyncRoute = (
@@ -7,6 +8,7 @@ export const asyncRoute = (
   try {
     await handler(req, res, next);
   } catch (error) {
+    reportAccountingRequestFailure(res, error);
     // Prisma messages can contain SQL or protected data. Retain the diagnostic
     // code without disclosing the original message to the client or logs.
     const code = (error as { code?: unknown } | null)?.code;

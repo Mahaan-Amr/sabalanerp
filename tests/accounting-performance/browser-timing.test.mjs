@@ -39,7 +39,8 @@ test('browser receipts attribute complete responses and aborted transfers indepe
       return;
     }
     if (url.pathname === '/api/accounting/contracts') {
-      const correct = req.method === 'GET' && url.searchParams.getAll('view').join(',') === 'reviewable';
+      const correct = req.method === 'GET' && !url.searchParams.has('view[0]') && !url.searchParams.has('status') &&
+        url.searchParams.getAll('view').join(',') === 'reviewable';
       res.writeHead(200, {
         'content-type': 'application/json',
         'x-accounting-request-id': correct ? reviewableId : decoyId,
@@ -72,7 +73,8 @@ test('browser receipts attribute complete responses and aborted transfers indepe
       res.end(`<button>به‌روزرسانی</button><h2>کارهای امروز</h2>
         <p>در خلاصهٔ فعلی اقدام فوری برای قراردادها پیدا نشد.</p>
         <a href="#">مشاهده همه قراردادها</a>
-        <h2>سررسیدها</h2><section aria-label="شاخص‌های عملیاتی حسابداری">قراردادهای قابل بررسی</section>
+        <h2>سررسیدها</h2><p>موردی در این فیلتر وجود ندارد</p>
+        <section aria-label="شاخص‌های عملیاتی حسابداری"><a href="/dashboard/accounting/contracts?view=reviewable">قراردادهای قابل بررسی <span>۰</span></a></section>
         <section aria-label="روند مالی قراردادها"><div aria-busy="true"></div></section><script>
         const controller = new AbortController();
         fetch('/api/accounting/dashboard?range=6m', {signal: controller.signal}).then(response => {
@@ -93,6 +95,8 @@ test('browser receipts attribute complete responses and aborted transfers indepe
           await fetch(path);
           await fetch(path + '?view=reviewable&view=other');
           await fetch(path + '?view=reviewable', {method: 'POST'});
+          await fetch(path + '?view=reviewable&view%5B0%5D=other&page=1&pageSize=50');
+          await fetch(path + '?view=reviewable&status=SIGNED&page=1&pageSize=50');
           const { data } = await fetch(path + '?view=reviewable&page=1&pageSize=50&private=synthetic-secret').then(r => r.json());
           document.querySelector('main').insertAdjacentHTML('beforeend', data.items.length
             ? '<table>' + data.items.map(() => '<tr><td><a href="#">مشاهده</a></td></tr>').join('') + '</table><p>نمایش ۱ تا ۵۰ از ۵۱ قرارداد</p><button disabled>قبلی</button><button>بعدی</button>'
@@ -140,6 +144,7 @@ test('browser receipts attribute complete responses and aborted transfers indepe
   assert.equal(aborted.api.fullHttpMs, undefined);
   assert.equal(rendered.data.chart, 'rendered');
   assert.ok(rendered.completeMs >= 600, 'full readiness waits for the fresh rendered chart');
+  assert.ok(rendered.firstActionMs < rendered.completeMs, 'the work queue is timed independently of the chart');
   assert.equal(invalidChart.failure, 'CHART_UNAVAILABLE');
   assert.equal(metrics.dashboard.fullHttpMs.count, 3);
   assert.equal(metrics.dashboard.completeMs.count, 1);

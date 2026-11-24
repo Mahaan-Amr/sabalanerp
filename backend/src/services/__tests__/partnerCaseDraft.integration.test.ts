@@ -1692,6 +1692,9 @@ test('Partner preparation lists preserve amounts and advisory audit with one bou
     queries.length = 0;
     const rows = await withAccountingReadScope(database, { userId: actorId }, scope =>
       listPartnerPreparationDocumentsInScope(scope, actorId));
+    const auditInsertCount = queries.filter(query => query.includes('INSERT INTO') &&
+      query.includes('effective_authorization_audit')).length;
+    assert.equal(auditInsertCount, 2, 'the scope and preparation list each flush one batch of authorization decisions');
     assert.deepEqual(new Set(rows.map(row => row.owner.caseId)), new Set([finished.caseId, draft.caseId]));
     const finalRow = rows.find(row => row.owner.caseId === finished.caseId);
     assert.ok(finalRow);

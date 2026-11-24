@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import { createServer, get } from 'node:http';
 import { once } from 'node:events';
 import { test } from 'node:test';
+import express from 'express';
 import { createAccountingRequestObserver, reportAccountingRequestFailure } from '../accountingRequestObserver';
 import { countAccountingReadRows, measureAccountingReadPhase } from '../../services/accountingReadTiming';
+import { asyncRoute } from '../asyncRoute';
 
 test('Accounting responses and operational records share a server-issued correlation without leaking inputs', async () => {
   const records: unknown[] = [];
@@ -158,9 +160,9 @@ test('duty and notification read records retain fixed labels and database failur
     assert.ok(address && typeof address !== 'string');
     const origin = `http://127.0.0.1:${address.port}`;
     const reads = [
-      ['/api/duties/workspaces/PRIVATE/duties?view=assigned', '/api/duties/workspaces/:workspace/duties', 'success', undefined],
-      ['/api/hr-duties/workspaces/PRIVATE/duties?view=history&search=PRIVATE', '/api/duties/workspaces/:workspace/duties?view=history', 'success', undefined],
-      ['/api/duties/workspaces/PRIVATE/summary?search=PRIVATE', '/api/duties/workspaces/:workspace/summary', 'pool_timeout', 'P2024'],
+      ['/api/duties/workspaces/accounting/duties?search=PRIVATE', '/api/duties/workspaces/accounting/duties', 'success', undefined],
+      ['/api/hr-duties/workspaces/accounting/duties?view=history&search=PRIVATE', '/api/duties/workspaces/accounting/duties?view=history', 'success', undefined],
+      ['/api/duties/workspaces/accounting/summary?search=PRIVATE', '/api/duties/workspaces/accounting/summary', 'pool_timeout', 'P2024'],
       ['/api/notifications/?cursor=PRIVATE', '/api/notifications', 'success', undefined],
       ['/api/notifications/metadata?workspace=PRIVATE', '/api/notifications/metadata', 'success', undefined],
       ['/api/notifications/unread-count?workspace=PRIVATE', '/api/notifications/unread-count', 'transaction_expired', 'P2028'],
@@ -173,13 +175,41 @@ test('duty and notification read records retain fixed labels and database failur
       assert.deepEqual([record?.route, record?.requestId, record?.outcome, record?.code],
         [route, response.headers.get('x-accounting-request-id'), outcome, code]);
     }
-    for (const path of ['/api/notifications/unread-count', '/api/duties/workspaces/PRIVATE/summary']) {
+    const otherDuty = await fetch(origin + '/api/duties/workspaces/sales/duties?search=PRIVATE');
+    await otherDuty.text();
+    assert.equal(otherDuty.headers.get('x-accounting-request-id'), null);
+    for (const path of ['/api/notifications/unread-count', '/api/duties/workspaces/accounting/summary']) {
       const response = await fetch(origin + path, { method: 'POST' });
       await response.text();
       assert.equal(response.headers.get('x-accounting-request-id'), null);
       assert.equal(response.headers.get('x-accounting-outcome'), null);
     }
     assert.equal(records.length, reads.length);
+    assert.doesNotMatch(JSON.stringify(records), /PRIVATE/);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+});
+
+test('an observed notification failure retains its Prisma code through the actual async route boundary', async () => {
+  const records: Array<{ outcome: string; code?: string }> = [];
+  const app = express();
+  app.use(createAccountingRequestObserver('local', record => records.push(record)));
+  app.get('/api/notifications/unread-count', asyncRoute(async () => {
+    throw Object.assign(new Error('PRIVATE'), { code: 'P2028' });
+  }));
+  const server = app.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address !== 'string');
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/notifications/unread-count`);
+    assert.equal(response.status, 500);
+    assert.equal(response.headers.get('x-accounting-outcome'), 'transaction_expired');
+    assert.doesNotMatch(await response.text(), /PRIVATE/);
+    assert.equal(records[0]?.code, 'P2028');
+    assert.equal(records[0]?.outcome, 'transaction_expired');
     assert.doesNotMatch(JSON.stringify(records), /PRIVATE/);
   } finally {
     server.closeAllConnections();

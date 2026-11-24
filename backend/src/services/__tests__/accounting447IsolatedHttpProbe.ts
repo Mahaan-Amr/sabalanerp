@@ -43,8 +43,8 @@ async function main() {
       assert.equal(body.success, true, route);
       return body.data;
     };
-    for (const [name, path] of [['dashboard', '/dashboard?range=3m'],
-      ['reviewable', '/contracts?view=reviewable&page=1&pageSize=12']] as const) {
+    for (const [name, path] of [['dashboard', '/dashboard?range=6m'],
+      ['reviewable', '/contracts?view=reviewable&page=1&pageSize=50']] as const) {
       const samples: number[] = [];
       const stages = name === 'dashboard' ? [...measuredStages, 'workspace', 'trend'] as const : measuredStages;
       const stageSamples = stages.map(stage => ({ stage, samples: [] as number[] }));
@@ -64,8 +64,13 @@ async function main() {
           sample.samples.push(duration);
         }
         stagesByRequest.delete(requestId);
-        if (name === 'reviewable') assert.equal(body.data?.total, 965);
-        else assert.equal(body.data?.workspace?.commandCenter?.reviewableContracts?.count, 965);
+        if (name === 'reviewable') {
+          assert.equal(body.data?.total, 965);
+          assert.equal(body.data?.items.length, 50);
+        } else {
+          assert.equal(body.data?.workspace?.commandCenter?.reviewableContracts?.count, 965);
+          assert.equal(body.data?.trend?.range, '6m');
+        }
       }
       const durationP95 = p95(samples);
       const stageP95Ms = Object.fromEntries(stageSamples.map(sample => [sample.stage, p95(sample.samples)]));

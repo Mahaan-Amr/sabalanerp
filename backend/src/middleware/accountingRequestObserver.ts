@@ -23,8 +23,8 @@ const accountingRoutes = [
 ] as const;
 
 const relatedReadRoutes = [
-  [/^\/api\/(?:hr-)?duties\/workspaces\/[^/]+\/duties$/, '/api/duties/workspaces/:workspace/duties'],
-  [/^\/api\/(?:hr-)?duties\/workspaces\/[^/]+\/summary$/, '/api/duties/workspaces/:workspace/summary'],
+  [/^\/api\/(?:hr-)?duties\/workspaces\/accounting\/duties$/, '/api/duties/workspaces/accounting/duties'],
+  [/^\/api\/(?:hr-)?duties\/workspaces\/accounting\/summary$/, '/api/duties/workspaces/accounting/summary'],
   [/^\/api\/notifications$/, '/api/notifications'],
   [/^\/api\/notifications\/metadata$/, '/api/notifications/metadata'],
   [/^\/api\/notifications\/unread-count$/, '/api/notifications/unread-count'],
@@ -48,8 +48,8 @@ export function accountingOperationalRoute(url: string | undefined, method?: str
   if (readRoute === '/api/accounting/contracts' && hasExactView(search, 'reviewable')) {
     return '/api/accounting/contracts?view=reviewable';
   }
-  if (readRoute === '/api/duties/workspaces/:workspace/duties' && hasExactView(search, 'history')) {
-    return '/api/duties/workspaces/:workspace/duties?view=history';
+  if (readRoute === '/api/duties/workspaces/accounting/duties' && hasExactView(search, 'history')) {
+    return '/api/duties/workspaces/accounting/duties?view=history';
   }
   return readRoute;
 }

@@ -11,20 +11,24 @@ import { withAccountingReadScope, type AccountingReadScope } from './readScope';
 import { prisma } from '../../../lib/prisma';
 import { fillPartnerPrintCodes, partnerPhysicalPrintDetails, readPartnerPrintCodes } from '../../../utils/partnerProductPrint';
 import { partnerCustomerPrintSelect } from './customerPrintInformation';
+import { appendAuthorizationDecisions, type AuthorizationDecisionAudit } from '../../effectiveAuthorization/audit';
+import { measureAccountingReadPhase } from '../../accountingReadTiming';
 
 const object = (value: unknown): Record<string, any> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {};
+type RecordPreparationDecision = (decision: AuthorizationDecisionAudit) => Promise<unknown>;
 
 function authorizePartnerPreparationRead(tx: Prisma.TransactionClient, actorId: string, caseId: string,
-  source?: AccountingCaseAuthority['preparationSource']) {
+  source?: AccountingCaseAuthority['preparationSource'], recordDecision?: RecordPreparationDecision) {
   return createAuditedPartnerAuthorization(tx, { actorId, purpose: 'ACCOUNTING', channel: 'LIST' },
-    { correlationId: randomUUID() }, undefined, undefined, undefined, source).authorize('ACCOUNTING_READ', { kind: 'CASE', id: caseId });
+    { correlationId: randomUUID() }, undefined, undefined, recordDecision, source).authorize('ACCOUNTING_READ', { kind: 'CASE', id: caseId });
 }
 
 async function canRegisterPartnerPreparation(tx: Prisma.TransactionClient, actorId: string, caseId: string,
-  inactive: boolean, commercialStatus: PartnerCommercialState['status'], source?: AccountingCaseAuthority['preparationSource']) {
+  inactive: boolean, commercialStatus: PartnerCommercialState['status'], source?: AccountingCaseAuthority['preparationSource'],
+  recordDecision?: RecordPreparationDecision) {
   return !inactive && commercialStatus === 'FINAL' && (await createAuditedPartnerAuthorization(tx,
     { actorId, purpose: 'ACCOUNTING', channel: 'API' }, { correlationId: randomUUID(), reason: 'بررسی امکان ثبت مالی قرارداد قطعی همکار' },
-    undefined, undefined, undefined, source)
+    undefined, undefined, recordDecision, source)
     .authorize('ACCOUNTING_WRITE', { kind: 'CASE', id: caseId })).ok &&
     await hasSharedOperationAuthority(tx, actorId, 'accounting', 'accounting_invoice_candidates_manage');
 }
@@ -130,10 +134,10 @@ function currentPreparationFacts(facts: Map<string, PreparationFacts>, caseId: s
 }
 
 async function readPreparationListSummary(scope: AccountingReadScope, actorId: string, root: PreparationListRoot,
-  caseAuthority: AccountingCaseAuthority, factsByCase: Map<string, PreparationFacts>) {
+  caseAuthority: AccountingCaseAuthority, factsByCase: Map<string, PreparationFacts>, recordDecision: RecordPreparationDecision) {
   const tx = scope.database, caseId = root.id;
   const source = caseAuthority.preparationSource;
-  if (!(await authorizePartnerPreparationRead(tx, actorId, caseId, source)).ok) return null;
+  if (!(await authorizePartnerPreparationRead(tx, actorId, caseId, source, recordDecision)).ok) return null;
   if (!root.internalRecord || !root.customerContract) return null;
   // The earlier scope can disagree when a time-bound grant or denial expires.
   // Load a newly allowed Case only after its own successful preparation READ.
@@ -141,13 +145,13 @@ async function readPreparationListSummary(scope: AccountingReadScope, actorId: s
   const commercialStatus = (await scope.readCommercialForCase(caseId))?.status;
   if (!commercialStatus) return null;
   const isInactive = root.customerContract.isInactive;
-  const canRegister = await canRegisterPartnerPreparation(tx, actorId, caseId, isInactive, commercialStatus, source);
+  const canRegister = await canRegisterPartnerPreparation(tx, actorId, caseId, isInactive, commercialStatus, source, recordDecision);
   const owner = { caseId, revision: root.headRevision, integrityHash: root.integrityHash };
   const content = projectPartnerInternalSummary({ partnerPreparation: { ...facts, owner } });
   // Preserve the advisory paper-signature audit after registration and
   // financial evidence have been evaluated.
   await readPartnerPaperSignatureAvailability(tx, caseId, actorId, root.state, root.customerContract,
-    facts.preparationCompleted !== false, caseAuthority.signatureSource);
+    facts.preparationCompleted !== false, { caseAuthority: caseAuthority.signatureSource, recordDecision });
 
   return { id: root.internalRecord.id, owner, caseState: root.state, isInactive, commercialStatus, canRegister,
     status: 'DRAFT', amountKnown: Boolean(content.totals), amount: content.totals?.payable ?? '0',
@@ -183,11 +187,14 @@ export async function listPartnerPreparationDocumentsInScope(scope: AccountingRe
   const authorized = new Set(scope.authorizedPartnerInternalIds);
   const authorizedCaseIds = roots.flatMap(root => root.internalRecord && authorized.has(root.internalRecord.id) ? [root.id] : []);
   const facts = await readPreparationFacts(scope.database, authorizedCaseIds, 'list');
+  const decisions: AuthorizationDecisionAudit[] = [];
+  const recordDecision: RecordPreparationDecision = async decision => { decisions.push(decision); };
   const documents: NonNullable<Awaited<ReturnType<typeof readPreparationListSummary>>>[] = [];
   for (const root of roots) {
-    const row = await readPreparationListSummary(scope, actorId, root, caseAuthority, facts);
+    const row = await readPreparationListSummary(scope, actorId, root, caseAuthority, facts, recordDecision);
     if (row) documents.push(row);
   }
+  await measureAccountingReadPhase('authorizationAudit', () => appendAuthorizationDecisions(scope.database, decisions));
   return documents;
 }
 

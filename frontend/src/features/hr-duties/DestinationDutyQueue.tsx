@@ -65,12 +65,12 @@ function WorkspaceDutyQueue({ workspace, metricPresentation = 'default' }: Queue
     reduceDestinationDutyState<DestinationDutySummary>, initialDestinationDutyState,
   );
 
-  const loadSummary = useCallback(async (changed = false) => {
+  const loadSummary = useCallback(async (change?: Event) => {
     if (!user) return;
     const sequence = ++summarySequence.current.value;
     dispatchSummary({ type: 'start' });
     try {
-      const summary = await requestCrossWorkspaceDutySummary(user, workspace, changed);
+      const summary = await requestCrossWorkspaceDutySummary(user, workspace, change);
       if (sequence === summarySequence.current.value) dispatchSummary({ type: 'success', data: summary });
     } catch {
       if (sequence === summarySequence.current.value) {
@@ -125,7 +125,7 @@ function WorkspaceDutyQueue({ workspace, metricPresentation = 'default' }: Queue
   }, [load]);
   useEffect(() => {
     const sequence = summarySequence.current;
-    const onChange = () => void loadSummary(true);
+    const onChange = (event: Event) => void loadSummary(event);
     void loadSummary();
     window.addEventListener(CROSS_WORKSPACE_DUTY_CHANGED_EVENT, onChange);
     return () => {

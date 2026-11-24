@@ -32,3 +32,17 @@ test('workspaces and authentication sessions are isolated and failures can retry
   await assert.rejects(requests(actor, 'sales'), /offline/);
   assert.equal(loads, 4);
 });
+
+test('the badge and the queue share the summary refreshed by one mutation event', async () => {
+  const pending: Array<(summary: { attention: number }) => void> = [];
+  const requests = createDutyCountRequests(async () => new Promise<{ attention: number }>(resolve => pending.push(resolve)));
+  const actor = {};
+  const event = {};
+  const badge = requests(actor, 'accounting', event);
+  const queue = requests(actor, 'accounting', event);
+  assert.equal(badge, queue);
+  pending[0]({ attention: 2 });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(pending.length, 1, 'the same invalidation triggers one read');
+  assert.deepEqual(await queue, { attention: 2 });
+});

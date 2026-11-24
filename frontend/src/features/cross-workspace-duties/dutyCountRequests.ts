@@ -1,16 +1,19 @@
 /** Share pending network work only within one authentication session. No settled
  * count or permission is cached. A mutation invalidates an in-flight response. */
 export function createDutyCountRequests<T>(load: (workspace: string) => Promise<T>) {
-  const sessions = new WeakMap<object, Map<string, { promise: Promise<T>; dirty: boolean }>>();
-  return (session: object, workspace: string, changed = false): Promise<T> => {
+  const sessions = new WeakMap<object, Map<string, { promise: Promise<T>; dirty: boolean; change: boolean | object }>>();
+  return (session: object, workspace: string, change: boolean | object = false): Promise<T> => {
     let flights = sessions.get(session);
     if (!flights) { flights = new Map(); sessions.set(session, flights); }
     const existing = flights.get(workspace);
     if (existing) {
-      if (changed) existing.dirty = true;
+      if (change && (change === true || change !== existing.change)) {
+        existing.change = change;
+        existing.dirty = true;
+      }
       return existing.promise;
     }
-    const flight = { dirty: false, promise: undefined as unknown as Promise<T> };
+    const flight = { dirty: false, change, promise: undefined as unknown as Promise<T> };
     flight.promise = (async () => {
       try {
         do {

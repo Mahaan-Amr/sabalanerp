@@ -708,6 +708,8 @@ test('customer revenue and treasury tracer bullet persists once and projects onl
         ]);
         assert.equal(outcomes.filter(outcome => outcome.replayed).length, 1);
         assert.equal(outcomes[0].data.id, outcomes[1].data.id);
+        await assert.rejects(finalizeStoneReturn(database, accepted.id, { ...accountant, id: 'another-accountant' },
+          returnCommand), /فرمان دیگری/);
         const reviewed = await readStoneReturnAllocationReview(database, accepted.id);
         assert.equal(reviewed.allocationStatus, 'FINALIZED');
         assert.equal(reviewed.finalization?.draftVersion, complete.draft.version);

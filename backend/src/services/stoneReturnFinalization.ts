@@ -185,7 +185,7 @@ export async function finalizeStoneReturn(db: PrismaClient, receiptId: string, a
     await lockStoneReturnCase(tx, receiptId);
     const prior = await tx.stoneReturnFinalization.findUnique({ where: { receiptId } });
     if (prior) {
-      if (prior.requestId !== command.requestId || prior.commandHash !== commandHash) {
+      if (prior.finalizedBy !== actor.id || prior.requestId !== command.requestId || prior.commandHash !== commandHash) {
         throw new StoneReturnAllocationError(409, 'این مرجوعی قبلاً با فرمان دیگری ثبت قطعی شده است.');
       }
       return { data: prior, replayed: true };

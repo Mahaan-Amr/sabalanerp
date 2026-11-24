@@ -2,11 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import {
-  ErpButton, ErpField, ErpInlineState, ErpInput, ErpSearchableSelect, ErpSection, ErpSelect, ErpTextarea,
+  ErpButton, ErpField, ErpInlineState, ErpInput, ErpSearchableSelect, ErpSection, ErpSelect, ErpSkeleton, ErpTextarea,
 } from '@/components/erp';
+import { useAuth } from '@/contexts/AuthContext';
 import { LogisticsPage } from '@/features/logistics/LogisticsWorkspace';
 import { userFacingError } from '@/features/dispatch/userFacingError';
 import { normalizeStoneReturnQuantity, stoneReturnQuantityAtoms } from './stoneReturnQuantityInput';
+import { createStoneReturnIntakeClient } from './stoneReturnIntakeRecovery';
 import { displayStoneReturnQuantity, stoneReturnApi, stoneReturnUnitLabels, type StoneReturnOption } from './stoneReturnApi';
 
 const listHref = '/dashboard/logistics/returns';
@@ -57,6 +59,12 @@ function Lookup({ label, placeholder, fetchOptions, selected, onChange, enabled 
 }
 
 export function StoneReturnIntake() {
+  const { user, loading } = useAuth();
+  if (loading || !user) return <ErpSkeleton />;
+  return <ActorStoneReturnIntake key={user.id} actorId={user.id} />;
+}
+
+function ActorStoneReturnIntake({ actorId }: { actorId: string }) {
   const [customer, setCustomer] = useState<StoneReturnOption | null>(null);
   const [product, setProduct] = useState<StoneReturnOption | null>(null);
   const [guard, setGuard] = useState<StoneReturnOption | null>(null);
@@ -66,14 +74,19 @@ export function StoneReturnIntake() {
   const [reason, setReason] = useState('');
   const [pending, setPending] = useState(false);
   const [attempted, setAttempted] = useState(false);
-  const [uncertain, setUncertain] = useState(false);
+  const [recovery, setRecovery] = useState<'loading' | 'ready' | 'pending' | 'unavailable'>('loading');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const busy = useRef(false);
-  const requestId = useRef('');
+  const client = useCallback(() => createStoneReturnIntakeClient(actorId, window.sessionStorage, stoneReturnApi.record), [actorId]);
+  const checkRecovery = useCallback(() => {
+    try { setRecovery(client().hasPending() ? 'pending' : 'ready'); }
+    catch { setRecovery('unavailable'); }
+  }, [client]);
+  useEffect(checkRecovery, [checkRecovery]);
   const customerId = customer?.id ?? '';
   const lookupGuard = useCallback((query: string) => stoneReturnApi.guard(customerId, query), [customerId]);
-  const editable = !pending && !uncertain;
+  const editable = !pending && recovery === 'ready';
   const receivedQuantity = normalizeStoneReturnQuantity(received, true);
   const acceptedQuantity = normalizeStoneReturnQuantity(accepted, true);
   const receivedAtoms = stoneReturnQuantityAtoms(receivedQuantity, unit);
@@ -87,31 +100,32 @@ export function StoneReturnIntake() {
   const reasonRequired = receivedAtoms !== null && acceptedAtoms !== null && receivedAtoms > acceptedAtoms;
   const reasonError = reasonRequired && !reason.trim() ? 'علت رد را وارد کنید.' : undefined;
 
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function send() {
     if (busy.current || success) return;
-    setAttempted(true);
-    setError('');
-    if (!customer || !product || !unit) {
-      setError('مشتری، سنگ و واحد را انتخاب کنید.');
-      return;
+    const resume = recovery === 'pending';
+    if (!resume) {
+      if (!editable) return;
+      setAttempted(true);
+      if (!customer || !product || !unit) {
+        setError('مشتری، سنگ و واحد را انتخاب کنید.');
+        return;
+      }
+      if (receivedError || acceptedError || reasonError) return;
     }
-    if (receivedError || acceptedError || reasonError) return;
+    setError('');
     busy.current = true;
     setPending(true);
-    requestId.current ||= crypto.randomUUID();
     try {
-      const { data } = await stoneReturnApi.record({
-        requestId: requestId.current, customerId: customer.id, productId: product.id, unit,
+      const { data } = resume ? await client().resume() : await client().submit({
+        customerId: customer!.id, productId: product!.id, unit,
         receivedQuantity, acceptedQuantity, rejectionReason: reasonRequired ? reason : '',
         guardReturnMovementId: guard?.id ?? null,
       });
       const quantity = displayStoneReturnQuantity(data.acceptedQuantity, data.unit);
       setSuccess(data.inventoryIdentityId ? `رسید ثبت شد. ${quantity} به موجودی قابل فروش اضافه شد.` : 'رسید ثبت شد. تمام مقدار دریافتی رد شد.');
     } catch (error) {
-      const status = (error as { response?: { status?: number } }).response?.status;
-      if (!status || status >= 500) setUncertain(true);
-      setError(userFacingError(error, 'نتیجه ثبت مشخص نیست. برای پیگیری همین درخواست دوباره تلاش کنید.'));
+      checkRecovery();
+      setError(userFacingError(error, 'ثبت دریافت کامل نشد. دسترسی به حافظه مرورگر و اتصال را بررسی کنید.'));
     } finally {
       busy.current = false;
       setPending(false);
@@ -120,8 +134,16 @@ export function StoneReturnIntake() {
 
   return <LogisticsPage eyebrow="لجستیک" title="ثبت دریافت سنگ مرجوعی" backHref={listHref}>
     {success ? <ErpInlineState kind="success" title={success} action={{ label: 'مشاهده مرجوعی‌ها', href: listHref }} /> :
+      recovery === 'loading' ? <ErpSkeleton /> :
+      recovery === 'unavailable' ? <ErpInlineState kind="error" title="برای پیگیری رسید، دسترسی به حافظه این زبانه لازم است."
+        action={{ label: 'تلاش دوباره', onClick: checkRecovery }} /> :
+      recovery === 'pending' ? <ErpSection>
+        {error && <ErpInlineState kind="error" title={error} />}
+        <ErpInlineState kind="stale" title="نتیجه ثبت دریافت هنوز مشخص نیست." />
+        <ErpButton label={pending ? 'در حال پیگیری…' : 'پیگیری همان دریافت'} disabled={pending} onClick={() => void send()} />
+      </ErpSection> :
       <ErpSection>
-        <form className="space-y-5" onSubmit={submit} noValidate>
+        <form className="space-y-5" onSubmit={(event: FormEvent<HTMLFormElement>) => { event.preventDefault(); void send(); }} noValidate>
           {error && <ErpInlineState kind="error" title={error} />}
           <div className="grid gap-4 md:grid-cols-2">
             <Lookup label="مشتری" placeholder="انتخاب مشتری" selected={customer} onChange={option => { setCustomer(option); setGuard(null); }}
@@ -147,7 +169,7 @@ export function StoneReturnIntake() {
             <ErpTextarea required maxLength={2000} value={reason} disabled={!editable} onChange={event => setReason(event.target.value)} />
           </ErpField>}
           <ErpButton type="submit" tone="primary" variant="solid" disabled={pending}
-            label={pending ? 'در حال ثبت…' : uncertain ? 'تلاش دوباره برای ثبت' : 'ثبت دریافت و پذیرش'} />
+            label={pending ? 'در حال ثبت…' : 'ثبت دریافت و پذیرش'} />
         </form>
       </ErpSection>}
   </LogisticsPage>;

@@ -62,7 +62,8 @@ export async function lockPartnerCommercialContract(tx: Tx, caseId: string) {
   return { root, contract };
 }
 
-export function assertPartnerCommercialAvailable(contract: SalesContract) {
+export function assertPartnerCommercialAvailable(contract: Pick<SalesContract,
+  'isInactive' | 'status' | 'firstFinancialRecordAt' | 'commercialExpiresAt' | 'dispatchExpiryExempt'>) {
   if (contract.isInactive || ['CANCELLED', 'EXPIRED'].includes(contract.status) || partnerDeadlinePassed(contract)) {
     throw new Error('قرارداد لغو، غیرفعال یا منقضی شده است.');
   }

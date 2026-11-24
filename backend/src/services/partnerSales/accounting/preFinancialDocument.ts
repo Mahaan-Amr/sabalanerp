@@ -1,4 +1,4 @@
-import { readPartnerCustomerSignature } from './customerSignature';
+import { partnerCustomerSignatureContractSelect, readPartnerCustomerSignature, readPartnerPaperSignatureAvailability } from './customerSignature';
 import { randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import type { PartnerCommercialState } from '@sabalanerp/partner-sales-contracts';
@@ -14,49 +14,53 @@ import { partnerCustomerPrintSelect } from './customerPrintInformation';
 
 const object = (value: unknown): Record<string, any> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {};
 
+function authorizePartnerPreparationRead(tx: Prisma.TransactionClient, actorId: string, caseId: string,
+  source?: AccountingCaseAuthority['preparationSource']) {
+  return createAuditedPartnerAuthorization(tx, { actorId, purpose: 'ACCOUNTING', channel: 'LIST' },
+    { correlationId: randomUUID() }, undefined, undefined, undefined, source).authorize('ACCOUNTING_READ', { kind: 'CASE', id: caseId });
+}
+
+async function canRegisterPartnerPreparation(tx: Prisma.TransactionClient, actorId: string, caseId: string,
+  inactive: boolean, commercialStatus: PartnerCommercialState['status'], source?: AccountingCaseAuthority['preparationSource']) {
+  return !inactive && commercialStatus === 'FINAL' && (await createAuditedPartnerAuthorization(tx,
+    { actorId, purpose: 'ACCOUNTING', channel: 'API' }, { correlationId: randomUUID(), reason: 'بررسی امکان ثبت مالی قرارداد قطعی همکار' },
+    undefined, undefined, undefined, source)
+    .authorize('ACCOUNTING_WRITE', { kind: 'CASE', id: caseId })).ok &&
+    await hasSharedOperationAuthority(tx, actorId, 'accounting', 'accounting_invoice_candidates_manage');
+}
+
 /** A read-only preparation projection, never a persisted financial record.
  * Retail rates, totals and customer payment terms are not returned. */
-export async function readPartnerPreparationDocument(tx: Prisma.TransactionClient, actorId: string, caseId: string,
-  list?: { caseAuthority: AccountingCaseAuthority; commercial?: PartnerCommercialState }) {
-  const presentation = list ? 'list' : 'detail';
-  const source = list?.caseAuthority.preparationSource;
-  const allowed = await createAuditedPartnerAuthorization(tx, { actorId, purpose: 'ACCOUNTING', channel: 'LIST' },
-    { correlationId: randomUUID() }, undefined, undefined, undefined, source).authorize('ACCOUNTING_READ', { kind: 'CASE', id: caseId });
-  if (!allowed.ok) return null;
+export async function readPartnerPreparationDocument(tx: Prisma.TransactionClient, actorId: string, caseId: string) {
+  if (!(await authorizePartnerPreparationRead(tx, actorId, caseId)).ok) return null;
   const root = await tx.partnerSaleCase.findUnique({ where: { id: caseId }, include: {
     head: true, internalRecord: true, customerContract: true, trackingCode: true,
     profile: { include: { commercialAccount: true } },
     customer: { select: partnerCustomerPrintSelect },
   } });
   if (!root?.internalRecord || !root.customerContract) return null;
-  const commercial = list?.commercial ?? await readPartnerCommercialState(tx, caseId);
+  const commercial = await readPartnerCommercialState(tx, caseId);
   if (!commercial) return null;
-  const write = !root.customerContract.isInactive && commercial.status === 'FINAL' && (await createAuditedPartnerAuthorization(tx,
-    { actorId, purpose: 'ACCOUNTING', channel: 'API' }, { correlationId: randomUUID(), reason: 'بررسی امکان ثبت مالی قرارداد قطعی همکار' },
-    undefined, undefined, undefined, source)
-    .authorize('ACCOUNTING_WRITE', { kind: 'CASE', id: caseId })).ok &&
-    await hasSharedOperationAuthority(tx, actorId, 'accounting', 'accounting_invoice_candidates_manage');
+  const write = await canRegisterPartnerPreparation(tx, actorId, caseId, root.customerContract.isInactive, commercial.status);
   const owner = { caseId, revision: root.headRevision, integrityHash: root.integrityHash };
   const projection = object(root.head.internalProjection);
   const accounting = object(projection.accounting), partner = object(projection.partner);
   const parties = object(root.head.partySnapshots), context = object(root.head.customerContent);
   const snapshot = { partnerPreparation: { owner,
     products: accounting.products, totals: accounting.totals, paymentPlan: accounting.sabalanPaymentPlan } };
-  const content = presentation === 'list'
-    ? { ...projectPartnerInternalSummary(snapshot), items: [] }
-    : projectPartnerInternalContent(snapshot, root.head.graph);
+  const content = projectPartnerInternalContent(snapshot, root.head.graph);
   const amountKnown = Boolean(content.totals);
-  const codes = presentation === 'list' ? new Map<string, string>() : await readPartnerPrintCodes(tx, root.head.graph);
+  const codes = await readPartnerPrintCodes(tx, root.head.graph);
   content.items = content.items.map(item => ({ ...item, productCode: item.productCode || item.printDetails?.code || codes.get(item.productRowId),
     ...(item.printDetails ? { printDetails: fillPartnerPrintCodes({ ...item.printDetails, code: item.printDetails.code || item.productCode }, codes) } : {}) }));
-  const items = presentation === 'list' ? [] : amountKnown ? content.items : (Array.isArray(partner.products) ? partner.products : []).map((row: Record<string, any>) => ({
+  const items = amountKnown ? content.items : (Array.isArray(partner.products) ? partner.products : []).map((row: Record<string, any>) => ({
       ...partnerInternalPhysicalFacts(String(row.productRowId), root.head.graph),
       printDetails: partnerPhysicalPrintDetails(String(row.productRowId), root.head.graph),
       productCode: typeof row.productCode === 'string' ? row.productCode : codes.get(String(row.productRowId)),
       productRowId: String(row.productRowId), description: String(row.description), quantity: String(row.quantity),
       unit: String(row.unit), unitPrice: '0', totalPrice: '0',
     }));
-  return { customerSignature: await readPartnerCustomerSignature(tx, caseId, actorId, list?.caseAuthority.signatureSource), id: root.internalRecord.id, preparationOnly: true, amountKnown, commercial, canRegister: write,
+  return { customerSignature: await readPartnerCustomerSignature(tx, caseId, actorId), id: root.internalRecord.id, preparationOnly: true, amountKnown, commercial, canRegister: write,
     caseState: root.state, isInactive: root.customerContract.isInactive, owner, status: 'DRAFT', amount: content.totals?.payable ?? '0',
     receivedAmount: '0', remainingAmount: content.totals?.payable ?? '0', currency: 'IRT', createdAt: root.createdAt,
     systemInvoiceNumber: null, systemInvoiceDate: null, sepidarAmount: null, metadata: undefined,
@@ -85,32 +89,106 @@ export async function readPartnerPreparationDocument(tx: Prisma.TransactionClien
   };
 }
 
+const preparationListRootSelect = {
+  id: true, caseNumber: true, state: true, createdAt: true, headRevision: true, integrityHash: true,
+  internalRecord: { select: { id: true, recordNumber: true } },
+  customerContract: { select: { ...partnerCustomerSignatureContractSelect, contractNumber: true } },
+  trackingCode: { select: { number: true } },
+  profile: { select: { userId: true, commercialAccount: { select: { id: true } } } },
+} satisfies Prisma.PartnerSaleCaseSelect;
+
+type PreparationListRoot = Prisma.PartnerSaleCaseGetPayload<{ select: typeof preparationListRootSelect }>;
+type PreparationFacts = {
+  caseId: string; contractDate: unknown; products: unknown; totals: unknown; paymentPlan: unknown;
+  debtorName?: unknown; customerName?: unknown; customerPhone?: unknown; preparationCompleted?: boolean;
+};
+
+/** Only selected wholesale evidence and bounded presentation fields cross the
+ * database boundary. The wholesale evidence still uses the full financial schema. */
+async function readPreparationFacts(tx: Prisma.TransactionClient, caseIds: string[], presentation: 'list' | 'overlay') {
+  const listFacts = presentation === 'list' ? Prisma.sql`,
+    r."partySnapshots" #> '{partner,displayName}' AS "debtorName",
+    r."partySnapshots" #> '{customer,displayName}' AS "customerName",
+    r."partySnapshots" #> '{customer,phone}' AS "customerPhone",
+    (r."retailEnvelope" -> 'preparationCompleted') IS DISTINCT FROM 'false'::jsonb AS "preparationCompleted"` : Prisma.empty;
+  const facts = caseIds.length ? await tx.$queryRaw<PreparationFacts[]>`
+    SELECT c.id AS "caseId", r."customerContent" -> 'contractDate' AS "contractDate",
+      r."internalProjection" #> '{accounting,products}' AS products,
+      r."internalProjection" #> '{accounting,totals}' AS totals,
+      r."internalProjection" #> '{accounting,sabalanPaymentPlan}' AS "paymentPlan"
+      ${listFacts}
+    FROM partner_sale_cases c
+    JOIN partner_case_revisions r ON r."caseId" = c.id AND r.revision = c."headRevision"
+    WHERE c.id = ANY(${caseIds}::text[])` : [];
+  return new Map(facts.map(fact => [fact.caseId, fact]));
+}
+
+function currentPreparationFacts(facts: Map<string, PreparationFacts>, caseId: string) {
+  const row = facts.get(caseId);
+  if (!row) throw new Error('Accounting Case head evidence missing');
+  return row;
+}
+
+async function readPreparationListSummary(scope: AccountingReadScope, actorId: string, root: PreparationListRoot,
+  caseAuthority: AccountingCaseAuthority, factsByCase: Map<string, PreparationFacts>) {
+  const tx = scope.database, caseId = root.id;
+  const source = caseAuthority.preparationSource;
+  if (!(await authorizePartnerPreparationRead(tx, actorId, caseId, source)).ok) return null;
+  if (!root.internalRecord || !root.customerContract) return null;
+  // The earlier scope can disagree when a time-bound grant or denial expires.
+  // Load a newly allowed Case only after its own successful preparation READ.
+  const facts = factsByCase.get(caseId) ?? currentPreparationFacts(await readPreparationFacts(tx, [caseId], 'list'), caseId);
+  const commercialStatus = (await scope.readCommercialForCase(caseId))?.status;
+  if (!commercialStatus) return null;
+  const isInactive = root.customerContract.isInactive;
+  const canRegister = await canRegisterPartnerPreparation(tx, actorId, caseId, isInactive, commercialStatus, source);
+  const owner = { caseId, revision: root.headRevision, integrityHash: root.integrityHash };
+  const content = projectPartnerInternalSummary({ partnerPreparation: { ...facts, owner } });
+  // Preserve the advisory paper-signature audit after registration and
+  // financial evidence have been evaluated.
+  await readPartnerPaperSignatureAvailability(tx, caseId, actorId, root.state, root.customerContract,
+    facts.preparationCompleted !== false, caseAuthority.signatureSource);
+
+  return { id: root.internalRecord.id, owner, caseState: root.state, isInactive, commercialStatus, canRegister,
+    status: 'DRAFT', amountKnown: Boolean(content.totals), amount: content.totals?.payable ?? '0',
+    currency: 'IRT', createdAt: root.createdAt, contractDate: typeof facts.contractDate === 'string' ? facts.contractDate : undefined,
+    partnerContext: { caseId, caseNumber: root.caseNumber, trackingNumber: root.trackingCode?.number,
+      customerContractNumber: root.customerContract.contractNumber, internalRecordNumber: root.internalRecord.recordNumber,
+      partnerSellerId: root.profile.userId, commercialAccountId: root.profile.commercialAccount?.id ?? '',
+      debtor: { displayName: String(facts.debtorName ?? '') },
+      endCustomer: { displayName: String(facts.customerName ?? ''),
+        phone: typeof facts.customerPhone === 'string' ? facts.customerPhone : undefined }, revision: root.headRevision,
+      actionUrl: `/dashboard/accounting/contracts/partner/${encodeURIComponent(caseId)}`, accountingWritable: false, accountingDraftDeletionWritable: false },
+  };
+}
+
 export async function listPartnerPreparationDocuments(actorId: string, lifecycleView: 'active' | 'inactive' | 'pending' = 'active') {
   return withAccountingReadScope(prisma, { userId: actorId }, scope => listPartnerPreparationDocumentsInScope(scope, actorId, lifecycleView));
 }
 
-/** Reuse this request's validated authorization snapshot, never a second root
- * transaction competing for the operations-control lock. List rows need no print geometry. */
+/** Reuse this request's validated authorization snapshot. Evaluate and audit
+ * each Case in the original order, with evidence read in bulk in that snapshot. */
 export async function listPartnerPreparationDocumentsInScope(scope: AccountingReadScope, actorId: string,
   lifecycleView: 'active' | 'inactive' | 'pending' = 'active',
   reviewable?: { existingInternalIds: readonly string[] }) {
-    const caseAuthority = scope.caseAuthority;
-    if (!caseAuthority) throw new Error('Partner preparation list requires a fenced Accounting Case scope');
-    const pending = lifecycleView === 'pending' ? await scope.database.contractLifecycleRequest.findMany({
-      where: { status: 'PENDING' }, select: { contractId: true } }) : [];
-    const roots = await scope.database.partnerSaleCase.findMany({ where: { commercialFlowVersion: 1,
-      internalRecordId: { not: null }, customerContractId: { not: null }, customerContract: lifecycleView === 'pending'
-        ? { id: { in: pending.map(row => row.contractId) } } : { isInactive: lifecycleView === 'inactive' },
-      ...(reviewable ? { state: 'COMMITTED', NOT: { internalRecordId: { in: [...reviewable.existingInternalIds] } } } : {}) },
-      select: { id: true }, orderBy: { id: 'asc' } });
-    const documents: NonNullable<Awaited<ReturnType<typeof readPartnerPreparationDocument>>>[] = [];
-    for (const root of roots) {
-      const document = await readPartnerPreparationDocument(scope.database, actorId, root.id, {
-        caseAuthority, commercial: scope.commercialForCase(root.id),
-      });
-      if (document) documents.push(document);
-    }
-    return documents;
+  const caseAuthority = scope.caseAuthority;
+  if (!caseAuthority) throw new Error('Partner preparation list requires a fenced Accounting Case scope');
+  const pending = lifecycleView === 'pending' ? await scope.database.contractLifecycleRequest.findMany({
+    where: { status: 'PENDING' }, select: { contractId: true } }) : [];
+  const roots = await scope.database.partnerSaleCase.findMany({ where: { commercialFlowVersion: 1,
+    internalRecordId: { not: null }, customerContractId: { not: null }, customerContract: lifecycleView === 'pending'
+      ? { id: { in: pending.map(row => row.contractId) } } : { isInactive: lifecycleView === 'inactive' },
+    ...(reviewable ? { state: 'COMMITTED', NOT: { internalRecordId: { in: [...reviewable.existingInternalIds] } } } : {}) },
+    select: preparationListRootSelect, orderBy: { id: 'asc' } });
+  const authorized = new Set(scope.authorizedPartnerInternalIds);
+  const authorizedCaseIds = roots.flatMap(root => root.internalRecord && authorized.has(root.internalRecord.id) ? [root.id] : []);
+  const facts = await readPreparationFacts(scope.database, authorizedCaseIds, 'list');
+  const documents: NonNullable<Awaited<ReturnType<typeof readPreparationListSummary>>>[] = [];
+  for (const root of roots) {
+    const row = await readPreparationListSummary(scope, actorId, root, caseAuthority, facts);
+    if (row) documents.push(row);
+  }
+  return documents;
 }
 
 /** Existing financial rows only need these preparation overlays. Their Case
@@ -118,17 +196,13 @@ export async function listPartnerPreparationDocumentsInScope(scope: AccountingRe
 export async function readPartnerPreparationOverlaysInScope(scope: AccountingReadScope, internalIds: readonly string[]) {
   if (!internalIds.length) return new Map<string, { contractDate?: string; amountKnown: boolean; isInactive: boolean }>();
   const roots = await scope.database.partnerSaleCase.findMany({ where: { internalRecordId: { in: [...internalIds] } },
-    select: { id: true, headRevision: true, integrityHash: true,
-      head: { select: { customerContent: true, internalProjection: true } },
-      customerContract: { select: { isInactive: true } } } });
+    select: { id: true, headRevision: true, integrityHash: true, customerContract: { select: { isInactive: true } } } });
+  const facts = await readPreparationFacts(scope.database, roots.map(root => root.id), 'overlay');
   return new Map(roots.map(root => {
-    const context = object(root.head.customerContent);
-    const accounting = object(object(root.head.internalProjection).accounting);
-    const content = projectPartnerInternalSummary({ partnerPreparation: {
-      owner: { caseId: root.id, revision: root.headRevision, integrityHash: root.integrityHash },
-      products: accounting.products, totals: accounting.totals, paymentPlan: accounting.sabalanPaymentPlan,
-    } });
-    return [root.id, { contractDate: typeof context.contractDate === 'string' ? context.contractDate : undefined,
+    const row = currentPreparationFacts(facts, root.id);
+    const owner = { caseId: root.id, revision: root.headRevision, integrityHash: root.integrityHash };
+    const content = projectPartnerInternalSummary({ partnerPreparation: { ...row, owner } });
+    return [root.id, { contractDate: typeof row.contractDate === 'string' ? row.contractDate : undefined,
       amountKnown: Boolean(content.totals), isInactive: root.customerContract?.isInactive ?? false }] as const;
   }));
 }

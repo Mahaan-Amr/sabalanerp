@@ -1437,15 +1437,15 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}, ac
       const row: any = existing ?? partnerAccountingContractRow({ ...document, amount: new Prisma.Decimal(document.amount), receivables: [] });
       if (!row) continue;
       if (row.partnerContext) row.partnerContext.caseState = document.caseState;
-      row.partnerCommercialStatus = document.commercial.status;
+      row.partnerCommercialStatus = document.commercialStatus;
       row.contractDate = document.contractDate ?? row.contractDate;
       row.amountKnown = document.amountKnown; row.isInactive = document.isInactive;
-      row.status = ({ NOTE: 'DRAFT', DRAFT: 'PENDING_APPROVAL', CUSTOMER_SIGNED: 'APPROVED', QUOTED: 'QUOTED', FINAL: 'SIGNED', EXPIRED: 'EXPIRED', CANCELLED: 'CANCELLED' } as Record<string, string>)[document.commercial.status];
+      row.status = ({ NOTE: 'DRAFT', DRAFT: 'PENDING_APPROVAL', CUSTOMER_SIGNED: 'APPROVED', QUOTED: 'QUOTED', FINAL: 'SIGNED', EXPIRED: 'EXPIRED', CANCELLED: 'CANCELLED' } as Record<string, string>)[document.commercialStatus];
       if (!existing) {
         row.preparationOnly = true; row.owner = document.owner;
         row.financialRecords = [];
         row.accounting.invoiceStatus = 'NONE';
-        row.accounting.sourceStatus = document.commercial.status === 'FINAL' ? 'ELIGIBLE' : 'VISIBLE_ONLY';
+        row.accounting.sourceStatus = document.commercialStatus === 'FINAL' ? 'ELIGIBLE' : 'VISIBLE_ONLY';
         row.accounting.eligibleForFinancialRecords = document.canRegister;
         row.attention = document.canRegister ? {
           priority: 3, reason: 'صورتحساب مالی هنوز آماده نشده',

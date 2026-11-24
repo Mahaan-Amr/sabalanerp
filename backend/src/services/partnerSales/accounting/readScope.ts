@@ -359,7 +359,6 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
   return { database,
     actorId: actor?.userId ?? null,
     caseAuthority,
-    commercialForCase: (caseId: string) => commercialByCase.get(caseId),
     readCommercialForCase,
     partnerAccountingIncluded: authorizedInvoices.length > 0,
     authorizedPartnerInternalIds: allowedInternalIds,

@@ -5,7 +5,7 @@ import { RevisionRefSchema, type PartnerCommercialState } from '@sabalanerp/part
 import { createAuditedPartnerAuthorization } from '../authorization/audited';
 import { appendAuthorizationDecisions, type AuthorizationDecisionAudit } from '../../effectiveAuthorization/audit';
 import { resolvePartnerAccountingScopedAuthority } from '../authorization/centralAuthority';
-import { readCurrentPartnerCaseViews, readPartnerRevisionProjections } from '../cases/lifecycle';
+import { readCurrentPartnerCaseViews, readCurrentPartnerCaseViewsBatch, readPartnerRevisionProjections } from '../cases/lifecycle';
 import { PARTNER_INTERNAL_ACCOUNTING_SOURCE, matchesFinancialPreparation, preparePartnerFinancialSource, type PartnerFinancialPreparation, type PartnerAccountingSource } from './source';
 import { subtract } from '../reporting/money';
 import { PartnerAccountingCommandError } from './errors';
@@ -18,7 +18,7 @@ import { partnerPredecessorIsFrozen } from '../corrections/mutationFreeze';
 import { PARTNER_ACCOUNTING_MARKER_JSON_PATH } from './provenance';
 import { assertPartnerAccountingWitnesses as assertWitnesses, readPartnerReceivableEvidence } from './receivableEvidence';
 import { assertPartnerTaxEvidence, assertSinglePartnerTaxRecord } from './taxEvidence';
-import { resolveCurrentSabalanPlan, resolveInvoiceSabalanPlan } from './sabalanPlanEvidence';
+import { readCurrentSabalanPlanRows, resolveCurrentSabalanPlan, resolveInvoiceSabalanPlan } from './sabalanPlanEvidence';
 import { readAuthorizedPartnerAuditWitnesses } from '../../accountingReadProjection';
 import { batchAccountingCaseAuthority, type AccountingCaseAuthority } from './batchCaseAuthority';
 import { groupPaymentsByReceivable } from './groupPaymentsByReceivable';
@@ -214,15 +214,22 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
     const ids = [...new Set(rows.flatMap(row => invoiceFor(row) ? [invoiceFor(row)!] : []))];
     const invoices = ids.length ? await database.accountingFinancialRecord.findMany({ where: { id: { in: ids },
       sourceKind: PARTNER_INTERNAL_ACCOUNTING_SOURCE } }) : [];
-    for (const invoice of invoices) {
-      if (contextByInvoice.has(invoice.id)) continue;
+    const pendingInvoices = invoices.filter(invoice => !contextByInvoice.has(invoice.id)).map(invoice => {
       const row = cases.find(candidate => candidate.internalRecordId === invoice.sourceId);
       const preparation = object(invoice.sourceSnapshot)?.partnerPreparation as PartnerFinancialPreparation | undefined;
       const owner = RevisionRefSchema.safeParse(preparation?.owner);
       if (!row || !allowedInternalIds.includes(row.internalRecordId) || !owner.success || owner.data.caseId !== row.id ||
           object(invoice.metadata)?.partnerCaseId !== row.id) throw conflict();
+      if (sharesCaseFence && !caseAuthority?.hasCase(row.id)) throw conflict();
+      return { invoice, row, owner: owner.data, preparation };
+    });
+    const pendingCaseIds = [...new Set(pendingInvoices.map(({ row }) => row.id))];
+    const currentViews = sharesCaseFence
+      ? await readCurrentPartnerCaseViewsBatch(database, pendingCaseIds.filter(id => !healthyCases.has(id))) : undefined;
+    const currentPlanRows = sharesCaseFence ? await readCurrentSabalanPlanRows(database, pendingCaseIds) : undefined;
+    for (const { invoice, row, owner, preparation } of pendingInvoices) {
       if (!healthyCases.has(row.id)) {
-        const current = await readCurrentPartnerCaseViews(database, row.id);
+        const current = currentViews ? currentViews.get(row.id) : await readCurrentPartnerCaseViews(database, row.id);
         if (!current?.accounting) throw conflict();
         currentAccountingByCase.set(row.id, current.accounting);
         if (current.row.state === 'COMMITTED') committedCases.add(row.id);
@@ -237,23 +244,23 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
       const currentAccounting = currentAccountingByCase.get(row.id);
       if (!currentAccounting) throw conflict();
       const currentOwner = currentAccounting.owner;
-      const invoiceAccounting = owner.data.revision === currentOwner.revision &&
-        owner.data.integrityHash === currentOwner.integrityHash
+      const invoiceAccounting = owner.revision === currentOwner.revision &&
+        owner.integrityHash === currentOwner.integrityHash
         ? currentAccounting
-        : (await readPartnerRevisionProjections(database, owner.data))?.accounting;
+        : (await readPartnerRevisionProjections(database, owner))?.accounting;
       if (!invoiceAccounting) throw conflict();
       // Live terms and immutable invoice terms are validated independently.
-      const currentPlan = await resolveCurrentSabalanPlan(database, row.id, currentAccounting.sabalanPaymentPlan);
+      const currentPlan = await resolveCurrentSabalanPlan(database, row.id, currentAccounting.sabalanPaymentPlan, currentPlanRows);
       const currentPrepared = await preparePartnerFinancialSource({ view: {
         ...currentAccounting, sabalanPaymentPlan: currentPlan, state: 'COMMITTED',
       }, partnerSellerId: row.profile.userId }, currentAccounting.owner);
       if (!currentPrepared.ok) throw conflict();
-      const invoicePlan = await resolveInvoiceSabalanPlan(database, owner.data,
+      const invoicePlan = await resolveInvoiceSabalanPlan(database, owner,
         invoiceAccounting.sabalanPaymentPlan, preparation?.paymentPlan);
       const prepared = await preparePartnerFinancialSource({ view: {
         ...invoiceAccounting, sabalanPaymentPlan: invoicePlan, state: 'COMMITTED',
       },
-        partnerSellerId: row.profile.userId }, owner.data);
+        partnerSellerId: row.profile.userId }, owner);
       if (!prepared.ok || !preparation || !matchesFinancialPreparation(prepared.value, preparation) ||
           invoice.currency !== prepared.value.amount.currency || subtract(invoice.amount.toString(), prepared.value.amount.amount) !== '0') throw conflict();
       contextByInvoice.set(invoice.id, { caseId: row.id, caseNumber: invoiceAccounting.caseNumber,
@@ -263,7 +270,7 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
         commercialAccountId: invoiceAccounting.commercialAccountId, debtor: invoiceAccounting.debtor,
         endCustomer: { displayName: row.customer.companyName ||
           `${row.customer.firstName} ${row.customer.lastName}`.trim() },
-        revision: owner.data.revision, caseState: row.state, commercialStatus: commercialByCase.get(row.id)?.status,
+        revision: owner.revision, caseState: row.state, commercialStatus: commercialByCase.get(row.id)?.status,
         accountingWritable: writableCases.has(row.id) && finalCases.has(row.id),
         accountingDraftDeletionWritable: writableCases.has(row.id),
         actionUrl: `/dashboard/accounting/invoice-candidates?search=${encodeURIComponent(invoiceAccounting.caseNumber)}` });

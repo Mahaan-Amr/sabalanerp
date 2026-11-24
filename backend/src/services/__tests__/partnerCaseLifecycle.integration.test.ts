@@ -10,6 +10,8 @@ import { PartnerEventSchema, canonicalHash, partnerError, type PartnerCommand, t
 import { createPartnerFixtures } from '@sabalanerp/partner-sales-contracts/testing';
 import { createPartnerCaseLifecycleService, createPrismaPartnerCaseLifecycleService,
   readPartnerRevisionProjections, type PartnerCaseLifecycleDependencies } from '../partnerSales/cases/lifecycle';
+import { withAccountingReadScope } from '../partnerSales/accounting/readScope';
+import { preparePartnerFinancialSource } from '../partnerSales/accounting/source';
 import { createPartnerAccountingAdapter } from '../partnerSales/accounting/adapter';
 import { createPrismaPartnerAccountingRepository } from '../partnerSales/accounting/prismaRepository';
 import { PARTNER_INTERNAL_ACCOUNTING_SOURCE, approvePartnerFinancialSourceWithinTransaction } from '../partnerSales/accounting/financialApproval';
@@ -45,6 +47,54 @@ function databaseUrl() {
   if (url.hostname !== '127.0.0.1' || url.port !== '55432' || url.pathname !== '/sabalanerp') throw new Error('Existing local DB required');
   url.searchParams.set('connection_limit', '2'); url.searchParams.set('pool_timeout', '10'); return url.toString();
 }
+
+test('Accounting reads authorized Case heads together and rejects damaged evidence outside the first page', async () => {
+  const temporary = await createPartnerLifecycleDatabase({ repositoryRoot: process.cwd(), sourceDatabaseUrl: databaseUrl() });
+  const database = new PrismaClient({ datasources: { db: { url: temporary.databaseUrl } }, log: [{ level: 'query', emit: 'event' }] });
+  let headReads = 0, planReads = 0;
+  database.$on('query', ({ query }) => {
+    if (/FROM (?:"public"\.)?"?partner_payment_plans"?\b/.test(query)) planReads++;
+    if (query.includes('"partner_case_revisions"."internalProjection"') && query.includes('"partner_case_revisions"."graph"')) headReads++;
+  });
+  const first = idsFor('page-a'), second = idsFor('page-b');
+  const actorId = 'page-accountant';
+  try {
+    await database.$transaction(async tx => {
+      await tx.effectiveAuthorizationState.create({ data: { id: 1, revision: 1 } });
+      await tx.user.create({ data: { id: actorId, username: actorId, email: 'page@example.invalid', password: 'fixture',
+        firstName: 'Page', lastName: 'Accountant', role: 'ADMIN' } });
+      for (const ids of [first, second]) {
+        const owner = await seedCase(tx, ids);
+        const revision = await tx.partnerCaseRevision.findUniqueOrThrow({ where: { caseId_revision: { caseId: ids.caseId, revision: 1 } } });
+        const view = partnerContracts.SabalanInternalRecordViewSchema.parse((revision.internalProjection as Prisma.JsonObject).accounting);
+        const prepared = await preparePartnerFinancialSource({ view: { ...view, state: 'COMMITTED' }, partnerSellerId: ids.partnerId }, owner);
+        assert.ok(prepared.ok);
+        await tx.accountingFinancialRecord.create({ data: { id: ids.caseId, sourceId: ids.internalId, sourceKind: PARTNER_INTERNAL_ACCOUNTING_SOURCE,
+          kind: 'INVOICE_CANDIDATE', amount: prepared.value.amount.amount, currency: prepared.value.amount.currency, createdBy: actorId,
+          sourceSnapshot: { partnerPreparation: prepared.value }, metadata: { partnerCaseId: ids.caseId } } });
+      }
+    });
+    const firstPage = () => withAccountingReadScope(database, { userId: actorId }, async scope => {
+      const rows = await scope.database.accountingFinancialRecord.findMany({ where: scope.financial(), orderBy: { id: 'asc' }, take: 1 });
+      return scope.contextualize('FINANCIAL', rows);
+    });
+    headReads = 0; planReads = 0;
+    const page = await firstPage();
+    assert.deepEqual(page.map(row => [row.id, row.partnerContext?.caseId]), [[first.caseId, first.caseId]]);
+    const validPageHeadReads = headReads, validPagePlanReads = planReads;
+    await database.$transaction(async tx => {
+      await tx.$executeRawUnsafe('SET LOCAL session_replication_role = replica');
+      await tx.partnerCaseRevision.update({ where: { caseId_revision: { caseId: second.caseId, revision: 1 } },
+        data: { graphHash: `sha256-v1:${'e'.repeat(64)}` } });
+    });
+    await assert.rejects(firstPage, { code: 'INTEGRITY_CONFLICT' });
+    assert.equal(validPageHeadReads, 1, 'the whole authorized page population needs one canonical head fetch');
+    assert.equal(validPagePlanReads, 1, 'two Cases using their embedded terms need one current-plan lookup');
+  } finally {
+    await database.$disconnect();
+    await temporary.cleanup();
+  }
+});
 
 test('multi-Case Accounting list does not deadlock with the Partner writer lock sequence', async () => {
   const temporary = await createPartnerLifecycleDatabase({ repositoryRoot: path.resolve(process.cwd()), sourceDatabaseUrl: databaseUrl() });

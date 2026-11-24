@@ -112,21 +112,23 @@ async function clock(tx: Transaction) {
   return { date: instant.slice(0, 10), instant };
 }
 
+const caseViewSelect = {
+  id: true, caseNumber: true, trackingCode: { select: { number: true } },
+  profileId: true, headRevision: true, integrityHash: true, state: true,
+  pricingState: true, commercialFlowVersion: true, customerConfirmationState: true,
+  stateRevision: true, internalRecordId: true, customerContractId: true, commitmentEventId: true,
+  profile: { select: { userId: true } },
+  internalRecord: { select: { recordNumber: true, commercialAccountId: true, pricingState: true,
+    expectedRevision: true, integrityHash: true } },
+  head: { select: { predecessorRevision: true, integrityHash: true, pricingState: true, graphHash: true, graph: true,
+    partySnapshots: true, wholesaleEnvelope: true, retailEnvelope: true, paymentEvidence: true,
+    customerContent: true, internalProjection: true, customerProjection: true } },
+  customerContract: { select: { contractNumber: true, partnerRevision: true, partnerIntegrityHash: true,
+    status: true, signedAt: true, printedAt: true, firstFinancialRecordAt: true } },
+} satisfies Prisma.PartnerSaleCaseSelect;
+
 async function readCase(tx: Transaction, caseId: string) {
-  return tx.partnerSaleCase.findUnique({ where: { id: caseId }, select: {
-    id: true, caseNumber: true, trackingCode: { select: { number: true } },
-    profileId: true, headRevision: true, integrityHash: true, state: true,
-    pricingState: true, commercialFlowVersion: true, customerConfirmationState: true,
-    stateRevision: true, internalRecordId: true, customerContractId: true, commitmentEventId: true,
-    profile: { select: { userId: true } },
-    internalRecord: { select: { recordNumber: true, commercialAccountId: true, pricingState: true,
-      expectedRevision: true, integrityHash: true } },
-    head: { select: { predecessorRevision: true, integrityHash: true, pricingState: true, graphHash: true, graph: true,
-      partySnapshots: true, wholesaleEnvelope: true, retailEnvelope: true, paymentEvidence: true,
-      customerContent: true, internalProjection: true, customerProjection: true } },
-    customerContract: { select: { contractNumber: true, partnerRevision: true, partnerIntegrityHash: true,
-      status: true, signedAt: true, printedAt: true, firstFinancialRecordAt: true } },
-  } });
+  return tx.partnerSaleCase.findUnique({ where: { id: caseId }, select: caseViewSelect });
 }
 
 async function lockCase(tx: Transaction, caseId: string) {
@@ -136,7 +138,7 @@ async function lockCase(tx: Transaction, caseId: string) {
 
 type LockedCase = NonNullable<Awaited<ReturnType<typeof lockCase>>>;
 
-async function parseViews(tx: Transaction, row: LockedCase) {
+async function parseViews(tx: Transaction, row: LockedCase, loadedPredecessor?: { integrityHash: string } | null) {
   if (!row.internalRecordId || !row.customerContractId || !row.internalRecord || !row.customerContract) return undefined;
   const internal = row.head.internalProjection;
   if (!internal || typeof internal !== 'object' || Array.isArray(internal)) return undefined;
@@ -145,7 +147,8 @@ async function parseViews(tx: Transaction, row: LockedCase) {
   const accounting = SabalanInternalRecordViewSchema.safeParse(source.accounting);
   const fulfillment = FulfillmentViewSchema.safeParse(source.fulfillment);
   const customer = CustomerContractOutputSchema.safeParse(row.head.customerProjection);
-  const predecessor = row.head.predecessorRevision === null ? null : await tx.partnerCaseRevision.findUnique({
+  const predecessor = loadedPredecessor !== undefined ? loadedPredecessor :
+    row.head.predecessorRevision === null ? null : await tx.partnerCaseRevision.findUnique({
     where: { caseId_revision: { caseId: row.id, revision: row.head.predecessorRevision } },
     select: { integrityHash: true },
   });
@@ -209,6 +212,20 @@ export async function readCurrentPartnerCaseViews(tx: Transaction, caseId: strin
   if (!row) return undefined;
   const views = await parseViews(tx, row);
   return views ? { row, ...views } : undefined;
+}
+
+/** The caller authorizes and fences every supplied Case in the same read snapshot. */
+export async function readCurrentPartnerCaseViewsBatch(tx: Transaction, caseIds: string[]) {
+  const viewsByCase = new Map<string, NonNullable<Awaited<ReturnType<typeof readCurrentPartnerCaseViews>>>>();
+  if (!caseIds.length) return viewsByCase;
+  const rows = await tx.partnerSaleCase.findMany({ where: { id: { in: caseIds } }, select: {
+    ...caseViewSelect, head: { select: { ...caseViewSelect.head.select, predecessor: { select: { integrityHash: true } } } },
+  } });
+  for (const row of rows) {
+    const views = await parseViews(tx, row, row.head.predecessor);
+    if (views) viewsByCase.set(row.id, { row, ...views });
+  }
+  return viewsByCase;
 }
 
 /** Immutable revision projection read for staged Accounting work. It validates

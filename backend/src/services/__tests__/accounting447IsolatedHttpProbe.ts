@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import express from 'express';
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import accountingRouter from '../../routes/accounting';
 import { prisma } from '../../lib/prisma';
 import { createAuthoritativeSession, SESSION_COOKIE } from '../identitySessionService';
 import { createAccountingRequestObserver } from '../../middleware/accountingRequestObserver';
 import type { AccountingReadTimings } from '../accountingReadTiming';
+import { resetPartnerCommercialApprovals } from '../partnerSales/cases/commercialLifecycle';
 
 const measuredStages = ['lockWait', 'authorization', 'population', 'rowHydration'] as const;
 const p95 = (samples: number[]) => samples.sort((a, b) => a - b)[Math.ceil(0.95 * samples.length) - 1];
@@ -136,6 +137,26 @@ async function main() {
       assert.equal(response.status, 200, `${route}: ${JSON.stringify(body).slice(0, 300)}`);
       assert.equal(body.success, true, route);
     }
+    const concurrentReads = [get('/contracts?view=reviewable&page=1&pageSize=100'),
+      get('/dashboard?range=3m')];
+    await prisma.salesContract.create({ data: { id: 'accounting-447-mutation', contractNumber: 'accounting-447-mutation',
+      title: 'Qualification mutation', titlePersian: 'تغییر آزمون', content: 'Qualification mutation',
+      customerId, departmentId, createdBy: actorId, responsibleSellerId: actorId } });
+    await Promise.all(concurrentReads);
+    const afterMutation = await get('/contracts?view=reviewable&page=1&pageSize=100');
+    assert.equal(afterMutation.total, 966);
+
+    // A reopened committed Case still has accepted pricing, so the list must
+    // consult its approval and inquiry row instead of short-circuiting on SIGNED.
+    const pricedCase = await prisma.partnerSaleCase.findUniqueOrThrow({ where: { id: partnerRows[0].caseId },
+      select: { id: true, headRevision: true, pricingState: true } });
+    assert.equal(pricedCase.pricingState, 'READY_TO_FINALIZE');
+    const { approval } = await prisma.partnerInquiryUsage.findFirstOrThrow({ where: {
+      caseId: pricedCase.id, caseRevision: pricedCase.headRevision,
+    }, select: { approval: { select: { id: true, rowId: true } } } });
+    await prisma.$transaction(tx => resetPartnerCommercialApprovals(tx, pricedCase.id, actorId, 'آزمون بازبینی قیمت'));
+    const isLocked = (error: unknown) => error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === 'P2010' && error.meta?.code === '55P03';
     const preparationRoute = '/contracts?view=all&sourceKind=PARTNER_INTERNAL_RECORD&page=1&pageSize=100';
     const paperDecisions = () => prisma.effectiveAuthorizationAudit.count({ where: {
       actorId, action: 'ACCOUNTING_WRITE', purpose: 'ACCOUNTING', channel: 'API', allowed: true,
@@ -166,7 +187,12 @@ async function main() {
     const first = get(preparationRoute);
     try {
       await Promise.race([held, first.then(() => { throw new Error('First preparation request did not hold its snapshot'); })]);
+      await assert.rejects(prisma.$queryRaw`SELECT id FROM partner_inquiry_approvals WHERE id = ${approval.id} FOR UPDATE NOWAIT`, isLocked);
+      await assert.rejects(prisma.$queryRaw`SELECT id FROM partner_inquiry_rows WHERE id = ${approval.rowId} FOR UPDATE NOWAIT`, isLocked);
       const second = await get(preparationRoute, AbortSignal.timeout(10_000));
+      const reopened = second.items.find((row: { partnerContext?: { caseId: string } }) => row.partnerContext?.caseId === pricedCase.id);
+      assert.ok(reopened?.preparationOnly);
+      assert.notEqual(reopened.partnerCommercialStatus, 'FINAL');
       assert.ok(second.items.some((row: { preparationOnly?: boolean }) => row.preparationOnly));
       release();
       const firstResult = await first;
@@ -178,14 +204,6 @@ async function main() {
     }
     assert.ok(await paperDecisions() >= beforePaperDecisions + 2, 'each preparation read records its paper-signature authority');
 
-    const concurrentReads = [get('/contracts?view=reviewable&page=1&pageSize=100'),
-      get('/dashboard?range=3m')];
-    await prisma.salesContract.create({ data: { id: 'accounting-447-mutation', contractNumber: 'accounting-447-mutation',
-      title: 'Qualification mutation', titlePersian: 'تغییر آزمون', content: 'Qualification mutation',
-      customerId, departmentId, createdBy: actorId, responsibleSellerId: actorId } });
-    await Promise.all(concurrentReads);
-    const afterMutation = await get('/contracts?view=reviewable&page=1&pageSize=100');
-    assert.equal(afterMutation.total, 966);
     const simultaneous = [fetch(`${base}/contracts?view=reviewable&page=1&pageSize=12`, { headers }),
       fetch(`${base}/dashboard?range=3m`, { headers })];
     await prisma.user.update({ where: { id: actorId }, data: { isActive: false } });

@@ -14,9 +14,11 @@ import {
 } from './crossWorkspaceDutyModule';
 import { countAccountingReadRows, measureAccountingReadPhase } from './accountingReadTiming';
 import { resolveWorkspaceDutyAuthority } from './crossWorkspaceDutyAuthority';
+import { createSalesCorrectionInboxReader } from './crossWorkspaceDutyAdapters/salesContractCorrectionDutyAdapter';
 
 type Database = PrismaClient | Prisma.TransactionClient;
 type Access = 'ASSIGNEE' | 'MANAGER_TRIAGE' | 'AVAILABLE' | 'SHARED';
+type SalesCorrectionInboxReader = ReturnType<typeof createSalesCorrectionInboxReader>;
 
 const WORKSPACE_CODES: Record<string, string> = {
   accounting: 'ACCOUNTING',
@@ -222,6 +224,7 @@ const authorizeLoadedDuty = async (
   summaryOnly = false,
   readSource = loadCrossWorkspaceDutySourceProjection,
   view?: DutyView,
+  correction?: SalesCorrectionInboxReader,
 ) => {
   if (duty.status === 'OPEN' && duty.sourceType === 'SALES_CONTRACT_CORRECTION'
     && duty.sourceActionCode === 'SALES_EDIT_CONTRACT_CORRECTION' && duty.dueAt <= now) {
@@ -233,7 +236,7 @@ const authorizeLoadedDuty = async (
     sourceActionCode: duty.sourceActionCode,
     sourceVersion: duty.sourceVersion,
   });
-  const access = await resolveLoadedDutyAccess(database, duty, actorUserId, requestedWorkspaceCode, now, knownManager, source.sourceIsCurrent);
+  const access = await resolveLoadedDutyAccess(database, duty, actorUserId, requestedWorkspaceCode, now, knownManager, source.sourceIsCurrent, correction);
   if (summaryOnly || (view && view !== 'history' && !matchesActiveView(access, view))) return { duty, source, access };
   if (access === 'AVAILABLE') return {
     duty, source, access,
@@ -264,9 +267,11 @@ const authorizeLoadedDuty = async (
     resultActor,
     currentAssignee,
     accessProvenance: access === 'SHARED'
-      ? await sharedCrossWorkspaceDutyAccessProvenance(database, { dutyId: duty.id, actorUserId, now })
+      ? correction
+        ? await correction.accessProvenance(duty)
+        : await sharedCrossWorkspaceDutyAccessProvenance(database, { dutyId: duty.id, actorUserId, now })
       : [],
-    responseRequiresReason: access === 'ASSIGNEE' || access === 'SHARED'
+    responseRequiresReason: (access === 'ASSIGNEE' || access === 'SHARED') && (!correction || duty.status === 'OPEN')
       ? await crossWorkspaceDutyResponseRequiresReason(database, { dutyId: duty.id, actorUserId })
       : false,
   };
@@ -280,6 +285,7 @@ const resolveLoadedDutyAccess = async (
   now: Date,
   knownManager: boolean | undefined,
   sourceIsCurrent: boolean,
+  correction?: SalesCorrectionInboxReader,
 ): Promise<Access> => {
   // Named-responsibility assignments are retained only as historical evidence.
   // Existing duties keep their snapshotted assignee until completion; new duties
@@ -287,13 +293,12 @@ const resolveLoadedDutyAccess = async (
   const assignmentIsCurrent = true;
   const definition = definitionFor(duty.sourceActionCode);
   const isSharedDecision = definition?.accountabilityModel === 'SHARED_DECISION';
-  const isSharedEligible = Boolean(isSharedDecision && await canAccessSharedCrossWorkspaceDuty(database, {
-    dutyId: duty.id,
-    actorUserId,
-    includeCompleted: duty.status !== 'OPEN',
-    now,
-  }));
-  if (!isSharedDecision && duty.currentAssigneeUserId === null && await canClaimCrossWorkspaceDuty(database, {
+  const isSharedEligible = Boolean(isSharedDecision && (correction
+    ? await correction.canAccessSharedDecision(duty)
+    : await canAccessSharedCrossWorkspaceDuty(database, {
+      dutyId: duty.id, actorUserId, includeCompleted: duty.status !== 'OPEN', now,
+    })));
+  if (!isSharedDecision && duty.currentAssigneeUserId === null && (!correction || duty.status === 'OPEN') && await canClaimCrossWorkspaceDuty(database, {
     dutyId: duty.id, actorUserId, policyVersion: 1, now,
   })) return 'AVAILABLE';
   const decision = authorizeCrossWorkspaceDutyInbox({
@@ -389,11 +394,14 @@ const readInbox = async (database: Database, input: DutyReadInput) => {
   const workspaceCode = crossWorkspaceDutyDestinationCode(input.workspaceCode);
   const manager = await isManager(database, input.actorUserId, workspaceCode, now);
   const loadSource = createCrossWorkspaceDutySourceProjectionReader();
+  const correction = createSalesCorrectionInboxReader(database, input.actorUserId, now);
   const readSource: typeof loadSource = (db, source) => {
     const phase = Object.prototype.hasOwnProperty.call(sourcePhase, source.sourceType)
       ? sourcePhase[source.sourceType as keyof typeof sourcePhase]
       : 'dutySourceOther';
-    return measureAccountingReadPhase(phase, () => loadSource(db, source));
+    return measureAccountingReadPhase(phase, () => source.sourceType === 'SALES_CONTRACT_CORRECTION'
+      ? correction.loadProjection(source)
+      : loadSource(db, source));
   };
 
   const read = async (options: {
@@ -439,6 +447,7 @@ const readInbox = async (database: Database, input: DutyReadInput) => {
       try {
         const authorized = await authorizeLoadedDuty(
           database, duty, input.actorUserId, workspaceCode, now, manager, options.summaryOnly, readSource, options.view,
+          duty.sourceType === 'SALES_CONTRACT_CORRECTION' ? correction : undefined,
         );
         if (options.view && options.view !== 'history' && !matchesActiveView(authorized.access, options.view)) return null;
         return { duty, access: authorized.access, authorized };
@@ -475,11 +484,14 @@ const readInbox = async (database: Database, input: DutyReadInput) => {
     if (after) {
       const cursor = await database.crossWorkspaceDuty.findFirst({ where: { ...where, id: after }, include: relations });
       // A client-supplied cursor cannot reveal the position of a hidden record.
-      if (!cursor || !await authorize(cursor)) return { duties, rows, nextCursor: null };
+      if (!cursor) return { duties, rows, nextCursor: null };
+      correction.prepare([cursor]);
+      if (!await authorize(cursor)) return { duties, rows, nextCursor: null };
     }
     do {
       const candidates = await findCandidates(after, batchSize);
       countAccountingReadRows(history ? 'dutyHistoryCandidates' : 'dutyActiveCandidates', candidates.length);
+      correction.prepare(candidates);
       // Bound the provider reads while retaining the database ordering.
       for (let offset = 0; offset < candidates.length; offset += 4) {
         const batch = await Promise.all(candidates.slice(offset, offset + 4).map(authorize));

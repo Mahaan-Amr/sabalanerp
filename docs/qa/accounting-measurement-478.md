@@ -28,6 +28,8 @@ Set these environment variables before running `node scripts/measure-accounting-
 | `ACCOUNTING_TIMING_WORKLOAD` | Nonpersonal fixture name shared by matching runs |
 | `ACCOUNTING_TIMING_IDENTIFIER`, `ACCOUNTING_TIMING_PASSWORD` | Private authorized accountant credentials |
 | `ACCOUNTING_TIMING_SAMPLES`, `ACCOUNTING_TIMING_CONCURRENCY` | Samples **per surface** and parallel Chrome-context ceiling, default 20 and 1 |
+| `ACCOUNTING_TIMING_PHASE` | `cold` starts after login, `warm` opens the target once before timing, and `mixed` alternates. Default `cold`. |
+| `ACCOUNTING_TIMING_ACTOR_CLASS` | Declared cohort, `accountant` or `administrator`. Default `authenticated`. Record evidence of actual authority separately. |
 | `ACCOUNTING_TIMING_SURFACES` | Comma-separated surface names, or `all`. Default is `dashboard,reviewable-list,dispatch`. Additional surfaces are `invoice-candidates,correction-requests,receivables,payments,tax,audit,duties,customer-accounts`. |
 | `ACCOUNTING_TIMING_OUTPUT` | A new path in the private evidence directory |
 | `ACCOUNTING_TIMING_SEPIDAR_FIXTURE` | Optional private JSON with one `{ "row", "reference", "amount" }` object per sample. Omit for read-only. |
@@ -36,7 +38,7 @@ The optional fixture enables real Sepidar registration through the Accounting di
 
 The receipt reports sample and failure counts, nearest-rank p95, request counts, response bytes, error classes and normalized request counts per sample. Parallelism is the number of independent browser contexts attempted concurrently, not verified overlapping SQL operations. Use the server records for overlap and retain environment, load and time-window provenance with the receipt. Candidate measurements on local data do not fill the production-shape p95 and 30-second-expiry gates in #443 and #448. Apply the existing protected qualification workflow for those gates.
 
-The dashboard receipt measures the work queue and the complete page separately. Complete readiness requires the current chart, reviewable count and deadline data or the displayed empty state. The duty receipt separates queue and summary readiness. Exit status 2 marks a failed sample or a selected priority surface with p95 at or above 3,000 ms. Samples use fresh browser contexts. Record the actor's actual scope alongside the run and use the same authority and equivalent fixture in both runs.
+The dashboard receipt measures the work queue and the complete page separately. Complete readiness requires the current chart, reviewable count and deadline data or the displayed empty state. The duty receipt separates queue and summary readiness. Exit status 2 marks a failed sample or a selected priority surface with p95 at or above 3,000 ms. Each sample authenticates a fresh browser context. For a warm sample the second navigation uses the same context after the first verified load. Record the actor's actual scope alongside the run and use the same authority and equivalent fixture in both runs.
 
 ## Evidence at implementation
 

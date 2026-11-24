@@ -122,13 +122,14 @@ test('browser receipts attribute complete responses and aborted transfers indepe
   t.after(() => { server.closeAllConnections(); return new Promise(resolve => server.close(resolve)); });
 
   const output = path.join(directory, 'receipt.json');
-  const child = spawn(process.execPath, [script], { stdio: 'inherit', env: {
+  const runnerEnv = {
     ...process.env, ACCOUNTING_TIMING_RUN: 'candidate', ACCOUNTING_TIMING_WORKLOAD: 'http-fixture',
     ACCOUNTING_TIMING_SURFACES: 'dashboard,reviewable-list,duties', ACCOUNTING_TIMING_SAMPLES: '4', ACCOUNTING_TIMING_CONCURRENCY: '1',
     ACCOUNTING_TIMING_IDENTIFIER: 'fixture', ACCOUNTING_TIMING_PASSWORD: 'fixture', ACCOUNTING_TIMING_COMMIT: commit,
     ACCOUNTING_TIMING_ORIGIN: `http://127.0.0.1:${server.address().port}`, ACCOUNTING_TIMING_OUTPUT: output,
-    ACCOUNTING_TIMING_SEPIDAR_FIXTURE: '',
-  } });
+    ACCOUNTING_TIMING_SEPIDAR_FIXTURE: '', ACCOUNTING_TIMING_PHASE: 'cold',
+  };
+  const child = spawn(process.execPath, [script], { stdio: 'inherit', env: runnerEnv });
   const [code] = await once(child, 'exit');
   assert.equal(code, 2, 'HTTP error and aborted transfer make the run fail');
   const raw = await readFile(output, 'utf8');
@@ -172,4 +173,15 @@ test('browser receipts attribute complete responses and aborted transfers indepe
   assert.ok(duties.summary.fullHttpMs >= 400);
   assert.ok(duties.completeMs >= duties.summaryReadyMs);
   assert.equal(metrics.duties.target.passed, true);
+
+  const warmOutput = path.join(directory, 'warm-receipt.json');
+  const warm = spawn(process.execPath, [script], { stdio: 'inherit', env: {
+    ...runnerEnv, ACCOUNTING_TIMING_SURFACES: 'reviewable-list', ACCOUNTING_TIMING_SAMPLES: '1',
+    ACCOUNTING_TIMING_PHASE: 'warm', ACCOUNTING_TIMING_OUTPUT: warmOutput,
+  } });
+  assert.equal((await once(warm, 'exit'))[0], 0);
+  const warmReceipt = JSON.parse(await readFile(warmOutput, 'utf8'));
+  assert.equal(warmReceipt.results.length, 1);
+  assert.equal(warmReceipt.results[0].phase, 'warm');
+  assert.equal(reviewableRequests, 6, 'the warmup makes a real request before the timed navigation');
 });

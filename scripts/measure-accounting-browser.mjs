@@ -20,14 +20,17 @@ function options() {
   const workload = env.ACCOUNTING_TIMING_WORKLOAD;
   const samples = Number(env.ACCOUNTING_TIMING_SAMPLES ?? 20);
   const concurrency = Number(env.ACCOUNTING_TIMING_CONCURRENCY ?? 1);
+  const phase = env.ACCOUNTING_TIMING_PHASE ?? 'cold';
+  const actorClass = env.ACCOUNTING_TIMING_ACTOR_CLASS ?? 'authenticated';
   const run = env.ACCOUNTING_TIMING_RUN;
   const output = env.ACCOUNTING_TIMING_OUTPUT;
   if (!commitPattern.test(commit ?? '') || !/^[a-z0-9-]{1,48}$/.test(workload ?? '')
-    || !['baseline', 'candidate'].includes(run) || !output
+    || !['baseline', 'candidate'].includes(run) || !['cold', 'warm', 'mixed'].includes(phase) || !output
+    || !['accountant', 'administrator', 'authenticated'].includes(actorClass)
     || !Number.isSafeInteger(samples) || samples < 1 || samples > 1000
     || !Number.isSafeInteger(concurrency) || concurrency < 1 || concurrency > 20 || concurrency > samples
     || !env.ACCOUNTING_TIMING_IDENTIFIER || !env.ACCOUNTING_TIMING_PASSWORD) throw Error('INVALID_TIMING_INPUT');
-  return { baseURL, commit, workload, samples, concurrency, run, output };
+  return { baseURL, commit, workload, samples, concurrency, phase, actorClass, run, output };
 }
 
 const list = '/api/accounting/dispatch-candidates';
@@ -332,12 +335,12 @@ async function measureFirstRead(page, config, scenario, result) {
   result.completeMs ??= Math.max(result.firstActionMs, result.summaryReadyMs ?? 0);
 }
 
-async function sample(browser, config, scenario, command) {
+async function sample(browser, config, scenario, command, phase) {
   const context = await browser.newContext({ baseURL: config.baseURL.origin, locale: 'fa-IR', timezoneId: 'Asia/Tehran' });
   const page = await context.newPage();
   page.setDefaultTimeout(timeout);
   page.setDefaultNavigationTimeout(timeout);
-  const result = { surface: scenario.name, commandsEnabled: Boolean(command) };
+  const result = { surface: scenario.name, phase, commandsEnabled: Boolean(command) };
   let stop;
   let stage = 'login';
   try {
@@ -346,6 +349,10 @@ async function sample(browser, config, scenario, command) {
     await page.getByRole('textbox', { name: 'ایمیل، نام کاربری یا شماره تماس' }).fill(env.ACCOUNTING_TIMING_IDENTIFIER);
     await page.locator('input[name="password"]').fill(env.ACCOUNTING_TIMING_PASSWORD);
     await Promise.all([page.waitForURL(/\/dashboard$/), page.getByRole('button', { name: 'ورود', exact: true }).click()]);
+    if (phase === 'warm') {
+      stage = 'warmup';
+      await measureFirstRead(page, config, scenario, {});
+    }
     stage = 'first_action';
     stop = monitor(page);
     await measureFirstRead(page, config, scenario, result);
@@ -422,8 +429,11 @@ async function run() {
     // Each sample opens an independently authenticated browser context.
     for (const scenario of measuredScenarios) {
       for (let i = 0; i < config.samples; i += config.concurrency) {
-        const batch = Array.from({ length: Math.min(config.concurrency, config.samples - i) }, (_, offset) =>
-          sample(browser, config, scenario, scenario.name === 'dispatch' ? commands[i + offset] : undefined));
+        const batch = Array.from({ length: Math.min(config.concurrency, config.samples - i) }, (_, offset) => {
+          const index = i + offset;
+          const phase = config.phase === 'mixed' ? (index % 2 === 0 ? 'cold' : 'warm') : config.phase;
+          return sample(browser, config, scenario, scenario.name === 'dispatch' ? commands[index] : undefined, phase);
+        });
         results.push(...await Promise.all(batch));
       }
     }
@@ -462,7 +472,7 @@ async function run() {
   }));
   await writeFile(config.output, JSON.stringify({
     format: 'sabalan-accounting-browser-timing/v1', started, commit: config.commit, workload: config.workload,
-    run: config.run, concurrency: config.concurrency, actorClass: 'authenticated', metrics, results,
+    run: config.run, concurrency: config.concurrency, phase: config.phase, actorClass: config.actorClass, metrics, results,
   }, null, 2) + '\n', { flag: 'wx' });
   if (results.some(sample => sample.failed) || Object.values(metrics).some(surface => surface.target?.passed === false)) process.exitCode = 2;
 }

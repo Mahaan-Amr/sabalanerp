@@ -96,6 +96,7 @@ import {
   resolveOutstandingReceivableProjection,
   resolveTaxRecordPopulation,
   taxRecordPopulationWhere,
+  tehranGregorianMonth,
 } from './accountingPopulations';
 import { createFinancialApprovalTransactionRunner } from './financialApprovalTransaction';
 import {
@@ -726,21 +727,15 @@ export const assertCorrectionFinancialWorkflowReady = async (
 };
 
 const getOrCreateCurrentPeriod = async (now = new Date(), database: Prisma.TransactionClient = prisma) => {
-  const code = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const { code, startsAt, endsAt } = tehranGregorianMonth(now);
   const existing = await database.accountingPeriod.findUnique({ where: { code } });
   if (existing) return existing;
 
-  const startsAt = new Date(now.getFullYear(), now.getMonth(), 1);
-  const endsAt = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
-
-  return database.accountingPeriod.create({
-    data: {
-      code,
-      title: `دوره ${code}`,
-      startsAt,
-      endsAt
-    }
+  await database.accountingPeriod.createMany({
+    data: { code, title: `دوره ${code}`, startsAt, endsAt },
+    skipDuplicates: true,
   });
+  return database.accountingPeriod.findUniqueOrThrow({ where: { code } });
 };
 
 const audit = async (tx: Prisma.TransactionClient | PrismaClient, data: {
@@ -1326,17 +1321,14 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}, ac
   const lifecycleView = query.lifecycleView === 'inactive' || query.lifecycleView === 'pending'
     ? query.lifecycleView
     : 'active';
-  let partner: Awaited<ReturnType<typeof readPartnerContractSources>> = {
-    partnerRecords: [], preparations: [], preparationOverlays: new Map(),
+  const ordinaryOnly = { partnerRecords: [], preparations: [], preparationOverlays: new Map() };
+  const read = async (scope: AccountingReadScope) => {
+    const partner = actor ? await readPartnerContractSources(scope, actor.userId, lifecycleView, query.view === 'reviewable') : ordinaryOnly;
+    return readAccountingContractPage(scope.database, query, lifecycleView, partner, asOf ?? scope.asOf);
   };
-  if (actor) {
-    const readPartner = (scope: AccountingReadScope) => readPartnerContractSources(scope, actor.userId, lifecycleView, query.view === 'reviewable');
-    partner = existingScope ? await readPartner(existingScope) : await withAccountingReadScope(prisma, actor, readPartner);
-  }
-  // A standalone list releases its Partner locks before acquiring the ordinary
-  // snapshot. Neither path holds a connection while waiting for a second one.
-  const read = (database: Prisma.TransactionClient) => readAccountingContractPage(database, query, lifecycleView, partner, asOf);
-  return existingScope ? read(existingScope.database) : prisma.$transaction(read, {
+  if (existingScope) return read(existingScope);
+  if (actor) return withAccountingReadScope(prisma, actor, read);
+  return prisma.$transaction(tx => readAccountingContractPage(tx, query, lifecycleView, ordinaryOnly, asOf), {
     isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: 30_000,
   });
 };

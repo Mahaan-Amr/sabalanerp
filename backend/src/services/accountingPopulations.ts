@@ -144,6 +144,17 @@ export const resolveTehranDayRange = (value: unknown): DateRange | null => {
   };
 };
 
+export const tehranGregorianMonth = (instant: Date) => {
+  const { year, month } = dateTimeParts(instant, TEHRAN_TIME_ZONE);
+  const nextMonth = new Date(Date.UTC(year, month, 1));
+  const nextStart = zonedMidnightToUtc(nextMonth.getUTCFullYear(), nextMonth.getUTCMonth() + 1, 1);
+  return {
+    code: `${year}-${String(month).padStart(2, '0')}`,
+    startsAt: zonedMidnightToUtc(year, month, 1),
+    endsAt: new Date(nextStart.getTime() - 1),
+  };
+};
+
 const tehranCivilMidnight = (now: Date, dayOffset = 0) => {
   const local = dateTimeParts(now, TEHRAN_TIME_ZONE);
   const shifted = new Date(Date.UTC(local.year, local.month - 1, local.day + dayOffset));

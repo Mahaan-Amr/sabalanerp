@@ -225,36 +225,41 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
         if (await partnerPredecessorIsFrozen(database, row.id, current.row.headRevision)) frozenCases.add(row.id);
         healthyCases.add(row.id);
       }
-      const views = await readPartnerRevisionProjections(database, owner.data);
-      if (!views?.accounting) throw conflict();
-      // Validate live terms against the current Case, independently of the
-      // invoice's immutable historical revision and financial preparation.
+      // The current projection already passed the canonical reconstruction.
+      // A saved invoice from another revision still needs its own reconstruction.
       const currentAccounting = currentAccountingByCase.get(row.id);
       if (!currentAccounting) throw conflict();
+      const currentOwner = currentAccounting.owner;
+      const invoiceAccounting = owner.data.revision === currentOwner.revision &&
+        owner.data.integrityHash === currentOwner.integrityHash
+        ? currentAccounting
+        : (await readPartnerRevisionProjections(database, owner.data))?.accounting;
+      if (!invoiceAccounting) throw conflict();
+      // Live terms and immutable invoice terms are validated independently.
       const currentPlan = await resolveCurrentSabalanPlan(database, row.id, currentAccounting.sabalanPaymentPlan);
       const currentPrepared = await preparePartnerFinancialSource({ view: {
         ...currentAccounting, sabalanPaymentPlan: currentPlan, state: 'COMMITTED',
       }, partnerSellerId: row.profile.userId }, currentAccounting.owner);
       if (!currentPrepared.ok) throw conflict();
       const invoicePlan = await resolveInvoiceSabalanPlan(database, owner.data,
-        views.accounting.sabalanPaymentPlan, preparation?.paymentPlan);
+        invoiceAccounting.sabalanPaymentPlan, preparation?.paymentPlan);
       const prepared = await preparePartnerFinancialSource({ view: {
-        ...views.accounting, sabalanPaymentPlan: invoicePlan, state: 'COMMITTED',
+        ...invoiceAccounting, sabalanPaymentPlan: invoicePlan, state: 'COMMITTED',
       },
         partnerSellerId: row.profile.userId }, owner.data);
       if (!prepared.ok || !preparation || !matchesFinancialPreparation(prepared.value, preparation) ||
           invoice.currency !== prepared.value.amount.currency || subtract(invoice.amount.toString(), prepared.value.amount.amount) !== '0') throw conflict();
-      contextByInvoice.set(invoice.id, { caseId: row.id, caseNumber: views.accounting.caseNumber,
+      contextByInvoice.set(invoice.id, { caseId: row.id, caseNumber: invoiceAccounting.caseNumber,
         trackingNumber: row.trackingCode?.number,
-        customerContractNumber: views.accounting.customerContractNumber,
-        internalRecordNumber: views.accounting.recordNumber, partnerSellerId: row.profile.userId,
-        commercialAccountId: views.accounting.commercialAccountId, debtor: views.accounting.debtor,
+        customerContractNumber: invoiceAccounting.customerContractNumber,
+        internalRecordNumber: invoiceAccounting.recordNumber, partnerSellerId: row.profile.userId,
+        commercialAccountId: invoiceAccounting.commercialAccountId, debtor: invoiceAccounting.debtor,
         endCustomer: { displayName: row.customer.companyName ||
           `${row.customer.firstName} ${row.customer.lastName}`.trim() },
         revision: owner.data.revision, caseState: row.state, commercialStatus: commercialByCase.get(row.id)?.status,
         accountingWritable: writableCases.has(row.id) && finalCases.has(row.id),
         accountingDraftDeletionWritable: writableCases.has(row.id),
-        actionUrl: `/dashboard/accounting/invoice-candidates?search=${encodeURIComponent(views.accounting.caseNumber)}` });
+        actionUrl: `/dashboard/accounting/invoice-candidates?search=${encodeURIComponent(invoiceAccounting.caseNumber)}` });
       preparationByInvoice.set(invoice.id, preparation);
     }
     return rows.map(row => {

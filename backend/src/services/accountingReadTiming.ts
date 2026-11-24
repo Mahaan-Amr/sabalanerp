@@ -14,7 +14,8 @@ type AccountingReadWorkKind = 'historicalInvoices' | 'historicalPayments' | 'his
   | 'historicalPartnerBalances' | 'receiptCandidates' | 'receiptPageRows'
   | 'partnerInvoices' | 'partnerReceivables' | 'partnerPayments' | 'partnerTaxRows'
   | 'partnerAuditWitnesses' | 'markedProvenanceRows'
-  | 'dutyActiveCandidates' | 'dutyHistoryCandidates';
+  | 'dutyActiveCandidates' | 'dutyHistoryCandidates'
+  | 'reviewableSqlPages' | 'reviewableOrdinaryRows' | 'reviewableFilterFallbacks' | 'reviewableExactnessFallbacks';
 export type AccountingReadWork = Partial<Record<AccountingReadWorkKind, number>>;
 
 export const accountingReadTiming = new AsyncLocalStorage<AccountingReadTimings & { readWork?: AccountingReadWork }>();

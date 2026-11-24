@@ -5,7 +5,7 @@ import accountingRouter from '../../routes/accounting';
 import { prisma } from '../../lib/prisma';
 import { createAuthoritativeSession, SESSION_COOKIE } from '../identitySessionService';
 import { createAccountingRequestObserver } from '../../middleware/accountingRequestObserver';
-import type { AccountingReadTimings } from '../accountingReadTiming';
+import type { AccountingReadTimings, AccountingReadWork } from '../accountingReadTiming';
 import { resetPartnerCommercialApprovals } from '../partnerSales/cases/commercialLifecycle';
 
 const measuredStages = ['lockWait', 'authorization', 'authorizationAudit', 'scopeSetup', 'provenance',
@@ -24,8 +24,10 @@ async function main() {
   const { token, session } = await createAuthoritativeSession(prisma, actorId, { ipAddress: '127.0.0.1' });
   const app = express();
   const stagesByRequest = new Map<string, AccountingReadTimings>();
+  const workByRequest = new Map<string, AccountingReadWork>();
   app.use(createAccountingRequestObserver(process.env.APP_COMMIT, record => {
     if (record.stagesMs) stagesByRequest.set(record.requestId, record.stagesMs);
+    if (record.readWork) workByRequest.set(record.requestId, record.readWork);
   }));
   app.use('/api/accounting', accountingRouter);
   const server = app.listen(0, '127.0.0.1');
@@ -64,6 +66,11 @@ async function main() {
           sample.samples.push(duration);
         }
         stagesByRequest.delete(requestId);
+        const work = workByRequest.get(requestId);
+        assert.equal(work?.reviewableSqlPages, 1, `${name}: uses the PostgreSQL population`);
+        assert.equal(work?.reviewableExactnessFallbacks, undefined, `${name}: fixture is within the exact projection bounds`);
+        assert.ok((work?.reviewableOrdinaryRows ?? Infinity) <= (name === 'reviewable' ? 50 : 12), `${name}: page-only hydration`);
+        workByRequest.delete(requestId);
         if (name === 'reviewable') {
           assert.equal(body.data?.total, 965);
           assert.equal(body.data?.items.length, 50);
@@ -99,6 +106,17 @@ async function main() {
     assert.equal(new Set(allIds).size, 965, 'pages do not duplicate or omit records');
     assert.deepEqual(new Set(allIds), new Set([...expectedOrdinary, ...expectedPartner]),
       'complete authorized population is exactly the fixture population');
+    for (const page of [1, 5, 10, 11]) {
+      const route = `/contracts?view=reviewable&page=${page}&pageSize=100`;
+      assert.deepEqual(await get(route), await get(`${route}&dateFrom=unfiltered`),
+        'ordered rows, visible actions, exact totals and pagination agree through authenticated HTTP');
+    }
+    const workQueue = await get('/contracts?view=reviewable&sort=work_queue&pageSize=12&dateFrom=unfiltered');
+    const dashboard = await get('/dashboard?range=6m');
+    assert.equal(dashboard.workspace.commandCenter.reviewableContracts.count, workQueue.total);
+    assert.deepEqual(dashboard.workspace.queues.contracts.map((row: { contractId: string }) => row.contractId),
+      workQueue.items.map((row: { contractId: string }) => row.contractId),
+      'dashboard attention order and reviewable membership agree with the authoritative work queue');
     const ordinaryFirst = await get('/contracts?view=reviewable&sourceKind=SALES_CONTRACT&page=1&pageSize=100');
     const ordinaryAgain = await get('/contracts?view=reviewable&sourceKind=SALES_CONTRACT&page=1&pageSize=100');
     assert.deepEqual(ordinaryAgain.items.map((item: { contractId: string }) => item.contractId),

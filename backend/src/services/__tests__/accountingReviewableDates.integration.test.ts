@@ -39,8 +39,12 @@ test('reviewable pages read historical dates for visible ordinary contracts and 
       }
 
       const dateReadIds: string[] = [];
+      const hydratedContracts: string[] = [];
       prisma.$use(async (params, next) => {
         const result = await next(params);
+        if (params.model === 'SalesContract' && params.action === 'findMany') {
+          hydratedContracts.push(...result.map((row: { id: string }) => row.id));
+        }
         if (params.action === 'queryRaw' && Array.isArray(result)) {
           for (const row of result) if (row && 'contractData' in row) dateReadIds.push(row.id);
         }
@@ -53,6 +57,7 @@ test('reviewable pages read historical dates for visible ordinary contracts and 
         assert.deepEqual(reference.totals, { contractAmount: '500', receivedAmount: '0', invoicedAmount: '0', remainingAmount: '500' });
         for (const page of [1, 2, 3, 4]) {
           dateReadIds.length = 0;
+          hydratedContracts.length = 0;
           const result = await listAccountingContracts({ ...query, page, pageSize: 2 });
           const visible = reference.items.slice(2 * (page - 1), 2 * page);
           assert.deepEqual(result.items, visible);
@@ -60,6 +65,8 @@ test('reviewable pages read historical dates for visible ordinary contracts and 
           assert.deepEqual(result.totals, reference.totals);
           assert.deepEqual(dateReadIds.sort(), visible.map(row => row.contractId).sort(),
             'the historical date projection must read only visible ordinary contract IDs');
+          assert.deepEqual(hydratedContracts.sort(), visible.map(row => row.contractId).sort(),
+            'reviewable ranking must hydrate only the visible ordinary contracts');
         }
         for (const [index, sample] of samples.entries()) {
           const row = reference.items.find(item => item.contractId === `contract-${index}`);
@@ -116,6 +123,26 @@ test('reviewable pages read historical dates for visible ordinary contracts and 
       assert.equal(change.trendChanged, false);
       const historical = await getAccountingFinancialTrend('1m', historicalTime, reader);
       assert.equal(historical.points.at(-1)!.endsAt, historicalTime.toISOString());
+
+      const commercial = { commercialFlowVersion: 1, commercialRevision: 3, salesApprovalRevision: 3,
+        commercialExpiresAt: new Date('2030-12-01') };
+      await prisma.salesContract.update({ where: { id: 'contract-1' }, data: {
+        ...commercial, status: 'SIGNED', customerAcceptanceRevision: 3,
+      } });
+      await prisma.salesContract.update({ where: { id: 'contract-2' }, data: {
+        ...commercial, status: 'PENDING_APPROVAL', customerCreditCustomerId: customer.id,
+        customerCreditRevision: 3, customerCreditAmountRials: 50,
+      } });
+      await prisma.salesContract.updateMany({ where: { id: { in: ['contract-3', 'contract-4'] } }, data: {
+        ...commercial, status: 'SIGNED', customerAcceptanceRevision: 3, commercialExpiresAt: new Date('2020-01-01'),
+      } });
+      await prisma.salesContract.update({ where: { id: 'contract-4' }, data: { dispatchExpiryExempt: true } });
+      const query = { view: 'reviewable', sort: 'work_queue' };
+      const ranked = await listAccountingContracts(query, reader);
+      const authoritative = await listAccountingContracts({ ...query, dateFrom: 'unchanged' }, reader);
+      assert.deepEqual(ranked, authoritative);
+      assert.deepEqual(ranked.items.filter(row => row.accounting.eligibleForFinancialRecords).map(row => row.contractId).sort(),
+        ['contract-1', 'contract-2', 'contract-4'], 'eligibility uses the current revision, credit and expiry rules');
     } finally {
       await prisma.$disconnect();
     }

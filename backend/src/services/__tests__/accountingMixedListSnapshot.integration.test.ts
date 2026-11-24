@@ -16,12 +16,14 @@ test('one-connection mixed list reads both flag counts before or after the same 
     const { prisma } = await import('../../lib/prisma');
     try {
       const { listAccountingContracts } = await import('../accountingService');
+      const { accountingReadTiming } = await import('../accountingReadTiming');
       const { seedHistoricalAccountingRead } = await import('./partnerAccountingHistoricalReadSeed');
       const { actorId, fixture } = await seedHistoricalAccountingRead(writer);
       await writer.crmCustomerCard.create({ data: { customerId: 'historical-customer' } });
       const ordinary = await writer.salesContract.create({ data: { contractNumber: 'mixed-ordinary',
         title: 'Ordinary', titlePersian: 'عادی', content: '', customerId: 'historical-customer',
-        departmentId: 'historical-department', createdBy: actorId, responsibleSellerId: actorId } });
+        departmentId: 'historical-department', createdBy: actorId, responsibleSellerId: actorId,
+        status: 'SIGNED', totalAmount: '10.05', currency: '\u00a0ToMaN\ufeff' } });
       let written = false;
       prisma.$use(async (params, next) => {
         const rows = await next(params);
@@ -37,7 +39,7 @@ test('one-connection mixed list reads both flag counts before or after the same 
         return rows;
       });
       const counts = async () => {
-        const page = await listAccountingContracts({}, { userId: actorId });
+        const page = await listAccountingContracts({ view: 'reviewable' }, { userId: actorId });
         return [ordinary.id, 'partner:' + fixture.invoice.id].map(id =>
           page.items.find(row => row.contractId === id)?.accounting.openFlags);
       };
@@ -45,6 +47,67 @@ test('one-connection mixed list reads both flag counts before or after the same 
       assert.ok(written);
       assert.deepEqual(during, [0, 0]);
       assert.deepEqual(await counts(), [1, 1]);
+
+      const baseInvoice = { contractId: ordinary.id, sourceId: ordinary.id, amount: '10.50',
+        kind: 'INVOICE_CANDIDATE', sourceKind: 'SALES_CONTRACT', createdBy: actorId } as const;
+      const visible = await writer.accountingFinancialRecord.create({ data: { ...baseInvoice, status: 'ISSUED',
+        sourceSnapshot: { partnerCaseId: null, ordinary: true } } });
+      const hidden = await writer.accountingFinancialRecord.create({ data: { ...baseInvoice, amount: '3000.50',
+        sourceSnapshot: { partnerCaseId: null, retained: { partnerCaseId: null } } } });
+      const privateReceivable = await writer.accountingReceivable.create({ data: { contractId: ordinary.id,
+        invoiceRecordId: hidden.id, originalAmount: '3000.50', remainingAmount: '3000.50', dueDate: new Date('2020-01-01'),
+        createdBy: actorId } });
+      const payment = { contractId: ordinary.id, method: 'CASH', status: 'RECEIVED', createdBy: actorId } as const;
+      await writer.accountingPaymentStatus.createMany({ data: [
+        { ...payment, amount: '5.51' },
+        { ...payment, amount: 7000, receivableId: privateReceivable.id },
+        { ...payment, amount: 8000, metadata: { nested: [null, { financialEvidenceHash: false }] } },
+      ] });
+      await writer.accountingContractFlag.create({ data: { contractId: ordinary.id, category: 'OTHER', title: 'Private source',
+        sourceFinancialRecordId: hidden.id, severity: 'BLOCKER', createdBy: actorId } });
+      await writer.accountingCorrectionRequest.create({ data: { contractId: ordinary.id, category: 'OTHER',
+        recordId: hidden.id, accountantNote: 'Private correction', createdBy: actorId } });
+      await writer.accountingTaxRecord.create({ data: { contractId: ordinary.id, submissionStatus: 'READY',
+        invoiceRecordId: hidden.id, taxableAmount: 10, missingFields: [], createdBy: actorId } });
+      for (const sort of ['attention', 'work_queue']) {
+        const query = { view: 'reviewable', sort };
+        const expected = await listAccountingContracts({ ...query, dateFrom: 'retain-entire-population' }, { userId: actorId });
+        const actual = await accountingReadTiming.run({}, async () => {
+          const result = await listAccountingContracts(query, { userId: actorId });
+          assert.equal(accountingReadTiming.getStore()?.readWork?.reviewableSqlPages, 1);
+          return result;
+        });
+        assert.deepEqual(actual, expected);
+        assert.equal(actual.total, 2, 'the private retail Contract never becomes an ordinary row');
+        const row = actual.items.find(item => item.contractId === ordinary.id);
+        assert.deepEqual(row?.financialRecords.map((record: { id: string }) => record.id), [visible.id]);
+        assert.equal(row?.accounting.totalContractAmount, '101');
+        assert.equal(row?.accounting.invoicedAmount, '11');
+        assert.equal(row?.accounting.receivedAmount, '6');
+        assert.equal(row?.accounting.remainingAmount, '95');
+        assert.equal(row?.accounting.openFlags, 1);
+        assert.equal(row?.accounting.openCorrections, 0);
+        assert.equal(row?.accounting.receivableStatus, 'NONE');
+        assert.equal(row?.accounting.taxStatus, 'NOT_READY');
+      }
+      const assertAuthoritativeFallback = async () => {
+        const query = { view: 'reviewable', page: 5, pageSize: 1 };
+        const reference = await listAccountingContracts({ ...query, dateFrom: 'retain-entire-population' }, { userId: actorId });
+        await accountingReadTiming.run({}, async () => {
+          const actual = await listAccountingContracts(query, { userId: actorId });
+          assert.deepEqual(actual, reference, 'the authoritative result still supplies exact totals on an empty page');
+          assert.deepEqual(actual.items, []);
+          assert.equal(accountingReadTiming.getStore()?.readWork?.reviewableExactnessFallbacks, 1);
+        });
+      };
+      const legacyMarker = await writer.accountingPaymentStatus.create({ data: { ...payment, amount: 123456,
+        metadata: { nested: [{ sourceKind: [['PARTNER_INTERNAL_RECORD']] }] } } });
+      await assertAuthoritativeFallback();
+      await writer.accountingPaymentStatus.delete({ where: { id: legacyMarker.id } });
+      await writer.accountingFinancialRecord.createMany({ data: Array.from({ length: 101 }, () => ({
+        ...baseInvoice, amount: '9999999999999999.99',
+      })) });
+      await assertAuthoritativeFallback();
     } finally { await prisma.$disconnect(); }
   } finally {
     if (previousUrl === undefined) delete process.env.DATABASE_URL;

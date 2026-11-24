@@ -196,8 +196,10 @@ async function readData(page, response, config, scenario, result, key = 'api') {
   };
   Object.assign(receipt, await fullTransfer(page, response));
   if (receipt.transferFailure) throw Error('INCOMPLETE_TRANSFER');
-  if (!response.ok() || (receipt.outcome && receipt.outcome !== 'success')) throw Error('API_FAILED');
+  if (!response.ok()) throw Error('API_FAILED');
   const body = await response.json().catch(() => null);
+  if (receipt.outcome && receipt.outcome !== 'success'
+    && !(scenario.name === 'dashboard' && body?.data?.trendError)) throw Error('API_FAILED');
   if (body?.success !== true || body.data == null) throw Error('INVALID_READ_DATA');
   return body.data;
 }
@@ -233,24 +235,27 @@ async function readyRegister(page, data, scenario) {
 
 async function readyDashboard(page, data, queueReady) {
   const { workspace, trend, trendError } = data;
-  if (trendError) throw Error('CHART_UNAVAILABLE');
   if (!Array.isArray(workspace?.queues?.contracts) || !Array.isArray(workspace?.deadlines?.items)
-    || !count(workspace?.commandCenter?.reviewableContracts?.count)
-    || trend?.range !== '6m' || !Array.isArray(trend.points) || !trend.points.length) throw Error('INVALID_READ_DATA');
+    || !count(workspace?.commandCenter?.reviewableContracts?.count)) throw Error('INVALID_READ_DATA');
+  const workQueueRows = workspace.queues.contracts.filter(row => row?.attention).slice(0, 6).length;
+  const waitForQueue = () => Promise.all([
+    visible(page.getByRole('heading', { name: 'کارهای امروز', exact: true })),
+    visible(page.getByRole('link', { name: 'مشاهده همه قراردادها', exact: true })),
+    visible(workQueueRows ? page.getByText(/^مدرک یا مغایرت:/).nth(workQueueRows - 1)
+      : page.getByText('در خلاصهٔ فعلی اقدام فوری برای قراردادها پیدا نشد.', { exact: true })),
+  ]).then(queueReady);
+  if (trendError) {
+    await waitForQueue();
+    throw Error('CHART_UNAVAILABLE');
+  }
+  if (trend?.range !== '6m' || !Array.isArray(trend.points) || !trend.points.length) throw Error('INVALID_READ_DATA');
   const points = trend.points.flatMap(point => [point?.invoicedRial, point?.receivedRial, point?.outstandingRial]);
   if (!points.every(Number.isFinite)) throw Error('INVALID_READ_DATA');
   const hasChart = points.some(value => value !== 0);
   const chart = page.getByRole('region', { name: 'روند مالی قراردادها', exact: true });
-  const workQueueRows = workspace.queues.contracts.filter(row => row?.attention).slice(0, 6).length;
-  const queue = [
-    visible(page.getByRole('heading', { name: 'کارهای امروز', exact: true })),
-    visible(page.getByRole('link', { name: 'مشاهده همه قراردادها', exact: true })),
-  ];
-  queue.push(visible(workQueueRows ? page.getByText(/^مدرک یا مغایرت:/).nth(workQueueRows - 1)
-    : page.getByText('در خلاصهٔ فعلی اقدام فوری برای قراردادها پیدا نشد.', { exact: true })));
   const metrics = page.getByRole('region', { name: 'شاخص‌های عملیاتی حسابداری', exact: true });
   await Promise.all([
-    Promise.all(queue).then(queueReady),
+    waitForQueue(),
     visible(page.getByRole('heading', { name: 'سررسیدها', exact: true })),
     visible(workspace.deadlines.items.length
       ? page.getByRole('link', { name: /· سررسید / }).nth(workspace.deadlines.items.length - 1)

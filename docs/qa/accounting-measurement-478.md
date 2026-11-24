@@ -50,3 +50,11 @@ The isolated HTTP fixture ran on the existing `sabalanerp-local` PostgreSQL serv
 | Reviewable contracts | 2,915 ms | 6,819 ms | 10.15 ms | 326.29 ms | 149.61 ms | 0.16 ms |
 
 The stage columns cover the instrumented operations. The HTTP time includes the complete response and additional shared work. These numbers are local fixture evidence. #448 still requires independently verified production-state measurements.
+
+## Three-second roadmap implementation slice
+
+The deployed baseline `697e8946e` completed the earlier local fixture at 933 ms dashboard p95 and 932 ms reviewable p95 with a three-month chart and 12-row page. It did not reproduce the production latency.
+
+The revised probe tested runtime commit `e7f9a2458` against an isolated schema on the existing `sabalanerp-local` PostgreSQL service. It used 935 ordinary contracts, 30 lifecycle-backed committed Partner Cases, and 20 authenticated sequential HTTP samples per surface. The probe opened a six-month chart and the 50-row reviewable page. Dashboard p95 was **881 ms** and reviewable p95 was **814 ms**. The fixture does not reproduce production invoice history or load, and the two local runs used different chart ranges and page sizes.
+
+All 965 expected authorized IDs matched. Concurrent reads during a mutation returned 200 and a revoked actor's next read returned 401. A separate fixture with a saved Partner invoice showed one full invoice evidence read per snapshot, down from three. The preparation-list fixture kept the individual authorization decisions and reduced audit insert statements from five to two. The full Chrome receipt regressions ran against the browser test fixture. A matched real-browser run on both builds and production p95 remain outstanding.

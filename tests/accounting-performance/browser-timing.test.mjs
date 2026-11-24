@@ -25,6 +25,7 @@ test('browser receipts attribute complete responses and aborted transfers indepe
       dashboardRequests++;
       res.writeHead(dashboardRequests === 1 ? 503 : 200, {
         'content-type': 'application/json', 'x-accounting-request-id': decoyId, 'x-accounting-commit': commit,
+        ...(dashboardRequests === 4 ? { 'x-accounting-outcome': 'internal_error' } : {}),
       });
       if (dashboardRequests >= 3) {
         res.end(JSON.stringify({ success: true, data: {
@@ -146,6 +147,9 @@ test('browser receipts attribute complete responses and aborted transfers indepe
   assert.ok(rendered.completeMs >= 600, 'full readiness waits for the fresh rendered chart');
   assert.ok(rendered.firstActionMs < rendered.completeMs, 'the work queue is timed independently of the chart');
   assert.equal(invalidChart.failure, 'CHART_UNAVAILABLE');
+  assert.equal(invalidChart.api.outcome, 'internal_error');
+  assert.ok(Number.isFinite(invalidChart.firstActionMs));
+  assert.equal(invalidChart.completeMs, undefined);
   assert.equal(metrics.dashboard.fullHttpMs.count, 3);
   assert.equal(metrics.dashboard.completeMs.count, 1);
   const reviewable = results.filter(sample => sample.surface === 'reviewable-list');

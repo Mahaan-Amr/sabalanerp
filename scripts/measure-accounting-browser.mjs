@@ -33,9 +33,9 @@ const list = '/api/accounting/dispatch-candidates';
 const detail = /^\/api\/accounting\/dispatch-candidates\/[^/]+\/document-read-model$/;
 const reference = /^\/api\/accounting\/loadings\/[^/]+\/sepidar-reference$/;
 const scenarios = [
-  { name: 'dashboard', page: '/dashboard/accounting', api: '/api/accounting/dashboard',
+  { name: 'dashboard', page: '/dashboard/accounting', view: null, api: '/api/accounting/dashboard',
     ready: page => page.getByRole('button', { name: 'به‌روزرسانی', exact: true }) },
-  { name: 'reviewable-list', page: '/dashboard/accounting/contracts', api: '/api/accounting/contracts',
+  { name: 'reviewable-list', page: '/dashboard/accounting/contracts?view=reviewable', view: 'reviewable', api: '/api/accounting/contracts',
     ready: page => page.getByRole('row').filter({ has: page.getByRole('cell') }).first().getByRole('link', { name: /^(مشاهده|مشاهده پرونده)$/ }) },
   { name: 'dispatch', page: '/dashboard/accounting/dispatch', api: list,
     ready: page => page.getByRole('button', { name: 'جزئیات اقلام و اسناد بارگیری', exact: true }).first() },
@@ -96,8 +96,36 @@ function monitor(page) {
 }
 
 const validId = value => /^(?:[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/.test(value ?? '') ? value : undefined;
-const pathIs = (response, path, method) => response.request().method() === method
-  && new URL(response.url()).pathname === path;
+function matchesRead(response, scenario, origin) {
+  const url = new URL(response.url());
+  if (response.request().method() !== 'GET' || url.pathname !== scenario.api) return false;
+  if (scenario.name === 'dispatch') return true;
+  const views = url.searchParams.getAll('view');
+  return url.origin === origin && (scenario.view === null ? views.length === 0 :
+    views.length === 1 && views[0] === scenario.view);
+}
+
+async function fullTransfer(page, response) {
+  const request = response.request();
+  let timer;
+  let onFailure;
+  try {
+    const interrupted = new Promise(resolve => {
+      onFailure = failed => { if (failed === request) resolve(false); };
+      page.on('requestfailed', onFailure);
+      timer = setTimeout(() => resolve(false), timeout);
+    });
+    const complete = !request.failure() && await Promise.race([
+      response.finished().then(error => !error, () => false), interrupted,
+    ]);
+    const duration = request.timing().responseEnd;
+    if (complete && !request.failure() && Number.isFinite(duration) && duration >= 0) return { fullHttpMs: duration };
+    return { transferFailure: request.failure()?.errorText === 'net::ERR_ABORTED' ? 'client_abort' : 'incomplete_transfer' };
+  } finally {
+    clearTimeout(timer);
+    page.off('requestfailed', onFailure);
+  }
+}
 
 function checkResponse(response, config) {
   const headers = response.headers();
@@ -116,6 +144,7 @@ async function sample(browser, config, scenario, command) {
   page.setDefaultNavigationTimeout(timeout);
   const result = { surface: scenario.name, commandsEnabled: Boolean(command) };
   let stop;
+  let transfer;
   let stage = 'login';
   try {
     await page.goto('/login');
@@ -126,11 +155,17 @@ async function sample(browser, config, scenario, command) {
     stop = monitor(page);
     const started = performance.now();
     const [response] = await Promise.all([
-      page.waitForResponse(response => pathIs(response, scenario.api, 'GET')),
+      page.waitForResponse(response => matchesRead(response, scenario, config.baseURL.origin)),
       page.goto(scenario.page, { waitUntil: 'commit' }),
     ]);
     result.api = checkResponse(response, config);
-    if (!response.ok() || result.api.outcome) throw Error('API_FAILED');
+    if (scenario.name !== 'dispatch') {
+      const matched = new URL(response.url());
+      result.api.path = matched.pathname;
+      result.api.view = matched.searchParams.get('view');
+      transfer = fullTransfer(page, response);
+    }
+    if (!response.ok() || (result.api.outcome && result.api.outcome !== 'success')) throw Error('API_FAILED');
     await scenario.ready(page).click({ trial: true });
     result.firstActionMs = Math.round(performance.now() - started);
     result.browser = await stop();
@@ -173,6 +208,13 @@ async function sample(browser, config, scenario, command) {
     result.failure = safeErrors.has(error.message) ? error.message : error.name === 'TimeoutError' ? 'TIMEOUT' : 'BROWSER_FAILURE';
   } finally {
     if (stop) result[stage === 'command' ? 'commandBrowser' : 'browser'] = await stop();
+    if (transfer) {
+      Object.assign(result.api, await transfer);
+      if (result.api.transferFailure && !result.failed) {
+        result.failed = 'first_action';
+        result.failure = 'INCOMPLETE_TRANSFER';
+      }
+    }
     await context.close();
   }
   return result;
@@ -218,6 +260,7 @@ async function run() {
       samples: samples.length,
       failures: samples.filter(sample => sample.failed).length,
       firstActionMs: p95(samples, sample => sample.firstActionMs),
+      ...(name === 'dispatch' ? {} : { fullHttpMs: p95(samples, sample => sample.api?.fullHttpMs) }),
       submitToVisibleMs: p95(samples, sample => sample.submitToVisibleMs),
       responseToVisibleMs: p95(samples, sample => sample.responseToVisibleMs),
       commitAcknowledgedToVisibleMs: p95(samples, sample => sample.commitAcknowledgedToVisibleMs),

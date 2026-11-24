@@ -63,6 +63,8 @@ export async function historicalAccountingFixture(status = 'DRAFT', identity: Hi
     status, amount: prepared.value.amount.amount, currency: prepared.value.amount.currency,
     sourceSnapshot: { partnerPreparation: prepared.value }, metadata: { partnerCaseId: row.id } };
   const writes: string[] = [];
+  const planReads: string[] = [];
+  const caseReads: string[] = [];
   const emptyModel = new Proxy({}, { get: (_target, method) => async () => {
     if (method === 'findMany') return [];
     if (method === 'findFirst' || method === 'findUnique') return null;
@@ -75,16 +77,19 @@ export async function historicalAccountingFixture(status = 'DRAFT', identity: Hi
       writes.push(...args.data.map(() => 'AUTHORIZATION_AUDIT'));
       return { count: args.data.length };
     } },
-    partnerSaleCase: { findMany: async () => [{ ...row, head: { ...row.head,
-      predecessor: row.head.predecessorRevision === null ? null : { integrityHash: revision.integrityHash } } }], findUnique: async () => row },
+    partnerSaleCase: { findMany: async (args: { select: Prisma.PartnerSaleCaseSelect }) => {
+      if (args.select.pricingState) caseReads.push(args.select.head ? 'projection' : 'commercial');
+      return [{ ...row, head: { ...row.head,
+        predecessor: row.head.predecessorRevision === null ? null : { integrityHash: revision.integrityHash } } }];
+    }, findUnique: async () => row },
     partnerCaseRevision: { findUnique: async () => revision },
     partnerProfile: { findMany: async () => [profile], findUnique: async () => profile },
     user: { findMany: async () => [admin, { id: profile.userId, role: 'USER', isActive: true, partnerProfile: profile }],
       findUnique: async () => admin },
     accountingFinancialRecord: { findMany: async (args: { where?: { NOT?: unknown; sourceId?: { in?: string[] } } }) =>
       args.where?.NOT || args.where?.sourceId?.in?.length === 0 ? [] : [invoice] },
-    partnerPaymentPlan: { findMany: async () => [persistedPlan], findFirst: async () => persistedPlan,
-      findUnique: async (args: { where: { id: string } }) => storedPlans.get(args.where.id) ?? null },
+    partnerPaymentPlan: { findMany: async () => { planReads.push('current'); return [persistedPlan]; }, findFirst: async () => persistedPlan,
+      findUnique: async (args: { where: { id: string } }) => { planReads.push(args.where.id); return storedPlans.get(args.where.id) ?? null; } },
     $queryRaw: async (strings: TemplateStringsArray) => {
       const sql = strings.join('?');
       if (sql.includes('FROM partner_payment_plans')) return [{ id: persistedPlan.id }];
@@ -111,7 +116,7 @@ export async function historicalAccountingFixture(status = 'DRAFT', identity: Hi
     for (const [context] of contexts) assert.equal(context.partnerContext?.caseId, row.id);
     return contexts;
   });
-  return { read, invoice, row, revision, persistedPlan, storedPlans, tx: tx as unknown as Prisma.TransactionClient, writes };
+  return { read, invoice, row, revision, persistedPlan, storedPlans, tx: tx as unknown as Prisma.TransactionClient, writes, planReads, caseReads };
 }
 
 /** Shape emitted by setSabalanPaymentPlan: revision has an empty v3 plan,

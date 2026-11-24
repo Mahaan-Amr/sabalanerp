@@ -12,6 +12,7 @@ import {
   PartnerCommandSchema,
   SabalanInternalRecordViewSchema,
   canonicalHash,
+  canonicalJson,
   checkExpectedRevision,
   partnerError,
   type PartnerCommandPort,
@@ -184,10 +185,12 @@ async function parseViews(tx: Transaction, row: LockedCase, loadedPredecessor?: 
   if (!rebuilt.ok) return undefined;
   const { customerContractNumber: _rebuiltContractNumber, ...rebuiltPartnerWithoutContract } = rebuilt.value.partner;
   const expectedPartner = partner.data.customerContractNumber ? rebuilt.value.partner : rebuiltPartnerWithoutContract;
-  if (await canonicalHash(partner.data) !== await canonicalHash(expectedPartner) ||
-      await canonicalHash(customer.data) !== await canonicalHash(rebuilt.value.customer)) return undefined;
-  if (pricingReady && (await canonicalHash(accounting.data) !== await canonicalHash(rebuilt.value.accounting) ||
-      await canonicalHash(fulfillment.data) !== await canonicalHash(rebuilt.value.fulfillment))) return undefined;
+  // Compare complete canonical content when both values are in memory. The
+  // stored revision and public output digests still bind their original evidence.
+  if (canonicalJson(partner.data) !== canonicalJson(expectedPartner) ||
+      canonicalJson(customer.data) !== canonicalJson(rebuilt.value.customer)) return undefined;
+  if (pricingReady && (canonicalJson(accounting.data) !== canonicalJson(rebuilt.value.accounting) ||
+      canonicalJson(fulfillment.data) !== canonicalJson(rebuilt.value.fulfillment))) return undefined;
   const owner = expectedOwner(row);
   const owns = (candidate: RevisionRef) => candidate.caseId === owner.caseId && candidate.revision === owner.revision &&
     candidate.integrityHash === owner.integrityHash;
@@ -214,13 +217,21 @@ export async function readCurrentPartnerCaseViews(tx: Transaction, caseId: strin
   return views ? { row, ...views } : undefined;
 }
 
+const accountingCaseViewSelect = {
+  ...caseViewSelect, head: { select: { ...caseViewSelect.head.select, predecessor: { select: { integrityHash: true } } } },
+  customerContract: { select: { ...caseViewSelect.customerContract.select,
+    id: true, partnerKind: true, commercialFlowVersion: true, salesApprovalRevision: true,
+    customerAcceptanceRevision: true, commercialRevision: true, commercialExpiresAt: true, dispatchExpiryExempt: true } },
+} satisfies Prisma.PartnerSaleCaseSelect;
+type AccountingCaseView = NonNullable<Awaited<ReturnType<typeof parseViews>>> & {
+  row: Prisma.PartnerSaleCaseGetPayload<{ select: typeof accountingCaseViewSelect }>;
+};
+
 /** The caller authorizes and fences every supplied Case in the same read snapshot. */
 export async function readCurrentPartnerCaseViewsBatch(tx: Transaction, caseIds: string[]) {
-  const viewsByCase = new Map<string, NonNullable<Awaited<ReturnType<typeof readCurrentPartnerCaseViews>>>>();
+  const viewsByCase = new Map<string, AccountingCaseView>();
   if (!caseIds.length) return viewsByCase;
-  const rows = await tx.partnerSaleCase.findMany({ where: { id: { in: caseIds } }, select: {
-    ...caseViewSelect, head: { select: { ...caseViewSelect.head.select, predecessor: { select: { integrityHash: true } } } },
-  } });
+  const rows = await tx.partnerSaleCase.findMany({ where: { id: { in: caseIds } }, select: accountingCaseViewSelect });
   for (const row of rows) {
     const views = await parseViews(tx, row, row.head.predecessor);
     if (views) viewsByCase.set(row.id, { row, ...views });

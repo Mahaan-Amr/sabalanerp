@@ -12,6 +12,7 @@ for (const status of ['DRAFT', 'ISSUED', 'POSTED']) {
     const f = await fixture(status);
     const before = structuredClone({ invoice: f.invoice, revision: f.revision, plan: f.persistedPlan });
     await f.read();
+    assert.deepEqual(f.caseReads, ['projection'], 'the Accounting scope reads current projection and commercial Case data together');
     assert.deepEqual({ invoice: f.invoice, revision: f.revision, plan: f.persistedPlan }, before);
     assert.equal(f.writes.length, 2);
     assert.ok(f.writes.every(write => write === 'AUTHORIZATION_AUDIT'));
@@ -23,10 +24,28 @@ for (const advance of [false, true]) {
     const f = await writerBoundAccountingFixture(advance);
     const before = structuredClone({ invoice: f.invoice, bound: f.boundPlan, current: f.persistedPlan });
     await f.read();
+    assert.deepEqual(f.planReads, advance ? ['current', f.boundPlan.id] : ['current'],
+      'the Accounting scope reads a selected plan once when the invoice binds the same persisted version');
     await readPartnerInvoiceSource(f.tx, f.invoice as never, f.row.id);
     assert.deepEqual({ invoice: f.invoice, bound: f.boundPlan, current: f.persistedPlan }, before);
   });
 }
+
+test('matching plan identities alone do not substitute current terms for the immutable invoice terms', async () => {
+  const f = await fixture('ISSUED');
+  const embedded = f.revision.paymentEvidence.sabalanPaymentPlan;
+  const installment = { installmentId: 'current-installment', dueDate: embedded.effectiveDate,
+    amount: { amount: f.invoice.amount, currency: f.invoice.currency }, method: 'CASH' as const };
+  const current = { ...embedded, installments: [installment] };
+  Object.assign(f.persistedPlan, { id: current.planId, version: current.version, predecessorId: current.predecessorPlanId,
+    predecessor: { id: current.predecessorPlanId, caseId: f.row.id, purpose: 'SABALAN', version: current.version - 1 },
+    evidence: current, integrityHash: await canonicalHash({ purpose: 'PARTNER_SABALAN_PAYMENT_PLAN', schemaVersion: 1,
+      caseId: f.row.id, revision: 1, plan: current }),
+    installments: [{ id: installment.installmentId, dueDate: new Date(installment.dueDate), amount: installment.amount.amount,
+      currency: installment.amount.currency, method: installment.method, evidence: installment }] });
+  await f.read();
+  assert.deepEqual(f.invoice.sourceSnapshot.partnerPreparation.paymentPlan.installments, []);
+});
 
 for (const corruption of ['missing', 'hash', 'crossCase', 'futureRevision', 'purpose', 'version', 'effectiveDate',
   'installmentAmount', 'installmentEvidence', 'predecessor', 'snapshotTerms'] as const) {

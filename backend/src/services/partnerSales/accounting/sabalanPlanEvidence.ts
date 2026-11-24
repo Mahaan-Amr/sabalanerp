@@ -13,6 +13,10 @@ const planEvidenceSelect = {
 
 type PersistedPlan = Prisma.PartnerPaymentPlanGetPayload<{ select: typeof planEvidenceSelect }>;
 type PaymentPlan = ReturnType<typeof PaymentPlanSchema.parse>;
+type CurrentPlanEvidence = {
+  byCase: Map<string, PersistedPlan>;
+  verifiedById: Map<string, Promise<PaymentPlan>>;
+};
 
 async function verifyPersistedPlan(row: PersistedPlan, caseId: string): Promise<PaymentPlan> {
   const parsed = PaymentPlanSchema.safeParse(row.evidence);
@@ -40,11 +44,21 @@ async function verifyPersistedPlan(row: PersistedPlan, caseId: string): Promise<
   return parsed.data;
 }
 
+function verifySelectedPlan(row: PersistedPlan, caseId: string, currentEvidence?: CurrentPlanEvidence) {
+  if (!currentEvidence || row.caseId !== caseId) return verifyPersistedPlan(row, caseId);
+  const known = currentEvidence.verifiedById.get(row.id);
+  if (known) return known;
+  const verified = verifyPersistedPlan(row, caseId);
+  currentEvidence.verifiedById.set(row.id, verified);
+  return verified;
+}
+
 /** Read the latest persisted terms for each authorized Case in this snapshot.
  * Only the selected versions need their predecessor and installment evidence. */
-export async function readCurrentSabalanPlanRows(tx: Prisma.TransactionClient, caseIds: string[]) {
+export async function readCurrentSabalanPlanEvidence(tx: Prisma.TransactionClient, caseIds: string[]): Promise<CurrentPlanEvidence> {
   const byCase = new Map<string, PersistedPlan>();
-  if (!caseIds.length) return byCase;
+  const snapshot = { byCase, verifiedById: new Map<string, Promise<PaymentPlan>>() };
+  if (!caseIds.length) return snapshot;
   const latest = await tx.$queryRaw<Array<{ id: string }>>`SELECT DISTINCT ON ("caseId") id
     FROM partner_payment_plans WHERE "caseId" = ANY(${caseIds}::text[]) AND purpose = 'SABALAN'
     ORDER BY "caseId", version DESC, id DESC`;
@@ -53,14 +67,14 @@ export async function readCurrentSabalanPlanRows(tx: Prisma.TransactionClient, c
     if (plans.length !== latest.length) throw new PartnerSabalanPlanIntegrityError('Missing current Partner Sabalan plan');
     for (const plan of plans) byCase.set(plan.caseId, plan);
   }
-  return byCase;
+  return snapshot;
 }
 
 export async function resolveCurrentSabalanPlan(tx: Prisma.TransactionClient, caseId: string, fallback: PaymentPlan,
-  currentRows?: ReadonlyMap<string, PersistedPlan>) {
-  const latest = currentRows ? currentRows.get(caseId) : await tx.partnerPaymentPlan.findFirst({ where: { caseId, purpose: 'SABALAN' },
+  currentEvidence?: CurrentPlanEvidence) {
+  const latest = currentEvidence ? currentEvidence.byCase.get(caseId) : await tx.partnerPaymentPlan.findFirst({ where: { caseId, purpose: 'SABALAN' },
     orderBy: [{ version: 'desc' }, { id: 'desc' }], select: planEvidenceSelect });
-  return latest ? verifyPersistedPlan(latest, caseId) : fallback;
+  return latest ? verifySelectedPlan(latest, caseId, currentEvidence) : fallback;
 }
 
 /** The caller must verify the immutable Case revision and compare the complete
@@ -68,17 +82,19 @@ export async function resolveCurrentSabalanPlan(tx: Prisma.TransactionClient, ca
  * they never supply authoritative terms. Accounting can persist a new plan
  * independently of the Case revision that originally embedded its terms. */
 export async function resolveInvoiceSabalanPlan(tx: Prisma.TransactionClient, owner: RevisionRef,
-  revisionPlan: PaymentPlan, invoicePlan: unknown): Promise<PaymentPlan> {
+  revisionPlan: PaymentPlan, invoicePlan: unknown, currentEvidence?: CurrentPlanEvidence): Promise<PaymentPlan> {
   const requested = PaymentPlanSchema.safeParse(invoicePlan);
   if (!requested.success) throw new PartnerSabalanPlanIntegrityError('Invalid Partner invoice payment plan');
   if (requested.data.planId === revisionPlan.planId && requested.data.version === revisionPlan.version) {
     return revisionPlan;
   }
-  const persisted = await tx.partnerPaymentPlan.findUnique({ where: { id: requested.data.planId }, select: planEvidenceSelect });
+  const current = currentEvidence?.byCase.get(owner.caseId);
+  const persisted = current?.id === requested.data.planId ? current
+    : await tx.partnerPaymentPlan.findUnique({ where: { id: requested.data.planId }, select: planEvidenceSelect });
   if (!persisted || persisted.caseRevision > owner.revision) {
     throw new PartnerSabalanPlanIntegrityError('Missing or future Partner invoice payment plan');
   }
-  const verified = await verifyPersistedPlan(persisted, owner.caseId);
+  const verified = await verifySelectedPlan(persisted, owner.caseId, currentEvidence);
   if (verified.version !== requested.data.version) {
     throw new PartnerSabalanPlanIntegrityError('Invalid Partner invoice payment plan version');
   }

@@ -613,8 +613,9 @@ export const ordersAPI = {
 // Dashboard API
 export const dashboardAPI = {
   getStats: () => api.get('/dashboard/stats'),
-  getProfile: () => api.get('/dashboard/profile'),
-  getRouteAvailability: (path: string) => api.get('/dashboard/route-availability', { params: { path } }),
+  getProfile: (request?: Pick<AxiosRequestConfig, 'signal'>) => api.get('/dashboard/profile', request),
+  getRouteAvailability: (path: string, request?: Pick<AxiosRequestConfig, 'signal'>) =>
+    api.get('/dashboard/route-availability', { ...request, params: { path } }),
   getActionAvailability: (workspace: string) => api.get('/dashboard/action-availability', { params: { workspace } }),
 };
 

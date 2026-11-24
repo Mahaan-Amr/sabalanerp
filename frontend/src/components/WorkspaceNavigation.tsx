@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -50,6 +50,7 @@ import {
   WORKSPACE_CONFIG,
   WORKSPACE_PERMISSIONS,
 } from "@/contexts/WorkspaceContext";
+import { useAuth } from "@/contexts/AuthContext";
 import { dashboardAPI, securityAPI } from "@/lib/api";
 import { ErpPressable, useErpPresentationScope } from '@/components/erp';
 import { DutyCountBadge } from '@/features/cross-workspace-duties/DutyCountBadge';
@@ -94,12 +95,25 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
   const { currentWorkspace, hasPermission, accessibleWorkspaces } =
     useWorkspace();
   const [expandedItems, setExpandedItems] = useState<string[]>([]);
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const { user: actor } = useAuth();
+  const [profile, setProfile] = useState<{ actor: typeof actor; user: User } | null>(null);
+  const currentUser = actor && profile?.actor === actor ? profile.user : null;
   const [canOpenSecurityShiftReport, setCanOpenSecurityShiftReport] =
     useState(false);
-  const [partnerRouteAccess, setPartnerRouteAccess] = useState<Record<string, boolean>>({});
   const [purchasingSections,setPurchasingSections]=useState<string[]>([]);
   const pathname = usePathname();
+  // WorkspaceContext resolves after the route render. Check both before treating the sidebar as unscoped.
+  const pathnameWorkspace = Object.values(WORKSPACE_CONFIG).find(({ path }) => pathname.startsWith(path))?.id;
+  const needsPartnerRoutes = Boolean(currentUser && (
+    (currentWorkspace === WORKSPACES.SALES && pathnameWorkspace === WORKSPACES.SALES) ||
+    (!currentWorkspace && !pathnameWorkspace && currentUser.role !== 'ADMIN' && currentUser.role !== 'MANAGER')
+  ));
+  const partnerRequest = useMemo(() => needsPartnerRoutes && actor ? { actor } : null, [needsPartnerRoutes, actor]);
+  const [partnerResult, setPartnerResult] = useState<{
+    request: NonNullable<typeof partnerRequest>;
+    access: Record<string, boolean>;
+  } | null>(null);
+  const partnerRouteAccess = partnerRequest && partnerResult?.request === partnerRequest ? partnerResult.access : {};
   const crmPresentation = useErpPresentationScope() === 'workspace';
   const dutyCount = useCrossWorkspaceDutyCount(currentWorkspace || null);
 
@@ -107,25 +121,38 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
   useEffect(()=>{if(currentWorkspace!==WORKSPACES.PURCHASING)return;let active=true;setPurchasingSections([]);void purchasingAPI.access().then(r=>{if(active)setPurchasingSections(r.data.data.sections);}).catch(()=>{if(active)setPurchasingSections([]);});return()=>{active=false;};},[currentWorkspace,currentUser?.id]);
 
   useEffect(() => {
-    loadCurrentUser();
-  }, []);
+    if (!actor) return;
+    const controller = new AbortController();
+    dashboardAPI.getProfile({ signal: controller.signal }).then(response => {
+      if (!controller.signal.aborted && response.data.success && response.data.data?.id === actor.id) {
+        setProfile({ actor, user: response.data.data });
+      }
+    }).catch(error => {
+      if (!controller.signal.aborted) console.error("Error loading user profile:", error);
+    });
+    return () => controller.abort();
+  }, [actor]);
 
   useEffect(() => {
-    if (!currentUser) return;
-    let active = true;
+    if (!partnerRequest) return;
+    const controller = new AbortController();
     const paths = ['/dashboard/sales/partners', '/dashboard/sales/contracts', '/dashboard/sales/contracts/create',
       '/dashboard/sales/partner-inquiries', '/dashboard/sales/partner-cases',
       '/dashboard/sales/partner-customers', '/dashboard/sales/partner-customers/transfers', '/dashboard/sales/partner-reports'];
     Promise.all(paths.map(async path => {
       try {
-        const response = await dashboardAPI.getRouteAvailability(path);
-        return [path, response.data.data.allowed === true] as const;
+        const response = await dashboardAPI.getRouteAvailability(path, { signal: controller.signal });
+        return [path, response.data.success === true && response.data.data?.allowed === true] as const;
       } catch {
         return [path, false] as const;
       }
-    })).then(entries => { if (active) setPartnerRouteAccess(Object.fromEntries(entries)); });
-    return () => { active = false; };
-  }, [currentUser]);
+    })).then(entries => {
+      if (!controller.signal.aborted) {
+        setPartnerResult({ request: partnerRequest, access: Object.fromEntries(entries) });
+      }
+    });
+    return () => controller.abort();
+  }, [partnerRequest]);
 
   useEffect(() => {
     if (currentWorkspace !== WORKSPACES.SECURITY) {
@@ -154,17 +181,6 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
       active = false;
     };
   }, [currentWorkspace]);
-
-  const loadCurrentUser = async () => {
-    try {
-      const response = await dashboardAPI.getProfile();
-      if (response.data.success) {
-        setCurrentUser(response.data.data);
-      }
-    } catch (error) {
-      console.error("Error loading user profile:", error);
-    }
-  };
 
   const toggleExpanded = (itemKey: string) => {
     setExpandedItems((prev) =>

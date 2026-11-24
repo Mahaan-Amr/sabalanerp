@@ -64,6 +64,8 @@ Use **1.5–1.8 seconds at application p95** as an initial engineering budget fo
 
 **Acceptance.** Full-dashboard p95 below 3 s in the agreed matched browser workload, with exact chart and drilldown parity. Run the dashboard snapshot, financial trend, historical drilldown and operational drilldown suites.
 
+On a cold direct Accounting load, the sidebar used to issue eight Partner Sales route-availability requests alongside the active route's check. The sidebar now requests Partner Sales availability in Sales and for eligible actors on unscoped dashboard pages. The active route keeps its own authorization check. The [browser regression](../../tests/workspace-navigation/partner-availability.test.mjs) covers direct Accounting entry before the workspace resolves, CRM, Sales and main navigation, and a late response during an account change. Run it with `npm run test:workspace-navigation`. Use the matched normal-accountant benchmark to measure the effect on full-dashboard p95.
+
 ### 4. Remove duplicate duties work
 
 **Files.** `backend/src/services/crossWorkspaceDutyInbox.ts` and `frontend/src/features/hr-duties/DestinationDutyQueue.tsx`.

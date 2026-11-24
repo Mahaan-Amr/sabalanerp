@@ -12,9 +12,10 @@ export function createStoneReturnIntakeClient<Result>(
     try {
       result = await record(command, actorId);
     } catch (error) {
-      const status = (error as { response?: { status?: number } }).response?.status;
-      // These domain responses are issued before a receipt can be committed.
-      if (status === 400 || status === 404 || status === 409) storage.removeItem(key);
+      const rejection = (error as { response?: { data?: { code?: string; requestId?: string } } }).response?.data;
+      if (rejection?.code === 'STONE_RETURN_INTAKE_REJECTED' && rejection.requestId === command.requestId) {
+        storage.removeItem(key);
+      }
       throw error;
     }
     try { storage.removeItem(key); } catch { /* A later replay returns this receipt. */ }

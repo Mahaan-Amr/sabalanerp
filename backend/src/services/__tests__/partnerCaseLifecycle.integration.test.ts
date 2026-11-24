@@ -940,8 +940,8 @@ test('durable Accounting queue replay returns the original Partner record withou
           commandId: `${correctionId}-process`, evidence: { evidenceId: `${correctionId}-processing-evidence` } } });
         const approvedAt = new Date();
         const earlierInvoiceDate = new Date(approvedAt.getTime() - 86_400_000);
-        const history = async (cutoff = new Date()) => readPartnerOutstandingHistory(tx, {
-          invoiceIds: [existingInvoice.id, stagedInvoice.id], cutoff, asOf: new Date(),
+        const history = async (cutoff = new Date(), asOf = new Date()) => readPartnerOutstandingHistory(tx, {
+          invoiceIds: [existingInvoice.id, stagedInvoice.id], cutoff, asOf,
         });
         assert.deepEqual((await history()).map(row => row.remainingAmount), ['1600']);
         const approvedReplacement = await tx.accountingFinancialRecord.update({ where: { id: stagedInvoice.id }, data: {
@@ -1074,7 +1074,6 @@ test('durable Accounting queue replay returns the original Partner record withou
         assert.equal(revoked.ok ? null : revoked.error.code, 'FORBIDDEN');
         await tx.$executeRaw`ROLLBACK TO SAVEPOINT revoked_replacement_approver`;
         await tx.$executeRaw`RELEASE SAVEPOINT revoked_replacement_approver`;
-        const beforeActivation = new Date();
         for (const administrativeDate of [earlierInvoiceDate, new Date(approvedAt.getTime() + 86_400_000)]) {
           await tx.$executeRaw`SAVEPOINT replacement_date_boundary`;
           const dated = await tx.accountingFinancialRecord.update({ where: { id: stagedInvoice.id }, data: {
@@ -1086,13 +1085,18 @@ test('durable Accounting queue replay returns the original Partner record withou
             downstreamNote: 'تسویه مستند پیش از جایگزینی صورتحساب' });
           const effective = await service.execute(command);
           assert.equal(effective.ok, true, JSON.stringify(effective));
-          assert.deepEqual((await history(beforeActivation)).map(row => row.remainingAmount), ['1600'],
+          const retired = await tx.accountingFinancialRecord.findUniqueOrThrow({ where: { id: existingInvoice.id },
+            select: { voidedAt: true } });
+          assert.ok(retired.voidedAt);
+          const activation = retired.voidedAt, afterActivation = new Date(activation.getTime() + 1);
+          const [knowledge] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
+          assert.deepEqual((await history(activation, knowledge.now)).map(row => row.remainingAmount), ['1600'],
             'administrative invoice dating cannot move replacement debt before activation');
-          assert.deepEqual((await history()).map(row => row.remainingAmount), ['1700'],
+          assert.deepEqual((await history(afterActivation, knowledge.now)).map(row => row.remainingAmount), ['1700'],
             'an activated future-dated invoice must not leave a gap in current debt');
           const trend = await readPartnerAccountingTrend(tx, { invoiceIds: [existingInvoice.id, stagedInvoice.id],
-            asOf: new Date(), periods: [{ key: 'activation', monthKey: 'activation', label: 'activation', marker: true,
-              startsAt: beforeActivation, endsAt: new Date() }] });
+            asOf: knowledge.now, periods: [{ key: 'activation', monthKey: 'activation', label: 'activation', marker: true,
+              startsAt: activation, endsAt: afterActivation }] });
           assert.equal(trend[0].points[0].invoiced, '100', 'the replacement adjustment belongs to the activation period');
           await tx.$executeRaw`ROLLBACK TO SAVEPOINT replacement_date_boundary`;
           await tx.$executeRaw`RELEASE SAVEPOINT replacement_date_boundary`;

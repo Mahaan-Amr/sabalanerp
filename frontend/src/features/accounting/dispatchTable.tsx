@@ -93,7 +93,7 @@ export function dispatchTableColumns(showHistoricalWaybills: boolean): ErpColumn
       </> },
     { id: "status", header: "وضعیت", sortValue: row => row.statuses.map(candidateStatusLabel).join("، "),
       cell: row => <div className="flex flex-wrap gap-1">{row.statuses.map(status =>
-        <ErpBadge key={status} tone={statusTone(status)}>{candidateStatusLabel(status)}</ErpBadge>)}</div> },
+        <ErpBadge key={status} tone={statusTone(status)}><span className="whitespace-nowrap">{candidateStatusLabel(status)}</span></ErpBadge>)}</div> },
     { id: "waybill", header: "بارنامه", sortValue: row => shownWaybills(row).map(waybill => waybill.number).join("، "),
       cell: row => shownWaybills(row).length ? <ul className="space-y-1">{shownWaybills(row).map(waybill =>
         <li key={waybill.id}><bdi>{waybill.number.replace(/[0-9]/g, digit => "۰۱۲۳۴۵۶۷۸۹"[Number(digit)])}</bdi>

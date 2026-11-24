@@ -322,7 +322,7 @@ for (const width of [1280, 390]) {
       return range.getClientRects().length;
     })).toBe(1);
     await expect(table.getByRole("button", { name: /ابطال.*فاکتور فروش/ })).toHaveCount(0);
-    const search = page.getByPlaceholder("شماره بارگیری، مشتری، پروژه، قرارداد، راننده، پلاک یا شماره بارنامه");
+    const search = page.getByRole("searchbox", { name: "جست‌وجو در ردیف‌ها", exact: true });
     await search.fill("راننده ۱");
     await expect(table.getByRole("row")).toHaveCount(2);
     await expect(table.getByText("راننده 1", { exact: true })).toBeVisible();

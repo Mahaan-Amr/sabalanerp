@@ -19,6 +19,10 @@ async function main() {
   const url = new URL(process.env.DATABASE_URL || '');
   if (url.hostname !== '127.0.0.1' || url.port !== '55432' ||
       !/^\/sabalanerp_concurrency_[a-f0-9]{16}$/.test(url.pathname)) throw new Error('Isolated local test DB required');
+  const databaseInstant = async () => {
+    const [clock] = await prisma.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
+    return clock.now.toISOString();
+  };
   const recordId = process.env.PARTNER_TEST_INVOICE_ID!;
   const actor = { userId: process.env.PARTNER_TEST_ACTOR_ID!, role: 'ADMIN' };
   try {
@@ -45,7 +49,7 @@ async function main() {
       }
     };
     const receipt = { kind: 'REGISTER_RECEIPT', receivableId: receivable.id, method: 'CHECK' as const,
-      amount: '200', receivedAt: new Date().toISOString(), note: 'دریافت چک آزمایشی حساب همکار',
+      amount: '200', receivedAt: await databaseInstant(), note: 'دریافت چک آزمایشی حساب همکار',
       idempotencyKey: `${recordId}-receipt`, correlationId: `${recordId}-receipt`,
       check: { checkNumber: 'isolated-334', ownerName: 'آزمایش همکار', dueDate: '2026-09-03T00:00:00.000Z' } };
     const caseId = (record.metadata as { partnerCaseId: string }).partnerCaseId;
@@ -112,7 +116,7 @@ async function main() {
       ['CLEARED', '200', '1400'], ['BOUNCED', '0', '1600'], ['RETURNED', '0', '1600'],
     ]) {
       const change = { kind: 'UPDATE_CHECK_STATUS', paymentEventId, status,
-        occurredAt: new Date().toISOString(), note: 'آزمون گردش چک',
+        occurredAt: await databaseInstant(), note: 'آزمون گردش چک',
         idempotencyKey: `${recordId}-${status}`, correlationId: `${recordId}-${status}` };
       await executeAccountingAction(change, actor);
       await executeAccountingAction(change, actor);
@@ -188,7 +192,7 @@ async function main() {
         trackingCode: `${recordId}-ambiguous-time`, submittedAt: '2026-09-02' }, `${recordId}-ambiguous-tax-time`);
       assert.equal(ambiguousTaxTime.status, 400, 'a fiscal instant must not silently interpret a date-only value as UTC midnight');
       assert.equal((await action({ kind: 'TRACK_TAX_SUBMISSION', invoiceId: recordId, status: 'SUBMITTED',
-        trackingCode: `${recordId}-fiscal-reference`, submittedAt: new Date().toISOString() }, `${recordId}-tax-submit`)).status, 200);
+        trackingCode: `${recordId}-fiscal-reference`, submittedAt: await databaseInstant() }, `${recordId}-tax-submit`)).status, 200);
       let acceptingTax: ReturnType<typeof action> | undefined;
       let submissionRecordedAt: Date | undefined;
       await prisma.effectiveActionGrant.create({ data: { ...grant, id: `${grant.id}-tax-clock-read`, action: 'ACCOUNTING_READ',
@@ -426,7 +430,7 @@ async function main() {
       assert.equal((await readPayment(actionPaymentId)).partnerActions.reverseReceipt, false);
       const periodParts = new Intl.DateTimeFormat('en-US-u-ca-persian', { timeZone: 'Asia/Tehran', year: 'numeric', month: '2-digit' }).formatToParts(new Date());
       const period = `${periodParts.find(part => part.type === 'year')!.value}-${periodParts.find(part => part.type === 'month')!.value}`;
-      const historical = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/accounting/receivables?view=outstanding&period=${period}&cutoff=${encodeURIComponent(new Date().toISOString())}&search=${encodeURIComponent(displayed.partnerContext.caseNumber)}`,
+      const historical = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/accounting/receivables?view=outstanding&period=${period}&cutoff=${encodeURIComponent(await databaseInstant())}&search=${encodeURIComponent(displayed.partnerContext.caseNumber)}`,
         { headers: { cookie: `${SESSION_COOKIE}=${session.token}` } });
       const historicalBody = await historical.json() as any;
       assert.equal(historical.status, 200, JSON.stringify(historicalBody));

@@ -147,7 +147,7 @@ test('Accounting-related read records retain fixed labels and database failure c
   const server = createServer((request, response) => {
     middleware(request, response, () => {
       const expires = request.url?.includes('/unread-count') || request.url?.includes('/sabalan-plan-candidates');
-      const code = expires ? 'P2028' : request.url?.includes('/summary') ? 'P2024' : undefined;
+      const code = expires ? 'P2028' : /\/(summary|route-availability)/.test(request.url ?? '') ? 'P2024' : undefined;
       if (code) {
         reportAccountingRequestFailure(response, { code, message: 'PRIVATE' });
         response.statusCode = 500;
@@ -168,6 +168,8 @@ test('Accounting-related read records retain fixed labels and database failure c
       ['/api/notifications/metadata?workspace=PRIVATE', '/api/notifications/metadata', 'success', undefined],
       ['/api/notifications/unread-count?workspace=PRIVATE', '/api/notifications/unread-count', 'transaction_expired', 'P2028'],
       ['/api/partner/accounting/sabalan-plan-candidates?search=PRIVATE', '/api/partner/accounting/sabalan-plan-candidates', 'transaction_expired', 'P2028'],
+      ['/api/dashboard/route-availability?path=%2Fdashboard%2Faccounting%2Fcontracts%2FPRIVATE',
+        '/api/dashboard/route-availability?scope=accounting', 'pool_timeout', 'P2024'],
     ];
     for (const [path, route, outcome, code] of reads) {
       const response = await fetch(origin + path);
@@ -177,9 +179,17 @@ test('Accounting-related read records retain fixed labels and database failure c
       assert.deepEqual([record?.route, record?.requestId, record?.outcome, record?.code],
         [route, response.headers.get('x-accounting-request-id'), outcome, code]);
     }
-    const otherDuty = await fetch(origin + '/api/duties/workspaces/sales/duties?search=PRIVATE');
-    await otherDuty.text();
-    assert.equal(otherDuty.headers.get('x-accounting-request-id'), null);
+    for (const path of [
+      '/api/duties/workspaces/sales/duties?search=PRIVATE',
+      '/api/dashboard/route-availability?path=/dashboard/sales',
+      '/api/dashboard/route-availability?path=/dashboard/accounting-private',
+      '/api/dashboard/route-availability?path=/dashboard/accounting&path=/dashboard/sales',
+      '/api/dashboard/route-availability?path=/dashboard/accounting&path%5B0%5D=PRIVATE',
+    ]) {
+      const response = await fetch(origin + path);
+      await response.text();
+      assert.equal(response.headers.get('x-accounting-request-id'), null);
+    }
     for (const path of [
       '/api/notifications/unread-count',
       '/api/duties/workspaces/accounting/summary',

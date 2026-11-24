@@ -46,6 +46,14 @@ export function accountingOperationalRoute(url: string | undefined, method?: str
 
   const readRoute = route ?? relatedReadRoutes.find(([pattern]) => pattern.test(path))?.[1];
   const search = target.slice(pathname.length);
+  if (path === '/api/dashboard/route-availability') {
+    const query = new URLSearchParams(search);
+    const paths = query.getAll('path');
+    if (paths.length === 1 && /^\/dashboard\/accounting(?:\/|$)/.test(paths[0]) &&
+        ![...query.keys()].some(key => key.startsWith('path['))) {
+      return '/api/dashboard/route-availability?scope=accounting';
+    }
+  }
   if (readRoute === '/api/accounting/contracts' && hasExactView(search, 'reviewable')) {
     return '/api/accounting/contracts?view=reviewable';
   }

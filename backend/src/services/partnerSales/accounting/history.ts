@@ -188,13 +188,17 @@ export async function readPartnerAccountingTrend(source: Prisma.TransactionClien
           cutoff: new Date(period.endsAt.getTime() - 1), asOf: input.asOf, preparation });
         if (before === null || after === null || invoice.receivables[0].id !== approval.accountingReceivableId) throw conflict();
         receivedAmounts.push(after, negate(before));
-        if (purchase && outstandingAt(row, period.endsAt, activeCases)) {
-          const official = requireOfficialPurchase(purchase.atCollection(after), invoice.receivables[0].id);
-          closingBalances.push(official.balance.amount);
-        }
+        const active = outstandingAt(row, period.endsAt, activeCases);
+        if (!active && !within(row.effectiveAt) && !(invoice.voidedAt && within(invoice.voidedAt)) && before === after) continue;
+        // A publication can affect invoicing or collections and have no closing debt.
+        const verified = purchase ? purchase.atCollection(after) : await readPartnerOfficialPurchase(tx, {
+          internalRecordId: invoice.sourceId!, approval, cutoff: new Date(period.endsAt.getTime() - 1),
+          asOf: input.asOf, voided: !active && Boolean(invoice.voidedAt && invoice.voidedAt < period.endsAt),
+        });
+        const official = requireOfficialPurchase(verified, invoice.receivables[0].id);
+        if (active) closingBalances.push(official.balance.amount);
       }
-      const outstanding = scopedPurchases ? sum(closingBalances) : sum((await projectPartnerOutstandingHistory(tx,
-        { cutoff: period.endsAt, asOf: input.asOf }, selected)).map(row => row.remainingAmount));
+      const outstanding = sum(closingBalances);
       points.push({ periodKey: period.key, label: period.label, startsAt: period.startsAt.toISOString(), endsAt: period.endsAt.toISOString(),
         invoiced, received: sum(receivedAmounts), outstanding });
     }

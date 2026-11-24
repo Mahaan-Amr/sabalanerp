@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { prisma } from '../../lib/prisma';
-import { executeAccountingAction } from '../accountingService';
+import type { Prisma } from '@prisma/client';
+import { executeAccountingAction, getAccountingFinancialTrend } from '../accountingService';
 
 async function main() {
   const url = new URL(process.env.DATABASE_URL || '');
@@ -22,6 +23,21 @@ async function main() {
       method: 'CASH', amount: '100', receivedAt, idempotencyKey: key, correlationId: key }, actor);
     assert.equal(received.status, 'APPLIED');
     const paymentId = (await prisma.accountingPaymentStatus.findFirstOrThrow({ where: { receivableId: receivable.id }, orderBy: { createdAt: 'desc' } })).id;
+    const settlementKey = randomUUID();
+    const remainder = receivable.remainingAmount.minus(100);
+    const settlement = await executeAccountingAction({ kind: 'REGISTER_RECEIPT', receivableId: receivable.id,
+      method: 'CASH', amount: remainder.toString(), receivedAt: new Date().toISOString(),
+      idempotencyKey: settlementKey, correlationId: settlementKey }, actor);
+    assert.equal(settlement.status, 'APPLIED');
+    const settled = await getAccountingFinancialTrend('3m', new Date(Date.now() + 1), actor);
+    const settledPoint = settled.partnerSeries[0]?.points.at(-1);
+    assert.ok(settledPoint);
+    assert.deepEqual([settledPoint.invoiced, settledPoint.received, settledPoint.outstanding], ['1600', '1600', '0']);
+    const settlementPayment = await prisma.accountingPaymentStatus.findFirstOrThrow({ where: {
+      receivableId: receivable.id, method: 'CASH', amount: remainder } });
+    await executeAccountingAction({ kind: 'REVERSE_RECEIPT', paymentEventId: settlementPayment.id,
+      reason: 'آزمون تسویه و برگشت', occurredAt: new Date().toISOString(),
+      idempotencyKey: randomUUID(), correlationId: randomUUID() }, actor);
     const checkKey = randomUUID();
     await executeAccountingAction({ kind: 'REGISTER_RECEIPT', receivableId: receivable.id, method: 'CHECK', amount: '200',
       receivedAt: new Date().toISOString(), check: { checkNumber: 'isolated-void-check', ownerName: 'همکار آزمون', dueDate: '2026-10-10' },
@@ -47,6 +63,21 @@ async function main() {
     await executeAccountingAction({ kind: 'VOID_ACCOUNTING_RECORD', recordId }, actor);
     const finalInvoice = await prisma.accountingFinancialRecord.findUniqueOrThrow({ where: { id: recordId } });
     assert.equal(finalInvoice.status, 'VOIDED'); assert.equal(finalInvoice.contractId, null); assert.equal(finalInvoice.customerId, null);
+    const trendNow = new Date(Date.now() + 1);
+    const readTrend = () => getAccountingFinancialTrend('3m', trendNow, actor);
+    const valid = await readTrend();
+    const point = valid.partnerSeries[0]?.points.at(-1);
+    assert.ok(point);
+    assert.deepEqual([point.invoiced, point.received, point.outstanding], ['0', '0', '0']);
+    const metadata = finalInvoice.metadata as Prisma.JsonObject;
+    await prisma.accountingFinancialRecord.update({ where: { id: recordId }, data: { metadata: {
+      ...metadata, partnerApproval: { ...(metadata.partnerApproval as Prisma.JsonObject), financialApprovalEvidenceId: 'wrong-publication' },
+    } } });
+    try {
+      await assert.rejects(readTrend, /integrity/i, 'a void in the issue period must still verify its publication');
+    } finally {
+      await prisma.accountingFinancialRecord.update({ where: { id: recordId }, data: { metadata } });
+    }
     const finalRoot = await prisma.partnerSaleCase.findUniqueOrThrow({ where: { id: caseId } });
     assert.equal(finalRoot.state, 'COMMITTED'); assert.equal(finalRoot.commitmentEventId, root.commitmentEventId);
     assert.equal(await prisma.partnerCaseEvent.count({ where: { caseId, type: 'CASE_COMMITTED' } }), commitmentCount);

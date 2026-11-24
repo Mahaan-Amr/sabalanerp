@@ -12,7 +12,7 @@ import { PartnerAccountingCommandError } from './errors';
 import { PartnerCollectionIntegrityError, sumPartnerCollections } from './collections';
 import { partnerCheckTransitions } from './paymentPolicy';
 import { readPartnerAccountingCapabilities } from './capabilities';
-import { readPartnerSnapshot } from '../authorization/readSnapshot';
+import { readPartnerSnapshot, retryReadSnapshot } from '../authorization/readSnapshot';
 import { partnerTaxTransitions } from './taxPolicy';
 import { partnerPredecessorIsFrozen, readFrozenPartnerPredecessors } from '../corrections/mutationFreeze';
 import { PARTNER_ACCOUNTING_MARKER_JSON_PATH } from './provenance';
@@ -54,9 +54,9 @@ export function withAccountingReadScope<T>(database: PrismaClient, actor: Accoun
   if (actor) return readPartnerSnapshot(database, async tx => read(await createScope(tx, actor, selection)), {
     multiRootAuthority: Boolean(selection.focusedCaseId),
   });
-  return database.$transaction(async tx => read(await createScope(tx, actor, selection)), {
+  return retryReadSnapshot(() => database.$transaction(async tx => read(await createScope(tx, actor, selection)), {
     isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: 30_000,
-  });
+  }));
 }
 
 async function createScope(database: Prisma.TransactionClient, actor: AccountingReadActor | undefined,

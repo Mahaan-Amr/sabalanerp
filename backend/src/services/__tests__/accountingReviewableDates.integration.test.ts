@@ -105,7 +105,8 @@ test('reviewable pages read historical dates for visible ordinary contracts and 
       const dashboard = await getAccountingDashboard({}, '1m', undefined, reader).finally(() => mock.timers.reset());
       assert.equal(dashboard.trendError, false, 'the dashboard can read cancelled ordinary rows using one connection');
       assert.equal(dashboard.workspace.period.code,
-        `${databaseClock.now.getFullYear()}-${String(databaseClock.now.getMonth() + 1).padStart(2, '0')}`);
+        new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tehran', year: 'numeric', month: '2-digit', day: '2-digit' })
+          .format(databaseClock.now).slice(0, 7));
       assert.ok(Date.parse(dashboard.trend!.points.at(-1)!.endsAt) >= databaseClock.now.getTime());
       assert.ok('revisions' in dashboard && dashboard.revisions);
       const revisions = dashboard.revisions;

@@ -10,6 +10,7 @@ const validOutcome = new Set([
 ]);
 const timeout = 30_000;
 const targetMs = 3_000;
+const baselineWithUnmountedPaymentPlanRoute = '697e8946e61cc2811072c5ffdb7f1f769d6e05ef';
 
 export function options(env) {
   const baseURL = new URL(env.ACCOUNTING_TIMING_ORIGIN ?? 'http://127.0.0.1:3000');
@@ -370,8 +371,9 @@ async function measureFirstRead(page, config, scenario, result) {
     }));
   }
   // The deployed baseline does not mount the URL its invoice page requests.
-  // Measure the first invoice rows on both builds and attach the plan result on candidates.
-  if (scenario.name === 'invoice-candidates' && config.run === 'candidate') {
+  // Keep the first invoice rows comparable and measure the plan panel on builds with the mounted route.
+  const missingBaselineRoute = config.run === 'baseline' && config.commit === baselineWithUnmountedPaymentPlanRoute;
+  if (scenario.name === 'invoice-candidates' && !missingBaselineRoute) {
     actions.push(waitFor(paymentPlanCandidates).then(async response => {
       await readyPaymentPlanCandidates(page, response, config, result, navigationStartedAt);
       result.paymentPlanReadyMs = elapsed();

@@ -9,7 +9,6 @@ import { asyncRoute } from '../middleware/asyncRoute';
 import {
   filterCurrentlyAuthorizedNotifications,
   readCurrentlyAuthorizedUnreadCount,
-  type NotificationWithAuthorizationEvent,
 } from '../services/notificationAuthorization';
 import {
   notificationEventDefinition,
@@ -87,6 +86,7 @@ router.get('/', asyncRoute(async (req: AuthRequest, res) => {
       ...(scanCursor ? { cursor: { id: scanCursor }, skip: 1 } : {}),
       select: {
         id: true,
+        userId: true,
         type: true,
         title: true,
         message: true,
@@ -103,7 +103,7 @@ router.get('/', asyncRoute(async (req: AuthRequest, res) => {
     const authorizedRows = await filterCurrentlyAuthorizedNotifications(
       prisma,
       req.user!,
-      candidates as NotificationWithAuthorizationEvent[] & typeof candidates,
+      candidates,
       { inbox: true },
     );
     const authorizedIds = new Set(authorizedRows.map((row) => row.id));
@@ -114,7 +114,7 @@ router.get('/', asyncRoute(async (req: AuthRequest, res) => {
       const safeCategory = notificationCategory(row.type);
       if (category && safeCategory !== category) continue;
       if (!notificationMatchesSearch(row, search)) continue;
-      const { event: _event, ...notification } = row;
+      const { event: _event, userId: _userId, ...notification } = row;
       data.push({
         ...notification,
         workspace: row.event?.workspace || null,
@@ -193,7 +193,7 @@ router.put('/read-all', asyncRoute(async (req: AuthRequest, res) => {
     where: { userId: req.user!.id, readAt: null },
     select: { id: true, type: true, userId: true, event: { select: { workspace: true, feature: true, resourceType: true, resourceId: true } } },
   });
-  const authorizedRows = await filterCurrentlyAuthorizedNotifications(prisma, req.user!, rows, { inbox: true });
+  const authorizedRows = await filterCurrentlyAuthorizedNotifications(prisma, req.user!, rows);
   const result = await prisma.notification.updateMany({
     where: { id: { in: authorizedRows.map((row) => row.id) } },
     data: { readAt: new Date() },

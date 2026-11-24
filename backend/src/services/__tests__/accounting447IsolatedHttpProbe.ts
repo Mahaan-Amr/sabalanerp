@@ -8,7 +8,8 @@ import { createAccountingRequestObserver } from '../../middleware/accountingRequ
 import type { AccountingReadTimings } from '../accountingReadTiming';
 import { resetPartnerCommercialApprovals } from '../partnerSales/cases/commercialLifecycle';
 
-const measuredStages = ['lockWait', 'authorization', 'population', 'rowHydration'] as const;
+const measuredStages = ['lockWait', 'authorization', 'authorizationAudit', 'scopeSetup', 'provenance',
+  'partnerEvidence', 'population', 'ordinaryPopulation', 'partnerPopulation', 'registerRanking', 'rowHydration'] as const;
 const p95 = (samples: number[]) => samples.sort((a, b) => a - b)[Math.ceil(0.95 * samples.length) - 1];
 
 async function main() {
@@ -45,7 +46,8 @@ async function main() {
     for (const [name, path] of [['dashboard', '/dashboard?range=3m'],
       ['reviewable', '/contracts?view=reviewable&page=1&pageSize=12']] as const) {
       const samples: number[] = [];
-      const stageSamples = measuredStages.map(stage => ({ stage, samples: [] as number[] }));
+      const stages = name === 'dashboard' ? [...measuredStages, 'workspace', 'trend'] as const : measuredStages;
+      const stageSamples = stages.map(stage => ({ stage, samples: [] as number[] }));
       for (let index = 0; index < 20; index++) {
         const started = performance.now();
         const response = await fetch(`${base}${path}`, { headers });

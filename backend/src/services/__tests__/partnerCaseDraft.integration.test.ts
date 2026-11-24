@@ -1737,6 +1737,28 @@ test('Partner preparation lists preserve amounts and advisory audit with one bou
         }
       }
     });
+
+    const { readCurrentPartnerCaseViews } = await import('../partnerSales/cases/lifecycle');
+    const { preparePartnerFinancialSource } = await import('../partnerSales/accounting/source');
+    const current = await readCurrentPartnerCaseViews(database, finished.caseId);
+    assert.ok(current?.accounting);
+    const prepared = await preparePartnerFinancialSource({ view: { ...current.accounting, state: 'COMMITTED' },
+      partnerSellerId: finished.partnerId }, current.accounting.owner);
+    assert.ok(prepared.ok);
+    const invoice = await database.accountingFinancialRecord.create({ data: {
+      kind: 'INVOICE_CANDIDATE', status: 'DRAFT', sourceKind: 'PARTNER_INTERNAL_RECORD',
+      sourceId: prepared.value.internalRecordId, amount: prepared.value.amount.amount,
+      currency: prepared.value.amount.currency, createdBy: actorId,
+      sourceSnapshot: JSON.parse(JSON.stringify({ partnerPreparation: prepared.value })),
+      metadata: { partnerCaseId: finished.caseId },
+    } });
+    queries.length = 0;
+    const [projected] = await withAccountingReadScope(database, { userId: actorId }, scope =>
+      scope.contextualize('FINANCIAL', [{ id: invoice.id }]));
+    assert.equal(projected.partnerContext?.caseId, finished.caseId);
+    const invoiceReads = queries.filter(query => query.includes('SELECT') &&
+      query.includes('"accounting_financial_records"."sourceSnapshot"'));
+    assert.equal(invoiceReads.length, 1, 'the authorized invoice evidence is fetched once per snapshot');
   } finally { await database.$disconnect(); await temporary.cleanup(); }
 });
 

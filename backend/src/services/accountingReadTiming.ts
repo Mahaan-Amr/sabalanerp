@@ -1,6 +1,8 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 
-type AccountingReadPhase = 'lockWait' | 'authorization' | 'population' | 'rowHydration';
+type AccountingReadPhase = 'lockWait' | 'authorization' | 'population' | 'rowHydration'
+  | 'scopeSetup' | 'authorizationAudit' | 'provenance' | 'partnerEvidence'
+  | 'ordinaryPopulation' | 'partnerPopulation' | 'registerRanking' | 'workspace' | 'trend';
 export type AccountingReadTimings = Partial<Record<AccountingReadPhase, number>>;
 
 type AccountingReadWorkKind = 'historicalInvoices' | 'historicalPayments' | 'historicalAuditEvents'

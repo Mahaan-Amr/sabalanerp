@@ -1286,7 +1286,11 @@ const readPartnerContractSources = async (scope: AccountingReadScope, actorId: s
   const records = await scope.database.accountingFinancialRecord.findMany({
     where: scope.financial({ sourceKind: PARTNER_INTERNAL_ACCOUNTING_SOURCE,
       kind: FinancialRecordKind.INVOICE_CANDIDATE, contractId: null, customerId: null }),
-    include: { receivables: { where: scope.receivable(), select: { status: true, currency: true, dueDate: true, paidAmount: true, remainingAmount: true } } },
+    select: {
+      id: true, sourceId: true, status: true, amount: true, currency: true, createdAt: true,
+      receivables: { where: scope.receivable(),
+        select: { status: true, currency: true, dueDate: true, paidAmount: true, remainingAmount: true } },
+    },
     orderBy: { createdAt: 'desc' },
   });
   const contextualized = await scope.contextualize('FINANCIAL', records);
@@ -1323,7 +1327,8 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}, ac
     : 'active';
   const ordinaryOnly = { partnerRecords: [], preparations: [], preparationOverlays: new Map() };
   const read = async (scope: AccountingReadScope) => {
-    const partner = actor ? await readPartnerContractSources(scope, actor.userId, lifecycleView, query.view === 'reviewable') : ordinaryOnly;
+    const partner = actor ? await measureAccountingReadPhase('partnerPopulation',
+      () => readPartnerContractSources(scope, actor.userId, lifecycleView, query.view === 'reviewable')) : ordinaryOnly;
     return readAccountingContractPage(scope.database, query, lifecycleView, partner, asOf ?? scope.asOf);
   };
   if (existingScope) return read(existingScope);
@@ -1380,7 +1385,7 @@ const readAccountingContractPage = async (database: Prisma.TransactionClient, qu
     { createdAt: 'desc' };
   const stableOrderBy: Prisma.SalesContractOrderByWithRelationInput[] = [orderBy, { id: 'asc' }];
 
-  const ordinaryRead = measureAccountingReadPhase('population', async () => {
+  const ordinaryRead = measureAccountingReadPhase('population', () => measureAccountingReadPhase('ordinaryPopulation', async () => {
     const aggregate = sqlPaged ? await aggregateActiveOrdinaryContracts(database) : null;
     const rows = query.sourceKind === 'PARTNER_INTERNAL_RECORD' ? [] : await database.salesContract.findMany({
       where, select: accountingContractListSelect, orderBy: stableOrderBy,
@@ -1388,7 +1393,7 @@ const readAccountingContractPage = async (database: Prisma.TransactionClient, qu
     });
     const prepared = sqlPaged ? await attachAccountingCollections(await attachAccountingListDates(database, rows), database) : null;
     return { rows, prepared, aggregate: aggregate?.safe ? aggregate : null };
-  });
+  }));
   const [ordinary, settings] = await Promise.all([ordinaryRead, getDefaultSettings(database)]);
   const finishPopulation = startAccountingReadPhase('population');
   const rawContracts = ordinary.rows;
@@ -1426,8 +1431,10 @@ const readAccountingContractPage = async (database: Prisma.TransactionClient, qu
         ...financialStatuses, ...(date ? [date.toISOString(), getTehranDateKey(date)] : [])]);
     });
   }
-  let contracts = ordinary.prepared ?? await attachAccountingCollections(populationContracts, database);
+  let contracts = ordinary.prepared ?? await measureAccountingReadPhase('ordinaryPopulation',
+    () => attachAccountingCollections(populationContracts, database));
   const rowTime = asOf ?? new Date();
+  const finishRanking = startAccountingReadPhase('registerRanking');
   let items: any[] = await Promise.all(contracts.map((contract) => buildContractRow(contract, settings, true, rowTime, database)));
   {
     const projected = (lifecycleView === 'active' ? partnerRecords : [])
@@ -1578,6 +1585,7 @@ const readAccountingContractPage = async (database: Prisma.TransactionClient, qu
     });
   }
 
+  finishRanking();
   const partnerItems = sqlPaged ? items.filter(item => item.sourceKind === PARTNER_INTERNAL_ACCOUNTING_SOURCE) : [];
   const total = ordinaryAggregate ? Number(ordinaryAggregate.count) + partnerItems.length : items.length;
   const contractsById = new Map(contracts.map(contract => [contract.id, contract]));
@@ -1811,7 +1819,8 @@ const getAccountingFinancialTrendInScope = async (scope: AccountingReadScope, re
 };
 
 export const getAccountingFinancialTrend = async (requestedRange: unknown, now?: Date, actor?: AccountingReadActor) =>
-  withAccountingReadScope(prisma, actor, scope => getAccountingFinancialTrendInScope(scope, requestedRange, now ?? scope.asOf));
+  withAccountingReadScope(prisma, actor, scope => measureAccountingReadPhase('trend',
+    () => getAccountingFinancialTrendInScope(scope, requestedRange, now ?? scope.asOf)));
 
 // The dashboard renders counts and deadlines, not the financial evidence
 // bodies. Keep them available on the dedicated workspace/detail endpoints.
@@ -1891,7 +1900,7 @@ export const getAccountingDashboardChange = async (query: any = {}, actor: Accou
 
 export const getAccountingDashboardWorkspace = async (query: any = {}, actor: AccountingReadActor) => {
   return withAccountingReadScope(prisma, actor, async scope => {
-    const workspace = await getAccountingWorkspaceInScope(scope, query, true, actor);
+    const workspace = await measureAccountingReadPhase('workspace', () => getAccountingWorkspaceInScope(scope, query, true, actor));
     const revisions = await getDashboardRevisions(scope.database, actor.userId,
       scope.authorizedPartnerInternalIds, query, query.range ?? '6m', scope.asOf);
     return { workspace: compactDashboardWorkspace(workspace), revisions };
@@ -1906,13 +1915,13 @@ export const getAccountingDashboard = async (query: any = {}, requestedRange: un
   try {
     return await withAccountingReadScope(prisma, actor, async scope => {
       const now = asOf ?? scope.asOf;
-      const workspace = await getAccountingWorkspaceInScope(scope, query, true, actor, now);
+      const workspace = await measureAccountingReadPhase('workspace', () => getAccountingWorkspaceInScope(scope, query, true, actor, now));
       // Creating the current period or default settings advances the workspace revision.
       const revisions = actor ? await getDashboardRevisions(scope.database, actor.userId,
         scope.authorizedPartnerInternalIds, query, requestedRange, now) : undefined;
       workspaceCompleted = true;
       try {
-        const trend = await getAccountingFinancialTrendInScope(scope, requestedRange, now);
+        const trend = await measureAccountingReadPhase('trend', () => getAccountingFinancialTrendInScope(scope, requestedRange, now));
         return { workspace: compactDashboardWorkspace(workspace), trend, trendError: false, revisions };
       } catch (error) {
         reportFailure?.(error);

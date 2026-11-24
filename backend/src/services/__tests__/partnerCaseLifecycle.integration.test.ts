@@ -682,9 +682,12 @@ test('durable Accounting queue replay returns the original Partner record withou
     await database.$transaction(async tx => {
       await tx.user.create({ data: { id: accountantId, username: accountantId,
         email: `${accountantId}@example.invalid`, password: 'not-a-login', firstName: 'Accounting', lastName: 'Replay' } });
+      await tx.workspacePermission.create({ data: { userId: accountantId, workspace: 'accounting', permissionLevel: 'edit' } });
+      await tx.featurePermission.create({ data: { userId: accountantId, workspace: 'accounting',
+        feature: 'accounting_invoice_candidates_manage', permissionLevel: 'edit' } });
       await tx.effectiveActionGrant.create({ data: { id: `${ids.caseId}-accounting-grant`, principalKind: 'USER',
         principalId: accountantId, subjectUserId: accountantId, domain: 'PARTNER', action: 'ACCOUNTING_WRITE',
-        rootKind: 'CASE', purpose: 'ACCOUNTING', scope: 'COMPANY', effect: 'ALLOW', grantedBy: accountantId,
+        rootKind: 'CASE', purpose: 'ACCOUNTING', scope: 'PURPOSE_BOUND', boundRootId: ids.caseId, effect: 'ALLOW', grantedBy: accountantId,
         reason: 'isolated durable Accounting replay fixture', correlationId: `${ids.caseId}-grant` } });
     });
     const adapter = createPartnerAccountingAdapter(createPrismaPartnerAccountingRepository({ database,
@@ -728,6 +731,13 @@ test('durable Accounting queue replay returns the original Partner record withou
     } catch (error) { if (error !== frozenQueueRollback) throw error; }
     const first = await adapter.enqueueCommitted(view, commitment);
     assert.equal(first.ok, true);
+    const queuePermission = { userId_workspace_feature: { userId: accountantId, workspace: 'accounting',
+      feature: 'accounting_invoice_candidates_manage' } };
+    await database.featurePermission.update({ where: queuePermission, data: { permissionLevel: 'view' } });
+    const deniedReplay = await adapter.enqueueCommitted(view, commitment);
+    assert.equal(deniedReplay.ok ? null : deniedReplay.error.code, 'FORBIDDEN',
+      'a previously successful queue command requires current invoice-candidate edit authority on replay');
+    await database.featurePermission.update({ where: queuePermission, data: { permissionLevel: 'edit' } });
     assert.deepEqual(await adapter.enqueueCommitted(view, commitment), first);
     assert.equal(await database.accountingFinancialRecord.count({ where: {
       sourceKind: PARTNER_INTERNAL_ACCOUNTING_SOURCE, sourceId: ids.internalId,
@@ -871,9 +881,9 @@ test('durable Accounting queue replay returns the original Partner record withou
         assert.equal((await tx.partnerSaleCase.findUniqueOrThrow({ where: { id: ids.caseId } })).headRevision, 2);
         assert.equal((await stagePartnerAccountingReplacement(tx, { caseId: ids.caseId, correctionId, actorId: ids.partnerId }))?.id,
           stagedInvoice.id, 'staging retries return one immutable source-bound invoice draft');
-        await tx.effectiveActionGrant.create({ data: { id: `${ids.caseId}-replacement-approval-grant`, principalKind: 'USER',
+        const replacementApproval = await tx.effectiveActionGrant.create({ data: { id: `${ids.caseId}-replacement-approval-grant`, principalKind: 'USER',
           principalId: accountantId, subjectUserId: accountantId, domain: 'PARTNER', action: 'FINANCIAL_APPROVE',
-          rootKind: 'CASE', purpose: 'ACCOUNTING', scope: 'COMPANY', effect: 'ALLOW', grantedBy: accountantId,
+          rootKind: 'CASE', purpose: 'ACCOUNTING', scope: 'PURPOSE_BOUND', boundRootId: ids.caseId, effect: 'ALLOW', grantedBy: accountantId,
           reason: 'isolated replacement Accounting approval', correlationId: `${ids.caseId}-replacement-grant` } });
         await tx.partnerCorrectionGate.create({ data: { id: `${correctionId}-process`, opportunityId: correctionId,
           kind: 'ACCOUNTING_PROCESS', outcome: 'APPROVE', actorId: 'separate-accounting-processor',
@@ -1005,6 +1015,8 @@ test('durable Accounting queue replay returns the original Partner record withou
           await tx.$executeRaw`RELEASE SAVEPOINT contradictory_predecessor_balance`;
         }
         await tx.$executeRaw`SAVEPOINT revoked_replacement_approver`;
+        await tx.effectiveActionGrant.create({ data: { ...replacementApproval, id: `${correctionId}-other-case-approval`,
+          boundRootId: `${ids.caseId}-other`, correlationId: `${correctionId}-other-case-approval` } });
         await tx.effectiveActionGrant.update({ where: { id: `${ids.caseId}-replacement-approval-grant` }, data: {
           revokedAt: new Date(), revokedBy: accountantId, revocationReason: 'isolated revocation regression',
           revocationCorrelationId: `${correctionId}-revoke` } });
@@ -1810,9 +1822,12 @@ test('Partner independent financial void keeps the commercial contract and commi
     await database.$transaction(async tx => {
       await tx.user.create({ data: { id: accountantId, username: accountantId,
         email: `${accountantId}@example.invalid`, password: 'not-a-login', firstName: 'Accounting', lastName: 'Replay' } });
+      await tx.workspacePermission.create({ data: { userId: accountantId, workspace: 'accounting', permissionLevel: 'edit' } });
+      await tx.featurePermission.create({ data: { userId: accountantId, workspace: 'accounting',
+        feature: 'accounting_invoice_candidates_manage', permissionLevel: 'edit' } });
       await tx.effectiveActionGrant.create({ data: { id: `${ids.caseId}-accounting-grant`, principalKind: 'USER',
         principalId: accountantId, subjectUserId: accountantId, domain: 'PARTNER', action: 'ACCOUNTING_WRITE',
-        rootKind: 'CASE', purpose: 'ACCOUNTING', scope: 'COMPANY', effect: 'ALLOW', grantedBy: accountantId,
+        rootKind: 'CASE', purpose: 'ACCOUNTING', scope: 'PURPOSE_BOUND', boundRootId: ids.caseId, effect: 'ALLOW', grantedBy: accountantId,
         reason: 'isolated financial void fixture', correlationId: `${ids.caseId}-grant` } });
     });
     const adapter = createPartnerAccountingAdapter(createPrismaPartnerAccountingRepository({ database,

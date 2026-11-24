@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { mock } from 'node:test';
 import { prisma } from '../../lib/prisma';
 import { executeAccountingAction } from '../accountingService';
 import { createPartnerAccountingAdapter } from '../partnerSales/accounting/adapter';
@@ -147,7 +148,7 @@ async function main() {
       assert.equal((await action(reverse, `${recordId}-cash-reverse`)).status, 200);
       await assertBalance('0', '1600');
       const grant = await prisma.effectiveActionGrant.findFirstOrThrow({ where: { principalId: actor.userId,
-        domain: 'PARTNER', action: 'ACCOUNTING_WRITE', revokedAt: null } });
+        domain: 'PARTNER', action: 'ACCOUNTING_WRITE', scope: 'PURPOSE_BOUND', boundRootId: caseId, revokedAt: null } });
       await prisma.effectiveActionGrant.update({ where: { id: grant.id }, data: { revokedAt: new Date(),
         revokedBy: actor.userId, revocationReason: 'آزمون لغو دسترسی', revocationCorrelationId: `${recordId}-revoke` } });
       const deniedReplay = await action(reverse, `${recordId}-cash-reverse`);
@@ -404,9 +405,15 @@ async function main() {
       const actionCash = await action({ kind: 'REGISTER_RECEIPT', receivableId: receivable.id, method: 'CASH', amount: '1',
         note: 'آزمون دسترسی اقدام' }, `${recordId}-action-cash`);
       assert.equal(actionCash.status, 200);
-      const beforeReversal = new Date().toISOString();
       const actionPaymentId = actionCash.body.data.affected.paymentEventIds[0];
-      assert.equal((await readPayment(actionPaymentId)).partnerActions.reverseReceipt, true);
+      // An acknowledged receipt is visible even when the application clock lags PostgreSQL.
+      mock.timers.enable({ apis: ['Date'], now: Date.now() - 5_000 });
+      let beforeReversal: string;
+      try {
+        const postedCash = await readPayment(actionPaymentId);
+        assert.equal(postedCash.partnerActions.reverseReceipt, true);
+        beforeReversal = new Date(Date.parse(postedCash.occurredAt) + 1).toISOString();
+      } finally { mock.timers.reset(); }
       const paymentGrantKey = { userId_workspace_feature: { userId: actor.userId, workspace: 'accounting', feature: 'accounting_payments_manage' } };
       await prisma.featurePermission.update({ where: paymentGrantKey, data: { permissionLevel: 'view' } });
       assert.equal((await readPayment(actionPaymentId)).partnerActions.reverseReceipt, false, 'current narrow permission controls the projected action');

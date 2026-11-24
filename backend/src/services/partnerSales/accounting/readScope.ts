@@ -304,7 +304,10 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
     database.accountingTaxRecord.findMany({ where: { invoiceRecordId: { in: invoiceIds } } }),
   ]);
   const invoiceByEntity = new Map(invoiceIds.map(id => [id, id]));
-  const asOf = new Date();
+  // The collection writer timestamps both knowledge and effect with PostgreSQL's clock.
+  const asOf = invoiceIds.length
+    ? (await database.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`)[0].now
+    : new Date();
   const paymentsByReceivable = groupPaymentsByReceivable(ownedPayments);
   for (const receivable of ownedReceivables) {
     const preparation = preparationByInvoice.get(receivable.invoiceRecordId!)!;
@@ -356,7 +359,7 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
   }
   auditAccess.AND = [...auditAccess.AND as Prisma.AccountingAuditLogWhereInput[], { id: { notIn: rejectedAuditIds } }];
   finishPopulation();
-  return { database,
+  return { database, asOf,
     actorId: actor?.userId ?? null,
     caseAuthority,
     readCommercialForCase,

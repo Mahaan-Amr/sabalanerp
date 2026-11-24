@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FaBan, FaEye, FaFileAlt, FaFingerprint, FaTruck, FaRedo, FaReply, FaSync, FaWrench } from "react-icons/fa";
+import { FaBan, FaEye, FaFileAlt, FaFileInvoiceDollar, FaFingerprint, FaListAlt, FaTruck, FaRedo, FaReply, FaSync, FaWrench } from "react-icons/fa";
 import {
   type ErpAction,
   ErpBadge,
@@ -10,26 +10,29 @@ import {
   ErpDisclosure,
   ErpEmptyState,
   ErpField,
+  ErpFilters,
   ErpInlineState,
   ErpInput,
-  ErpListPage,
   ErpLoading,
   ErpPagination,
+  ErpListContent,
+  ErpPage,
   ErpSegmentedControl,
   ErpSheet,
 } from "@/components/erp";
-import RoleAwareDispatchCases from "@/features/dispatch-case/RoleAwareDispatchCases";
+import RoleAwareDispatchCases, { type DispatchCaseRow } from "@/features/dispatch-case/RoleAwareDispatchCases";
 import SalesDispatchInvoices from "@/features/accounting/SalesDispatchInvoices";
 import { dispatchDocumentApiPaths, mapDispatchDocumentReadModel } from "@/features/accounting/dispatch-documents/dispatchDocumentsClient";
-import { sepidarCheckAmount } from "@/features/accounting/dispatch-documents/sepidarCheckAmount";
+import SepidarDispatchInvoices, { SepidarInvoiceNumbers, sepidarInvoiceLabel, sepidarInvoicesOf, type SepidarAuditEntry,
+  type SepidarInvoice, type SepidarInvoiceOwner } from "@/features/accounting/SepidarDispatchInvoices";
+import { candidateDispatchTableRow, contractsOf, currentLoadingCandidates, dispatchTableColumns, dispatchTableFilters, matchDispatchTableRow,
+  type DispatchTableCandidate, type DispatchTableRow } from "@/features/accounting/dispatchTable";
 import { formatDisplayedMoney, type DispatchDocumentCase } from "@/features/accounting/dispatch-documents/dispatchDocumentsViewModel";
-import { dispatchCaseReference } from "@/features/dispatch-case/dispatchCasePresentation";
-import { operationalStatusLabel } from "@/features/dispatch/operationalStatusPresentation";
 import { userFacingError } from "@/features/dispatch/userFacingError";
 import { biometricAttemptNotice, confirmationActionsFor } from "@/features/biometric/dispatchConfirmationPresentation";
 import { createAccountingAPI, createDispatchConfirmationAPI } from "@/lib/api";
 import { biometricConnectorClient } from "@/lib/biometricConnector";
-import { formatNumericInputText, normalizeDigits } from "@/lib/numberFormat";
+import { normalizeDigits } from "@/lib/numberFormat";
 import { useAuth } from "@/contexts/AuthContext";
 import { useWorkspace, WORKSPACES } from "@/contexts/WorkspaceContext";
 import { useActorScopedHttp } from "@/hooks/useActorScopedHttp";
@@ -55,24 +58,6 @@ const dispatchAccessDenied = (error: unknown) => lostDispatchIdentity(error) || 
 const dispatchDeniedNotice = { kind: "error", text: "دسترسی به اطلاعات ارسال مجاز نیست." } as const;
 const loadingIssueKey = (actorId: string, loadingId: string) => JSON.stringify([actorId, loadingId]);
 type DispatchSection = "candidates" | "confirmation" | "cases";
-type ReferenceAuditEntry = {
-  id: string;
-  actorId: string;
-  createdAt: string;
-  beforeState?: { sepidarLoadingReference: string | null } | null;
-  afterState?: { sepidarLoadingReference: string | null } | null;
-  note?: string | null;
-};
-type ReferenceCandidate = {
-  id: string;
-  loadingId: string;
-  waybills: { id: string }[];
-  canManageSepidarLoadingReference: boolean;
-  sepidarLoadingReference: string | null;
-  sepidarLoadingReferenceHistory: ReferenceAuditEntry[];
-};
-type ReferenceError = { text: string; stale?: boolean; reason?: boolean };
-const referenceLabel = "شماره بارگیری سپیدار";
 type ReasonAction = {
   type: "reject" | "void" | "replace" | "revoke" | "reconstruct";
   id: string;
@@ -85,23 +70,8 @@ type ReasonAction = {
   idempotencyKey?: string;
 };
 
-const dispatchStatusLabels: Record<string, string> = {
-  PENDING: "در انتظار بررسی",
-  ACCEPTED: "پذیرفته‌شده",
-  REJECTED: "برای اصلاح بازگردانده‌شده",
-  RETURNED: "برای اصلاح بازگردانده‌شده",
-};
 const quantityUnitLabels: Record<string, string> = { meter: "متر طول", squareMeter: "متر مربع", count: "عدد", ton: "تن" };
 const dispatchPageSize = 50;
-const normalizeDispatchSearch = (value: unknown) => normalizeDigits(String(value ?? ""))
-  .toLowerCase().replace(/ي/g, "ی").replace(/ك/g, "ک").trim();
-const matchesDispatchSearch = (candidate: any, query: string) => !query || [
-  candidate.summary?.loadingNumber, candidate.sepidarLoadingReference, candidate.summary?.driverName, candidate.summary?.plate,
-  candidate.summary?.customerName, candidate.summary?.projectName, candidate.summary?.projectAddress, candidate.partnerCaseNumber,
-  ...(candidate.waybills || []).map((waybill: any) => waybill.number),
-  ...(candidate.lines || []).map((line: any) => line.contractNumber),
-  ...(candidate.contractNumbers || []),
-].some(value => normalizeDispatchSearch(value).includes(query));
 
 export default function AccountingDispatchPage() {
   const { user, loading: authLoading } = useAuth();
@@ -128,30 +98,22 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
   const groupReads = useRef(new Set<string>());
   const [section, setSection] = useState<DispatchSection>("candidates");
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [invoiceFilter, setInvoiceFilter] = useState("");
+  const [caseRefresh, setCaseRefresh] = useState(0);
   const [voidInvoiceLoadingId, setVoidInvoiceLoadingId] = useState<string | null>(null);
   const [detailCandidateId, setDetailCandidateId] = useState<string | null>(null);
-  const [referenceTarget, setReferenceTarget] = useState<{ loadingId: string; candidateId: string } | null>(null);
-  const referenceLoadingId = referenceTarget?.loadingId;
-  const referenceCandidateId = referenceTarget?.candidateId;
-  const [referenceInput, setReferenceInput] = useState("");
-  const [referenceAmount, setReferenceAmount] = useState("");
-  const [referenceDetail, setReferenceDetail] = useState<DispatchDocumentCase | null>();
-  const [referenceExpected, setReferenceExpected] = useState<string | null>(null);
-  const [referenceVersion, setReferenceVersion] = useState<string | null>(null);
-  const [referenceReason, setReferenceReason] = useState("");
-  const [referenceError, setReferenceError] = useState<ReferenceError | null>(null);
+  const [referenceLoadingId, setReferenceLoadingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const registry = useMemo(() => createDispatchRegistryReads<any>(), []);
   const [{ rows: dispatchCandidates, page: candidatePage }, setRegistry] = useState<ReturnType<typeof registry.discard>>({ rows: [] });
-  const referenceCandidate: ReferenceCandidate | undefined = dispatchCandidates.find(
-    candidate => candidate.id === referenceCandidateId,
-  );
-  const referenceWaybillId = referenceCandidate?.waybills.at(-1)?.id;
   const [detailRead, setDetailRead] = useState<{ key: string; value: DispatchDocumentCase | null }>();
   const [detailAttempt, retryDetail] = useState(0);
   const [page, setPage] = useState(1);
   const showTimeline = section === "cases";
   const registrySearch = showTimeline ? "" : search.trim();
+  const registryStatus = showTimeline ? undefined : statusFilter || undefined;
+  const registryInvoice = showTimeline ? undefined : invoiceFilter || undefined;
   const [dispatchReason, setDispatchReason] = useState("");
   const [reasonAction, setReasonAction] = useState<ReasonAction | null>(null);
   const currentReasonAction = useRef(reasonAction);
@@ -176,14 +138,7 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
     setLoading(false);
     setDetailCandidateId(null);
     setDetailRead(undefined);
-    setReferenceTarget(null);
-    setReferenceDetail(undefined);
-    setReferenceInput("");
-    setReferenceAmount("");
-    setReferenceExpected(null);
-    setReferenceVersion(null);
-    setReferenceReason("");
-    setReferenceError(null);
+    setReferenceLoadingId(null);
     setVoidInvoiceLoadingId(null);
     setPickupCode("");
     setLoadingIssues({});
@@ -208,19 +163,20 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
     discardConfirmation();
   }, [discardCandidates, discardConfirmation]);
 
-  useEffect(() => {
-    if (!referenceCandidateId) return;
-    const controller = new AbortController();
-    api.get(dispatchDocumentApiPaths("/accounting").readModel(referenceCandidateId, referenceWaybillId), { signal: controller.signal })
-      .then(response => {
-        const detail = mapDispatchDocumentReadModel(response.data.data);
-        if (!controller.signal.aborted) setReferenceDetail(detail.id === referenceCandidateId ? detail : null);
-      })
-      .catch(() => {
-        if (!controller.signal.aborted) setReferenceDetail(null);
-      });
-    return () => controller.abort();
-  }, [api, referenceCandidateId, referenceWaybillId]);
+  const handleSepidarError = useCallback((error: unknown, deniedLoadingId: string) => {
+    if (!dispatchAccessDenied(error) && errorStatus(error) !== 404) return false;
+    if (lostDispatchIdentity(error)) discardIdentity();
+    else if (errorStatus(error) === 403) discardCandidates();
+    else {
+      const deniedCandidateIds = new Set(registry.rowsForGroup(deniedLoadingId).map(row => row.id));
+      const result = registry.acceptGroup(registry.beginGroup(), deniedLoadingId, []);
+      if (result?.snapshot) setRegistry(result.snapshot);
+      setDetailCandidateId(current => current && deniedCandidateIds.has(current) ? null : current);
+      setReferenceLoadingId(current => current === deniedLoadingId ? null : current);
+    }
+    setDispatchNotice(dispatchDeniedNotice);
+    return true;
+  }, [discardCandidates, discardIdentity, registry]);
 
   const loadDispatch = useCallback(async () => {
     const request = registry.beginList();
@@ -238,16 +194,15 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
     try {
       const response = showTimeline
         ? await accountingAPI.getDispatchCandidates()
-        : await accountingAPI.getDispatchCandidatePage(page, dispatchPageSize, registrySearch);
+        : await accountingAPI.getDispatchCandidatePage(page, dispatchPageSize, registrySearch, registryStatus, registryInvoice);
       const { data = [], relatedCandidates = [], invoiceActionCandidateIds = [], pagination } = response.data;
-      const query = normalizeDispatchSearch(registrySearch);
       const next = registry.acceptList(request, {
         rows: [...data, ...relatedCandidates],
         page: pagination ? {
           ids: new Set(data.map((row: { id: string }) => row.id)), invoiceActionIds: new Set(invoiceActionCandidateIds),
           page: pagination.page, total: pagination.total,
         } : undefined,
-      }, candidate => matchesDispatchSearch(candidate, query));
+      }, candidate => matchDispatchTableRow(candidateDispatchTableRow(candidate), registrySearch, registryStatus ?? "", registryInvoice ?? ""));
       if (!next) return;
       setRegistry(next);
       if (response.data.capabilities) {
@@ -285,7 +240,8 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
     } finally {
       if (registry.isCurrentList(request)) setLoading(false);
     }
-  }, [accountingAPI, dispatchConfirmationAPI, discardCandidates, discardConfirmation, discardIdentity, page, registry, registrySearch, showTimeline]);
+  }, [accountingAPI, dispatchConfirmationAPI, discardCandidates, discardConfirmation, discardIdentity, page, registry, registrySearch,
+    registryStatus, registryInvoice, showTimeline]);
 
   const runDispatch = async (
     command: () => Promise<any>,
@@ -471,11 +427,28 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
     void loadDispatch();
   }, [loadDispatch]);
 
-  const query = normalizeDispatchSearch(search);
-  const filteredCandidates = dispatchCandidates.filter(candidate => {
-    if (candidatePage) return candidatePage.ids.has(candidate.id);
-    return matchesDispatchSearch(candidate, query);
-  });
+  const candidateRows = dispatchCandidates.filter(candidate => !candidatePage || candidatePage.ids.has(candidate.id))
+    .map(candidateDispatchTableRow);
+  const loadingGroups = new Map<string, DispatchTableCandidate[]>();
+  for (const candidate of dispatchCandidates) {
+    if (!candidate.loadingId) continue;
+    const members = loadingGroups.get(candidate.loadingId) ?? [];
+    members.push(candidate);
+    loadingGroups.set(candidate.loadingId, members);
+  }
+  const candidateMatches = (row: DispatchTableRow) => matchDispatchTableRow(row, search, statusFilter, invoiceFilter);
+  const filteredCandidateRows = candidateRows.filter(candidateMatches);
+  const visibleFilters = (rows: DispatchTableRow[]) => dispatchTableFilters(rows,
+    { id: "dispatch-search", type: "search", label: "جست‌وجو در ردیف‌ها", value: search, onChange: value => { setSearch(value); setPage(1); },
+      placeholder: "بارگیری، فاکتور سپیدار، راننده، مشتری یا بارنامه" },
+    { id: "dispatch-status", label: "وضعیت", value: statusFilter, onChange: value => { setStatusFilter(value); setPage(1); } },
+    { id: "dispatch-sepidar", label: "فاکتور سپیدار", value: invoiceFilter, onChange: value => { setInvoiceFilter(value); setPage(1); } },
+  );
+  const hasFilters = Boolean(search.trim() || statusFilter || invoiceFilter);
+  const noRows = (title: string) => <ErpEmptyState title={hasFilters ? "بارگیری مطابق جست‌وجو و فیلترها پیدا نشد" : title}
+    action={hasFilters ? { label: "پاک‌کردن جست‌وجو و فیلترها", variant: "outline", onClick: () => {
+      setSearch(""); setStatusFilter(""); setInvoiceFilter(""); setPage(1);
+    } } : undefined} />;
   const selectedCandidate = dispatchCandidates.find(candidate => candidate.id === detailCandidateId);
   const selectedId = selectedCandidate?.id;
   const selectedWaybillId = selectedCandidate?.waybills.at(-1)?.id;
@@ -523,7 +496,7 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
       setDetailRead(undefined);
       setPickupCode("");
     }
-    setReferenceTarget(current => current?.loadingId === scope.loadingId ? null : current);
+    setReferenceLoadingId(current => current === scope.loadingId ? null : current);
     setVoidInvoiceLoadingId(current => current === scope.loadingId ? null : current);
     if (currentReasonAction.current?.type !== "revoke" && currentReasonAction.current?.loadingId === scope.loadingId) {
       setReasonAction(null);
@@ -679,106 +652,31 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
     { loadingId: dispatchCandidates.find(row => row.id === id)?.loadingId },
   );
   const actionsBlocked = dispatchTimelineStale || dispatchPending;
-  const candidatesByLoading = new Map<string, ReferenceCandidate>(
-    dispatchCandidates.filter(candidate => candidate.loadingId).map(candidate => [candidate.loadingId, candidate]),
-  );
-  const referenceForLoading = (id?: string | null) => id ? candidatesByLoading.get(id)?.sepidarLoadingReference : null;
-  const referenceAction = (candidate?: ReferenceCandidate): ErpAction[] => {
+  const referenceAction = (candidate?: SepidarInvoiceOwner): ErpAction[] => {
     if (!candidate?.canManageSepidarLoadingReference || !dispatchCapabilities.canManageAccountingCandidates) return [];
-    const current = candidate.sepidarLoadingReference;
-    const version = candidate.sepidarLoadingReferenceHistory?.[0]?.id ?? null;
+    const correction = Boolean(sepidarInvoicesOf(candidate).length || candidate.sepidarLoadingReferenceHistory?.length);
     return [{
-      label: current || version ? "اصلاح شماره بارگیری سپیدار" : "ثبت شماره بارگیری سپیدار",
-      icon: FaFileAlt,
+      label: correction ? "اصلاح فاکتورهای سپیدار" : "ثبت فاکتور سپیدار",
+      icon: FaFileInvoiceDollar,
+      tone: "primary",
       disabled: actionsBlocked,
-      onClick: () => {
-        setReferenceTarget({ loadingId: candidate.loadingId, candidateId: candidate.id });
-        setReferenceAmount("");
-        setReferenceDetail(undefined);
-        setReferenceExpected(current);
-        setReferenceVersion(version);
-        setReferenceInput(current ?? "");
-        setReferenceReason("");
-        setReferenceError(null);
-      },
+      onClick: () => setReferenceLoadingId(candidate.loadingId),
     }];
   };
-  const referenceIsCorrection = Boolean(referenceExpected || referenceVersion);
-  const checkingReferenceAmount = Boolean(referenceInput.trim());
-  const expectedReferenceAmount = referenceDetail ? sepidarCheckAmount(referenceDetail.total) : null;
-  const referenceAmountMatches = expectedReferenceAmount !== null
-    && sepidarCheckAmount({ amount: referenceAmount, currency: "IRR" }) === expectedReferenceAmount;
-  const runReferenceAction = async (action: () => Promise<void>, onFailure: (error: unknown) => void) => {
-    if (dispatchPendingRef.current) return;
-    const scope = registry.currentScope();
-    dispatchPendingRef.current = true;
-    setDispatchPending(true);
-    try {
-      await action();
-    } catch (error) {
-      if (dispatchAccessDenied(error)) {
-        if (lostDispatchIdentity(error)) discardIdentity();
-        else discardCandidates();
-        setDispatchNotice(dispatchDeniedNotice);
-      } else if (scope === registry.currentScope()) {
-        onFailure(error);
-      }
-    } finally {
-      dispatchPendingRef.current = false;
-      setDispatchPending(false);
+  const referenceScope = registry.currentScope();
+  const saveReference = (invoices: SepidarInvoice[], auditEntry: SepidarAuditEntry, correction: boolean) => {
+    if (!referenceLoadingId || referenceScope !== registry.currentScope()) return;
+    const rows = registry.rowsForGroup(referenceLoadingId).map(candidate => ({
+      ...candidate, sepidarInvoices: invoices, sepidarLoadingReference: invoices[0]?.number ?? null,
+      sepidarLoadingReferenceHistory: [auditEntry, ...(candidate.sepidarLoadingReferenceHistory ?? [])
+        .filter((entry: SepidarAuditEntry) => entry.id !== auditEntry.id)],
+    }));
+    if (rows.length) {
+      const result = registry.acceptGroup(registry.beginGroup(), referenceLoadingId, rows);
+      if (result?.snapshot) setRegistry(result.snapshot);
     }
-  };
-  const saveReference = async () => {
-    if (!referenceLoadingId || dispatchTimelineStale || referenceError?.stale) return;
-    if (checkingReferenceAmount && !referenceAmountMatches) return;
-    await runReferenceAction(async () => {
-      const scope = registry.currentScope();
-      setReferenceError(null);
-      const saved = await accountingAPI.registerSepidarLoadingReference(referenceLoadingId, {
-        value: referenceInput.trim() ? referenceInput : null,
-        expectedVersion: referenceVersion,
-        reason: referenceIsCorrection ? referenceReason : undefined,
-      });
-      if (scope !== registry.currentScope()) return;
-      const { value, auditEntry } = saved.data.data as { value: string | null; auditEntry: ReferenceAuditEntry };
-      const rows = registry.rowsForGroup(referenceLoadingId).map(candidate => ({
-        ...candidate,
-        sepidarLoadingReference: value,
-        sepidarLoadingReferenceHistory: [auditEntry, ...(candidate.sepidarLoadingReferenceHistory ?? [])
-          .filter((event: ReferenceAuditEntry) => event.id !== auditEntry.id)],
-      }));
-      if (rows.length) {
-        const result = registry.acceptGroup(registry.beginGroup(), referenceLoadingId, rows);
-        if (result?.snapshot) setRegistry(result.snapshot);
-      }
-      setReferenceTarget(null);
-      setDispatchNotice({ kind: "success", text: referenceIsCorrection ? "شماره بارگیری سپیدار اصلاح شد." : "شماره بارگیری سپیدار ثبت شد." });
-    }, error => {
-      const code = (error as { response?: { data?: { code?: string } } })?.response?.data?.code;
-      setReferenceError({
-        text: userFacingError(error, "ثبت شماره بارگیری سپیدار انجام نشد."),
-        stale: code === "SEPIDAR_REFERENCE_STALE",
-        reason: code === "SEPIDAR_REFERENCE_REASON_REQUIRED",
-      });
-    });
-  };
-  const refreshReference = async () => {
-    if (!referenceLoadingId) return;
-    await runReferenceAction(async () => {
-      const scope = registry.currentScope();
-      const rows = await refreshCandidateGroup(referenceLoadingId);
-      if (scope !== registry.currentScope()) return;
-      const candidate: ReferenceCandidate | undefined = rows.find((row: ReferenceCandidate) =>
-        row.loadingId === referenceLoadingId && row.id === referenceCandidateId);
-      if (!candidate?.canManageSepidarLoadingReference) {
-        setReferenceTarget(null);
-        setDispatchNotice({ kind: "error", text: "امکان اصلاح شماره برای این بارگیری وجود ندارد." });
-        return;
-      }
-      setReferenceExpected(candidate.sepidarLoadingReference);
-      setReferenceVersion(candidate.sepidarLoadingReferenceHistory?.[0]?.id ?? null);
-      setReferenceError(null);
-    }, error => setReferenceError({ text: userFacingError(error, "تازه‌سازی انجام نشد."), stale: true }));
+    setReferenceLoadingId(null);
+    setDispatchNotice({ kind: "success", text: correction ? "فاکتورهای سپیدار اصلاح شدند." : "فاکتورهای سپیدار ثبت شدند." });
   };
   const canManageLoadingInvoices = (id: string) =>
     !actionsBlocked && dispatchCapabilities.canManageAccountingCandidates &&
@@ -793,7 +691,8 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
     (waybill: any) => waybill.status === "ISSUED" || waybill.status === "EXIT_RECORDED",
   );
   const invoiceOnlyRows = new Map<string, any>();
-  for (const candidate of filteredCandidates) {
+  for (const { owner } of filteredCandidateRows) {
+    const candidate: any = owner;
     if (!candidate.loadingId || !candidate.currentSalesInvoice) continue;
     const previous = invoiceOnlyRows.get(candidate.loadingId);
     if (!previous || activeWaybillFor(candidate)?.status === "ISSUED") {
@@ -869,54 +768,41 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
     return actions;
   };
 
-  const totalCandidates = candidatePage?.total ?? filteredCandidates.length;
+  const totalCandidates = candidatePage?.total ?? filteredCandidateRows.length;
   const totalPages = Math.max(1, Math.ceil(totalCandidates / dispatchPageSize));
   const currentPage = candidatePage?.page ?? Math.min(page, totalPages);
-  const visibleCandidates = candidatePage ? filteredCandidates
-    : filteredCandidates.slice((currentPage - 1) * dispatchPageSize, currentPage * dispatchPageSize);
+  const visibleCandidates = candidatePage ? filteredCandidateRows
+    : filteredCandidateRows.slice((currentPage - 1) * dispatchPageSize, currentPage * dispatchPageSize);
   return (
-    <ErpListPage
+    <ErpPage
       eyebrow="حسابداری"
       title="فرمان‌های ارسال"
       backHref="/dashboard/accounting"
       onBack={section === "confirmation" ? () => setSection("candidates") : undefined}
-      actions={[{ label: "به‌روزرسانی", icon: FaSync, onClick: loadDispatch, tone: "neutral" }]}
-      sectionNavigation={
+      actions={[{ label: "به‌روزرسانی", icon: FaSync, onClick: () => {
+        void loadDispatch();
+        setCaseRefresh(current => current + 1);
+      }, tone: "neutral" }]}
+    >
         <ErpSegmentedControl
           value={section}
-          onChange={setSection}
+          onChange={value => { setStatusFilter(""); setPage(1); setSection(value); }}
           options={[
             { value: "candidates", label: "صدور بارنامه" },
             { value: "confirmation", label: "تأیید راننده" },
             { value: "cases", label: "پرونده‌های ارسال" },
           ]}
         />
-      }
-      filters={section !== "confirmation" ? [{
-        id: "dispatch-search", type: "search", label: "جست‌وجو", value: search, onChange: value => { setSearch(value); setPage(1); },
-        placeholder: section === "candidates"
-          ? "شماره بارگیری، شماره بارگیری سپیدار، مشتری، پروژه، قرارداد، راننده، پلاک یا شماره بارنامه"
-          : "شماره بارگیری، شماره بارگیری سپیدار، راننده یا وضعیت",
-      }] : []}
-      isLoading={section === "candidates" && loading}
-      mobileLayout="table"
-      rows={section === "candidates" ? visibleCandidates : []}
-      footer={section === "candidates" && totalPages > 1 && <ErpPagination currentPage={currentPage}
-        totalPages={totalPages} totalItems={totalCandidates} itemsPerPage={dispatchPageSize}
-        onPageChange={setPage} itemLabel="پرونده" />}
-      rowKey={candidate => candidate.id}
-      columns={[
-        { id: "loading", header: "بارگیری", priority: "primary", cell: candidate => candidate.summary?.loadingNumber ? dispatchCaseReference(candidate.summary.loadingNumber) : "—" },
-        { id: "sepidar", header: referenceLabel, cell: candidate => <bdi>{candidate.sepidarLoadingReference ?? "—"}</bdi> },
-        { id: "driver", header: "راننده و پلاک", cell: candidate => <><strong>{candidate.summary?.driverName || "راننده نامشخص"}</strong><div className="sds-text-secondary">{candidate.summary?.plate || "—"}</div></> },
-        { id: "customer", header: "مشتری و پروژه", cell: candidate => <><div>{candidate.summary?.customerName || "—"}</div>{candidate.summary?.personalPickup && <div className="sds-text-secondary">{candidate.summary.personalPickup.partners.map((partner: any) => partner.name).join("، ")} · قرارداد {candidate.summary.personalPickup.contracts.map((contract: any) => contract.number).join("، ")}</div>}<div className="sds-text-secondary">{candidate.summary?.projectName || "—"}</div></> },
-        { id: "status", header: "وضعیت", cell: candidate => <ErpBadge tone={candidate.status === "ACCEPTED" ? "success" : ["REJECTED", "RETURNED"].includes(candidate.status) ? "danger" : "warning"}><span className="whitespace-nowrap">{dispatchStatusLabels[candidate.status] || operationalStatusLabel(candidate.status)}</span></ErpBadge> },
-        { id: "waybill", header: "بارنامه", cell: candidate => activeWaybillFor(candidate) ? Number(activeWaybillFor(candidate).number).toLocaleString("fa-IR") : "—" },
-      ]}
-      rowActions={rowActions}
-      emptyState={section === "candidates" ? <ErpEmptyState title={query ? "بارگیری مطابق جست‌وجو پیدا نشد" : "پرونده‌ای برای صدور بارنامه وجود ندارد"} /> : null}
-    >
       {dispatchNotice && <ErpInlineState kind={dispatchNotice.kind} title={dispatchNotice.text} />}
+      {section === "candidates" && <>
+        <ErpFilters layout="wide-search" showLabels filters={visibleFilters(candidateRows)} />
+        <ErpListContent rows={visibleCandidates} rowKey={row => row.id} mobileLayout="table"
+          columns={dispatchTableColumns(false)} isLoading={loading && !candidateRows.length}
+          emptyState={noRows("پرونده‌ای برای صدور بارنامه وجود ندارد")}
+          rowActions={row => rowActions(row.owner)}
+          footer={totalPages > 1 && <ErpPagination currentPage={currentPage} totalPages={totalPages}
+            totalItems={totalCandidates} itemsPerPage={dispatchPageSize} onPageChange={setPage} itemLabel="پرونده" />} />
+      </>}
 
         {section === "confirmation" && !confirmation?.id && (
           <ErpEmptyState
@@ -929,8 +815,11 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
           dispatchCapabilities.canManageAccountingConfirmation && (
             <ErpCard className="p-4">
               <strong>{confirmation?.method === "PERSONAL_PICKUP_ACCOUNTING" ? "مجوز خروج راننده شخصی" : "تأیید هویت راننده"}</strong>
-              <p className="mt-1 text-sm sds-text-secondary">شماره بارگیری سپیدار: <bdi>{dispatchCandidates.find(candidate =>
-                candidate.waybills?.some((waybill: any) => waybill.id === confirmation.waybillId))?.sepidarLoadingReference || "—"}</bdi></p>
+              <div className="mt-1 text-sm sds-text-secondary">
+                <span>{sepidarInvoiceLabel}</span>
+                <SepidarInvoiceNumbers invoices={sepidarInvoicesOf(dispatchCandidates.find(candidate =>
+                  candidate.waybills?.some((waybill: any) => waybill.id === confirmation.waybillId)))} />
+              </div>
               {confirmationActions.biometric && <p className="mt-1 text-sm sds-text-muted">
                 یک انگشت ثبت‌شده را انتخاب کنید و تا پایان بررسی روی حسگر نگه
                 دارید.
@@ -1063,23 +952,53 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
             </ErpCard>
           )}
 
-      <div hidden={section !== "cases"}>
+      {section === "cases" &&
         <RoleAwareDispatchCases
           workspace="accounting"
+          refreshRevision={caseRefresh}
           onStaleChange={setDispatchTimelineStale}
-          tableFilter={item => !query || [item.loadingNumber, referenceForLoading(item.loadingId), item.driverName, operationalStatusLabel(item.status)]
-            .some(value => normalizeDispatchSearch(value).includes(query))}
-          tableColumns={[{ id: "sepidar", header: referenceLabel, cell: item => <bdi>{referenceForLoading(item.loadingId) ?? "—"}</bdi> }]}
-          tableRowActions={item => referenceAction(dispatchCandidates.find(candidate =>
-            candidate.loadingId === item.loadingId && candidate.id === item.accountingCandidateId))}
-        />
-      </div>
+          renderTable={({ cases, openCase }) => {
+            const caseByCandidate = new Map(cases.map(item => [item.accountingCandidateId, item]));
+            const rows: DispatchTableRow[] = Array.from(loadingGroups, ([id, candidates]) => {
+              const members = currentLoadingCandidates(candidates);
+              const owner = members[0];
+              return { id, owner, members, statuses: owner.loadingStatus === "CANCELLED" ? ["CANCELLED"]
+                : Array.from(new Set(members.map(member => activeWaybillFor(member)?.status === "EXIT_RECORDED" ? "EXIT_RECORDED" : member.status))) };
+            });
+            return <>
+              <ErpFilters layout="wide-search" showLabels filters={visibleFilters(rows)} />
+              <ErpListContent rows={rows.filter(candidateMatches)} rowKey={row => row.id} mobileLayout="table"
+                columns={dispatchTableColumns(true)} rowActionMode="menu" isLoading={loading && !rows.length}
+                emptyState={noRows("پرونده ارسالی در این دامنه وجود ندارد")}
+                rowActions={row => [
+                  ...row.members.flatMap((member, index): ErpAction[] => {
+                    const savedCase = caseByCandidate.get(member.id);
+                    const timeline: DispatchCaseRow | undefined = member.queueTurnId
+                      ? { id: member.queueTurnId, loadingId: row.id, status: member.status }
+                      : savedCase;
+                    const driver = member.summary?.driverName || `راننده ${index + 1}`;
+                    const details = {
+                      label: row.members.length === 1 ? "جزئیات اقلام و اسناد بارگیری" : `اسناد بارگیری · ${driver}`,
+                      icon: FaFileAlt, onClick: () => showCandidate(member.id),
+                    };
+                    return timeline ? [{
+                      label: row.members.length === 1 ? "مشاهده مراحل ارسال" : `مراحل ارسال · ${driver}`,
+                      icon: FaListAlt, onClick: () => openCase(timeline),
+                    }, details] : [details];
+                  }),
+                  ...referenceAction(row.owner),
+                ]} />
+            </>;
+          }}
+        />}
       <ErpSheet open={Boolean(selectedCandidate)} onClose={() => setDetailCandidateId(null)}
         title="جزئیات اقلام و اسناد بارگیری" presentation="modal" size="wide" pending={dispatchPending}>
         {selectedCandidate && <div className="space-y-4">
           <div className="space-y-1">
             <strong>{selectedCandidate.summary?.driverName || "راننده نامشخص"}</strong>
-            <p className="text-sm sds-text-secondary">شماره بارگیری سپیدار: <bdi>{selectedCandidate.sepidarLoadingReference || "—"}</bdi></p>
+            <div className="text-sm sds-text-secondary">
+              <span>{sepidarInvoiceLabel}</span><SepidarInvoiceNumbers invoices={sepidarInvoicesOf(selectedCandidate)} showAmounts />
+            </div>
             {selectedCandidate.loadingStatus === "CANCELLED" && <ErpBadge tone="danger">بارگیری لغوشده</ErpBadge>}
             {selectedCandidate.summary?.personalPickup && <div className="space-y-1 text-sm sds-text-secondary">
               <p>مشتری: {selectedCandidate.summary.customerName}</p>
@@ -1094,13 +1013,15 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
             )}
           </div>
           {Boolean(selectedCandidate.sepidarLoadingReferenceHistory?.length) &&
-            <ErpDisclosure title="سابقه شماره بارگیری سپیدار" className="mt-3">
-              <div className="space-y-2">{selectedCandidate.sepidarLoadingReferenceHistory.map((entry: ReferenceAuditEntry) =>
-                <p key={entry.id} className="text-sm sds-text-secondary">
-                  <bdi>{entry.beforeState?.sepidarLoadingReference || "—"}</bdi> ← <bdi>{entry.afterState?.sepidarLoadingReference || "—"}</bdi>
-                  {' · '}{entry.actorId}{' · '}{new Date(entry.createdAt).toLocaleString('fa-IR')}
-                  {entry.note && <> · {entry.note}</>}
-                </p>)}</div>
+            <ErpDisclosure title="سابقه فاکتورهای سپیدار" className="mt-3">
+              <div className="space-y-3">{selectedCandidate.sepidarLoadingReferenceHistory.map((entry: SepidarAuditEntry) =>
+                <div key={entry.id} className="space-y-1 border-b border-[var(--sds-border-default)] pb-2 text-sm sds-text-secondary">
+                  <p>{new Date(entry.createdAt).toLocaleString("fa-IR")} · {entry.actorId}{entry.note && <> · {entry.note}</>}</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>قبل<SepidarInvoiceNumbers invoices={sepidarInvoicesOf(entry.beforeState)} showAmounts /></div>
+                    <div>بعد<SepidarInvoiceNumbers invoices={sepidarInvoicesOf(entry.afterState)} showAmounts /></div>
+                  </div>
+                </div>)}</div>
             </ErpDisclosure>}
           {selectedCandidate.summary?.driverSource === "CUSTOMER_PICKUP" && (
             <>
@@ -1197,39 +1118,10 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
             refreshKey={groupSnapshot.current.version}/>}
         </div>}
       </ErpSheet>
-      <ErpSheet open={Boolean(referenceLoadingId)} title={referenceIsCorrection ? "اصلاح شماره بارگیری سپیدار" : "ثبت شماره بارگیری سپیدار"} presentation="modal"
-        pending={dispatchPending} onClose={() => { if (!dispatchPending) setReferenceTarget(null); }}
-        footer={<div className="flex justify-end gap-2">
-          <ErpButton label="انصراف" variant="ghost" disabled={dispatchPending} onClick={() => setReferenceTarget(null)} />
-          <ErpButton label={referenceIsCorrection ? referenceInput.trim() ? "ذخیره شماره" : "پاک‌کردن شماره" : "ثبت شماره"}
-            tone={referenceExpected && !referenceInput.trim() ? "danger" : "primary"}
-            disabled={actionsBlocked || referenceError?.stale || (!referenceExpected && !checkingReferenceAmount)
-              || (checkingReferenceAmount && !referenceAmountMatches) || (referenceIsCorrection && !referenceReason.trim())}
-            onClick={saveReference} />
-        </div>}>
-        <div className="space-y-3">
-          <ErpField label={referenceLabel} error={referenceError?.reason ? undefined : referenceError?.text}
-            hint={referenceIsCorrection ? <>شماره فعلی <bdi>{referenceExpected ?? "—"}</bdi></> : undefined}>
-            <ErpInput dir="ltr" inputMode="numeric" value={referenceInput}
-              onChange={event => { setReferenceInput(event.target.value); if (!referenceError?.stale) setReferenceError(null); }} />
-          </ErpField>
-          {(!referenceIsCorrection || checkingReferenceAmount) && <ErpField label="مبلغ سپیدار (ریال)" required
-            hint={expectedReferenceAmount !== null
-              ? <>جمع این راننده به ریال <bdi>{formatNumericInputText(expectedReferenceAmount).displayText}</bdi></>
-              : referenceDetail === undefined ? "در حال دریافت جمع این راننده…" : "جمع دقیق این راننده در دسترس نیست."}
-            error={expectedReferenceAmount !== null && referenceAmount && !referenceAmountMatches
-              ? "مبلغ سپیدار باید با جمع این راننده برابر باشد." : undefined}>
-            <ErpInput numberFormat="money" dir="ltr" value={referenceAmount}
-              disabled={dispatchPending || expectedReferenceAmount === null}
-              onChange={event => setReferenceAmount(event.target.value)} />
-          </ErpField>}
-          {referenceError?.stale && <ErpButton label="به‌روزرسانی شماره فعلی" variant="soft" disabled={dispatchPending} onClick={refreshReference} />}
-          {referenceIsCorrection && <ErpField label="دلیل اصلاح" required error={referenceError?.reason ? referenceError.text : undefined}>
-            <ErpInput maxLength={200} value={referenceReason}
-              onChange={event => { setReferenceReason(event.target.value); if (!referenceError?.stale) setReferenceError(null); }} />
-          </ErpField>}
-        </div>
-      </ErpSheet>
+      {referenceLoadingId && <SepidarDispatchInvoices key={referenceLoadingId} loadingId={referenceLoadingId}
+        contracts={contractsOf(currentLoadingCandidates(loadingGroups.get(referenceLoadingId) ?? []))}
+        api={accountingAPI} blocked={actionsBlocked} onClose={() => setReferenceLoadingId(null)} onSaved={saveReference}
+        onError={handleSepidarError} />}
       {voidInvoiceLoadingId && <SalesDispatchInvoices key={voidInvoiceLoadingId}
         loadingId={voidInvoiceLoadingId} workspace="accounting"
         canManage={canManageLoadingInvoices(voidInvoiceLoadingId)}
@@ -1331,6 +1223,6 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
           />
         </div>
       </ErpSheet>
-    </ErpListPage>
+    </ErpPage>
   );
 }

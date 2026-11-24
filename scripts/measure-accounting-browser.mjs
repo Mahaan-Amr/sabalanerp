@@ -139,19 +139,25 @@ async function sample(browser, config, scenario, command) {
     if (command) {
       stage = 'command';
       const row = page.getByRole('row').filter({ hasText: command.row });
-      await row.getByRole('button', { name: 'ثبت شماره بارگیری سپیدار', exact: true }).click();
-      await page.getByRole('textbox', { name: 'شماره بارگیری سپیدار', exact: true }).fill(command.reference);
-      await page.getByRole('textbox', { name: 'مبلغ سپیدار (ریال)', exact: true }).fill(command.amount);
+      const invoiceAction = row.getByRole('button', { name: 'ثبت فاکتور سپیدار', exact: true });
+      const legacyAction = row.getByRole('button', { name: 'ثبت شماره بارگیری سپیدار', exact: true });
+      await invoiceAction.or(legacyAction).waitFor({ state: 'visible' });
+      const invoiceWorkflow = await invoiceAction.isVisible();
+      result.commandWorkflow = invoiceWorkflow ? 'loading-invoices' : 'legacy-loading-reference';
+      await (invoiceWorkflow ? invoiceAction : legacyAction).click();
+      await page.getByRole('textbox', { name: invoiceWorkflow ? 'شماره فاکتور سپیدار' : 'شماره بارگیری سپیدار', exact: true }).fill(command.reference);
+      await page.getByRole('textbox', { name: invoiceWorkflow ? 'مبلغ فاکتور (ریال)' : 'مبلغ سپیدار (ریال)', exact: true }).fill(command.amount);
       stop = monitor(page);
       const commandStarted = performance.now();
       const [receipt] = await Promise.all([
         page.waitForResponse(response => response.request().method() === 'POST' && reference.test(new URL(response.url()).pathname))
           .then(response => ({ response, at: performance.now() })),
-        page.getByRole('button', { name: 'ثبت شماره', exact: true }).click(),
+        page.getByRole('button', { name: invoiceWorkflow ? 'ذخیره فاکتورها' : 'ثبت شماره', exact: true }).click(),
       ]);
       result.command = checkResponse(receipt.response, config);
       if (!receipt.response.ok() || result.command.outcome) throw Error('COMMAND_FAILED');
-      await page.getByText('شماره بارگیری سپیدار ثبت شد.', { exact: true }).waitFor({ state: 'visible' });
+      await page.getByText(invoiceWorkflow ? 'فاکتورهای سپیدار ثبت شدند.' : 'شماره بارگیری سپیدار ثبت شد.',
+        { exact: true }).waitFor({ state: 'visible' });
       const visibleAt = Date.now();
       const acknowledged = Number(receipt.response.headers()['x-accounting-commit-acknowledged-ms']);
       result.submitToVisibleMs = Math.round(performance.now() - commandStarted);

@@ -1274,9 +1274,11 @@ export const createAccountingAPI = (api: RequestClient) => ({
     api.get('/accounting/dashboard/workspace', { params }),
   getFinancialTrend: (range: '1m' | '3m' | '6m' | '1y') => api.get('/accounting/financial-trend', { params: { range } }),
   getDispatchCandidates: (loadingId?: string) => api.get('/accounting/dispatch-candidates', { params: { loadingId } }),
-  getDispatchCandidatePage: (page: number, pageSize: number, search: string) =>
-    api.get('/accounting/dispatch-candidates', { params: { page, pageSize, search } }),
-  registerSepidarLoadingReference: (loadingId: string, data: { value: string | null; expectedVersion: string | null; reason?: string }) =>
+  getDispatchCandidatePage: (page: number, pageSize: number, search: string, status?: string, sepidar?: string) =>
+    api.get('/accounting/dispatch-candidates', { params: { page, pageSize, search, status, sepidar } }),
+  getSepidarDispatchInvoices: (loadingId: string, signal?: AbortSignal) =>
+    api.get(`/accounting/loadings/${encodeURIComponent(loadingId)}/sepidar-reference`, { signal }),
+  saveSepidarDispatchInvoices: (loadingId: string, data: { invoices: { number: string; amountRial: string }[]; expectedVersion: string | null; reason?: string }) =>
     api.post(`/accounting/loadings/${encodeURIComponent(loadingId)}/sepidar-reference`, data),
   issueLoadingDocuments: (loadingId: string, commandId: string, recovery?: { waybillId: string; invoiceId: string; reason: string }) =>
     api.post(`/accounting/loadings/${encodeURIComponent(loadingId)}/issue-dispatch-documents`, { commandId, recovery }),

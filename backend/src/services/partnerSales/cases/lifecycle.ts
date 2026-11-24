@@ -238,6 +238,7 @@ export async function readCurrentPartnerCaseViewsBatch(tx: Transaction, caseIds:
     const views = await parseViews(tx, row, row.head.predecessor);
     if (views) viewsByCase.set(row.id, { row, ...views });
   }
+  signal?.throwIfAborted();
   return viewsByCase;
 }
 

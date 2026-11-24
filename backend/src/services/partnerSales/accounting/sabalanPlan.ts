@@ -5,6 +5,7 @@ import {
   type Result, type SabalanPaymentPlanCandidate, type SabalanPaymentPlanSet,
 } from '@sabalanerp/partner-sales-contracts';
 import { createAuditedPartnerAuthorization } from '../authorization/audited';
+import { measureAccountingReadPhase } from '../../accountingReadTiming';
 import { lockPartnerOperationsControl } from '../authorization/technicalRollout';
 import { readPartnerAccountingCapabilities, readPartnerPaymentsCapability } from './capabilities';
 import { prepareCommittedAccountingSource, PARTNER_INTERNAL_ACCOUNTING_SOURCE } from './source';
@@ -71,57 +72,66 @@ function verifiedCommitment(row: CommittedCase,
 
 export async function listSabalanPlanCandidates(database: PrismaClient, actorId: string,
   correlationId: string, signal?: AbortSignal): Promise<Result<SabalanPaymentPlanCandidate[]>> {
-  signal?.throwIfAborted();
   return readPartnerSnapshot(database, async tx => {
+    const permissionClient = createFencedPartnerPermissionReader(tx, signal);
+    const hasCurrentPaymentsPermission = async () => {
+      const [{ paymentNow }] = await tx.$queryRaw<Array<{ paymentNow: Date }>>`SELECT clock_timestamp() AS "paymentNow"`;
+      signal?.throwIfAborted();
+      return readPartnerPaymentsCapability(permissionClient, actorId, paymentNow);
+    };
+    const permitted = await measureAccountingReadPhase('authorization', hasCurrentPaymentsPermission);
     signal?.throwIfAborted();
-    const permissionClient = createFencedPartnerPermissionReader(tx);
-    if (!await readPartnerPaymentsCapability(permissionClient, actorId)) {
-      return { ok: false, error: partnerError('FORBIDDEN') };
-    }
-    signal?.throwIfAborted();
-    const candidates = await tx.partnerSaleCase.findMany({ where: { state: 'COMMITTED',
+    const candidates = permitted ? await measureAccountingReadPhase('population', () => tx.partnerSaleCase.findMany({ where: { state: 'COMMITTED',
       paymentPlans: { none: { purpose: 'SABALAN', installments: { some: {} } } } }, orderBy: { id: 'asc' },
-      select: { id: true } });
+      select: { id: true } })) : [];
+    signal?.throwIfAborted();
+    const caseAuthority = await measureAccountingReadPhase('authorization', () =>
+      batchAccountingCaseAuthority(tx, actorId, candidates.map(row => row.id),
+        { permissionClient, includeUnlinkedCases: true, signal }));
+    if (!permitted) return { ok: false, error: partnerError('FORBIDDEN') };
     if (!candidates.length) return { ok: true, value: [] };
 
-    signal?.throwIfAborted();
-    const caseAuthority = await batchAccountingCaseAuthority(tx, actorId, candidates.map(row => row.id),
-      { permissionClient, includeUnlinkedCases: true });
     const decisions: AuthorizationDecisionAudit[] = [];
     const authority = createAuditedPartnerAuthorization(tx, { actorId, purpose: 'ACCOUNTING', channel: 'API' },
       { correlationId, reason: planAuthorizationReason }, undefined, undefined,
       async decision => { decisions.push(decision); }, caseAuthority.scheduledSource);
     const authorizedIds: string[] = [];
-    for (const { id } of candidates) {
-      signal?.throwIfAborted();
-      const allowed = await authority.authorize('ACCOUNTING_WRITE', { kind: 'CASE', id });
-      if (allowed.ok && await readPartnerPaymentsCapability(permissionClient, actorId, decisions[decisions.length - 1].evaluatedAt)) {
-        authorizedIds.push(id);
+    await measureAccountingReadPhase('authorization', async () => {
+      for (const { id } of candidates) {
+        signal?.throwIfAborted();
+        const allowed = await authority.authorize('ACCOUNTING_WRITE', { kind: 'CASE', id });
+        signal?.throwIfAborted();
+        // The narrower payments grant can expire after the Case decision.
+        if (allowed.ok && await hasCurrentPaymentsPermission()) authorizedIds.push(id);
       }
-    }
+    });
     signal?.throwIfAborted();
-    await appendAuthorizationDecisions(tx, decisions);
+    await measureAccountingReadPhase('authorizationAudit', () => appendAuthorizationDecisions(tx, decisions));
+    signal?.throwIfAborted();
     if (!authorizedIds.length) return { ok: true, value: [] };
 
-    signal?.throwIfAborted();
-    const commitments = await tx.partnerSaleCase.findMany({ where: { id: { in: authorizedIds } },
-      select: { id: true, events: commitmentEventSelection } });
-    const commitmentByCase = new Map(commitments.map(row => [row.id, row.events[0]]));
-    const verified = await readCurrentPartnerCaseViewsBatch(tx, authorizedIds, signal);
-    const result: SabalanPaymentPlanCandidate[] = [];
-    for (const id of authorizedIds) {
-      const source = verified.get(id);
-      if (!source?.accounting || !source.row.internalRecord || !matchesCommittedAccountingView(source.row, source.accounting) ||
-          !verifiedCommitment(source.row, commitmentByCase.get(id))) continue;
-      const { row, accounting } = source;
-      result.push({ expected: accounting.owner, caseNumber: row.caseNumber,
-        ...(row.trackingCode ? { trackingNumber: row.trackingCode.number } : {}),
-        internalRecordNumber: source.row.internalRecord.recordNumber,
-        partnerDisplayName: accounting.debtor.displayName,
-        payable: { amount: accounting.totals.payable, currency: accounting.totals.currency } });
-    }
-    return { ok: true, value: result };
-  }, { multiRootAuthority: false });
+    return measureAccountingReadPhase('partnerEvidence', async () => {
+      const commitments = await tx.partnerSaleCase.findMany({ where: { id: { in: authorizedIds } },
+        select: { id: true, events: commitmentEventSelection } });
+      signal?.throwIfAborted();
+      const commitmentByCase = new Map(commitments.map(row => [row.id, row.events[0]]));
+      const verified = await readCurrentPartnerCaseViewsBatch(tx, authorizedIds, signal);
+      signal?.throwIfAborted();
+      const result: SabalanPaymentPlanCandidate[] = [];
+      for (const id of authorizedIds) {
+        const source = verified.get(id);
+        if (!source?.accounting || !source.row.internalRecord || !matchesCommittedAccountingView(source.row, source.accounting) ||
+            !verifiedCommitment(source.row, commitmentByCase.get(id))) continue;
+        const { row, accounting } = source;
+        result.push({ expected: accounting.owner, caseNumber: row.caseNumber,
+          ...(row.trackingCode ? { trackingNumber: row.trackingCode.number } : {}),
+          internalRecordNumber: source.row.internalRecord.recordNumber,
+          partnerDisplayName: accounting.debtor.displayName,
+          payable: { amount: accounting.totals.payable, currency: accounting.totals.currency } });
+      }
+      return { ok: true, value: result };
+    });
+  }, { multiRootAuthority: false, signal });
 }
 
 export async function setSabalanPaymentPlan(database: PrismaClient, actorId: string, correlationId: string,

@@ -24,9 +24,11 @@ export const resolvePartnerAccountingScopedAuthority: ResolvePartnerAuthority<Pa
 /** Accounting list projections hold the shared Case, Profile and User fences.
  * The same policy runs behind the shared central revision lock. */
 export const readPartnerAccountingScopedAuthority = (tx: Prisma.TransactionClient,
-  input: { actorId: string; root: AuthorizationRoot }, permissionClient?: PartnerPermissionReadClient):
+  input: { actorId: string; root: AuthorizationRoot }, permissionClient: PartnerPermissionReadClient,
+  version: { revision: number }):
   ReturnType<ResolvePartnerAuthority<PartnerActionV2>> =>
-  resolvePartnerScopedAuthorityInPurpose(tx, input, 'ACCOUNTING', readFencedScopedActions, permissionClient);
+  resolvePartnerScopedAuthorityInPurpose(tx, input, 'ACCOUNTING',
+    (tx, actorId, domain) => readFencedScopedActions(tx, actorId, domain, version), permissionClient);
 
 async function resolvePartnerScopedAuthorityInPurpose(tx: Prisma.TransactionClient,
   input: { actorId: string; root: AuthorizationRoot }, purpose?: 'ACCOUNTING' | 'RESPONDER',
@@ -42,8 +44,8 @@ async function resolvePartnerScopedAuthorityInPurpose(tx: Prisma.TransactionClie
 /** Evaluate the workspace bridge and explicit grants using each Case's decision
  * clock, with raw permission rows loaded behind the shared revision fence. */
 export async function readPartnerAccountingAuthoritySchedule(tx: Prisma.TransactionClient, actorId: string,
-  permissionClient: PartnerPermissionReadClient) {
-  const scheduled = await readFencedScopedActionSchedule(tx, actorId, 'PARTNER');
+  permissionClient: PartnerPermissionReadClient, version: { revision: number }, signal?: AbortSignal) {
+  const scheduled = await readFencedScopedActionSchedule(tx, actorId, 'PARTNER', version, signal);
   return async (at: Date) => {
     const current = scheduled(at);
     const workspace = await resolvePartnerWorkspaceAuthority(tx, actorId, 'ACCOUNTING',

@@ -1,5 +1,6 @@
 import type { Prisma } from '@prisma/client';
 import type { PartnerActionV2 } from '@sabalanerp/partner-sales-contracts';
+import { lockScopedActionRevisionForRead } from '../../effectiveAuthorization/scopedActions';
 import type { AuthorizationEvidence, AuthorizationRoot, AuthorizationSource } from '../authorization/contracts';
 import { readPartnerAccountingAuthoritySchedule, readPartnerAccountingScopedAuthority } from '../authorization/centralAuthority';
 import { createFencedPartnerPermissionReader, type PartnerPermissionReadClient } from '../authorization/fencedPermissionReads';
@@ -8,34 +9,45 @@ import { createFencedPartnerPermissionReader, type PartnerPermissionReadClient }
  * boundary and repeatable-read snapshot. Share all root locks before profiles and
  * users, then resolve central authority behind the same fence. */
 export async function batchAccountingCaseAuthority(tx: Prisma.TransactionClient, actorId: string, caseIds: string[],
-  options: { permissionClient?: PartnerPermissionReadClient; includeUnlinkedCases?: boolean } = {}) {
+  options: { permissionClient?: PartnerPermissionReadClient; includeUnlinkedCases?: boolean; signal?: AbortSignal } = {}) {
+  const { signal } = options;
+  signal?.throwIfAborted();
   // SQL takes locks in the same sorted ID order as the command's User loop,
   // regardless of the database collation.
   const ids = [...new Set(caseIds)].sort();
   if (ids.length) await tx.$queryRaw`SELECT c.id FROM partner_sale_cases c
     JOIN unnest(${ids}::text[]) WITH ORDINALITY AS ordered(id, position) ON ordered.id = c.id
     ORDER BY ordered.position FOR SHARE OF c`;
-  const cases = await tx.partnerSaleCase.findMany({ where: { id: { in: ids } },
-    select: { id: true, profileId: true, customerContractId: true } });
+  signal?.throwIfAborted();
+  const cases = ids.length ? await tx.partnerSaleCase.findMany({ where: { id: { in: ids } },
+    select: { id: true, profileId: true, customerContractId: true } }) : [];
+  signal?.throwIfAborted();
   if (cases.length !== ids.length) throw new Error('Accounting Case authority evidence changed');
   const profileIds = [...new Set(cases.map(row => row.profileId))].sort();
   if (profileIds.length) await tx.$queryRaw`SELECT p.id FROM partner_profiles p
     JOIN unnest(${profileIds}::text[]) WITH ORDINALITY AS ordered(id, position) ON ordered.id = p.id
     ORDER BY ordered.position FOR SHARE OF p`;
-  const profiles = await tx.partnerProfile.findMany({ where: { id: { in: profileIds } },
-    select: { id: true, userId: true, state: true, revision: true } });
+  signal?.throwIfAborted();
+  const profiles = profileIds.length ? await tx.partnerProfile.findMany({ where: { id: { in: profileIds } },
+    select: { id: true, userId: true, state: true, revision: true } }) : [];
+  signal?.throwIfAborted();
   if (profiles.length !== profileIds.length) throw new Error('Accounting profile authority evidence changed');
   const userIds = [...new Set([actorId, ...profiles.map(row => row.userId)])].sort();
   await tx.$queryRaw`SELECT u.id FROM users u
     JOIN unnest(${userIds}::text[]) WITH ORDINALITY AS ordered(id, position) ON ordered.id = u.id
     ORDER BY ordered.position FOR SHARE OF u`;
-  const [users, deletions] = await Promise.all([
+  signal?.throwIfAborted();
+  // Fence the central revision even when no Case can yield a decision.
+  const version = await lockScopedActionRevisionForRead(tx);
+  signal?.throwIfAborted();
+  const [users, deletions] = cases.length ? await Promise.all([
     tx.user.findMany({ where: { id: { in: userIds } }, select: { id: true, isActive: true, role: true,
       departmentId: true, partnerProfile: { select: { state: true, revision: true } } } }),
     tx.contractLifecycleRequest.findMany({ where: { contractId: { in: cases.flatMap(row =>
       row.customerContractId ? [row.customerContractId] : []) }, kind: 'DELETE', status: 'EXECUTED' },
       select: { contractId: true } }),
-  ]);
+  ]) : [[], []];
+  signal?.throwIfAborted();
   const byCase = new Map(cases.map(row => [row.id, row]));
   const byProfile = new Map(profiles.map(row => [row.id, row]));
   const byUser = new Map(users.map(row => [row.id, row]));
@@ -43,8 +55,9 @@ export async function batchAccountingCaseAuthority(tx: Prisma.TransactionClient,
   const actor = byUser.get(actorId);
   // Shared by the list-only sources and advisory actions in this snapshot.
   // Scoped grants and the decision clock are still read by each policy.
-  const permissionClient = options.permissionClient ?? createFencedPartnerPermissionReader(tx);
-  const resolveScopedAuthority = (root: AuthorizationRoot) => readPartnerAccountingScopedAuthority(tx, { actorId, root }, permissionClient);
+  const permissionClient = options.permissionClient ?? createFencedPartnerPermissionReader(tx, signal);
+  const resolveScopedAuthority = (root: AuthorizationRoot) =>
+    readPartnerAccountingScopedAuthority(tx, { actorId, root }, permissionClient, version);
   // Keep the same transaction-scoped central result as the former list path.
   let central: ReturnType<typeof readPartnerAccountingScopedAuthority> | undefined;
   let scheduled: ReturnType<typeof readPartnerAccountingAuthoritySchedule> | undefined;
@@ -57,6 +70,7 @@ export async function batchAccountingCaseAuthority(tx: Prisma.TransactionClient,
   const read = async (requestedActor: string, root: AuthorizationRoot,
     resolveAuthority: (root: AuthorizationRoot) => ReturnType<typeof resolveScopedAuthority>,
     fresh = false): Promise<AuthorizationEvidence<PartnerActionV2>> => {
+    signal?.throwIfAborted();
     if (requestedActor !== actorId || root.kind !== 'CASE' || !byCase.has(root.id)) {
       throw new Error('Accounting Case authority evidence missing');
     }
@@ -70,17 +84,20 @@ export async function batchAccountingCaseAuthority(tx: Prisma.TransactionClient,
         lifecycleRevision: profile.revision,
         ...(owner?.departmentId ? { departmentId: owner.departmentId } : {}) }
       : null;
-    let authority: Awaited<ReturnType<typeof resolveScopedAuthority>> = { grants: [], authorizationRevision: 1 };
+    let authority: Awaited<ReturnType<typeof resolveScopedAuthority>> = { grants: [], authorizationRevision: version.revision };
     const hasAuthorityEvidence = actor?.isActive && resource;
     if (hasAuthorityEvidence) {
-      if (fresh) scheduled ??= readPartnerAccountingAuthoritySchedule(tx, actorId, permissionClient);
+      if (fresh) scheduled ??= readPartnerAccountingAuthoritySchedule(tx, actorId, permissionClient, version, signal);
       else authority = await resolveAuthority(root);
     }
-    disabled ??= await readDisabledFeatures();
-    // Establish the fence before taking the clock for this decision.
     const scheduledAuthority = fresh && hasAuthorityEvidence ? await scheduled : undefined;
+    signal?.throwIfAborted();
+    disabled ??= await readDisabledFeatures();
+    signal?.throwIfAborted();
     const now = await readClock();
+    signal?.throwIfAborted();
     if (scheduledAuthority) authority = await scheduledAuthority(now);
+    signal?.throwIfAborted();
     return { ...authority,
       evaluatedAt: now.toISOString(), resource, actor: {
         id: actorId, active: actor?.isActive ?? false, role: actor?.role ?? 'USER',

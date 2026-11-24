@@ -7,24 +7,25 @@ export type PartnerPermissionReadClient = Pick<Prisma.TransactionClient, 'user' 
 /** Memoize raw permission rows inside one fenced transaction. Callers still
  * resolve each decision at its original time so expiring grants cannot outlive
  * their authority. */
-export function createFencedPartnerPermissionReader(tx: Prisma.TransactionClient): PartnerPermissionReadClient {
+export function createFencedPartnerPermissionReader(tx: Prisma.TransactionClient, signal?: AbortSignal): PartnerPermissionReadClient {
   return {
-    user: memoizeReads(tx.user),
-    workspacePermission: memoizeReads(tx.workspacePermission),
-    roleWorkspacePermission: memoizeReads(tx.roleWorkspacePermission),
-    featurePermission: memoizeReads(tx.featurePermission),
-    roleFeaturePermission: memoizeReads(tx.roleFeaturePermission),
-    hrWorkspaceAccessGrant: memoizeReads(tx.hrWorkspaceAccessGrant),
-    hrFeatureAccessGrant: memoizeReads(tx.hrFeatureAccessGrant),
+    user: memoizeReads(tx.user, signal),
+    workspacePermission: memoizeReads(tx.workspacePermission, signal),
+    roleWorkspacePermission: memoizeReads(tx.roleWorkspacePermission, signal),
+    featurePermission: memoizeReads(tx.featurePermission, signal),
+    roleFeaturePermission: memoizeReads(tx.roleFeaturePermission, signal),
+    hrWorkspaceAccessGrant: memoizeReads(tx.hrWorkspaceAccessGrant, signal),
+    hrFeatureAccessGrant: memoizeReads(tx.hrFeatureAccessGrant, signal),
   };
 }
 
-function memoizeReads<Delegate extends object>(delegate: Delegate): Delegate {
+function memoizeReads<Delegate extends object>(delegate: Delegate, signal?: AbortSignal): Delegate {
   const reads = new Map<string, Promise<unknown>>();
   return new Proxy(delegate, { get(table, method, receiver) {
     const value: unknown = Reflect.get(table, method, receiver);
     if (typeof value !== 'function' || (method !== 'findUnique' && method !== 'findMany')) return value;
     return (...args: unknown[]) => {
+      signal?.throwIfAborted();
       const key = JSON.stringify([method, args]);
       let read = reads.get(key);
       if (!read) {

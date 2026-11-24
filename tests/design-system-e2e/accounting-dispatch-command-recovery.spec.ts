@@ -89,7 +89,7 @@ for (const result of ['acknowledged', 'recovered', 'resumed', 'reloaded'] as con
     failRefresh = false;
     await retry.click();
     await expect(retry).toHaveCount(0);
-    expect(reads).toEqual(result === 'reloaded' ? [null, null, 'group-a', 'group-a'] : [null, 'group-a', 'group-a']);
+    await expect.poll(() => reads).toEqual(result === 'reloaded' ? [null, null, 'group-a', 'group-a'] : [null, 'group-a', 'group-a']);
     expect(posts).toHaveLength(result === 'resumed' ? 2 : 1);
     await page.keyboard.press('Escape');
     await expect(page.getByRole('row').filter({ hasText: 'راننده ب' })).toContainText('پذیرفته‌شده');

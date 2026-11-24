@@ -62,7 +62,7 @@ async function run() {
         const historicalTool = await tx.subService.create({ data: {
           code: `HIST-${randomUUID()}`, namePersian: "نیم لول", pricePerMeter: 70000,
         } });
-        const customer = await tx.crmCustomer.findFirstOrThrow();
+        const customer = await tx.crmCustomer.create({ data: { firstName: "مشتری", lastName: "آزمون فاکتور" } });
         const template = await tx.salesContract.findFirstOrThrow({
           include: { items: { take: 1 } },
         });

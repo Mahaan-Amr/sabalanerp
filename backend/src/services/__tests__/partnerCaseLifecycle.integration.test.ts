@@ -1293,11 +1293,9 @@ test('real-schema loading source selects canonical delivery evidence without cha
     await database.$transaction(async tx => {
       await tx.user.create({ data: { id: accountantId, username: accountantId,
         email: `${accountantId}@example.invalid`, password: 'not-a-login', firstName: 'Dispatch', lastName: 'Accountant' } });
-      if (process.env.PERSONAL_PICKUP_ACCEPTANCE === '1') {
-        await tx.workspacePermission.create({ data: { userId: accountantId, workspace: 'accounting', permissionLevel: 'edit', grantedBy: actorId } });
-        await tx.featurePermission.create({ data: { userId: accountantId, workspace: 'accounting',
-          feature: 'accounting_invoice_candidates_manage', permissionLevel: 'edit', grantedBy: actorId } });
-      }
+      await tx.workspacePermission.create({ data: { userId: accountantId, workspace: 'accounting', permissionLevel: 'edit', grantedBy: actorId } });
+      await tx.featurePermission.create({ data: { userId: accountantId, workspace: 'accounting',
+        feature: 'accounting_invoice_candidates_manage', permissionLevel: 'edit', grantedBy: actorId } });
       for (const action of ['ACCOUNTING_READ', 'ACCOUNTING_WRITE']) await tx.effectiveActionGrant.create({ data: {
         id: `${accountantId}-${action}`, principalKind: 'USER', principalId: accountantId, subjectUserId: accountantId,
         domain: 'PARTNER', action, rootKind: 'CASE', purpose: 'ACCOUNTING', scope: 'PURPOSE_BOUND',

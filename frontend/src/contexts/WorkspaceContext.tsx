@@ -139,6 +139,11 @@ export const WORKSPACE_CONFIG: Record<WORKSPACES, WorkspaceInfo> = {
   }
 };
 
+export function workspaceForPathname(pathname: string): WORKSPACES | null {
+  return Object.values(WORKSPACE_CONFIG)
+    .find(({ path }) => pathname === path || pathname.startsWith(path + '/'))?.id ?? null;
+}
+
 export const LAST_WORKSPACE_STORAGE_KEY = 'sabalan:lastWorkspace';
 
 // Context Types
@@ -254,29 +259,6 @@ export const WorkspaceProvider: React.FC<WorkspaceProviderProps> = ({ children }
     }
   }, [actorId, authLoading]);
 
-  // Determine current workspace from pathname
-  const determineCurrentWorkspace = useCallback(() => {
-    if (pathname.startsWith('/dashboard/purchasing')) return WORKSPACES.PURCHASING;
-    if (pathname.startsWith('/dashboard/sales')) {
-      return WORKSPACES.SALES;
-    } else if (pathname.startsWith('/dashboard/crm')) {
-      return WORKSPACES.CRM;
-    } else if (pathname.startsWith('/dashboard/hr')) {
-      return WORKSPACES.HR;
-    } else if (pathname.startsWith('/dashboard/accounting')) {
-      return WORKSPACES.ACCOUNTING;
-    } else if (pathname.startsWith('/dashboard/inventory')) {
-      return WORKSPACES.INVENTORY;
-    } else if (pathname.startsWith('/dashboard/security')) {
-      return WORKSPACES.SECURITY;
-    } else if (pathname.startsWith('/dashboard/bi')) {
-      return WORKSPACES.BI;
-    } else if (pathname.startsWith('/dashboard/logistics')) {
-      return WORKSPACES.LOGISTICS;
-    }
-    return null;
-  }, [pathname]);
-
   // Set current workspace
   const setCurrentWorkspace = (workspace: WORKSPACES | null) => {
     setCurrentWorkspaceState(workspace);
@@ -318,7 +300,7 @@ export const WorkspaceProvider: React.FC<WorkspaceProviderProps> = ({ children }
   };
 
   useEffect(() => {
-    const workspace = determineCurrentWorkspace();
+    const workspace = workspaceForPathname(pathname);
     setCurrentWorkspaceState(workspace);
     if (workspace) localStorage.setItem(LAST_WORKSPACE_STORAGE_KEY, workspace);
 
@@ -327,7 +309,7 @@ export const WorkspaceProvider: React.FC<WorkspaceProviderProps> = ({ children }
     } else if (!authLoading) {
       setLoading(false);
     }
-  }, [pathname, determineCurrentWorkspace, loadUserPermissions, authLoading]);
+  }, [pathname, loadUserPermissions, authLoading]);
 
   const value: WorkspaceContextType = {
     currentWorkspace,

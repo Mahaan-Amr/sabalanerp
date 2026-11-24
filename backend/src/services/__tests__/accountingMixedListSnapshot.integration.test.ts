@@ -100,7 +100,10 @@ test('one-connection mixed list reads both flag counts before or after the same 
       }
       const partnerInvoice = await writer.accountingFinancialRecord.findUniqueOrThrow({ where: { id: fixture.invoice.id } });
       await writer.accountingFinancialRecord.createMany({ data: [
-        { ...partnerInvoice, id: 'mixed-partner-voided', status: 'VOIDED', voidedAt: new Date(),
+        { ...partnerInvoice, id: 'mixed-partner-voided-last', status: 'VOIDED', voidedAt: new Date(),
+          createdAt: new Date(partnerInvoice.createdAt.getTime() - 1000), idempotencyKey: null,
+          sourceSnapshot: partnerInvoice.sourceSnapshot ?? undefined, metadata: partnerInvoice.metadata ?? undefined },
+        { ...partnerInvoice, id: 'mixed-partner-voided-first', status: 'VOIDED', voidedAt: new Date(),
           createdAt: new Date(partnerInvoice.createdAt.getTime() - 1000), idempotencyKey: null,
           sourceSnapshot: partnerInvoice.sourceSnapshot ?? undefined, metadata: partnerInvoice.metadata ?? undefined },
         { ...partnerInvoice, id: 'mixed-partner-noncandidate', kind: 'PAYMENT_RECEIPT', idempotencyKey: null,
@@ -108,8 +111,19 @@ test('one-connection mixed list reads both flag counts before or after the same 
       ] });
       const actor = { userId: actorId };
       const reviewable = await listAccountingContracts({ view: 'reviewable' }, actor);
-      assert.equal(reviewable.items.find(item => item.contractId === 'partner:mixed-partner-voided')?.accounting.invoiceStatus, 'VOIDED');
+      assert.equal(reviewable.items.find(item => item.contractId === 'partner:mixed-partner-voided-last')?.accounting.invoiceStatus, 'VOIDED');
       assert.ok(!reviewable.items.some(item => item.contractId === 'partner:mixed-partner-noncandidate'));
+      const expectedTies = ['partner:mixed-partner-voided-first', 'partner:mixed-partner-voided-last'];
+      const tiedIds = (items: typeof reviewable.items) => items.map(item => item.contractId)
+        .filter(id => id.startsWith('partner:mixed-partner-voided-'));
+      assert.deepEqual(tiedIds(reviewable.items), expectedTies);
+      const fallback = await listAccountingContracts({ view: 'reviewable', dateFrom: 'retain-entire-population' }, actor);
+      assert.deepEqual(tiedIds(fallback.items), expectedTies);
+      const firstTiedPage = reviewable.items.findIndex(item => item.contractId === expectedTies[0]) + 1;
+      for (const [offset, id] of expectedTies.entries()) {
+        const page = await listAccountingContracts({ view: 'reviewable', page: firstTiedPage + offset, pageSize: 1 }, actor);
+        assert.deepEqual(tiedIds(page.items), [id]);
+      }
       const dashboard = await getAccountingDashboard({}, '6m', undefined, actor);
       const queued = dashboard.workspace.queues.contracts.flatMap(row => row.financialRecords.map((record: { id: string }) => record.id));
       assert.ok(queued.includes(fixture.invoice.id));

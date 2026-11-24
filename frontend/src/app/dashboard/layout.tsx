@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useState, useEffect, useRef } from "react";
 import {useUnarchivedDraftGuard} from '@/lib/useUnarchivedDraftGuard';
@@ -142,6 +142,7 @@ const captureSensitiveCandidateItems = (): SensitiveCandidateItem[] => {
 export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const [user, setUser] = useState<User | null>(null);
   const renderUser=useRef(user);renderUser.current=user;
+  const [navigationProfileVerified, setNavigationProfileVerified] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
@@ -204,18 +205,35 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const deniesFeatureRoute = Boolean(!isHrWorkspace && routeAvailability?.allowed === false);
 
   useEffect(() => {
-    let active = true;
-    setRouteAvailability(null);
-    if (isTaskScopedDutyRoute) return () => { active = false; };
-    dashboardAPI.getRouteAvailability(pathname)
-      .then((response) => { if (active) setRouteAvailability(response.data.data); })
-      .catch(() => {
-        if (active) setRouteAvailability({
-          allowed: false,
-          reason: 'بررسی دسترسی انجام نشد. پشتیبان سامانه باید وضعیت سرور را بررسی کند.',
+    if (isTaskScopedDutyRoute) {
+      setRouteAvailability(null);
+      return;
+    }
+    let controller = new AbortController();
+    const checkRoute = (signal: AbortSignal) => {
+      dashboardAPI.getRouteAvailability(pathname, { signal })
+        .then((response) => { if (!signal.aborted) setRouteAvailability(response.data.data); })
+        .catch(() => {
+          if (!signal.aborted) setRouteAvailability({
+            allowed: false,
+            reason: 'بررسی دسترسی انجام نشد. پشتیبان سامانه باید وضعیت سرور را بررسی کند.',
+          });
         });
-      });
-    return () => { active = false; };
+    };
+    setRouteAvailability(null);
+    const unsubscribe = browserSessionContinuation.subscribe(() => {
+      controller.abort();
+      if (browserSessionContinuation.expectedUserId() && !browserSessionContinuation.snapshot()) {
+        setRouteAvailability(null);
+        controller = new AbortController();
+        checkRoute(controller.signal);
+      }
+    });
+    checkRoute(controller.signal);
+    return () => {
+      unsubscribe();
+      controller.abort();
+    };
   }, [isTaskScopedDutyRoute, pathname]);
   const hrMobileNavigation = [
     {
@@ -345,8 +363,63 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   };
 
   useEffect(() => {
-    checkAuth();
-  }, []);
+    let controller = new AbortController();
+
+    async function checkAuth(signal: AbortSignal, initial: boolean) {
+      try {
+        const response = await dashboardAPI.getProfile({ signal });
+        if (signal.aborted) return;
+        if (!response.data.success || response.data.data?.id !== browserSessionContinuation.expectedUserId()) {
+          throw new Error("Authentication required");
+        }
+        if (response.data.data.mustChangePassword) {
+          router.push("/change-password");
+          return;
+        }
+        setUser(response.data.data);
+        setNavigationProfileVerified(true);
+        if (initial) {
+          const recoveryEnvironment = await systemRecoveryAPI.getEnvironment();
+          if (!signal.aborted) {
+            setSanitizedEnvironment(Boolean(recoveryEnvironment.data.data.sanitizedEnvironment));
+          }
+        }
+      } catch (error) {
+        if (signal.aborted) return;
+        console.error('Auth check error:', error);
+        if (!initial) return;
+        const returnTo = `${window.location.pathname}${window.location.search}`;
+        if (returnTo.startsWith('/dashboard')) sessionStorage.setItem('post-login-return-to', returnTo);
+        const status = error && typeof error === 'object' && 'response' in error
+          ? Number((error as { response?: { status?: unknown } }).response?.status || 0)
+          : 0;
+        // The shared HTTP client handles 401 navigation.
+        const contextChanged = error && typeof error === 'object' && 'code' in error && error.code === 'AUTH_CONTEXT_CHANGED';
+        if (status !== 401 && !contextChanged) router.replace('/login');
+      } finally {
+        if (!signal.aborted) setLoading(false);
+      }
+    }
+
+    const unsubscribe = browserSessionContinuation.subscribe(() => {
+      controller.abort();
+      setNavigationProfileVerified(false);
+      const owner = browserSessionContinuation.expectedUserId();
+      // A blocked session can recover the same owner while the page stays mounted.
+      setUser(previous => previous?.id === owner ? previous : null);
+      if (!owner || browserSessionContinuation.snapshot()) {
+        setLoading(false);
+        return;
+      }
+      controller = new AbortController();
+      void checkAuth(controller.signal, false);
+    });
+    void checkAuth(controller.signal, true);
+    return () => {
+      unsubscribe();
+      controller.abort();
+    };
+  }, [router]);
 
   useEffect(() => {
     if (sidebarOpen) {
@@ -406,37 +479,6 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       document.removeEventListener("mousedown", handleClickOutside);
     };
   }, [profileDropdownOpen]);
-
-  const checkAuth = async () => {
-    try {
-      const response = await dashboardAPI.getProfile();
-      if (!response.data.success) throw new Error("Authentication required");
-      if (response.data.data.mustChangePassword) {
-        router.push("/change-password");
-        return;
-      }
-      setUser(response.data.data);
-      const recoveryEnvironment = await systemRecoveryAPI.getEnvironment();
-      setSanitizedEnvironment(
-        Boolean(recoveryEnvironment.data.data.sanitizedEnvironment),
-      );
-    } catch (error) {
-      console.error('Auth check error:', error);
-      if (typeof window !== 'undefined') {
-        const returnTo = `${window.location.pathname}${window.location.search}`;
-        if (returnTo.startsWith('/dashboard')) sessionStorage.setItem('post-login-return-to', returnTo);
-      }
-      const status = error && typeof error === 'object' && 'response' in error
-        ? Number((error as { response?: { status?: unknown } }).response?.status || 0)
-        : 0;
-      // The shared HTTP client owns 401 navigation. Starting a second Next.js
-      // transition here can cancel both redirects and strand an anonymous user.
-      const contextChanged = error && typeof error === 'object' && 'code' in error && error.code === 'AUTH_CONTEXT_CHANGED';
-      if (status !== 401 && !contextChanged) router.replace('/login');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleLogout = async () => {
     await authAPI.logout().catch(() => undefined);
@@ -632,6 +674,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
             {/* Workspace Navigation */}
             <div data-sidebar-section className="flex-none lg:flex-1 lg:overflow-hidden">
               <WorkspaceNavigation
+                currentUser={navigationProfileVerified ? user : null}
                 collapsed={sidebarCollapsed}
                 onNavigate={handleSidebarNavigate}
               />

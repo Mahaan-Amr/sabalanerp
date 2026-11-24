@@ -453,7 +453,7 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
       // focused-record and candidate predicates used by the register's query.
       return authorizedInvoices.filter(row => row.kind === 'INVOICE_CANDIDATE' &&
         (!reviewRecordId || row.id === reviewRecordId))
-        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || a.id.localeCompare(b.id, 'en'))
         .map(({ id, sourceId, status, amount, currency, createdAt }) => ({
           id, sourceId, status, amount, currency, createdAt,
           partnerContext: contextByInvoice.get(id),

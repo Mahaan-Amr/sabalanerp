@@ -48,10 +48,10 @@ import {
   useWorkspace,
   WORKSPACES,
   WORKSPACE_CONFIG,
+  workspaceForPathname,
   WORKSPACE_PERMISSIONS,
 } from "@/contexts/WorkspaceContext";
-import { useAuth } from "@/contexts/AuthContext";
-import { dashboardAPI, securityAPI } from "@/lib/api";
+import { browserSessionContinuation, dashboardAPI, securityAPI } from "@/lib/api";
 import { ErpPressable, useErpPresentationScope } from '@/components/erp';
 import { DutyCountBadge } from '@/features/cross-workspace-duties/DutyCountBadge';
 import { useCrossWorkspaceDutyCount } from '@/features/cross-workspace-duties/useCrossWorkspaceDutyCount';
@@ -73,21 +73,20 @@ interface NavigationItem {
 }
 
 interface WorkspaceNavigationProps {
+  currentUser: NavigationUser | null;
   className?: string;
   collapsed?: boolean;
   onNavigate?: (href: string) => void;
 }
 
-interface User {
+interface NavigationUser {
   id: string;
-  firstName: string;
-  lastName: string;
-  email: string;
   role: string;
   permissions?: { features?: Array<{ feature: string; permissionLevel: string; workspace?: string }> };
 }
 
 export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
+  currentUser,
   className = "",
   collapsed: collapsedProp,
   onNavigate,
@@ -95,20 +94,17 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
   const { currentWorkspace, hasPermission, accessibleWorkspaces } =
     useWorkspace();
   const [expandedItems, setExpandedItems] = useState<string[]>([]);
-  const { user: actor } = useAuth();
-  const [profile, setProfile] = useState<{ actor: typeof actor; user: User } | null>(null);
-  const currentUser = actor && profile?.actor === actor ? profile.user : null;
   const [canOpenSecurityShiftReport, setCanOpenSecurityShiftReport] =
     useState(false);
   const [purchasingSections,setPurchasingSections]=useState<string[]>([]);
   const pathname = usePathname();
   // WorkspaceContext resolves after the route render. Check both before treating the sidebar as unscoped.
-  const pathnameWorkspace = Object.values(WORKSPACE_CONFIG).find(({ path }) => pathname.startsWith(path))?.id;
+  const pathnameWorkspace = workspaceForPathname(pathname);
   const needsPartnerRoutes = Boolean(currentUser && (
     (currentWorkspace === WORKSPACES.SALES && pathnameWorkspace === WORKSPACES.SALES) ||
     (!currentWorkspace && !pathnameWorkspace && currentUser.role !== 'ADMIN' && currentUser.role !== 'MANAGER')
   ));
-  const partnerRequest = useMemo(() => needsPartnerRoutes && actor ? { actor } : null, [needsPartnerRoutes, actor]);
+  const partnerRequest = useMemo(() => needsPartnerRoutes && currentUser ? { user: currentUser } : null, [needsPartnerRoutes, currentUser]);
   const [partnerResult, setPartnerResult] = useState<{
     request: NonNullable<typeof partnerRequest>;
     access: Record<string, boolean>;
@@ -121,21 +117,9 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
   useEffect(()=>{if(currentWorkspace!==WORKSPACES.PURCHASING)return;let active=true;setPurchasingSections([]);void purchasingAPI.access().then(r=>{if(active)setPurchasingSections(r.data.data.sections);}).catch(()=>{if(active)setPurchasingSections([]);});return()=>{active=false;};},[currentWorkspace,currentUser?.id]);
 
   useEffect(() => {
-    if (!actor) return;
-    const controller = new AbortController();
-    dashboardAPI.getProfile({ signal: controller.signal }).then(response => {
-      if (!controller.signal.aborted && response.data.success && response.data.data?.id === actor.id) {
-        setProfile({ actor, user: response.data.data });
-      }
-    }).catch(error => {
-      if (!controller.signal.aborted) console.error("Error loading user profile:", error);
-    });
-    return () => controller.abort();
-  }, [actor]);
-
-  useEffect(() => {
     if (!partnerRequest) return;
     const controller = new AbortController();
+    const unsubscribe = browserSessionContinuation.subscribe(() => controller.abort());
     const paths = ['/dashboard/sales/partners', '/dashboard/sales/contracts', '/dashboard/sales/contracts/create',
       '/dashboard/sales/partner-inquiries', '/dashboard/sales/partner-cases',
       '/dashboard/sales/partner-customers', '/dashboard/sales/partner-customers/transfers', '/dashboard/sales/partner-reports'];
@@ -151,7 +135,10 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
         setPartnerResult({ request: partnerRequest, access: Object.fromEntries(entries) });
       }
     });
-    return () => controller.abort();
+    return () => {
+      unsubscribe();
+      controller.abort();
+    };
   }, [partnerRequest]);
 
   useEffect(() => {

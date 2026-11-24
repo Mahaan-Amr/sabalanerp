@@ -19,6 +19,7 @@ test('browser receipts attribute complete responses and aborted transfers indepe
   const navigations = [];
   let dashboardRequests = 0;
   let reviewableRequests = 0;
+  let planRequests = 0;
   const server = createServer((req, res) => {
     const url = new URL(req.url, 'http://localhost');
     if (url.pathname === '/api/accounting/dashboard') {
@@ -54,6 +55,22 @@ test('browser receipts attribute complete responses and aborted transfers indepe
         setTimeout(() => res.end(JSON.stringify({ items, page: 1, pageSize: 50, total }) + '}'), 900);
       }
       else res.end('null}');
+      return;
+    }
+    if (url.pathname === '/api/accounting/financial-records') {
+      res.writeHead(200, { 'content-type': 'application/json', 'x-accounting-request-id': reviewableId,
+        'x-accounting-commit': commit });
+      res.end('{"success":true,"data":{"items":[],"page":1,"pageSize":50,"total":0}}');
+      return;
+    }
+    if (url.pathname === '/api/partner/accounting/sabalan-plan-candidates') {
+      const status = [200, 200, 403, 500][planRequests++];
+      res.writeHead(status, { 'content-type': 'application/json', 'x-accounting-request-id': reviewableId,
+        'x-accounting-commit': commit });
+      res.write('{');
+      const body = status === 200 ? { success: true, data: planRequests === 1 ? [{}, {}] : [] }
+        : { success: false, code: status === 403 ? 'FORBIDDEN' : 'TECHNICAL_FAILURE' };
+      setTimeout(() => res.end(JSON.stringify(body).slice(1)), 400);
       return;
     }
     if (url.pathname.startsWith('/api/duties/workspaces/accounting/')) {
@@ -104,6 +121,18 @@ test('browser receipts attribute complete responses and aborted transfers indepe
             : '<p>قراردادی یافت نشد</p>');
         })();
       </script></main>`);
+    } else if (url.pathname === '/dashboard/accounting/invoice-candidates') {
+      res.end(`<main><input type="search"><script>
+        fetch('/api/accounting/financial-records?view=actionable&page=1&pageSize=50&kind=INVOICE_CANDIDATE')
+          .then(response => response.json()).then(() => {
+            const contents = document.querySelector('main');
+            contents.insertAdjacentHTML('beforeend', '<p>صورتحسابی در این فیلتر وجود ندارد</p>');
+            return fetch('/api/partner/accounting/sabalan-plan-candidates').then(response => response.json()).then(body => {
+              if (body.data?.length) setTimeout(() => contents.insertAdjacentHTML('beforeend',
+                '<button>ثبت برنامه پرداخت به سبلان</button>'.repeat(body.data.length)), 200);
+            });
+          });
+      </script></main>`);
     } else if (url.pathname === '/dashboard/accounting/duties') {
       res.end(`<main><script>
         fetch('/api/duties/workspaces/accounting/duties?view=available');
@@ -124,7 +153,7 @@ test('browser receipts attribute complete responses and aborted transfers indepe
   const output = path.join(directory, 'receipt.json');
   const runnerEnv = {
     ...process.env, ACCOUNTING_TIMING_RUN: 'candidate', ACCOUNTING_TIMING_WORKLOAD: 'http-fixture',
-    ACCOUNTING_TIMING_SURFACES: 'dashboard,reviewable-list,duties', ACCOUNTING_TIMING_SAMPLES: '4', ACCOUNTING_TIMING_CONCURRENCY: '1',
+    ACCOUNTING_TIMING_SURFACES: 'dashboard,reviewable-list,invoice-candidates,duties', ACCOUNTING_TIMING_SAMPLES: '4', ACCOUNTING_TIMING_CONCURRENCY: '1',
     ACCOUNTING_TIMING_IDENTIFIER: 'fixture', ACCOUNTING_TIMING_PASSWORD: 'fixture', ACCOUNTING_TIMING_COMMIT: commit,
     ACCOUNTING_TIMING_ORIGIN: `http://127.0.0.1:${server.address().port}`, ACCOUNTING_TIMING_OUTPUT: output,
     ACCOUNTING_TIMING_SEPIDAR_FIXTURE: '', ACCOUNTING_TIMING_PHASE: 'cold',
@@ -167,6 +196,19 @@ test('browser receipts attribute complete responses and aborted transfers indepe
   assert.deepEqual(sample.data, { state: 'empty', page: 1, pageSize: 50, total: 0, rows: 0 });
   assert.deepEqual(reviewable[2].data, { state: 'rows', page: 1, pageSize: 50, total: 51, rows: 50 });
   assert.deepEqual(metrics['reviewable-list'].fullHttpMs, { count: 4, p95: Math.max(...reviewable.map(row => row.api.fullHttpMs)) });
+  const [plans, noPlans, scopeDenied, unavailablePlan] = results.filter(sample => sample.surface === 'invoice-candidates');
+  assert.equal(plans.paymentPlan.rows, 2);
+  assert.ok(plans.paymentPlan.fullHttpMs >= 350);
+  assert.ok(plans.paymentPlanReadyMs >= plans.firstActionMs + 500, 'separates first invoice rows from rendered plans');
+  assert.equal(plans.completeMs, plans.paymentPlanReadyMs);
+  assert.equal(noPlans.paymentPlan.rows, 0);
+  assert.equal(scopeDenied.paymentPlan.status, 403);
+  assert.equal(scopeDenied.paymentPlan.rows, 0);
+  assert.ok(Number.isFinite(scopeDenied.completeMs));
+  assert.equal(unavailablePlan.failure, 'API_FAILED');
+  assert.equal(unavailablePlan.completeMs, undefined);
+  assert.equal(metrics['invoice-candidates'].paymentPlanReadyMs.count, 3);
+  assert.equal(metrics['invoice-candidates'].target.passed, false);
   const [duties] = results.filter(sample => sample.surface === 'duties');
   assert.equal(duties.api.view, 'assigned');
   assert.equal(duties.data.state, 'empty');

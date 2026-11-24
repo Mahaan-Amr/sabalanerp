@@ -39,6 +39,7 @@ const detail = /^\/api\/accounting\/dispatch-candidates\/[^/]+\/document-read-mo
 const reference = /^\/api\/accounting\/loadings\/[^/]+\/sepidar-reference$/;
 const dutyList = '/api/duties/workspaces/accounting/duties';
 const dutySummary = '/api/duties/workspaces/accounting/summary';
+const paymentPlanCandidates = { api: '/api/partner/accounting/sabalan-plan-candidates' };
 const accountingPage = '/dashboard/accounting';
 
 function register(name, { path = name, endpoint = path, view = null, kind, empty, itemLabel, pageSize = 50 }) {
@@ -71,6 +72,7 @@ const readKinds = new Map([
   [list, 'dispatch-list'],
   [dutyList, 'duties-list'],
   [dutySummary, 'duties-summary'],
+  [paymentPlanCandidates.api, 'payment-plan-candidates'],
   ['/api/accounting/dashboard/workspace', 'dashboard-workspace'],
   ['/api/accounting/dashboard/change', 'dashboard-change'],
   ['/api/accounting/financial-trend', 'financial-trend'],
@@ -307,6 +309,32 @@ async function readyDutySummary(page, summary) {
   ]);
 }
 
+async function readyPaymentPlanCandidates(page, response, config, result, navigationStartedAt) {
+  const expectScopeDenial = response.status() === 403 && config.actorClass !== 'administrator';
+  let data;
+  if (expectScopeDenial) {
+    const evidence = checkResponse(response, config);
+    if (!evidence.requestId || response.headers()['x-accounting-commit'] !== config.commit) throw Error('BUILD_UNATTESTED');
+    result.paymentPlan = { ...evidence, path: paymentPlanCandidates.api,
+      ...await fullTransfer(page, response, navigationStartedAt) };
+    if (result.paymentPlan.transferFailure) throw Error('INCOMPLETE_TRANSFER');
+    const body = await response.json().catch(() => null);
+    if (body?.success !== false || body.code !== 'FORBIDDEN') throw Error('INVALID_READ_DATA');
+    data = [];
+  } else {
+    data = await readData(page, response, config, paymentPlanCandidates, result, navigationStartedAt, 'paymentPlan');
+    if (!Array.isArray(data)) throw Error('INVALID_READ_DATA');
+  }
+  const actions = page.getByRole('button', { name: 'ثبت برنامه پرداخت به سبلان', exact: true });
+  if (data.length) {
+    await visible(actions.nth(data.length - 1));
+    if (await actions.count() !== data.length) throw Error('INVALID_RENDERED_DATA');
+  } else {
+    await actions.first().waitFor({ state: 'hidden' });
+  }
+  result.paymentPlan.rows = data.length;
+}
+
 async function measureFirstRead(page, config, scenario, result) {
   const navigationStartedAt = Date.now();
   const started = performance.now();
@@ -341,11 +369,19 @@ async function measureFirstRead(page, config, scenario, result) {
       result.summaryReadyMs = elapsed();
     }));
   }
+  // The deployed baseline does not mount the URL its invoice page requests.
+  // Measure the first invoice rows on both builds and attach the plan result on candidates.
+  if (scenario.name === 'invoice-candidates' && config.run === 'candidate') {
+    actions.push(waitFor(paymentPlanCandidates).then(async response => {
+      await readyPaymentPlanCandidates(page, response, config, result, navigationStartedAt);
+      result.paymentPlanReadyMs = elapsed();
+    }));
+  }
   const [navigation, ...reads] = await Promise.allSettled([page.goto(scenario.page, { waitUntil: 'commit' }), ...actions]);
   for (const outcome of [navigation, ...reads]) {
     if (outcome.status === 'rejected') throw outcome.reason;
   }
-  result.completeMs ??= Math.max(result.firstActionMs, result.summaryReadyMs ?? 0);
+  result.completeMs ??= Math.max(result.firstActionMs, result.summaryReadyMs ?? 0, result.paymentPlanReadyMs ?? 0);
 }
 
 async function sample(browser, config, scenario, command, phase) {
@@ -453,6 +489,10 @@ export function summarizeSurface(samples, { name, target, phase }) {
     fullHttpMs: p95(samples, sample => sample.api?.fullHttpMs),
     apiRequestStartMs: p95(samples, sample => sample.api?.requestStartMs),
     apiResponseBodyBytes: p95(samples, sample => sample.api?.responseBodyBytes),
+    ...(name === 'invoice-candidates' ? {
+      paymentPlanReadyMs: p95(samples, sample => sample.paymentPlanReadyMs),
+      paymentPlanFullHttpMs: p95(samples, sample => sample.paymentPlan?.fullHttpMs),
+    } : {}),
     ...(name === 'duties' ? {
       summaryReadyMs: p95(samples, sample => sample.summaryReadyMs),
       summaryFullHttpMs: p95(samples, sample => sample.summary?.fullHttpMs),

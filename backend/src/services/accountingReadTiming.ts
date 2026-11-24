@@ -3,13 +3,18 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 type AccountingReadPhase = 'lockWait' | 'authorization' | 'population' | 'rowHydration'
   | 'scopeSetup' | 'authorizationAudit' | 'provenance' | 'partnerEvidence'
   | 'ordinaryPopulation' | 'partnerPopulation' | 'registerRanking' | 'workspace' | 'trend'
-  | 'invoiceEvidence' | 'collectionEvidence' | 'taxEvidence' | 'auditEvidence' | 'workspaceCounters';
+  | 'invoiceEvidence' | 'collectionEvidence' | 'taxEvidence' | 'auditEvidence' | 'workspaceCounters'
+  | 'dutyActiveList' | 'dutyActiveCounters' | 'dutyHistoryList' | 'dutyHistoryCounters'
+  | 'dutySourceContractDispatch' | 'dutySourceLoadingCancellation' | 'dutySourcePurchasingInquiry'
+  | 'dutySourceHrWorkItem' | 'dutySourceSalesCorrection' | 'dutySourceHiringFinance'
+  | 'dutySourcePartnerPricing' | 'dutySourceOther';
 export type AccountingReadTimings = Partial<Record<AccountingReadPhase, number>>;
 
 type AccountingReadWorkKind = 'historicalInvoices' | 'historicalPayments' | 'historicalAuditEvents'
   | 'historicalPartnerBalances' | 'receiptCandidates' | 'receiptPageRows'
   | 'partnerInvoices' | 'partnerReceivables' | 'partnerPayments' | 'partnerTaxRows'
-  | 'partnerAuditWitnesses' | 'markedProvenanceRows';
+  | 'partnerAuditWitnesses' | 'markedProvenanceRows'
+  | 'dutyActiveCandidates' | 'dutyHistoryCandidates';
 export type AccountingReadWork = Partial<Record<AccountingReadWorkKind, number>>;
 
 export const accountingReadTiming = new AsyncLocalStorage<AccountingReadTimings & { readWork?: AccountingReadWork }>();

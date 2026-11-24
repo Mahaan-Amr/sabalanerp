@@ -12,6 +12,8 @@ test('summary shares recovery evidence across inquiries and rereads it on the ne
     dueAt: now, createdAt: now, updatedAt: now, respondedAt: null, structuredResultJson: null,
     assignmentHistory: [], envelope: { isActive: true, allowedFieldsJson: [...definition.allowedFields],
       allowedEvidenceJson: [], allowedActionCodesJson: [], responseSchemaJson: definition.responseSchema } };
+  let activePasses = 0;
+  let managerReads = 0;
   let reads = 0;
   let evidenceReads = 0;
   let pending = true;
@@ -23,9 +25,13 @@ test('summary shares recovery evidence across inquiries and rereads it on the ne
       calculationPolicyVersion: 'calc', roundingPolicyVersion: 'rounding' }, description: 'سنگ', configuration: [],
   } }));
   const database = {
-    user: { findUnique: async () => ({ role: 'ADMIN', isActive: true }) },
-    crossWorkspaceDuty: { findMany: async ({ where }: any) => where.status === 'OPEN'
-      && where.currentAssigneeUserId !== null ? [duty, { ...duty, id: 'second-duty', sourceId: 'second-inquiry' }] : [] },
+    user: { findUnique: async () => { managerReads++; return { role: 'ADMIN', isActive: true }; } },
+    crossWorkspaceDuty: { findMany: async ({ where }: any) => {
+      if (where.status !== 'OPEN') return [];
+      activePasses++;
+      return where.currentAssigneeUserId !== null
+        ? [duty, { ...duty, id: 'second-duty', sourceId: 'second-inquiry' }] : [];
+    } },
     crossWorkspaceDutyHistoryReceipt: { findUnique: async () => null },
     crossWorkspaceDutyAvailableReceipt: { findUnique: async () => null },
     $queryRaw: async () => { evidenceReads++; return [{
@@ -38,6 +44,8 @@ test('summary shares recovery evidence across inquiries and rereads it on the ne
   const summary = await getCrossWorkspaceDutySummary(database as any, input);
   assert.deepEqual(summary, { open: 2, available: 0, availableUnseen: 0, attention: 2,
     dueSoon: 2, overdue: 0, triage: 2, historyUnseen: 0, canManageTriage: true });
+  assert.equal(activePasses, 1, 'one active candidate pass supplies all three active views');
+  assert.equal(managerReads, 1, 'all active views and unseen history use the same manager decision');
   assert.equal(reads, 2, 'each inquiry is read once across assigned and triage views');
   assert.equal(evidenceReads, 1, 'different inquiries referencing the same recovery share one protected journal read');
   pending = false;

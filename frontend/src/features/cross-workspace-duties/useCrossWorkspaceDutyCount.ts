@@ -2,16 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { createDutyCountRequests } from './dutyCountRequests';
 import {
   CROSS_WORKSPACE_DUTY_CHANGED_EVENT,
-  crossWorkspaceDutyApi,
+  requestCrossWorkspaceDutySummary,
 } from './crossWorkspaceDutyApi';
-
-const requestCount = createDutyCountRequests(async workspace => {
-  const response = await crossWorkspaceDutyApi.summary(workspace);
-  return response.data.data.attention;
-});
 
 export const useCrossWorkspaceDutyCount = (workspace: string | null) => {
   const { user } = useAuth();
@@ -22,7 +16,7 @@ export const useCrossWorkspaceDutyCount = (workspace: string | null) => {
     let active = true;
     const refresh = async (changed = false) => {
       try {
-        const count = await requestCount(user, workspace, changed);
+        const { attention: count } = await requestCrossWorkspaceDutySummary(user, workspace, changed);
         if (active) setResult({ session: user, workspace, count });
       } catch {
         // Preserve the last successful count for this session during transient failures.

@@ -1240,7 +1240,9 @@ export const accountingAPI = {
     api.get('/accounting/dashboard/workspace', { params }),
   getFinancialTrend: (range: '1m' | '3m' | '6m' | '1y') => api.get('/accounting/financial-trend', { params: { range } }),
   getDispatchCandidates: () => api.get('/accounting/dispatch-candidates'),
-  registerSepidarLoadingReference: (loadingId: string, data: { value: string | null; expectedVersion: string | null; reason?: string }) =>
+  getSepidarDispatchInvoices: (loadingId: string, signal?: AbortSignal) =>
+    api.get(`/accounting/loadings/${encodeURIComponent(loadingId)}/sepidar-reference`, { signal }),
+  saveSepidarDispatchInvoices: (loadingId: string, data: { invoices: { number: string; amountRial: string }[]; expectedVersion: string | null; reason?: string }) =>
     api.post(`/accounting/loadings/${encodeURIComponent(loadingId)}/sepidar-reference`, data),
   issueLoadingDocuments: (loadingId: string, recovery?: { waybillId: string; invoiceId: string; reason: string }) =>
     api.post(`/accounting/loadings/${encodeURIComponent(loadingId)}/issue-dispatch-documents`, recovery ? { recovery } : undefined),

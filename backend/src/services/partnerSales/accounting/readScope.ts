@@ -1,6 +1,6 @@
 import { readAccountingCommercialState, readPartnerCommercialState } from '../cases/commercialLifecycle';
 import { randomUUID } from 'node:crypto';
-import { Prisma, type PrismaClient } from '@prisma/client';
+import { Prisma, type AccountingFinancialRecord, type PrismaClient } from '@prisma/client';
 import { RevisionRefSchema, type PartnerCommercialState } from '@sabalanerp/partner-sales-contracts';
 import { createAuditedPartnerAuthorization } from '../authorization/audited';
 import { appendAuthorizationDecisions, type AuthorizationDecisionAudit } from '../../effectiveAuthorization/audit';
@@ -365,6 +365,13 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
     readCommercialForCase,
     partnerAccountingIncluded: authorizedInvoices.length > 0,
     authorizedPartnerInternalIds: allowedInternalIds,
+    verifiedInvoicePreparation: (invoice: AccountingFinancialRecord, caseId: string) => {
+      const preparation = preparationByInvoice.get(invoice.id);
+      if (!preparation || preparation.owner.caseId !== caseId || preparation.internalRecordId !== invoice.sourceId ||
+          invoice.sourceKind !== PARTNER_INTERNAL_ACCOUNTING_SOURCE || invoice.kind !== 'INVOICE_CANDIDATE' ||
+          invoice.contractId || invoice.customerId || object(invoice.metadata)?.partnerCaseId !== caseId) throw conflict();
+      return preparation;
+    },
     contextualize,
     search: async (kind: ListKind | 'CORRECTION', ordinaryContractIds: string[], text: string) => {
       const normalized = text.toLocaleLowerCase();

@@ -4,6 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { prisma } from '../../lib/prisma';
 import accountingRouter from '../../routes/accounting';
 import partnerAccountingRouter from '../../routes/partner-accounting';
+import { getAccountingDashboard, getAccountingFinancialTrend, getAccountingDashboardWorkspace } from '../accountingService';
 import { readPartnerOutstandingHistory } from '../partnerSales/accounting/history';
 import { createAuthoritativeSession, SESSION_COOKIE } from '../identitySessionService';
 
@@ -142,6 +143,20 @@ async function main() {
       assert.equal(await prisma.accountingReceivable.count({ where: { invoiceRecordId: invoiceId } }), 0);
       const approvedInvoice = await prisma.accountingFinancialRecord.findUniqueOrThrow({ where: { id: invoiceId } });
       assert.equal((approvedInvoice.metadata as Record<string, unknown>).partnerReceivablePending, true);
+      const readActor = { userId: actorId };
+      let fullRevisionReads = 0;
+      prisma.$use(async (query, next) => {
+        if (query.model === 'PartnerCaseRevision' && query.action === 'findUnique' && !query.args?.select) fullRevisionReads++;
+        return next(query);
+      });
+      const { workspace } = await getAccountingDashboardWorkspace({ range: '3m' }, readActor);
+      assert.equal(workspace.partnerAccountingIncluded, true, 'the reader is authorized for the pending Partner invoice');
+      const workspaceRevisionReads = fullRevisionReads;
+      fullRevisionReads = 0;
+      const dashboard = await getAccountingDashboard({}, '3m', new Date(), readActor);
+      assert.equal(dashboard.trendError, false);
+      assert.deepEqual(dashboard.trend?.partnerSeries, [], 'an approval awaiting its receivable contributes no issued debt');
+      assert.equal(fullRevisionReads, workspaceRevisionReads, 'the trend must reuse the verified revision from the same snapshot');
       const history = await prisma.$transaction(tx => readPartnerOutstandingHistory(tx, {
         invoiceIds: [invoiceId], cutoff: new Date(), asOf: new Date(),
       }));
@@ -164,7 +179,11 @@ async function main() {
       await prisma.accountingFinancialRecord.update({ where: { id: invoiceId }, data: { metadata: {
         ...metadata, partnerApproval: { ...metadata.partnerApproval, financialApprovalEvidenceId: 'tampered-approval' },
       } } });
-      try { assert.equal((await create()).status, 409, 'explicit creation rejects damaged approval evidence'); }
+      try {
+        await assert.rejects(() => getAccountingFinancialTrend('3m', new Date(), readActor),
+          { code: 'INTEGRITY_CONFLICT' }, 'a validated invoice source cannot cover a damaged approval seal');
+        assert.equal((await create()).status, 409, 'explicit creation rejects damaged approval evidence');
+      }
       finally { await prisma.accountingFinancialRecord.update({ where: { id: invoiceId }, data: { metadata: approvedInvoice.metadata! } }); }
       const beforeCreation = new Date(Date.now() - 1);
       const results = await Promise.all([create(), create(), create()]);
@@ -173,6 +192,12 @@ async function main() {
       assert.equal(await prisma.accountingReceivable.count({ where: { invoiceRecordId: invoiceId } }), 1);
       assert.equal(await prisma.accountingAuditLog.count({ where: { recordId: invoiceId, action: 'CREATE_PARTNER_RECEIVABLE' } }), 1);
       assert.equal((await prisma.accountingFinancialRecord.findUniqueOrThrow({ where: { id: invoiceId } })).status, 'ISSUED');
+      const publishedTrend = await getAccountingFinancialTrend('3m', new Date(), readActor);
+      assert.deepEqual(publishedTrend.partnerSeries.map(series => ({
+        currency: series.currency,
+        points: series.points.map(point => [point.invoiced, point.received, point.outstanding]),
+      })), [{ currency: 'IRR', points: [['0', '0', '0'], ['0', '0', '0'], ['1600', '0', '1600']] }],
+      'publication adds the exact invoice and remaining balance in its issue period');
       const priorHistory = await prisma.$transaction(tx => readPartnerOutstandingHistory(tx, {
         invoiceIds: [invoiceId], cutoff: new Date(Date.now() + 86400000), asOf: beforeCreation,
       }));

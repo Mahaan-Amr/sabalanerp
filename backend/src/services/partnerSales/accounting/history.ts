@@ -7,6 +7,7 @@ import { PARTNER_INTERNAL_ACCOUNTING_SOURCE, matchesFinancialPreparation, prepar
   type PartnerFinancialPreparation } from './source';
 import { sum, negate } from '../reporting/money';
 import { sumPartnerCollections } from './collections';
+import type { AccountingReadScope } from './readScope';
 import type { FinancialTrendPeriod } from '../../accountingFinancialTrend';
 import { PARTNER_REPLACEMENT_MODE, matchesPartnerStagedApproval } from './sharedCorrection';
 import { readPartnerRevisionProjections } from '../cases/lifecycle';
@@ -21,10 +22,16 @@ const conflict = () => new PartnerAccountingCommandError('INTEGRITY_CONFLICT', '
 /** Caller supplies already-authorized, canonically validated invoice ids from
  * the same read transaction. A historical obligation requires its published
  * approval and dated collections; drafts never stand in for an official debt. */
-async function publishedInvoices(tx: Prisma.TransactionClient, input: { invoiceIds: readonly string[]; asOf: Date }) {
+async function publishedInvoices(tx: Prisma.TransactionClient, input: { invoiceIds: readonly string[]; asOf: Date },
+  scope?: AccountingReadScope) {
   const invoices = await tx.accountingFinancialRecord.findMany({ where: { id: { in: [...input.invoiceIds] },
     sourceKind: PARTNER_INTERNAL_ACCOUNTING_SOURCE, financiallyApprovedAt: { not: null, lte: input.asOf } },
     include: { receivables: true } });
+  // Scoped trend reads select these rows in the same repeatable-read snapshot
+  // that authorized and rebuilt their sources. Direct history has no such proof.
+  const invoicePreparation = async (invoice: typeof invoices[number], caseId: string) => scope
+    ? scope.verifiedInvoicePreparation(invoice, caseId)
+    : (await readPartnerInvoiceSource(tx, invoice, caseId)).preparation;
   const caseIds = [...new Set(invoices.map(invoice => object(invoice.metadata)?.partnerCaseId).filter((id): id is string => typeof id === 'string'))];
   const cases = await tx.partnerSaleCase.findMany({ where: { id: { in: caseIds }, internalRecordId: { not: null } },
     include: { events: { orderBy: { sequence: 'asc' } } } });
@@ -62,7 +69,7 @@ async function publishedInvoices(tx: Prisma.TransactionClient, input: { invoiceI
       if (typeof caseId !== 'string' || invoice.receivables.length || !invoice.systemInvoiceDate ||
           !['ISSUED', 'POSTED', 'VOIDED'].includes(invoice.status) || typeof approvalId !== 'string' ||
           eventsByCase.get(caseId)?.some(event => event.eventId === approvalId)) throw conflict();
-      await readPartnerInvoiceSource(tx, invoice, caseId);
+      await invoicePreparation(invoice, caseId);
       await validatePendingPartnerApproval(invoice);
       continue;
     }
@@ -96,8 +103,8 @@ async function publishedInvoices(tx: Prisma.TransactionClient, input: { invoiceI
       if (!prepared.ok || !matchesFinancialPreparation(prepared.value, historical)) throw conflict();
       effectiveAt = replacesDebt ? new Date(effect.recordedAt) : invoice.systemInvoiceDate;
     }
-    const canonical = await readPartnerInvoiceSource(tx, invoice, approval.owner.caseId);
-    rows.push({ invoice, approval, effectiveAt, preparation: canonical.preparation });
+    const preparation = await invoicePreparation(invoice, approval.owner.caseId);
+    rows.push({ invoice, approval, effectiveAt, preparation });
   }
   return rows;
 }
@@ -134,10 +141,11 @@ async function projectPartnerOutstandingHistory(tx: Prisma.TransactionClient, in
 }
 
 /** Separate exact-currency series; ordinary contract/Rial chart stays unchanged. */
-export async function readPartnerAccountingTrend(tx: Prisma.TransactionClient, input: {
+export async function readPartnerAccountingTrend(source: Prisma.TransactionClient | AccountingReadScope, input: {
   invoiceIds: readonly string[]; periods: readonly FinancialTrendPeriod[]; asOf: Date;
 }) {
-  const published = await publishedInvoices(tx, input);
+  const tx = 'contextualize' in source ? source.database : source;
+  const published = await publishedInvoices(tx, input, 'contextualize' in source ? source : undefined);
   const receivableIds = [...new Set(published.map(({ approval }) => approval.accountingReceivableId))];
   const payments = receivableIds.length ? await tx.accountingPaymentStatus.findMany({ where: {
     receivableId: { in: receivableIds }, createdAt: { lte: input.asOf },

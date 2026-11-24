@@ -1804,7 +1804,7 @@ const getAccountingFinancialTrendInScope = async (scope: AccountingReadScope, re
   ]);
   const ordinary = buildAccountingFinancialTrend({ range, now, invoices, payments,
     auditEvents: await attachAccountingTrendAuditState(prisma, auditEvents) });
-  const partnerSeries = await readPartnerAccountingTrend(prisma, { invoiceIds: invoices.map(row => row.id),
+  const partnerSeries = await readPartnerAccountingTrend(scope, { invoiceIds: invoices.map(row => row.id),
     periods: resolveFinancialTrendPeriods(range, now), asOf: now });
   return { ...ordinary, partnerSeries };
 };

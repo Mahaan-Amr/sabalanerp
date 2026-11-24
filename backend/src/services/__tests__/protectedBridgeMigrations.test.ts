@@ -10,8 +10,9 @@ import { compileProtectedBridgeMigration, compileProtectedCurrentRelease,
 test('same-operation retry rejects changed quantity, duty, waybill, or pickup evidence', () => {
   const owner = { deploymentId: 'operation-1', releaseId: 'release-1', leaseToken: 'lease-1' };
   const receipt = { deploymentId: owner.deploymentId, releaseId: owner.releaseId,
-    quantityProofSha256: 'q', dutyRows: '437', sequenceProofSha256: 's', pickupDispatchRows: '19:41', personalPickupDispatchRows: '19:41' };
-  const observed = { quantityProofSha256: 'q', dutyRows: '437', sequenceProofSha256: 's', pickupDispatchRows: '19:41', personalPickupDispatchRows: '19:41' };
+    quantityProofSha256: 'q', dutyRows: '437', sequenceProofSha256: 's', pickupDispatchRows: '19:41',
+    personalPickupDispatchRows: '19:41', sepidarSeedSha256: 'digest' };
+  const { deploymentId, releaseId, ...observed } = receipt;
   assert.doesNotThrow(() => assertProtectedCurrentReleaseRetryEvidence(receipt, owner, observed));
   for (const key of Object.keys(observed) as Array<keyof typeof observed>) {
     assert.throws(() => assertProtectedCurrentReleaseRetryEvidence(receipt, owner,
@@ -75,6 +76,11 @@ test('the complete current release is admitted only with its reviewed ordered SQ
     '20261120125000_runtime_driver_assignment_permissions',
     '20261120126000_runtime_partner_receipt_permissions',
     '20261120127000_runtime_partner_inquiry_evidence_locks',
+    '20261123110000_stone_return_receipts',
+    '20261123111000_stone_return_allocation_drafts',
+    '20261123130000_sepidar_dispatch_invoices',
+    '20261123130000_stone_excess_shipment_return',
+    '20261123140000_stone_return_finalizations',
   ];
   const files = names.map(name => [name, fs.readFileSync(path.join(directory, name, 'migration.sql'))] as const);
   const release = compileProtectedCurrentRelease(files);
@@ -215,6 +221,17 @@ test('protected migration receipts verify exact ACLs across the dormant to restr
     routine('protect_runtime_driver_assignment_identity', false),
     routine('protect_runtime_partner_receipt_assembly', false)];
   assert.ok(await protectedCurrentReleaseRuntimeAclProof(query(true, [...fullTables, ...fullRoutines]), fullNames, split));
+  const novemberNames = new Set([...fullNames,
+    '20261123110000_stone_return_receipts', '20261123111000_stone_return_allocation_drafts',
+    '20261123130000_sepidar_dispatch_invoices', '20261123140000_stone_return_finalizations']);
+  const stone = ['stone_return_receipts', 'stone_return_allocation_drafts', 'stone_return_allocation_draft_rows',
+    'stone_return_finalizations'].map(name => table(name, ['INSERT', 'SELECT']));
+  const novemberObjects = [...fullTables, ...fullRoutines, ...stone];
+  const invoices = (verbs: string[]) => table('sepidar_dispatch_invoices', verbs);
+  assert.ok(await protectedCurrentReleaseRuntimeAclProof(query(true,
+    [...novemberObjects, invoices(['INSERT', 'DELETE', 'SELECT'])]), novemberNames, split));
+  await assert.rejects(protectedCurrentReleaseRuntimeAclProof(query(true,
+    [...novemberObjects, invoices(['INSERT', 'DELETE', 'SELECT', 'UPDATE'])]), novemberNames, split), /RUNTIME_ACL_DRIFT/);
   await assert.rejects(protectedCurrentReleaseRuntimeAclProof(query(true, [registry, ...fullTables.filter(object => object.name !== registry.name),
     ...fullRoutines]), fullNames, split), /RUNTIME_ACL_DRIFT/);
 });

@@ -33,7 +33,7 @@ const list = '/api/accounting/dispatch-candidates';
 const detail = /^\/api\/accounting\/dispatch-candidates\/[^/]+\/document-read-model$/;
 const reference = /^\/api\/accounting\/loadings\/[^/]+\/sepidar-reference$/;
 const scenarios = [
-  { name: 'dashboard', page: '/dashboard/accounting', api: '/api/accounting/dashboard/workspace',
+  { name: 'dashboard', page: '/dashboard/accounting', api: '/api/accounting/dashboard',
     ready: page => page.getByRole('button', { name: 'به‌روزرسانی', exact: true }) },
   { name: 'reviewable-list', page: '/dashboard/accounting/contracts', api: '/api/accounting/contracts',
     ready: page => page.getByRole('row').filter({ has: page.getByRole('cell') }).first().getByRole('link', { name: /^(مشاهده|مشاهده پرونده)$/ }) },
@@ -185,6 +185,9 @@ function p95(samples, measure) {
 
 async function run() {
   const config = options();
+  const selected = env.ACCOUNTING_TIMING_SURFACES?.split(',').map(value => value.trim());
+  if (selected?.some(name => !scenarios.some(scenario => scenario.name === name))) throw Error('INVALID_TIMING_SURFACES');
+  const measuredScenarios = selected ? scenarios.filter(scenario => selected.includes(scenario.name)) : scenarios;
   const file = env.ACCOUNTING_TIMING_SEPIDAR_FIXTURE;
   const commands = file ? JSON.parse(await readFile(file, 'utf8')) : [];
   if (!Array.isArray(commands) || (file && commands.length !== config.samples)
@@ -199,7 +202,7 @@ async function run() {
   const started = new Date().toISOString();
   try {
     // Each sample opens an independently authenticated browser context.
-    for (const scenario of scenarios) {
+    for (const scenario of measuredScenarios) {
       for (let i = 0; i < config.samples; i += config.concurrency) {
         const batch = Array.from({ length: Math.min(config.concurrency, config.samples - i) }, (_, offset) =>
           sample(browser, config, scenario, scenario.name === 'dispatch' ? commands[i + offset] : undefined));
@@ -209,7 +212,7 @@ async function run() {
   } finally {
     await browser.close();
   }
-  const metrics = Object.fromEntries(scenarios.map(({ name }) => {
+  const metrics = Object.fromEntries(measuredScenarios.map(({ name }) => {
     const samples = results.filter(sample => sample.surface === name);
     return [name, {
       samples: samples.length,

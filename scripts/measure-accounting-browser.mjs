@@ -76,6 +76,12 @@ const readKinds = new Map([
   ['/api/accounting/financial-trend', 'financial-trend'],
   ['/api/notifications/unread-count', 'notification-count'],
   ['/api/notifications', 'notification-preview'],
+  ['/api/auth/me', 'session-context'],
+  ['/api/dashboard/profile', 'dashboard-profile'],
+  ['/api/dashboard/route-availability', 'route-access'],
+  ['/api/workspace-permissions/user-workspaces', 'workspace-access'],
+  ['/api/system-recovery/environment', 'runtime-environment'],
+  ['/api/personnel-performance/badge/me', 'personnel-badge'],
 ]);
 
 function requestKind(request) {
@@ -159,7 +165,7 @@ function matchesRead(response, scenario, origin) {
   });
 }
 
-async function fullTransfer(page, response) {
+async function fullTransfer(page, response, navigationStartedAt) {
   const request = response.request();
   let timer;
   let onFailure;
@@ -172,10 +178,13 @@ async function fullTransfer(page, response) {
     const complete = !request.failure() && await Promise.race([
       response.finished().then(error => !error, () => false), interrupted,
     ]);
-    const duration = request.timing().responseEnd;
+    const timing = request.timing();
+    const duration = timing.responseEnd;
     if (complete && !request.failure() && Number.isFinite(duration) && duration >= 0) {
       const sizes = await request.sizes().catch(() => null);
-      return { fullHttpMs: duration, responseBodyBytes: sizes?.responseBodySize };
+      const requestStartMs = timing.startTime - navigationStartedAt;
+      return { fullHttpMs: duration, responseBodyBytes: sizes?.responseBodySize,
+        requestStartMs: Number.isFinite(requestStartMs) && requestStartMs >= 0 ? requestStartMs : undefined };
     }
     return { transferFailure: request.failure()?.errorText === 'net::ERR_ABORTED' ? 'client_abort' : 'incomplete_transfer' };
   } finally {
@@ -194,11 +203,11 @@ function checkResponse(response, config) {
   return { requestId, status: response.status(), outcome: validOutcome.has(outcome) ? outcome : undefined };
 }
 
-async function readData(page, response, config, scenario, result, key = 'api') {
+async function readData(page, response, config, scenario, result, navigationStartedAt, key = 'api') {
   const receipt = result[key] = {
     ...checkResponse(response, config), path: scenario.api, view: scenario.view ?? null,
   };
-  Object.assign(receipt, await fullTransfer(page, response));
+  Object.assign(receipt, await fullTransfer(page, response, navigationStartedAt));
   if (receipt.transferFailure) throw Error('INCOMPLETE_TRANSFER');
   if (!response.ok()) throw Error('API_FAILED');
   const body = await response.json().catch(() => null);
@@ -299,17 +308,20 @@ async function readyDutySummary(page, summary) {
 }
 
 async function measureFirstRead(page, config, scenario, result) {
+  const navigationStartedAt = Date.now();
   const started = performance.now();
   const elapsed = () => Math.round(performance.now() - started);
   const waitFor = spec => page.waitForResponse(response => matchesRead(response, spec, config.baseURL.origin));
   const actions = [
     waitFor(scenario).then(async response => {
       if (scenario.name === 'dispatch') {
-        result.api = checkResponse(response, config);
+        result.api = { ...checkResponse(response, config), path: scenario.api,
+          ...await fullTransfer(page, response, navigationStartedAt) };
+        if (result.api.transferFailure) throw Error('INCOMPLETE_TRANSFER');
         if (!response.ok() || (result.api.outcome && result.api.outcome !== 'success')) throw Error('API_FAILED');
         await scenario.ready(page).click({ trial: true });
       } else {
-        const data = await readData(page, response, config, scenario, result);
+        const data = await readData(page, response, config, scenario, result, navigationStartedAt);
         if (scenario.register) result.data = await readyRegister(page, data, scenario);
         else if (scenario.name === 'dashboard') {
           result.data = await readyDashboard(page, data, () => { result.firstActionMs = elapsed(); });
@@ -324,7 +336,7 @@ async function measureFirstRead(page, config, scenario, result) {
   if (scenario.name === 'duties') {
     const summary = { api: dutySummary };
     actions.push(waitFor(summary).then(async response => {
-      const data = await readData(page, response, config, summary, result, 'summary');
+      const data = await readData(page, response, config, summary, result, navigationStartedAt, 'summary');
       await readyDutySummary(page, data);
       result.summaryReadyMs = elapsed();
     }));
@@ -438,10 +450,9 @@ export function summarizeSurface(samples, { name, target, phase }) {
   return {
     ...aggregate,
     byPhase,
-    ...(name === 'dispatch' ? {} : {
-      fullHttpMs: p95(samples, sample => sample.api?.fullHttpMs),
-      apiResponseBodyBytes: p95(samples, sample => sample.api?.responseBodyBytes),
-    }),
+    fullHttpMs: p95(samples, sample => sample.api?.fullHttpMs),
+    apiRequestStartMs: p95(samples, sample => sample.api?.requestStartMs),
+    apiResponseBodyBytes: p95(samples, sample => sample.api?.responseBodyBytes),
     ...(name === 'duties' ? {
       summaryReadyMs: p95(samples, sample => sample.summaryReadyMs),
       summaryFullHttpMs: p95(samples, sample => sample.summary?.fullHttpMs),

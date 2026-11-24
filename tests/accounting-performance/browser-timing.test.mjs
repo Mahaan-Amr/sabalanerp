@@ -161,6 +161,7 @@ test('browser receipts attribute complete responses and aborted transfers indepe
   assert.equal(sample.api.view, 'reviewable');
   assert.doesNotMatch(raw, /synthetic-secret/);
   assert.ok(sample.api.fullHttpMs >= 850, 'includes delayed final body bytes');
+  assert.ok(Number.isFinite(sample.api.requestStartMs), 'separates navigation and request start from transfer');
   assert.ok(sample.firstActionMs >= sample.api.fullHttpMs, 'verified empty state is measured after transfer completion');
   assert.ok(sample.api.responseBodyBytes > 0);
   assert.deepEqual(sample.data, { state: 'empty', page: 1, pageSize: 50, total: 0, rows: 0 });

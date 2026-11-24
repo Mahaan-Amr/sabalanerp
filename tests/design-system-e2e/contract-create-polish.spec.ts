@@ -3,6 +3,33 @@ import { assertNoHorizontalOverflow, assertNoSeriousAxeViolations, loginAsAdmin,
 
 test('contract creation keeps date, customer selection and return navigation intact with readable RTL', async ({ page }, info) => {
   await loginAsAdmin(page);
+  const customer = {
+    id: 'qa-contract-polish-customer',
+    firstName: 'مشتری',
+    lastName: 'آزمایشی',
+    customerType: 'Individual',
+    status: 'Active',
+    isBlacklisted: false,
+    isLocked: false,
+  };
+  await page.route('**/api/crm/customer-options?**', route => {
+    const params = new URL(route.request().url()).searchParams;
+    const id = params.get('id');
+    const search = params.get('search');
+    const matches = (!id || id === customer.id)
+      && (!search || `${customer.firstName} ${customer.lastName}`.includes(search));
+    return route.fulfill({ json: { success: true, data: matches ? [{ ...customer, phone: null }] : [] } });
+  });
+  await page.route(`**/api/crm/customers/${customer.id}`, route => route.fulfill({
+    json: {
+      success: true,
+      data: {
+        ...customer,
+        phoneNumbers: [],
+        projectAddresses: [{ id: 'qa-contract-polish-project', projectName: 'پروژه آزمایشی', address: 'تهران', isActive: true }],
+      }
+    }
+  }));
   await page.goto('/dashboard/sales/contracts/create?fresh=1');
   const workflow = page.locator('main.sds-workspace');
   await expect(workflow.getByRole('heading', { name: 'اطلاعات ثبت', exact: true })).toBeVisible();
@@ -42,7 +69,8 @@ test('contract creation keeps date, customer selection and return navigation int
   const search = workflow.getByRole('searchbox', { name: 'جستجوی مشتری' });
   await expect(search).toBeEditable();
   const customerFieldMs = await page.evaluate(start => performance.now() - start, customerStepStartedAt);
-  const customerRows = workflow.getByRole('group', { name: 'انتخاب مشتری', exact: true }).getByRole('button');
+  const customerRows = workflow.getByRole('group', { name: 'انتخاب مشتری', exact: true })
+    .getByRole('button').and(page.locator('[aria-pressed]'));
   await expect(customerRows.first()).toBeVisible();
   const firstCustomerReady = await page.evaluate(start => {
     const wizardReads = new Set([
@@ -60,8 +88,8 @@ test('contract creation keeps date, customer selection and return navigation int
       encodedBodyBytes: resources.reduce((total, entry) => total + entry.encodedBodySize, 0)
     };
   }, customerStepStartedAt);
-  await info.attach('contract-wizard-live-loading.json', {
-    body: JSON.stringify({ firstFieldMs, customerFieldMs, ...firstCustomerReady }),
+  await info.attach('contract-wizard-browser-loading.json', {
+    body: JSON.stringify({ customerSource: 'browser-fixture', firstFieldMs, customerFieldMs, ...firstCustomerReady }),
     contentType: 'application/json'
   });
   for (const theme of ['dark', 'light'] as const) {

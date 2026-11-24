@@ -1,4 +1,3 @@
-import { scopeContractNavigationFixture } from './support/contract-navigation-fixture';
 import { expect, test, type Page } from '@playwright/test';
 import { loginAsAdmin, seedContractNavigation, assertNoHorizontalOverflow } from './support/design-system';
 
@@ -20,7 +19,6 @@ async function openStairConfiguration(page: Page) {
       payment: { payments: [], currency: 'تومان', totalContractAmount: 0 }, discount: null, signature: null
     }
   });
-  await scopeContractNavigationFixture(page);
   await page.goto('/dashboard/sales/contracts/create?fresh=1&returnTo=contract&step=4');
   await page.getByRole('tab', { name: 'پله', exact: true }).click();
   await page.getByRole('option', { name: /گوهره/ }).first().click();

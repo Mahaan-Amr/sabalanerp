@@ -9,6 +9,7 @@ const validOutcome = new Set([
   'unavailable', 'upstream_unavailable', 'upstream_timeout', 'internal_error', 'rejected',
 ]);
 const timeout = 30_000;
+const targetMs = 3_000;
 
 function options() {
   const baseURL = new URL(env.ACCOUNTING_TIMING_ORIGIN ?? 'http://127.0.0.1:3000');
@@ -32,20 +33,52 @@ function options() {
 const list = '/api/accounting/dispatch-candidates';
 const detail = /^\/api\/accounting\/dispatch-candidates\/[^/]+\/document-read-model$/;
 const reference = /^\/api\/accounting\/loadings\/[^/]+\/sepidar-reference$/;
+const dutyList = '/api/duties/workspaces/accounting/duties';
+const dutySummary = '/api/duties/workspaces/accounting/summary';
+const accountingPage = '/dashboard/accounting';
+
+function register(name, { path = name, endpoint = path, view = null, kind, empty, itemLabel, pageSize = 50 }) {
+  return {
+    name, page: `${accountingPage}/${path}${view ? `?view=${view}` : ''}`,
+    api: `/api/accounting/${endpoint}`, view,
+    query: { page: '1', ...(name === 'customer-accounts' ? {} : { pageSize: String(pageSize) }), ...(kind ? { kind } : {}) },
+    register: { empty, itemLabel, pageSize }, target: name !== 'customer-accounts',
+  };
+}
+
 const scenarios = [
-  { name: 'dashboard', page: '/dashboard/accounting', view: null, api: '/api/accounting/dashboard',
-    ready: page => page.getByRole('button', { name: 'به‌روزرسانی', exact: true }) },
-  { name: 'reviewable-list', page: '/dashboard/accounting/contracts?view=reviewable', view: 'reviewable', api: '/api/accounting/contracts',
-    ready: page => page.getByRole('row').filter({ has: page.getByRole('cell') }).first().getByRole('link', { name: /^(مشاهده|مشاهده پرونده)$/ }) },
+  { name: 'dashboard', page: accountingPage, view: null, api: '/api/accounting/dashboard', query: { range: '6m' }, target: true },
+  register('reviewable-list', { path: 'contracts', view: 'reviewable', empty: 'قراردادی یافت نشد', itemLabel: 'قرارداد' }),
+  register('invoice-candidates', { endpoint: 'financial-records', view: 'actionable', kind: 'INVOICE_CANDIDATE',
+    empty: 'صورتحسابی در این فیلتر وجود ندارد', itemLabel: 'رکورد' }),
+  register('correction-requests', { view: 'active', empty: 'درخواست اصلاح بازی وجود ندارد', itemLabel: 'درخواست' }),
+  register('receivables', { view: 'open', empty: 'دریافتنی ثبت نشده است', itemLabel: 'دریافتنی' }),
+  register('payments', { view: 'due-soon', empty: 'دریافت یا چکی ثبت نشده است', itemLabel: 'دریافت' }),
+  register('tax', { view: 'needs-attention', empty: 'پرونده مالیاتی ثبت نشده است', itemLabel: 'پرونده' }),
+  register('audit', { empty: 'هنوز سابقه‌ای ثبت نشده است', itemLabel: 'سابقه' }),
+  { name: 'duties', page: `${accountingPage}/duties`, api: dutyList, view: 'assigned', target: true },
   { name: 'dispatch', page: '/dashboard/accounting/dispatch', api: list,
     ready: page => page.getByRole('button', { name: 'جزئیات اقلام و اسناد بارگیری', exact: true }).first() },
+  register('customer-accounts', { endpoint: 'ledger/customer-accounts', empty: 'مشتری مستقیمی ثبت نشده است', pageSize: 25 }),
 ];
+const defaultSurfaces = ['dashboard', 'reviewable-list', 'dispatch'];
+const readKinds = new Map([
+  ...scenarios.map(scenario => [scenario.api, scenario.name]),
+  [list, 'dispatch-list'],
+  [dutyList, 'duties-list'],
+  [dutySummary, 'duties-summary'],
+  ['/api/accounting/dashboard/workspace', 'dashboard-workspace'],
+  ['/api/accounting/dashboard/change', 'dashboard-change'],
+  ['/api/accounting/financial-trend', 'financial-trend'],
+  ['/api/notifications/unread-count', 'notification-count'],
+  ['/api/notifications', 'notification-preview'],
+]);
 
 function requestKind(request) {
   const url = new URL(request.url());
   if (!loopback.has(url.hostname) || !['http:', 'https:'].includes(url.protocol)) return;
   const path = url.pathname;
-  if (path === list) return 'dispatch-list';
+  if (readKinds.has(path)) return readKinds.get(path);
   if (detail.test(path)) return 'dispatch-detail';
   if (reference.test(path)) return 'dispatch-reference-command';
   if (path.startsWith('/api/')) return 'api';
@@ -77,7 +110,10 @@ function monitor(page) {
   });
   return async () => {
     active = false;
-    const result = { requestCount: entries.size, completedRequests: 0, responseBodyBytes: 0, requestsByKind: {}, errors: {} };
+    const result = {
+      requestCount: entries.size, completedRequests: 0, unfinishedRequests: 0,
+      responseBodyBytes: 0, requestsByKind: {}, errors: {}, errorsByKind: {},
+    };
     for (const entry of entries.values()) {
       result.requestsByKind[entry.kind] = (result.requestsByKind[entry.kind] ?? 0) + 1;
       const sizes = await entry.sizes;
@@ -85,11 +121,16 @@ function monitor(page) {
         result.completedRequests++;
         result.responseBodyBytes += sizes.responseBodySize;
       }
+      if (!entry.sizes && !entry.failed) result.unfinishedRequests++;
       const status = entry.status;
       const failure = entry.failed ?? entry.outcome ?? (status === 499 ? 'client_abort' :
         status === 502 ? 'upstream_unavailable' : status === 503 ? 'unavailable' :
         status === 504 ? 'upstream_timeout' : status >= 500 ? 'internal_error' : status >= 400 ? 'rejected' : undefined);
-      if (failure) result.errors[failure] = (result.errors[failure] ?? 0) + 1;
+      if (failure) {
+        result.errors[failure] = (result.errors[failure] ?? 0) + 1;
+        const errors = result.errorsByKind[entry.kind] ??= {};
+        errors[failure] = (errors[failure] ?? 0) + 1;
+      }
     }
     return result;
   };
@@ -98,11 +139,11 @@ function monitor(page) {
 const validId = value => /^(?:[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/.test(value ?? '') ? value : undefined;
 function matchesRead(response, scenario, origin) {
   const url = new URL(response.url());
-  if (response.request().method() !== 'GET' || url.pathname !== scenario.api) return false;
-  if (scenario.name === 'dispatch') return true;
-  const views = url.searchParams.getAll('view');
-  return url.origin === origin && (scenario.view === null ? views.length === 0 :
-    views.length === 1 && views[0] === scenario.view);
+  if (response.request().method() !== 'GET' || url.pathname !== scenario.api || url.origin !== origin) return false;
+  return Object.entries({ view: scenario.view ?? null, ...scenario.query }).every(([key, expected]) => {
+    const values = url.searchParams.getAll(key);
+    return expected === null ? values.length === 0 : values.length === 1 && values[0] === expected;
+  });
 }
 
 async function fullTransfer(page, response) {
@@ -119,7 +160,10 @@ async function fullTransfer(page, response) {
       response.finished().then(error => !error, () => false), interrupted,
     ]);
     const duration = request.timing().responseEnd;
-    if (complete && !request.failure() && Number.isFinite(duration) && duration >= 0) return { fullHttpMs: duration };
+    if (complete && !request.failure() && Number.isFinite(duration) && duration >= 0) {
+      const sizes = await request.sizes().catch(() => null);
+      return { fullHttpMs: duration, responseBodyBytes: sizes?.responseBodySize };
+    }
     return { transferFailure: request.failure()?.errorText === 'net::ERR_ABORTED' ? 'client_abort' : 'incomplete_transfer' };
   } finally {
     clearTimeout(timer);
@@ -137,6 +181,135 @@ function checkResponse(response, config) {
   return { requestId, status: response.status(), outcome: validOutcome.has(outcome) ? outcome : undefined };
 }
 
+async function readData(page, response, config, scenario, result, key = 'api') {
+  const receipt = result[key] = {
+    ...checkResponse(response, config), path: scenario.api, view: scenario.view ?? null,
+  };
+  Object.assign(receipt, await fullTransfer(page, response));
+  if (receipt.transferFailure) throw Error('INCOMPLETE_TRANSFER');
+  if (!response.ok() || (receipt.outcome && receipt.outcome !== 'success')) throw Error('API_FAILED');
+  const body = await response.json().catch(() => null);
+  if (body?.success !== true || body.data == null) throw Error('INVALID_READ_DATA');
+  return body.data;
+}
+
+const visible = locator => locator.waitFor({ state: 'visible' });
+const count = value => Number.isSafeInteger(value) && value >= 0;
+const fa = value => value.toLocaleString('fa-IR');
+
+async function readyRegister(page, data, scenario) {
+  const { empty, itemLabel, pageSize } = scenario.register;
+  const { items, page: pageNumber, total } = data;
+  if (!Array.isArray(items) || pageNumber !== 1 || data.pageSize !== pageSize || !count(total)
+    || items.length !== Math.min(total, pageSize)) throw Error('INVALID_READ_DATA');
+
+  const rows = page.getByRole('row').filter({ has: page.getByRole('cell') });
+  const controls = [visible(page.getByRole('searchbox'))];
+  if (items.length && scenario.name === 'customer-accounts') {
+    controls.push(visible(page.getByText(`${fa(total)} مشتری · صفحه ${fa(pageNumber)}`, { exact: true })));
+  } else if (items.length) {
+    controls.push(visible(page.getByText(`نمایش ${fa(1)} تا ${fa(items.length)} از ${fa(total)} ${itemLabel}`, { exact: true })));
+  }
+  if (items.length) {
+    controls.push(...['قبلی', 'بعدی'].map(name => visible(page.getByRole('button', { name, exact: true }))));
+  }
+  controls.push(items.length ? visible(rows.nth(items.length - 1)) : visible(page.getByText(empty, { exact: true })));
+  if (scenario.name === 'reviewable-list' && items.length) {
+    controls.push(rows.first().getByRole('link', { name: /^(مشاهده|مشاهده پرونده)$/ }).click({ trial: true }));
+  }
+  await Promise.all(controls);
+  if (await rows.count() !== items.length) throw Error('INVALID_RENDERED_DATA');
+  return { state: items.length ? 'rows' : 'empty', page: pageNumber, pageSize, total, rows: items.length };
+}
+
+async function readyDashboard(page, data) {
+  const { workspace, trend, trendError } = data;
+  if (trendError) throw Error('CHART_UNAVAILABLE');
+  if (!Array.isArray(workspace?.queues?.contracts) || !Array.isArray(workspace?.deadlines?.items)
+    || !count(workspace?.commandCenter?.reviewableContracts?.count)
+    || trend?.range !== '6m' || !Array.isArray(trend.points) || !trend.points.length) throw Error('INVALID_READ_DATA');
+  const points = trend.points.flatMap(point => [point?.invoicedRial, point?.receivedRial, point?.outstandingRial]);
+  if (!points.every(Number.isFinite)) throw Error('INVALID_READ_DATA');
+  const hasChart = points.some(value => value !== 0);
+  const chart = page.getByRole('region', { name: 'روند مالی قراردادها', exact: true });
+  const workQueueRows = workspace.queues.contracts.filter(row => row?.attention).slice(0, 6).length;
+  const queue = [
+    visible(page.getByRole('heading', { name: 'کارهای امروز', exact: true })),
+    visible(page.getByRole('link', { name: 'مشاهده همه قراردادها', exact: true })),
+  ];
+  queue.push(visible(workQueueRows ? page.getByText(/^مدرک یا مغایرت:/).nth(workQueueRows - 1)
+    : page.getByText('در خلاصهٔ فعلی اقدام فوری برای قراردادها پیدا نشد.', { exact: true })));
+  const metrics = page.getByRole('region', { name: 'شاخص‌های عملیاتی حسابداری', exact: true });
+  await Promise.all([
+    ...queue,
+    visible(page.getByRole('heading', { name: 'سررسیدها', exact: true })),
+    visible(metrics),
+    visible(hasChart ? chart.locator('div[aria-busy="false"] svg.recharts-surface:has(.recharts-area-curve[d])')
+      : chart.getByText('هنوز رویداد مالی معناداری برای این بازه ثبت نشده است.', { exact: true })),
+  ]);
+  await metrics.getByText('در حال بررسی دسترسی', { exact: true }).first().waitFor({ state: 'hidden' });
+  if (await page.getByText('شاخص‌های استخدام در دسترس نیستند. برای تلاش دوباره از به‌روزرسانی استفاده کنید.',
+    { exact: true }).isVisible()) throw Error('METRICS_UNAVAILABLE');
+  return { chart: hasChart ? 'rendered' : 'empty', workQueueRows };
+}
+
+async function readyDutyQueue(page, duties) {
+  if (!Array.isArray(duties)) throw Error('INVALID_READ_DATA');
+  if (duties.length) {
+    await page.getByRole('link', { name: 'مشاهده وظیفه', exact: true }).first().click({ trial: true });
+  } else {
+    await visible(page.getByText('وظیفه بازی ندارید', { exact: true }));
+  }
+  return { state: duties.length ? 'rows' : 'empty', rows: duties.length };
+}
+
+async function readyDutySummary(page, summary) {
+  const badges = [['وظایف من', summary.open], ['قابل دریافت', summary.available], ['تاریخچه', summary.historyUnseen]];
+  if (summary.canManageTriage) badges.push(['بدون مسئول', summary.triage]);
+  if (typeof summary.canManageTriage !== 'boolean'
+    || ![summary.dueSoon, summary.overdue, summary.triage, ...badges.map(([, value]) => value)].every(count)) {
+    throw Error('INVALID_READ_DATA');
+  }
+  await Promise.all([
+    ...['باز', 'تا ۲۴ ساعت', 'گذشته از موعد', 'قابل دریافت'].map(label => visible(page.getByText(label, { exact: true }).first())),
+    ...badges.map(([label, value]) => visible(page.getByRole('button', { name: value ? `${label} ${fa(value)}` : label, exact: true }))),
+  ]);
+}
+
+async function measureFirstRead(page, config, scenario, result) {
+  const started = performance.now();
+  const elapsed = () => Math.round(performance.now() - started);
+  const waitFor = spec => page.waitForResponse(response => matchesRead(response, spec, config.baseURL.origin));
+  const actions = [
+    waitFor(scenario).then(async response => {
+      if (scenario.name === 'dispatch') {
+        result.api = checkResponse(response, config);
+        if (!response.ok() || (result.api.outcome && result.api.outcome !== 'success')) throw Error('API_FAILED');
+        await scenario.ready(page).click({ trial: true });
+      } else {
+        const data = await readData(page, response, config, scenario, result);
+        if (scenario.register) result.data = await readyRegister(page, data, scenario);
+        else if (scenario.name === 'dashboard') result.data = await readyDashboard(page, data);
+        else result.data = await readyDutyQueue(page, data);
+      }
+      result.firstActionMs = elapsed();
+    }),
+  ];
+  if (scenario.name === 'duties') {
+    const summary = { api: dutySummary };
+    actions.push(waitFor(summary).then(async response => {
+      const data = await readData(page, response, config, summary, result, 'summary');
+      await readyDutySummary(page, data);
+      result.summaryReadyMs = elapsed();
+    }));
+  }
+  const [navigation, ...reads] = await Promise.allSettled([page.goto(scenario.page, { waitUntil: 'commit' }), ...actions]);
+  for (const outcome of [navigation, ...reads]) {
+    if (outcome.status === 'rejected') throw outcome.reason;
+  }
+  result.completeMs = Math.max(result.firstActionMs, result.summaryReadyMs ?? 0);
+}
+
 async function sample(browser, config, scenario, command) {
   const context = await browser.newContext({ baseURL: config.baseURL.origin, locale: 'fa-IR', timezoneId: 'Asia/Tehran' });
   const page = await context.newPage();
@@ -144,30 +317,16 @@ async function sample(browser, config, scenario, command) {
   page.setDefaultNavigationTimeout(timeout);
   const result = { surface: scenario.name, commandsEnabled: Boolean(command) };
   let stop;
-  let transfer;
   let stage = 'login';
   try {
     await page.goto('/login');
+    if (new URL(page.url()).origin !== config.baseURL.origin) throw Error('UNEXPECTED_ORIGIN');
     await page.getByRole('textbox', { name: 'ایمیل، نام کاربری یا شماره تماس' }).fill(env.ACCOUNTING_TIMING_IDENTIFIER);
     await page.locator('input[name="password"]').fill(env.ACCOUNTING_TIMING_PASSWORD);
     await Promise.all([page.waitForURL(/\/dashboard$/), page.getByRole('button', { name: 'ورود', exact: true }).click()]);
     stage = 'first_action';
     stop = monitor(page);
-    const started = performance.now();
-    const [response] = await Promise.all([
-      page.waitForResponse(response => matchesRead(response, scenario, config.baseURL.origin)),
-      page.goto(scenario.page, { waitUntil: 'commit' }),
-    ]);
-    result.api = checkResponse(response, config);
-    if (scenario.name !== 'dispatch') {
-      const matched = new URL(response.url());
-      result.api.path = matched.pathname;
-      result.api.view = matched.searchParams.get('view');
-      transfer = fullTransfer(page, response);
-    }
-    if (!response.ok() || (result.api.outcome && result.api.outcome !== 'success')) throw Error('API_FAILED');
-    await scenario.ready(page).click({ trial: true });
-    result.firstActionMs = Math.round(performance.now() - started);
+    await measureFirstRead(page, config, scenario, result);
     result.browser = await stop();
     stop = undefined;
 
@@ -190,7 +349,7 @@ async function sample(browser, config, scenario, command) {
         page.getByRole('button', { name: invoiceWorkflow ? 'ذخیره فاکتورها' : 'ثبت شماره', exact: true }).click(),
       ]);
       result.command = checkResponse(receipt.response, config);
-      if (!receipt.response.ok() || result.command.outcome) throw Error('COMMAND_FAILED');
+      if (!receipt.response.ok() || (result.command.outcome && result.command.outcome !== 'success')) throw Error('COMMAND_FAILED');
       await page.getByText(invoiceWorkflow ? 'فاکتورهای سپیدار ثبت شدند.' : 'شماره بارگیری سپیدار ثبت شد.',
         { exact: true }).waitFor({ state: 'visible' });
       const visibleAt = Date.now();
@@ -204,17 +363,11 @@ async function sample(browser, config, scenario, command) {
     }
   } catch (error) {
     result.failed = stage;
-    const safeErrors = new Set(['BUILD_MISMATCH', 'BUILD_UNATTESTED', 'API_FAILED', 'COMMAND_FAILED', 'ACK_TIME_UNATTESTED']);
+    const safeErrors = new Set(['BUILD_MISMATCH', 'BUILD_UNATTESTED', 'API_FAILED', 'COMMAND_FAILED', 'ACK_TIME_UNATTESTED',
+      'UNEXPECTED_ORIGIN', 'INCOMPLETE_TRANSFER', 'INVALID_READ_DATA', 'INVALID_RENDERED_DATA', 'CHART_UNAVAILABLE', 'METRICS_UNAVAILABLE']);
     result.failure = safeErrors.has(error.message) ? error.message : error.name === 'TimeoutError' ? 'TIMEOUT' : 'BROWSER_FAILURE';
   } finally {
     if (stop) result[stage === 'command' ? 'commandBrowser' : 'browser'] = await stop();
-    if (transfer) {
-      Object.assign(result.api, await transfer);
-      if (result.api.transferFailure && !result.failed) {
-        result.failed = 'first_action';
-        result.failure = 'INCOMPLETE_TRANSFER';
-      }
-    }
     await context.close();
   }
   return result;
@@ -227,9 +380,10 @@ function p95(samples, measure) {
 
 async function run() {
   const config = options();
-  const selected = env.ACCOUNTING_TIMING_SURFACES?.split(',').map(value => value.trim());
-  if (selected?.some(name => !scenarios.some(scenario => scenario.name === name))) throw Error('INVALID_TIMING_SURFACES');
-  const measuredScenarios = selected ? scenarios.filter(scenario => selected.includes(scenario.name)) : scenarios;
+  const selected = env.ACCOUNTING_TIMING_SURFACES?.split(',').map(value => value.trim()) ?? defaultSurfaces;
+  if (!(selected.length === 1 && selected[0] === 'all')
+    && selected.some(name => !scenarios.some(scenario => scenario.name === name))) throw Error('INVALID_TIMING_SURFACES');
+  const measuredScenarios = selected.includes('all') ? scenarios : scenarios.filter(scenario => selected.includes(scenario.name));
   const file = env.ACCOUNTING_TIMING_SEPIDAR_FIXTURE;
   const commands = file ? JSON.parse(await readFile(file, 'utf8')) : [];
   if (!Array.isArray(commands) || (file && commands.length !== config.samples)
@@ -254,13 +408,29 @@ async function run() {
   } finally {
     await browser.close();
   }
-  const metrics = Object.fromEntries(measuredScenarios.map(({ name }) => {
+  const metrics = Object.fromEntries(measuredScenarios.map(({ name, target }) => {
     const samples = results.filter(sample => sample.surface === name);
+    const failures = samples.filter(sample => sample.failed).length;
+    const firstActionMs = p95(samples, sample => sample.firstActionMs);
+    const completeMs = p95(samples, sample => sample.completeMs);
+    const chartEmptySamples = samples.filter(sample => sample.data?.chart === 'empty').length;
     return [name, {
       samples: samples.length,
-      failures: samples.filter(sample => sample.failed).length,
-      firstActionMs: p95(samples, sample => sample.firstActionMs),
-      ...(name === 'dispatch' ? {} : { fullHttpMs: p95(samples, sample => sample.api?.fullHttpMs) }),
+      failures,
+      firstActionMs,
+      completeMs,
+      ...(target ? { target: { belowMs: targetMs, passed: failures === 0 && chartEmptySamples === 0
+        && completeMs.count === samples.length && completeMs.p95 < targetMs && firstActionMs.p95 < targetMs } } : {}),
+      ...(name === 'dashboard' ? { chartEmptySamples } : {}),
+      ...(name === 'dispatch' ? {} : {
+        fullHttpMs: p95(samples, sample => sample.api?.fullHttpMs),
+        apiResponseBodyBytes: p95(samples, sample => sample.api?.responseBodyBytes),
+      }),
+      ...(name === 'duties' ? {
+        summaryReadyMs: p95(samples, sample => sample.summaryReadyMs),
+        summaryFullHttpMs: p95(samples, sample => sample.summary?.fullHttpMs),
+        summaryResponseBodyBytes: p95(samples, sample => sample.summary?.responseBodyBytes),
+      } : {}),
       submitToVisibleMs: p95(samples, sample => sample.submitToVisibleMs),
       responseToVisibleMs: p95(samples, sample => sample.responseToVisibleMs),
       commitAcknowledgedToVisibleMs: p95(samples, sample => sample.commitAcknowledgedToVisibleMs),
@@ -272,7 +442,7 @@ async function run() {
     format: 'sabalan-accounting-browser-timing/v1', started, commit: config.commit, workload: config.workload,
     run: config.run, concurrency: config.concurrency, actorClass: 'authorized-accountant', metrics, results,
   }, null, 2) + '\n', { flag: 'wx' });
-  if (results.some(sample => sample.failed)) process.exitCode = 2;
+  if (results.some(sample => sample.failed) || Object.values(metrics).some(surface => surface.target?.passed === false)) process.exitCode = 2;
 }
 
 run().catch(() => {

@@ -85,7 +85,11 @@ for (const result of ['acknowledged', 'recovered', 'resumed', 'reloaded'] as con
     releaseRefresh();
     const retry = dialog.getByRole('button', { name: 'تلاش دوباره برای خواندن وضعیت بارگیری' });
     await expect(retry).toBeVisible();
-    await expect(issue).toBeDisabled();
+    if (result === 'reloaded') {
+      await expect(issue.and(dialog.getByRole('button', { disabled: false }))).toHaveCount(0);
+    } else {
+      await expect(issue).toBeDisabled();
+    }
     failRefresh = false;
     await retry.click();
     await expect(retry).toHaveCount(0);

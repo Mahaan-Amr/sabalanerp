@@ -3,6 +3,7 @@ import type { Prisma } from '@prisma/client';
 import { PartnerActionV2Schema, PermissionContextSchema, type PartnerActionV2 } from '@sabalanerp/partner-sales-contracts';
 import { readFencedScopedActions, readScopedActions, resolveScopedActions } from '../../effectiveAccessService';
 import type { ResolvePartnerAuthority } from './prisma';
+import { readFencedScopedActionSchedule } from '../../effectiveAuthorization/scopedActions';
 import type { AuthorizationEvidence, AuthorizationRoot } from './contracts';
 import { resolvePartnerWorkspaceAuthority } from './workspaceAuthority';
 import type { PartnerPermissionReadClient } from './fencedPermissionReads';
@@ -35,6 +36,24 @@ async function resolvePartnerScopedAuthorityInPurpose(tx: Prisma.TransactionClie
   const workspace = await resolvePartnerWorkspaceAuthority(tx, input.actorId, purpose,
     { fencedPermissionReads: purpose === 'ACCOUNTING', permissionClient });
   const explicit = await readExplicitPartnerDecisions(tx, input.actorId);
+  return combinePartnerAuthority(current, workspace, explicit);
+}
+
+/** Evaluate the workspace bridge and explicit grants using each Case's decision
+ * clock, with raw permission rows loaded behind the shared revision fence. */
+export async function readPartnerAccountingAuthoritySchedule(tx: Prisma.TransactionClient, actorId: string,
+  permissionClient: PartnerPermissionReadClient) {
+  const scheduled = await readFencedScopedActionSchedule(tx, actorId, 'PARTNER');
+  return async (at: Date) => {
+    const current = scheduled(at);
+    const workspace = await resolvePartnerWorkspaceAuthority(tx, actorId, 'ACCOUNTING',
+      { fencedPermissionReads: true, permissionClient, at });
+    return combinePartnerAuthority(current, workspace, current.explicit);
+  };
+}
+
+function combinePartnerAuthority(current: Awaited<ReturnType<typeof resolveScopedActions>>,
+  workspace: Awaited<ReturnType<typeof resolvePartnerWorkspaceAuthority>>, explicit: Set<string>) {
   const grants: AuthorizationEvidence<PartnerActionV2>['grants'] = [];
   for (const grant of current.grants) {
     const action = PartnerActionV2Schema.safeParse(grant.action);

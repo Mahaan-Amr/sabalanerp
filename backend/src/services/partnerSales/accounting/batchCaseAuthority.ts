@@ -1,13 +1,14 @@
 import type { Prisma } from '@prisma/client';
 import type { PartnerActionV2 } from '@sabalanerp/partner-sales-contracts';
 import type { AuthorizationEvidence, AuthorizationRoot, AuthorizationSource } from '../authorization/contracts';
-import { readPartnerAccountingScopedAuthority } from '../authorization/centralAuthority';
-import { createFencedPartnerPermissionReader } from '../authorization/fencedPermissionReads';
+import { readPartnerAccountingAuthoritySchedule, readPartnerAccountingScopedAuthority } from '../authorization/centralAuthority';
+import { createFencedPartnerPermissionReader, type PartnerPermissionReadClient } from '../authorization/fencedPermissionReads';
 
 /** Read-only list evidence. The caller already owns the operations-control
  * boundary and repeatable-read snapshot. Share all root locks before profiles and
  * users, then resolve central authority behind the same fence. */
-export async function batchAccountingCaseAuthority(tx: Prisma.TransactionClient, actorId: string, caseIds: string[]) {
+export async function batchAccountingCaseAuthority(tx: Prisma.TransactionClient, actorId: string, caseIds: string[],
+  options: { permissionClient?: PartnerPermissionReadClient; includeUnlinkedCases?: boolean } = {}) {
   // SQL takes locks in the same sorted ID order as the command's User loop,
   // regardless of the database collation.
   const ids = [...new Set(caseIds)].sort();
@@ -42,38 +43,48 @@ export async function batchAccountingCaseAuthority(tx: Prisma.TransactionClient,
   const actor = byUser.get(actorId);
   // Shared by the list-only sources and advisory actions in this snapshot.
   // Scoped grants and the decision clock are still read by each policy.
-  const permissionClient = createFencedPartnerPermissionReader(tx);
+  const permissionClient = options.permissionClient ?? createFencedPartnerPermissionReader(tx);
   const resolveScopedAuthority = (root: AuthorizationRoot) => readPartnerAccountingScopedAuthority(tx, { actorId, root }, permissionClient);
   // Keep the same transaction-scoped central result as the former list path.
   let central: ReturnType<typeof readPartnerAccountingScopedAuthority> | undefined;
+  let scheduled: ReturnType<typeof readPartnerAccountingAuthoritySchedule> | undefined;
+  const readClock = async () => (await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`)[0].now;
   let preparation: ReturnType<typeof readPartnerAccountingScopedAuthority> | undefined;
   const readDisabledFeatures = () => tx.featurePermission.findMany({ where: {
     userId: actorId, isActive: true, permissionLevel: 'none',
   }, select: { feature: true, expiresAt: true } });
   let disabled: Awaited<ReturnType<typeof readDisabledFeatures>> | undefined;
   const read = async (requestedActor: string, root: AuthorizationRoot,
-    resolveAuthority: typeof resolveScopedAuthority): Promise<AuthorizationEvidence<PartnerActionV2>> => {
+    resolveAuthority: (root: AuthorizationRoot) => ReturnType<typeof resolveScopedAuthority>,
+    fresh = false): Promise<AuthorizationEvidence<PartnerActionV2>> => {
     if (requestedActor !== actorId || root.kind !== 'CASE' || !byCase.has(root.id)) {
       throw new Error('Accounting Case authority evidence missing');
     }
     const sale = byCase.get(root.id)!;
     const profile = byProfile.get(sale.profileId);
     const owner = profile && byUser.get(profile.userId);
-    const resource: AuthorizationEvidence['resource'] = profile && sale.customerContractId &&
-      !deleted.has(sale.customerContractId)
+    const contractVisible = sale.customerContractId
+      ? !deleted.has(sale.customerContractId) : options.includeUnlinkedCases;
+    const resource: AuthorizationEvidence['resource'] = profile && contractVisible
       ? { root, partnerSellerId: profile.userId, partnerStatus: profile.state,
         lifecycleRevision: profile.revision,
         ...(owner?.departmentId ? { departmentId: owner.departmentId } : {}) }
       : null;
-    const authority = actor?.isActive && resource ? await resolveAuthority(root)
-      : { grants: [], authorizationRevision: 1 };
+    let authority: Awaited<ReturnType<typeof resolveScopedAuthority>> = { grants: [], authorizationRevision: 1 };
+    const hasAuthorityEvidence = actor?.isActive && resource;
+    if (hasAuthorityEvidence) {
+      if (fresh) scheduled ??= readPartnerAccountingAuthoritySchedule(tx, actorId, permissionClient);
+      else authority = await resolveAuthority(root);
+    }
     disabled ??= await readDisabledFeatures();
-    // Expiry is evaluated for each action, including READ followed by WRITE.
-    const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
+    // Establish the fence before taking the clock for this decision.
+    const scheduledAuthority = fresh && hasAuthorityEvidence ? await scheduled : undefined;
+    const now = await readClock();
+    if (scheduledAuthority) authority = await scheduledAuthority(now);
     return { ...authority,
-      evaluatedAt: clock.now.toISOString(), resource, actor: {
+      evaluatedAt: now.toISOString(), resource, actor: {
         id: actorId, active: actor?.isActive ?? false, role: actor?.role ?? 'USER',
-        disabledFeatures: disabled.filter(row => !row.expiresAt || row.expiresAt > clock.now).map(row => row.feature),
+        disabledFeatures: disabled.filter(row => !row.expiresAt || row.expiresAt > now).map(row => row.feature),
         ...(actor?.departmentId ? { departmentId: actor.departmentId } : {}),
         ...(actor?.partnerProfile ? { partnerProfile: actor.partnerProfile } : {}),
       } };
@@ -87,7 +98,9 @@ export async function batchAccountingCaseAuthority(tx: Prisma.TransactionClient,
   // Preserve that decision time through the same fenced Case membership.
   const signatureSource: AuthorizationSource<PartnerActionV2> = { read: (actor, root) =>
     read(actor, root, resolveScopedAuthority) };
-  return { source, preparationSource, signatureSource, permissionClient, hasCase: (caseId: string) => byCase.has(caseId) };
+  const scheduledSource: AuthorizationSource<PartnerActionV2> = { read: (actor, root) =>
+    read(actor, root, resolveScopedAuthority, true) };
+  return { source, preparationSource, signatureSource, scheduledSource, permissionClient, hasCase: (caseId: string) => byCase.has(caseId) };
 }
 
 export type AccountingCaseAuthority = Awaited<ReturnType<typeof batchAccountingCaseAuthority>>;

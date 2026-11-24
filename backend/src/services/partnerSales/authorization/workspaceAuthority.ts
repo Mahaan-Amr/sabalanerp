@@ -29,7 +29,7 @@ export async function resolvePartnerWorkspaceAuthority(
   tx: Prisma.TransactionClient,
   actorId: string,
   purpose?: 'ACCOUNTING' | 'RESPONDER',
-  options: { fencedPermissionReads?: boolean; permissionClient?: PartnerPermissionReadClient } = {},
+  options: { fencedPermissionReads?: boolean; permissionClient?: PartnerPermissionReadClient; at?: Date } = {},
 ): Promise<PartnerWorkspaceAuthority> {
   // Accounting supplies only raw permission reads after the central fence.
   const accessClient = purpose === 'ACCOUNTING' && options.fencedPermissionReads
@@ -42,7 +42,7 @@ export async function resolvePartnerWorkspaceAuthority(
   if (!actor?.isActive || actor.partnerProfile) {
     return { isSystemAdmin: false, canViewAssigned: false, canRespondAssigned: false, canManageInquiries: false, grants: [] };
   }
-  const effective = await getEffectiveUserAccess(accessClient, { userId: actorId, userRole: actor.role });
+  const effective = await getEffectiveUserAccess(accessClient, { userId: actorId, userRole: actor.role, at: options.at });
   const level = (feature: string) => effective.features.find(item => item.feature === feature)?.permission;
   const atLeast = (feature: string, required: EffectiveWorkspacePermission) => {
     const actual = level(feature);
@@ -76,14 +76,14 @@ export async function resolvePartnerWorkspaceAuthority(
       disabledFeatures: effective.disabledFeatures };
   }
 
-  if ((await readPartnerCommercialAccountingCapabilities(accessClient, actorId, { viewOnly: true })).view) {
+  if ((await readPartnerCommercialAccountingCapabilities(accessClient, actorId, { viewOnly: true, at: options.at })).view) {
     add({ action: 'ACCOUNTING_READ', rootKind: 'CASE', purpose: 'ACCOUNTING', scope: 'COMPANY' });
   }
 
   // Broad Case access is only the first gate. Every shared command retains its
   // exact feature check, so payments authority cannot enqueue an invoice, and
   // Guard authority cannot create a loading or materialize stock lineage.
-  const shared = await readSharedOperationAuthority(accessClient, actorId);
+  const shared = await readSharedOperationAuthority(accessClient, actorId, options.at);
   const accountingWrites = [FEATURES.ACCOUNTING_INVOICE_CANDIDATES_MANAGE,
     FEATURES.ACCOUNTING_RECEIVABLES_MANAGE, FEATURES.ACCOUNTING_PAYMENTS_MANAGE,
     FEATURES.ACCOUNTING_TAX_MANAGE, FEATURES.ACCOUNTING_RECORDS_APPROVE_VOID,

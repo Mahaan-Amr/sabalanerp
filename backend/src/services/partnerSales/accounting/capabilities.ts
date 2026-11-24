@@ -24,6 +24,18 @@ export async function readPartnerAccountingCapabilities(tx: Prisma.TransactionCl
   return { payments, tax, receivables, deleteDraft: approve, approve: approve && (actor.role === 'ADMIN' || workspace === 'admin') };
 }
 
+/** Re-evaluate payments authority against the Case snapshot's permission
+ * rows at the current decision time. */
+export async function readPartnerPaymentsCapability(tx: PartnerPermissionReadClient, actorId: string, at = new Date()) {
+  const actor = await tx.user.findUnique({ where: { id: actorId }, select: { role: true, isActive: true } });
+  if (!actor?.isActive) return false;
+  const effective = await getEffectiveUserAccess(tx, { userId: actorId, userRole: actor.role, at });
+  const workspace = effective.workspaces.find(row => row.workspace === 'accounting')?.permission;
+  return ['edit', 'admin'].includes(workspace || '') && (await resolveNarrowFeatureAccess(tx, {
+    userId: actorId, role: actor.role, workspace: 'accounting', feature: 'accounting_payments_manage', requiredPermission: 'edit',
+  }, at)).allowed;
+}
+
 /** Re-evaluate the narrow dispatch mutation capability in the transaction that
  * commits the Partner Case mutation. Route middleware is only a preflight and
  * must not remain authoritative after a concurrent permission revocation. */
@@ -51,12 +63,12 @@ export async function readPartnerDispatchAccountingViewCapability(tx: Prisma.Tra
 
 
 export async function readPartnerCommercialAccountingCapabilities(tx: PartnerPermissionReadClient, actorId: string,
-  options: { viewOnly?: boolean } = {}) {
+  options: { viewOnly?: boolean; at?: Date } = {}) {
   const actor = await tx.user.findUnique({ where: { id: actorId }, select: { role: true, isActive: true } });
   if (!actor?.isActive) return { view: false, paper: false };
-  const effective = await getEffectiveUserAccess(tx, { userId: actorId, userRole: actor.role });
+  const effective = await getEffectiveUserAccess(tx, { userId: actorId, userRole: actor.role, at: options.at });
   const workspace = effective.workspaces.find(row => row.workspace === 'accounting')?.permission;
-  const view = ['view', 'edit', 'admin'].includes(workspace || '') && (await resolveNarrowFeatureAccess(tx, { userId: actorId, role: actor.role, workspace: 'accounting', feature: 'accounting_contracts_view', requiredPermission: 'view' })).allowed;
-  const paper = !options.viewOnly && view && ['edit', 'admin'].includes(workspace || '') && (await resolveNarrowFeatureAccess(tx, { userId: actorId, role: actor.role, workspace: 'accounting', feature: 'accounting_actions_manage', requiredPermission: 'edit' })).allowed;
+  const view = ['view', 'edit', 'admin'].includes(workspace || '') && (await resolveNarrowFeatureAccess(tx, { userId: actorId, role: actor.role, workspace: 'accounting', feature: 'accounting_contracts_view', requiredPermission: 'view' }, options.at)).allowed;
+  const paper = !options.viewOnly && view && ['edit', 'admin'].includes(workspace || '') && (await resolveNarrowFeatureAccess(tx, { userId: actorId, role: actor.role, workspace: 'accounting', feature: 'accounting_actions_manage', requiredPermission: 'edit' }, options.at)).allowed;
   return { view, paper };
 }

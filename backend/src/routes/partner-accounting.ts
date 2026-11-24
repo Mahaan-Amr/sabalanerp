@@ -96,7 +96,18 @@ router.get('/account', guarded(async (request, response) => {
 }));
 router.get('/sabalan-plan-candidates', guarded(async (request, response) => {
   if (!request.user) { respond(response, { ok: false, error: partnerError('FORBIDDEN') }); return; }
-  respond(response, await listSabalanPlanCandidates(prisma, request.user.id, correlation(request)));
+  const controller = new AbortController();
+  const cancel = () => controller.abort();
+  response.once('close', cancel);
+  try {
+    if (response.destroyed) return;
+    const result = await listSabalanPlanCandidates(prisma, request.user.id, correlation(request), controller.signal);
+    if (!controller.signal.aborted) respond(response, result);
+  } catch (error) {
+    if (!controller.signal.aborted || error !== controller.signal.reason) throw error;
+  } finally {
+    response.off('close', cancel);
+  }
 }));
 router.post('/sabalan-payment-plan', guarded(async (request, response) => {
   if (!request.user) { respond(response, { ok: false, error: partnerError('FORBIDDEN') }); return; }

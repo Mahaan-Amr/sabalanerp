@@ -53,6 +53,29 @@ async function scopedActionSnapshot(tx: Prisma.TransactionClient, actorId: strin
       AND "effectiveFrom" <= clock_timestamp() AND ("expiresAt" IS NULL OR "expiresAt" > clock_timestamp())
       AND (("principalKind" = 'USER' AND "principalId" = ${actorId})
         OR ("principalKind" = 'ROLE' AND "principalId" = ${actor.role})) ORDER BY id`;
+  return selectScopedActions(rows, version);
+}
+
+/** Load scheduled grants behind the same central read fence. The caller
+ * supplies each decision time so expiry and activation stay independent. */
+export async function readFencedScopedActionSchedule(tx: Prisma.TransactionClient, actorId: string, domain: string) {
+  const [version] = await tx.$queryRaw<Array<{ revision: number }>>`
+    SELECT revision FROM effective_authorization_state WHERE id = 1 FOR SHARE`;
+  if (!version) throw new Error('Scoped authority state unavailable');
+  const actor = await tx.user.findUnique({ where: { id: actorId }, select: { role: true, isActive: true } });
+  const rows = !actor?.isActive ? [] : await tx.$queryRaw<Array<GrantRow & { effectiveFrom: Date }>>`
+    SELECT id, "principalKind", "principalId", domain, action, "rootKind", purpose, scope, effect, "boundRootId",
+      "effectiveFrom", "expiresAt"
+    FROM effective_action_grants WHERE domain = ${domain} AND "revokedAt" IS NULL
+      AND (("principalKind" = 'USER' AND "principalId" = ${actorId})
+        OR ("principalKind" = 'ROLE' AND "principalId" = ${actor.role})) ORDER BY id`;
+  return (at: Date) => {
+    const current = rows.filter(row => row.effectiveFrom <= at && (!row.expiresAt || row.expiresAt > at));
+    return { ...selectScopedActions(current, version), explicit: new Set(current.map(key)) };
+  };
+}
+
+function selectScopedActions(rows: GrantRow[], version: { revision: number }) {
   const direct = new Set(rows.filter(row => row.principalKind === 'USER').map(key));
   const selected = rows.filter(row => row.principalKind === 'USER' || !direct.has(key(row)));
   const denied = new Set(selected.filter(row => row.effect === 'DENY').map(key));

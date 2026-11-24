@@ -228,11 +228,13 @@ type AccountingCaseView = NonNullable<Awaited<ReturnType<typeof parseViews>>> & 
 };
 
 /** The caller authorizes and fences every supplied Case in the same read snapshot. */
-export async function readCurrentPartnerCaseViewsBatch(tx: Transaction, caseIds: string[]) {
+export async function readCurrentPartnerCaseViewsBatch(tx: Transaction, caseIds: string[], signal?: AbortSignal) {
+  signal?.throwIfAborted();
   const viewsByCase = new Map<string, AccountingCaseView>();
   if (!caseIds.length) return viewsByCase;
   const rows = await tx.partnerSaleCase.findMany({ where: { id: { in: caseIds } }, select: accountingCaseViewSelect });
   for (const row of rows) {
+    signal?.throwIfAborted();
     const views = await parseViews(tx, row, row.head.predecessor);
     if (views) viewsByCase.set(row.id, { row, ...views });
   }

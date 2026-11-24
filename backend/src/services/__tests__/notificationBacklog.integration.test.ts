@@ -15,6 +15,11 @@ import { planInquiryNotifications } from '../partnerSales/notifications/inquirie
 import { createDispatchDocumentsTemporaryDatabase } from './dispatchDocumentsTemporaryDatabase';
 import { partnerNotificationsTestDatabaseUrl } from './partnerNotificationsTestDatabase';
 
+function completed<T>(result: PromiseSettledResult<T>) {
+  if (result.status === 'rejected') throw result.reason;
+  return result.value;
+}
+
 test('a mixed notification backlog keeps exact totals, verifies each notice and refreshes current authority', async t => {
   const fixture = await createDispatchDocumentsTemporaryDatabase({
     repositoryRoot: resolve(__dirname, '../../../..'),
@@ -45,6 +50,7 @@ test('a mixed notification backlog keeps exact totals, verifies each notice and 
   try {
     registerPartnerNotificationAccess(inquiryNotificationAccess);
     await database.$transaction(async tx => {
+      await tx.effectiveAuthorizationState.create({ data: { id: 1, revision: 1 } });
       await tx.user.createMany({ data: [actorId, ownerId, nextResponderId].map(id => ({
         id, email: `${id}@example.invalid`, username: id, password: 'not-a-login', firstName: 'Notification', lastName: 'Fixture',
       })) });
@@ -127,13 +133,16 @@ test('a mixed notification backlog keeps exact totals, verifies each notice and 
     const countObservation: NonNullable<ReturnType<typeof notificationReadObservation.getStore>> = {};
     const previewObservation: typeof countObservation = {};
     const accountingActor = { userId: actorId };
-    const { result: [count, visible, accounting], queries } = await captureQueries(() => Promise.all([
+    const { result: [countResult, previewResult, accountingResult], queries } = await captureQueries(() => Promise.allSettled([
       notificationReadObservation.run(countObservation, unreadCount),
       notificationReadObservation.run(previewObservation, preview),
       withAccountingReadScope(applicationDatabase, accountingActor, scope =>
         listAccountingContracts({ view: 'reviewable', page: 1, pageSize: 50 }, accountingActor, scope),
-        { purpose: 'REGISTER' }),
+        { purpose: 'CORRECTIONS' }),
     ]));
+    const count = completed(countResult);
+    const visible = completed(previewResult);
+    const accounting = completed(accountingResult);
     assert.equal(accounting.total, 0);
     assert.deepEqual(accounting.items, []);
     assert.equal(count, expected);

@@ -32,7 +32,7 @@ async function mockAccounting(page: Page, state: {
 }) {
   await page.route('**/api/dispatch-confirmation/capabilities', route => route.fulfill({ json: { success: true,
     data: { canManageAccountingCandidates: true, canManageAccountingConfirmation: true } } }));
-  await page.route('**/api/accounting/dispatch-candidates', route => route.fulfill(state.canView === false
+  await page.route(url => url.pathname === '/api/accounting/dispatch-candidates', route => route.fulfill(state.canView === false
     ? { status: 403, json: { success: false } }
     : { json: { success: true, data: rows.map(row => {
       const target = row.loadingId === 'loading-1';

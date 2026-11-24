@@ -238,7 +238,7 @@ for (const width of [1280, 390]) {
           status: "ACCEPTED",
           canManage: true,
           summary: {
-            driverName: `راننده ${i}`,
+            driverName: i === 0 ? "راننده امید" : "راننده نوید",
             loadingNumber: "27",
             plate: "۱۲ ب ۳۴۵",
           },
@@ -323,9 +323,9 @@ for (const width of [1280, 390]) {
     })).toBe(1);
     await expect(table.getByRole("button", { name: /ابطال.*فاکتور فروش/ })).toHaveCount(0);
     const search = page.getByRole("searchbox", { name: "جست‌وجو در ردیف‌ها", exact: true });
-    await search.fill("راننده ۱");
+    await search.fill("راننده نوید");
     await expect(table.getByRole("row")).toHaveCount(2);
-    await expect(table.getByText("راننده 1", { exact: true })).toBeVisible();
+    await expect(table.getByText("راننده نوید", { exact: true })).toBeVisible();
     await search.fill("۲۷");
     await expect(table.getByRole("row")).toHaveCount(3);
     await assertNoHorizontalOverflow(page);

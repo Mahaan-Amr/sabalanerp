@@ -18,6 +18,7 @@ import { generatePdfBufferFromHtml } from "../../utils/pdf";
 import {
   bytesHash,
   readInvoiceSource,
+  readIssuedInvoicePrint,
   SalesInvoiceError,
   invoiceSourceHash,
 } from "./source";
@@ -480,7 +481,7 @@ export function createSalesInvoiceService(
           throw new SalesInvoiceError(
             "فایل فاکتور با شاهد ثبت‌شده مطابقت ندارد.",
           );
-        let reason = invoice.voidReason;
+        let reason = invoice.voidReason || (invoice.voidedAt ? "فاکتور باطل شده است." : null);
         if (!reason)
           try {
             if (
@@ -494,26 +495,21 @@ export function createSalesInvoiceService(
           }
         if (requireCurrent && reason) throw new SalesInvoiceError('فاکتور فروش معتبر برای چاپ موجود نیست.');
         const snapshot = invoice.snapshot as unknown as IssuedInvoiceSnapshot;
+        const { number: _number, issuedAt: _issuedAt, replacesNumber: _replacesNumber,
+          pdfLayoutVersion: _layout, documentStatus: _status, ...issuedSource } = snapshot;
+        if (invoiceSourceHash(issuedSource) !== invoice.sourceHash)
+          throw new SalesInvoiceError('نسخه ذخیره‌شده فاکتور با شاهد صدور مطابقت ندارد.');
         const refreshTemplate = !original && snapshot.pdfLayoutVersion !== salesInvoicePdfLayoutVersion;
-        let print = snapshot.print;
-        // Attach printable details only when the live dispatch still matches the
-        // issued evidence. The stored snapshot owns all financial values.
-        if (refreshTemplate && !print && !reason) {
-          try {
-            const source = await readInvoiceSource(tx, loadingId, true);
-            if (invoiceSourceHash(source) === invoice.sourceHash) print = source.print;
-          } catch (error) {
-            if (!(error instanceof SalesInvoiceError)) throw error;
-          }
-        }
-        const bytes = reason || refreshTemplate
-          ? await render({ ...snapshot, print }, reason ?? undefined)
+        const print = refreshTemplate ? await readIssuedInvoicePrint(tx, snapshot) : snapshot.print;
+        const bytes = original ? invoice.pdf : reason || refreshTemplate
+          ? await render({ ...snapshot, print, pdfLayoutVersion: salesInvoicePdfLayoutVersion,
+            documentStatus: invoice.voidedAt ? "VOIDED" : reason ? "INVALIDATED" : undefined }, reason ?? undefined)
           : invoice.pdf;
         await auditSalesInvoice(
           tx,
           id,
           "DOWNLOADED",
-          { loadingId, status: reason ? "VOIDED" : "ISSUED" },
+          { loadingId, status: invoice.voidedAt ? "VOIDED" : reason ? "INVALIDATED" : "ISSUED", original },
           ctx.actorId,
         );
         return { bytes, number: invoice.number.toString() };

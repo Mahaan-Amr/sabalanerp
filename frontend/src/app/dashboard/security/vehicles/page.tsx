@@ -19,6 +19,7 @@ import {
   ErpCard,
   ErpEmptyState,
   ErpInlineState,
+  ErpField,
   ErpInput,
   ErpPressable,
   ErpSection,
@@ -193,8 +194,6 @@ function SecurityVehicleWorkspace({ actorId, canViewQueue, canEditQueue, permiss
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [dispatchTimelineStale, setDispatchTimelineStale] = useState(false);
-  const [confirmationSessionId, setConfirmationSessionId] = useState("");
-  const [guardPassword, setGuardPassword] = useState("");
   const [authorizationToRevoke, setAuthorizationToRevoke] = useState("");
   const [canApproveDispatchConfirmation, setCanApproveDispatchConfirmation] =
     useState(false);
@@ -1351,58 +1350,12 @@ function SecurityVehicleWorkspace({ actorId, canViewQueue, canEditQueue, permiss
       {activeSection === "exceptions" && canApproveDispatchConfirmation && (
         <ErpSection
           title="رسیدگی استثنایی خروج"
-          description="این بخش فقط برای مسیر جایگزین یا لغو مجوز در شرایط استثنایی است."
+          description="لغو مجوز خروج با ثبت دلیل انجام می‌شود."
         >
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
-            <ErpInput
-              aria-label="شناسه نشست تأیید"
-              value={confirmationSessionId}
-              onChange={(event) => setConfirmationSessionId(event.target.value)}
-            />
-            <ErpInput
-              aria-label="رمز عبور تازه گارد"
-              type="password"
-              value={guardPassword}
-              onChange={(event) => setGuardPassword(event.target.value)}
-            />
-            <ErpInput
-              aria-label="دلیل تأیید جایگزین یا لغو مجوز"
-              value={queueReason}
-              onChange={(event) => setQueueReason(event.target.value)}
-            />
-            <ErpButton
-              label="تأیید گارد"
-              disabled={
-                dispatchTimelineStale ||
-                saving ||
-                !confirmationSessionId.trim() ||
-                !guardPassword
-              }
-              onClick={async () => {
-                if (mutationLock.current) return;
-                mutationLock.current = true;
-                setSaving(true);
-                setError("");
-                try {
-                  await dispatchConfirmationAPI.approveByGuard(
-                    confirmationSessionId.trim(),
-                    {
-                      password: guardPassword,
-                      reason: queueReason.trim() || undefined,
-                    },
-                  );
-                  setMessage("تأیید گارد و مجوز خروج ثبت شد.");
-                  setGuardPassword("");
-                } catch (err: any) {
-                  setError(userFacingError(err, "تأیید گارد انجام نشد."));
-                } finally {
-                  mutationLock.current = false;
-                  setSaving(false);
-                }
-              }}
-            />
-          </div>
-          <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <ErpField label="دلیل لغو مجوز خروج">
+              <ErpInput value={queueReason} onChange={(event) => setQueueReason(event.target.value)} />
+            </ErpField>
             <ErpInput
               aria-label="شناسه مجوز خروج برای لغو"
               value={authorizationToRevoke}

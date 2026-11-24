@@ -83,11 +83,12 @@ export type PartnerFulfillmentCommandReceipt = {
 };
 
 export interface PartnerFulfillmentTransaction {
-  readAuthorizedSource(expected: RevisionRef, action: 'MATERIALIZE' | 'SELECT_DELIVERY' | 'INSPECT_LOADING' | 'INSPECT_DEPENDENCIES' | 'INSPECT_VOIDING', authenticatedActorId?: string): Promise<Result<PartnerFulfillmentSource>>;
+  readAuthorizedSource(expected: RevisionRef, action: 'MATERIALIZE' | 'SELECT_DELIVERY' | 'SELECT_DRAFT_DELIVERY' | 'INSPECT_LOADING' | 'INSPECT_DEPENDENCIES' | 'INSPECT_VOIDING', authenticatedActorId?: string): Promise<Result<PartnerFulfillmentSource>>;
   /** Lookup is scoped by command identity OR actor/operation/target/key so a
    * changed command ID cannot bypass a durable replay decision. */
   readLineageCommand(command: PartnerFulfillmentCommandScope): Promise<PartnerFulfillmentCommandReceipt | null>;
   findLineage(caseId: string, productRowId: string): Promise<PartnerPhysicalLineage | null>;
+  findLineages?(caseId: string, productRowIds: string[]): Promise<Map<string, PartnerPhysicalLineage>>;
   /** Atomically CASes expected Case state/revision, enforces unique
    * (caseId, productRowId), inserts every missing lineage, and records the
    * command receipt. It must commit all three effects or none of them. */
@@ -96,7 +97,7 @@ export interface PartnerFulfillmentTransaction {
     intentHash: string;
     lineages: readonly PartnerPhysicalLineage[];
   }): Promise<Result<PartnerFulfillmentCommandReceipt>>;
-  readQuantityDependencies(expected: RevisionRef): Promise<readonly PartnerQuantityDependency[]>;
+  readQuantityDependencies(expected: RevisionRef, mode: 'SUCCESSOR' | 'VOIDING'): Promise<readonly PartnerQuantityDependency[]>;
 }
 
 export interface PartnerFulfillmentRepository {

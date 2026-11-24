@@ -2211,6 +2211,7 @@ model SalesReportPreset {
 }
 
 model CrmCustomer {
+  stoneReturnReceipts StoneReturnReceipt[]
   trustCategory                    String @default("NORMAL")
   creditLimitRials                  Decimal? @db.Decimal(18, 0)
   creditPolicyVersion               Int @default(0)
@@ -2498,6 +2499,7 @@ model CrmTimelineEvent {
 }
 
 model Product {
+  stoneReturnReceipts StoneReturnReceipt[]
   id                                String                             @id @default(cuid())
   code                              String                             @unique
   name                              String
@@ -2839,6 +2841,7 @@ model SecurityVehiclePairPhoto {
 }
 
 model SecurityVehicleMovement {
+  stoneReturnReceipts StoneReturnReceipt[]
   id                     String                           @id @default(cuid())
   movementNumber         String                           @unique
   direction              SecurityVehicleMovementDirection
@@ -4342,6 +4345,8 @@ model ShipmentQuantityProjection {
   finalizedReserved    Decimal?                 @db.Decimal(65, 30)
   physicallyDispatched Decimal?                 @db.Decimal(65, 30)
   availableToLoad      Decimal?                 @db.Decimal(65, 30)
+  approvedGrossContracted Decimal?              @db.Decimal(65, 30)
+  excessRetired         Decimal?                 @db.Decimal(65, 30)
   health               ShipmentProjectionHealth
   healthReasons        Json
   sourceEvidenceIds    Json
@@ -7159,6 +7164,7 @@ model AccountingCheckCustodyEvent {
 }
 
 model AccountingInventoryIdentity {
+  stoneReturnReceipt StoneReturnReceipt?
   id              String                              @id
   kind            AccountingInventoryIdentityKind
   originId        String?
@@ -7668,6 +7674,7 @@ enum ShipmentQuantityEvidenceKind {
   DISPATCH_CORRECTION_DRAFT
   DISPATCH_CORRECTION_POSTED
   GUARD_RETURN_VERIFIED
+  EXCESS_RETURN_FINALIZED
   LEGACY_UNRECONCILED_RESERVED
   LEGACY_DISPATCHED
   LEGACY_RELEASED
@@ -13215,4 +13222,94 @@ model PurchasingExistingEvidence {
   @@unique([sourceType, sourceId])
   @@index([documentId])
   @@map("purchasing_existing_evidence")
+}
+
+model StoneReturnReceipt {
+  id                    String                       @id @default(cuid())
+  requestId             String
+  customerId            String
+  customerName          String
+  productId             String
+  productCode           String
+  productName           String
+  unit                  String
+  receivedQuantity      Decimal                      @db.Decimal(65, 30)
+  acceptedQuantity      Decimal                      @db.Decimal(65, 30)
+  rejectedQuantity      Decimal                      @db.Decimal(65, 30)
+  rejectionReason       String?
+  guardReturnMovementId String?
+  inventoryIdentityId   String?                      @unique
+  createdBy             String
+  createdAt             DateTime                     @default(now())
+  customer              CrmCustomer                  @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  product               Product                      @relation(fields: [productId], references: [id], onDelete: Restrict)
+  guardReturnMovement   SecurityVehicleMovement?     @relation(fields: [guardReturnMovementId], references: [id], onDelete: Restrict)
+  inventoryIdentity     AccountingInventoryIdentity? @relation(fields: [inventoryIdentityId], references: [id], onDelete: Restrict)
+  allocationDrafts      StoneReturnAllocationDraft[]
+  finalization          StoneReturnFinalization?
+
+  @@unique([createdBy, requestId])
+  @@index([createdAt, id])
+  @@index([customerId, productId, unit])
+  @@index([productId])
+  @@unique([guardReturnMovementId, productId, unit], map: "stone_return_receipts_guard_product_unit_key")
+  @@map("stone_return_receipts")
+}
+
+
+model StoneReturnAllocationDraft {
+  id                String                          @id @default(cuid())
+  receiptId         String
+  version           Int
+  attributionReason String?
+  createdBy         String
+  createdAt         DateTime                        @default(now())
+  receipt           StoneReturnReceipt              @relation(fields: [receiptId], references: [id], onDelete: Restrict)
+  rows              StoneReturnAllocationDraftRow[]
+  finalization      StoneReturnFinalization?
+
+  @@unique([receiptId, version])
+  @@map("stone_return_allocation_drafts")
+}
+
+model StoneReturnAllocationDraftRow {
+  id                    String                     @id @default(cuid())
+  draftId               String
+  originalInvoiceId     String
+  originalInvoiceNumber String
+  originalLineId        String
+  originalTaxInvoiceId  String
+  originalTaxLineId     String
+  dispatchEvidenceId    String
+  contractId            String
+  contractNumber        String
+  contractItemId        String
+  productRowId          String
+  quantity              Decimal                    @db.Decimal(65, 30)
+  draft                 StoneReturnAllocationDraft @relation(fields: [draftId], references: [id], onDelete: Restrict)
+
+  @@unique([draftId, originalInvoiceId, originalLineId, dispatchEvidenceId], map: "stone_return_allocation_draft_source_key")
+  @@map("stone_return_allocation_draft_rows")
+}
+
+
+model StoneReturnFinalization {
+  id            String                     @id @default(cuid())
+  receiptId     String                     @unique
+  draftId       String                     @unique
+  draftVersion  Int
+  draftHash     String
+  requestId     String
+  commandHash   String
+  finalizedBy   String
+  finalizedAt   DateTime
+  documentDate  DateTime
+  bookId        String
+  periodId      String
+  postingRuleId String
+  summary       Json
+  receipt       StoneReturnReceipt         @relation(fields: [receiptId], references: [id], onDelete: Restrict)
+  draft         StoneReturnAllocationDraft @relation(fields: [draftId], references: [id], onDelete: Restrict)
+
+  @@map("stone_return_finalizations")
 }

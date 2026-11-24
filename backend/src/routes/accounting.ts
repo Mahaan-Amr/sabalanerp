@@ -58,6 +58,7 @@ import {
   updateAccountingSettings
 } from '../services/accountingService';
 import { FinancialEvidenceConflictError } from '../services/approvedPricing';
+import { ShipmentReturnConflictError } from '../services/shipmentQuantityProjectionStore';
 import type { ContractCustomPrintOptions, ContractPrintVariant } from '../utils/printTemplate';
 import { publishNotificationEvent } from '../services/notificationService';
 import { listDispatchDocumentRecoveryAudit } from '../services/dispatchDocumentAuditRecovery';
@@ -112,7 +113,10 @@ import accountingPeriodEndRouter from './accountingPeriodEnd';
 import accountingSupplyChainRouter from './accountingSupplyChain';
 import accountingReplacementRouter from './accountingReplacement';
 
+import { accountingStoneReturnsRouter } from './stoneReturns';
+
 const router = express.Router();
+router.use('/stone-returns', accountingStoneReturnsRouter);
 router.use('/ledger', accountingLedgerRouter);
 router.use('/period-end', accountingPeriodEndRouter);
 router.use('/supply-chain', accountingSupplyChainRouter);
@@ -2052,6 +2056,9 @@ export const createAccountingActionHandler = (
         workflow: error.workflow,
         actionUrl: error.actionUrl,
       });
+      if (error instanceof ShipmentReturnConflictError) {
+        return res.status(409).json({ success: false, message: error.message });
+      }
       if (error instanceof OrdinaryAccountingCommercialError) {
         return res.status(error.status).json({ success: false, message: error.message });
       }

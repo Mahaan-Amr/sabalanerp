@@ -38,6 +38,7 @@ interface RenderableContract {
 }
 
 interface NormalizedCut {
+  dispatchHistoricalRate?: string | null;
   type: string;
   code?: string;
   meters: number;
@@ -47,6 +48,7 @@ interface NormalizedCut {
 }
 
 interface NormalizedService {
+  dispatchHistoricalRate?: string | null;
   code?: string;
   sourceId?: string;
   category: string;
@@ -61,6 +63,7 @@ interface NormalizedService {
 }
 
 interface NormalizedProductTool {
+  dispatchHistoricalRate?: string | null;
   code?: string;
   sourceId?: string;
   name: string;
@@ -166,6 +169,8 @@ interface NormalizedStandaloneService {
 }
 
 interface FlatProductRow {
+  dispatchHistoricalRate?: string | null;
+  dispatchHistoricalRateUnit?: string;
   groupKey?: string;
   indexLabel: string;
   code: string;
@@ -705,7 +710,7 @@ const lengthValueToMeters = (value: unknown, unit: unknown): number => {
   return unit === 'cm' ? numeric / 100 : numeric;
 };
 
-const legacyCutMeters = (product: any, cut: any): number => {
+export const legacyCutMeters = (product: any, cut: any): number => {
   if (cut?.meters != null) return toNumber(cut.meters);
   if (product?.productType === 'longitudinal') {
     // Legacy length is consumed mother-stone length in cm, not billable cut
@@ -1131,6 +1136,7 @@ const normalizeProducts = (
       const cutsFromBreakdown: NormalizedCut[] = Array.isArray(product?.cuttingBreakdown)
         ? product.cuttingBreakdown.map((cut: any) => ({
           type: cut?.type === 'cross' ? 'برش عرضی' : 'برش طولی',
+          dispatchHistoricalRate: cut?.dispatchHistoricalRate,
           code: firstText(cut?.code, cut?.sourceCode),
           meters: toNumber(cut?.meters),
           rate: mandatoryCuttingPolicy && cut?.type === 'cross' ? 0 : toNumber(cut?.rate),
@@ -1147,6 +1153,7 @@ const normalizeProducts = (
         : (!product?.smartCutDerivedQuantity && Array.isArray(product?.cutDetails)
           ? product.cutDetails.map((cut: any) => ({
               type: cutTypeLabel(cut),
+              dispatchHistoricalRate: cut?.dispatchHistoricalRate,
               code: firstText(cut?.code, cut?.sourceCode),
               meters: legacyCutMeters(product, cut),
               rate: toNumber(cut?.rate || cut?.cuttingCostPerMeter),
@@ -1166,6 +1173,7 @@ const normalizeProducts = (
           .filter((cut: any) => cut?.type === 'vertical')
           .map((cut: any): NormalizedCut => ({
             type: cutTypeLabel(cut),
+            dispatchHistoricalRate: cut?.dispatchHistoricalRate,
             code: firstText(cut?.code, cut?.sourceCode),
             meters: toNumber(cut?.meters ?? cut?.length),
             rate: toNumber(cut?.rate ?? cut?.cuttingCostPerMeter),
@@ -1175,6 +1183,7 @@ const normalizeProducts = (
           verticalCuts.reduce((sum: number, cut: NormalizedCut) => sum + cut.cost, 0));
         cuts = [{
           type: 'برش اسلب بر اساس مساحت',
+          dispatchHistoricalRate: product?.dispatchHistoricalSlabCuttingRate,
           meters: 0,
           squareMeters: toNumber(product?.squareMeters),
           rate: toNumber(product?.slabCuttingPricePerSquareMeter ?? product?.slabPolicyInput?.squareMeterCutRateToman),
@@ -1191,10 +1200,11 @@ const normalizeProducts = (
         const calculationBase = service?.calculationBase || catalogSubService?.calculationBase;
         const rate = toNumber(service?.subService?.pricePerMeter || catalogSubService?.pricePerMeter);
         const selectedEdgesLabel = selectedEdgeLabels(service);
-        const rateUnitLabel = calculationBase === 'squareMeters' ? 'متر مربع' : 'متر طول';
+        const rateUnitLabel = calculationBase === 'squareMeters' ? 'متر مربع' : calculationBase === 'count' ? 'عدد' : 'متر طول';
         services.push({
           code: firstText(service?.subService?.code, service?.code, service?.sourceCode, catalogSubService?.code),
           sourceId: subServiceId,
+          dispatchHistoricalRate: service?.dispatchHistoricalRate,
           category: selectedEdgesLabel ? 'ابزار' : 'خدمات',
           name: firstText(
             service?.subService?.namePersian,
@@ -1205,7 +1215,7 @@ const normalizeProducts = (
           ),
           selectedEdgesLabel,
           amount,
-          amountLabel: `${toFaNumber(amount, 4)} ${calculationBase === 'squareMeters' ? 'متر مربع' : 'متر'}`,
+          amountLabel: `${toFaNumber(amount, 4)} ${calculationBase === 'squareMeters' ? 'متر مربع' : calculationBase === 'count' ? 'عدد' : 'متر'}`,
           rate,
           rateLabel: rate ? `${toFaNumber(rate)} تومان` : EMPTY,
           rateUnitLabel,
@@ -1229,6 +1239,7 @@ const normalizeProducts = (
         services.push({
           code: finishingCode,
           sourceId: finishingId,
+          dispatchHistoricalRate: product?.dispatchHistoricalFinishingRate,
           category: 'پرداخت سنگ',
           name: product?.finishingName || EMPTY,
           amount: finishingQuantity,
@@ -1259,6 +1270,7 @@ const normalizeProducts = (
           services.push({
             code: firstText(finishing?.code),
             sourceId: firstText(finishing?.finishingId, finishing?.id),
+            dispatchHistoricalRate: finishing?.dispatchHistoricalRate,
             category: 'پرداخت سنگ',
             name: firstText(finishing?.name, EMPTY),
             selectedEdgesLabel: selectedEdgeLabels({ edges: finishing?.targetEdges }),
@@ -1282,6 +1294,7 @@ const normalizeProducts = (
         return {
           code: firstText(tool?.code, tool?.toolCode, tool?.sourceCode),
           sourceId: firstText(tool?.toolId, tool?.id, tool?.sourceId),
+          dispatchHistoricalRate: tool?.dispatchHistoricalRate,
           name: tool?.namePersian || tool?.name || EMPTY,
           selectedEdgesLabel,
           amount,
@@ -2069,7 +2082,7 @@ const buildFlatProductRows = (
 
       const aggregatedCuts = new Map<string, NormalizedCut>();
       product.cuts.filter(isMeaningfulCut).forEach(cut => {
-        const key = `${cut.code || ''}|${cut.type}|${cut.rate}|${cut.squareMeters === undefined ? 'meter' : 'squareMeter'}`;
+        const key = `${cut.code || ''}|${cut.type}|${cut.rate}|${cut.squareMeters === undefined ? 'meter' : 'squareMeter'}|${String(cut.dispatchHistoricalRate)}`;
         const existing = aggregatedCuts.get(key);
         if (existing) {
           existing.meters += cut.meters;
@@ -2085,6 +2098,8 @@ const buildFlatProductRows = (
         code: cut.code || '',
         description: `${cut.type} لایه`,
         category: 'برش',
+        dispatchHistoricalRate: cut.dispatchHistoricalRate,
+        dispatchHistoricalRateUnit: cut.squareMeters === undefined ? 'متر طول' : 'متر مربع',
         length: '',
         width: '',
         linearMeasurement: cut.squareMeters === undefined ? toFaNumber(cut.meters, 4) : '',
@@ -2099,6 +2114,8 @@ const buildFlatProductRows = (
         code: tool.code || '',
         description: withSelectedEdges(tool.name, tool.selectedEdgesLabel),
         category: 'ابزار',
+        dispatchHistoricalRate: tool.dispatchHistoricalRate,
+        dispatchHistoricalRateUnit: tool.rateUnitLabel,
         length: '',
         width: '',
         ...measurementCellsFromLabel(tool.amountLabel),
@@ -2111,6 +2128,8 @@ const buildFlatProductRows = (
         code: service.code || '',
         description: withSelectedEdges(service.name, service.selectedEdgesLabel),
         category: service.category,
+        dispatchHistoricalRate: service.dispatchHistoricalRate,
+        dispatchHistoricalRateUnit: service.rateUnitLabel,
         length: '',
         width: '',
         ...measurementCellsFromLabel(service.amountLabel),
@@ -2258,6 +2277,8 @@ const buildFlatProductRows = (
         code: cut.code || '',
         description: cut.type,
         category: 'برش',
+        dispatchHistoricalRate: cut.dispatchHistoricalRate,
+        dispatchHistoricalRateUnit: cut.squareMeters === undefined ? 'متر طول' : 'متر مربع',
         length: '',
         width: '',
         linearMeasurement: cut.squareMeters === undefined ? toFaNumber(cut.meters, 4) : '',
@@ -2275,6 +2296,8 @@ const buildFlatProductRows = (
         code: tool.code || '',
         description: withSelectedEdges(tool.name, tool.selectedEdgesLabel),
         category: 'ابزار',
+        dispatchHistoricalRate: tool.dispatchHistoricalRate,
+        dispatchHistoricalRateUnit: tool.rateUnitLabel,
         length: '',
         width: '',
         ...measurementCellsFromLabel(tool.amountLabel),
@@ -2290,6 +2313,8 @@ const buildFlatProductRows = (
         code: service.code || '',
         description: withSelectedEdges(service.name, service.selectedEdgesLabel),
         category: service.category,
+        dispatchHistoricalRate: service.dispatchHistoricalRate,
+        dispatchHistoricalRateUnit: service.rateUnitLabel,
         length: '',
         width: '',
         ...measurementCellsFromLabel(service.amountLabel),
@@ -2388,6 +2413,12 @@ const buildFlatProductRows = (
   return rows;
 };
 
+function historicalDispatchRate(value: string, unit: string) {
+  const [whole, fraction] = new Prisma.Decimal(value).toFixed().split('.');
+  const formatted = whole.replace(/\B(?=(\d{3})+(?!\d))/g, '٬') + (fraction ? `٫${fraction}` : '');
+  return `${formatted.replace(/\d/g, digit => '۰۱۲۳۴۵۶۷۸۹'[Number(digit)])} / ${unit}`;
+}
+
 /** Dispatch uses the same saved measurement and service rows as contract print. */
 export type DispatchProductPrintRow = Pick<FlatProductRow, 'code' | 'description' | 'category' |
   'length' | 'width' | 'count' | 'linearMeasurement' | 'squareMeasurement' | 'rate' | 'total'>;
@@ -2409,7 +2440,10 @@ export function createDispatchProductRows(contractData: unknown, options: {
       ? buildPartnerProductRows(product, options.partnerDetails, 1, currency, { moneyFractionDigits: 12 })
       : buildFlatProductRows([product, ...children], [], currency, 0, undefined,
           { showTotals: false, accountingDetail: true, moneyFractionDigits: 12 });
-    return rows.map(({ code, description, category, length, width, count, linearMeasurement, squareMeasurement, rate, total }) => {
+    return rows.map(({ code, description, category, length, width, count, linearMeasurement, squareMeasurement, rate, total,
+      dispatchHistoricalRate, dispatchHistoricalRateUnit }) => {
+      if (dispatchHistoricalRate !== undefined) rate = dispatchHistoricalRate === null
+        ? 'نامشخص' : historicalDispatchRate(dispatchHistoricalRate, dispatchHistoricalRateUnit || '');
       const rateUnit = squareMeasurement ? 'متر مربع' : linearMeasurement ? 'متر طول' : '';
       const displayRate = category === 'برش' && rate && rateUnit && !rate.includes(' / ') ? `${rate} / ${rateUnit}` : rate;
       return { code, description, category, length, width, count, linearMeasurement, squareMeasurement, rate: displayRate, total };

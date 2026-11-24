@@ -15,24 +15,18 @@ async function main() {
       !/^\/sabalanerp_concurrency_[a-f0-9]{16}$/.test(url.pathname)) throw new Error('Isolated local test DB required');
     const actorId = process.env.PARTNER_TEST_ACTOR_ID!, invoiceId = process.env.PARTNER_TEST_INVOICE_ID!;
   try {
-    await prisma.workspacePermission.update({ where: { userId_workspace: { userId: actorId, workspace: 'accounting' } },
-      data: { permissionLevel: 'admin' } });
-    await prisma.featurePermission.create({ data: { userId: actorId, workspace: 'accounting',
-      feature: 'accounting_records_approve_void', permissionLevel: 'edit', grantedBy: actorId } });
+    await prisma.workspacePermission.upsert({ where: { userId_workspace: { userId: actorId, workspace: 'accounting' } },
+      create: { userId: actorId, workspace: 'accounting', permissionLevel: 'admin', grantedBy: actorId },
+      update: { permissionLevel: 'admin' } });
+    const approvalFeature = 'accounting_records_approve_void';
+    await prisma.featurePermission.upsert({ where: { userId_workspace_feature: { userId: actorId, workspace: 'accounting', feature: approvalFeature } },
+      create: { userId: actorId, workspace: 'accounting', feature: approvalFeature, permissionLevel: 'edit', grantedBy: actorId },
+      update: { permissionLevel: 'edit' } });
     const session = await createAuthoritativeSession(prisma, actorId, { ipAddress: '127.0.0.1', userAgent: 'isolated-334-approval' });
     const app = express(); app.use(express.json()); app.use('/api/accounting', accountingRouter); app.use('/api/partner/accounting', partnerAccountingRouter);
     const server = app.listen(0, '127.0.0.1');
     await new Promise<void>(resolve => server.once('listening', resolve));
     try {
-      const grant = await prisma.effectiveActionGrant.findFirstOrThrow({ where: { principalId: actorId, domain: 'PARTNER',
-        action: 'ACCOUNTING_WRITE', revokedAt: null } });
-      // A narrower grant still owns the decision after target access is revoked,
-      // so the workspace bridge cannot supply company-wide write authority.
-      await prisma.effectiveActionGrant.create({ data: { ...grant, id: `${grant.id}-outside-approval-scope`,
-        boundRootId: `${grant.boundRootId}-outside-scope`, reason: 'isolated fixture for a different Accounting Case scope',
-        correlationId: `${invoiceId}-restricted-other-case` } });
-      await prisma.effectiveActionGrant.update({ where: { id: grant.id }, data: { revokedAt: new Date(), revokedBy: actorId,
-        revocationReason: 'آزمون لغو مجوز پس از آماده‌سازی صورتحساب', revocationCorrelationId: `${invoiceId}-revoke-before-approval` } });
       const payload = { kind: 'APPROVE_FINANCIAL_INVOICE', invoiceId,
         systemInvoiceNumber: `${invoiceId}-official`, systemInvoiceDate: new Date().toISOString(),
         sepidarAmount: '1600', note: 'تأیید صورتحساب آزمایشی پرونده همکار' };
@@ -43,6 +37,33 @@ async function main() {
           body: JSON.stringify(payload) });
         return { status: response.status, body: await response.json() as any };
       };
+      const fixture = process.env.PARTNER_TEST_DRAFT_FIXTURE;
+      if (fixture === 'APPROVE') {
+        const approved = await approve();
+        assert.equal(approved.status, 200, JSON.stringify(approved.body));
+        return;
+      }
+      if (fixture === 'PUBLISH') {
+        await prisma.featurePermission.create({ data: { userId: actorId, workspace: 'accounting',
+          feature: 'accounting_receivables_manage', permissionLevel: 'edit', grantedBy: actorId } });
+        const invoice = await prisma.accountingFinancialRecord.findUniqueOrThrow({ where: { id: invoiceId } });
+        const sale = await prisma.partnerSaleCase.findUniqueOrThrow({ where: { internalRecordId: invoice.sourceId! } });
+        const expected = { caseId: sale.id, revision: sale.headRevision, integrityHash: sale.integrityHash };
+        const published = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/partner/accounting/receivables`, {
+          method: 'POST', headers: { 'content-type': 'application/json', cookie: `${SESSION_COOKIE}=${session.token}` },
+          body: JSON.stringify({ expected, invoiceRecordId: invoiceId }),
+        });
+        assert.equal(published.status, 200, await published.text());
+        return;
+      }
+      const grant = await prisma.effectiveActionGrant.findFirstOrThrow({ where: { principalId: actorId, domain: 'PARTNER',
+        action: 'ACCOUNTING_WRITE', revokedAt: null } });
+      // Keep a narrower explicit grant after revocation so the legacy workspace bridge cannot confer company-wide access.
+      await prisma.effectiveActionGrant.create({ data: { ...grant, id: `${grant.id}-outside-approval-scope`,
+        boundRootId: `${grant.boundRootId}-outside-scope`, reason: 'isolated fixture for a different Accounting Case scope',
+        correlationId: `${invoiceId}-restricted-other-case` } });
+      await prisma.effectiveActionGrant.update({ where: { id: grant.id }, data: { revokedAt: new Date(), revokedBy: actorId,
+        revocationReason: 'آزمون لغو مجوز پس از آماده‌سازی صورتحساب', revocationCorrelationId: `${invoiceId}-revoke-before-approval` } });
       const denied = await approve();
       assert.equal(denied.status, 403, 'a manager whose explicit write scope excludes this Case cannot approve its invoice');
       await prisma.effectiveActionGrant.create({ data: { ...grant, id: `${grant.id}-initial-approval`,

@@ -515,7 +515,7 @@ test("Accounting verifies a customer pickup before issuing its waybill and sales
   await expect(details.getByText("فاکتور ۲۲ · صادرشده", { exact: true })).toBeVisible();
 });
 
-test("Accounting shows the OTP controls after the biometric fallback starts", async ({ page }) => {
+test("Accounting shows confirmation and exit permit issuance after verifying the fallback OTP", async ({ page }) => {
   await loginAsAdmin(page);
   const waybillId = "qa-fallback-waybill";
   const sessionId = "qa-fallback-session";
@@ -535,7 +535,7 @@ test("Accounting shows the OTP controls after the biometric fallback starts", as
   }));
   await page.route(`**/api/dispatch-confirmation/sessions/${sessionId}/otp/verify`, route => {
     expect(route.request().postDataJSON()).toEqual({ code: "123456" });
-    return reply(route, { verifiedAt: new Date().toISOString() });
+    return reply(route, { verifiedAt: new Date().toISOString(), authorization: { id: "qa-fallback-permit" } });
   });
   await page.goto("/dashboard/accounting/dispatch");
   await page.getByRole("table").getByRole("button", { name: "تأیید هویت راننده" }).click();
@@ -554,7 +554,8 @@ test("Accounting shows the OTP controls after the biometric fallback starts", as
   await expect(code).toHaveValue("123456");
   await expect(verify).toBeEnabled();
   await code.press("Enter");
-  await expect(page.getByText("رمز راننده تأیید شد. تأیید نهایی را سرپرست گارد تکمیل می‌کند.", { exact: true })).toBeVisible();
+  await expect(page.getByText("رمز راننده تأیید شد و مجوز خروج صادر شد.", { exact: true })).toBeVisible();
+  await expect(code).toHaveCount(0);
 });
 
 test("Accounting shows how to recover from an unregistered biometric workstation", async ({ page }) => {

@@ -9,7 +9,6 @@ import { DeterministicBiometricSimulator } from '../services/biometricSimulator'
 import { ProtectedTemplateVault } from '../services/biometricTemplateVault';
 import { DispatchConfirmationConflictError, DispatchConfirmationService, DispatchConfirmationValidationError } from '../services/dispatchConfirmation';
 import smsService from '../services/smsService';
-import bcrypt from 'bcryptjs';
 import { BiometricConnector } from '../services/biometricProtocol';
 import { createHmac, randomUUID } from 'node:crypto';
 import { PilotSafetyPauseError } from '../services/dispatchCutover';
@@ -226,18 +225,6 @@ router.post('/sessions/:sessionId/otp/resend', accountingManage, async (req: Aut
 });
 router.post('/sessions/:sessionId/otp/verify', accountingManage, async (req: AuthRequest, res) => {
   try { return res.json({ success: true, data: await service().verifyOtp({ sessionId: req.params.sessionId, code: req.body.code, actorId: req.user!.id }) }); }
-  catch (error) { return handle(res, error); }
-});
-router.post('/sessions/:sessionId/guard-approval', guardApprove, async (req: AuthRequest, res) => {
-  try {
-    const guard = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { password: true } });
-    if (!guard || typeof req.body.password !== 'string' || !await bcrypt.compare(req.body.password, guard.password)) {
-      await service().auditControlDenied(req.params.sessionId, req.user!.id, 'GUARD_REAUTHENTICATION_FAILED');
-      return res.status(401).json({ success: false, error: 'Fresh Guard reauthentication failed.' });
-    }
-    return res.json({ success: true, data: await service().approveByGuard({ sessionId: req.params.sessionId, guardActorId: req.user!.id,
-      reauthenticatedAt: new Date(), reason: req.body.reason }) });
-  }
   catch (error) { return handle(res, error); }
 });
 router.post('/authorizations/:authorizationId/revoke', accountingManage, async (req: AuthRequest, res) => {

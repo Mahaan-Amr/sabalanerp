@@ -1,11 +1,11 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { canonicalHash } from '@sabalanerp/partner-sales-contracts';
-import { historicalAccountingFixture, writerBoundAccountingFixture } from './partnerAccountingHistoricalReadFixture';
+import { historicalAccountingFixture, writerBoundAccountingFixture, type HistoricalAccountingFixtureIdentity } from './partnerAccountingHistoricalReadFixture';
 const json = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value));
 
 export async function seedHistoricalAccountingRead(database: PrismaClient, password = 'HistoricalAccountingQa2026!', writerBound = false,
-  identity: { invoiceId?: string; customerContractNumber?: string } = {}): Promise<{
+  identity: HistoricalAccountingFixtureIdentity = {}): Promise<{
   fixture: Awaited<ReturnType<typeof historicalAccountingFixture>> | Awaited<ReturnType<typeof writerBoundAccountingFixture>>;
   actorId: string; username: string; password: string;
 }> {

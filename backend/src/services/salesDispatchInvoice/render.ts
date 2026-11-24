@@ -14,11 +14,13 @@ export type IssuedInvoiceSnapshot = InvoiceSource & {
   issuedAt: string;
   replacesNumber: string | null;
   pdfLayoutVersion?: number;
+  documentStatus?: "VOIDED" | "INVALIDATED";
 };
-export const salesInvoicePdfLayoutVersion = 2;
+export const salesInvoicePdfLayoutVersion = 3;
 
 function rialRate(value: string, multiplier: number) {
   const [rate, unit] = value.split(' / ', 2);
+  if (/[٪%]/.test(rate)) return value;
   const amount = parsePrintNumber(rate);
   if (!amount) return value;
   const [whole, fraction] = amount.mul(multiplier).toFixed().split('.');
@@ -93,8 +95,9 @@ export function renderSalesInvoice(snapshot: IssuedInvoiceSnapshot, voidReason?:
   return shipmentHtml(title,
     shipmentHeader({ title, number: snapshot.number, numberLabel: 'شماره فاکتور', loadingNumber: snapshot.loadingNumber, date })
     + (voidReason || snapshot.replacesNumber ? printSection('وضعیت فاکتور',
-      `<p class="note">${voidReason ? `باطل‌شده · ${escapePrint(voidReason)}` : ''}${snapshot.replacesNumber ? ` · جایگزین فاکتور ${escapePrint(invoiceNumber(snapshot.replacesNumber))}` : ''}</p>`) : '')
+      `<p class="note">${voidReason ? `${snapshot.documentStatus === "INVALIDATED" ? "نامعتبر" : "باطل‌شده"} · ${escapePrint(voidReason)}` : ''}${snapshot.replacesNumber ? ` · جایگزین فاکتور ${escapePrint(invoiceNumber(snapshot.replacesNumber))}` : ''}</p>`) : '')
     + shipmentParties(snapshot.customerName, snapshot.print?.contacts || [], true, snapshot.counterparty)
+    + (!snapshot.print ? '<p class="note">جزئیات تاریخی مقدار سنگ مصرفی و خدمات و نرخ آن‌ها نامشخص است؛ مبالغ مصوب سند حفظ شده‌اند.</p>' : '')
     + printSection('مشخصات کالا یا خدمات مورد معامله', shipmentItemTable(groups, true))
     + `<div class="settlement-panel">${shipmentTerms(snapshot.print?.contacts.map(contact => contact.contractNumber)
       ?? snapshot.lines.map(line => line.contractNumber))}

@@ -55,6 +55,9 @@ async function run() {
             isActive: true,
           },
         });
+        const historicalTool = await tx.subService.create({ data: {
+          code: `HIST-${randomUUID()}`, namePersian: "نیم لول", pricePerMeter: 70000,
+        } });
         const customer = await tx.crmCustomer.findFirstOrThrow();
         const template = await tx.salesContract.findFirstOrThrow({
           include: { items: { take: 1 } },
@@ -92,6 +95,7 @@ async function run() {
             versionId = randomUUID(),
             itemId = randomUUID();
           const sourceSnapshot = {
+            currency: index === 0 ? "TOMAN" : "RIAL",
             customerId: customer.id,
             contractData: {
               project: { projectName: `پروژه ${index}`, address: `نشانی ذخیره‌شدهٔ قرارداد ${index}`,
@@ -109,13 +113,35 @@ async function run() {
                   totalPrice: 30,
                   unitPrice: 11,
                   tools: [{ code: "TEST-TOOL", name: "ابزار نیم‌لول",
-                    computedMeters: 2, pricePerMeter: 4, totalPrice: 8 }],
+                    computedMeters: 2, pricePerMeter: 4, totalPrice: 8 },
+                    { toolId: historicalTool.id, code: "923218", name: index === 1 ? "نیم لول با ارز ریالی" : undefined, computedMeters: 155,
+                      totalPrice: 7750000, edges: { front: true, left: true } },
+                    { name: "ابزار رایگان تاریخی", computedMeters: 3, pricePerMeter: 0, totalPrice: 0 },
+                    { name: "ابزار نرخ نامعلوم", computedMeters: 3 },
+                    { toolId: historicalTool.id, name: "نام تاریخی ابزار", computedMeters: 2, pricePerMeter: 6, totalPrice: 12 },
+                    { name: "ارز تاریخی ریالی", computedMeters: 2, totalPrice: 1000000, currency: "IRR" },
+                    { name: "مبنای نامنطبق", computedMeters: 3, totalPrice: 600, calculationBase: "count" },
+                    { name: "حداقل مبهم", computedMeters: 3, totalPrice: 600, minimumQuantity: 5 },
+                  ],
+                  appliedSubServices: [{ name: "خدمت شمارشی تاریخی", calculationBase: "count", meter: 4, cost: 40 }],
                   cuttingBreakdown: [{ type: "longitudinal", meters: 1, rate: 3, cost: 3 }],
+                  finishings: [
+                    { finishingId: 'length-finishing', name: 'پرداخت طولی رایگان', calculationBase: 'length', quantity: 9, unitPrice: 0, cost: 0 },
+                    { finishingId: 'count-finishing', name: 'پرداخت تعدادی رایگان', calculationBase: 'count', quantity: 12, unitPrice: 0, cost: 0 },
+                  ],
                   finishingId: "test-finishing",
                   finishingName: "ساب آزمون",
                   finishingUnitPrice: 2,
                   finishingCost: 6,
                   squareMeters: 3,
+                },
+                {
+                  rowId: `layer-${rowId}`, parentProductRowId: rowId,
+                  stoneName: 'لایه آزمون', length: '1.2', lengthUnit: 'm', width: '5', widthUnit: 'cm',
+                  quantity: 3, squareMeters: 0.18, totalPrice: 0,
+                  meta: { isLayer: true, layerEdges: { front: true },
+                    layerType: { name: 'لایه رایگان آزمون', pricePerLayer: 0 },
+                    layerInfo: { parentProductRowId: rowId, layerSetQuantity: 3, pricingQuantity: 3, calculationUnit: 'set' } },
                 },
               ],
             },
@@ -492,6 +518,8 @@ async function run() {
         assert.equal(bytesHash(first.bytes), bytesHash(second.bytes));
         const invoiceHtml = Buffer.from(first.bytes).toString();
         assert.match(invoiceHtml, /کارشناس فروش<\/strong> آزمون فاکتور/);
+        assert.equal(invoiceHtml.match(/<strong>خریدار<\/strong>/g)?.length, 1);
+        assert.equal(invoiceHtml.match(/<h2>مشخصات پروژه · قرارداد/g)?.length, 2);
         assert.match(invoiceHtml, /بلوار دکتر حسابی/);
         assert.match(invoiceHtml, /تلفن ثابت<\/strong> <bdi dir="ltr">۰۷۱۹۱۰۱۰۹۰۰/);
         assert.match(invoiceHtml, /قیمت اقلام و نحوهٔ تسویه طبق قراردادهای شمارهٔ <bdi dir="ltr">IT-/);
@@ -502,13 +530,48 @@ async function run() {
         assert.match(invoiceHtml, /سنگ مصوب[\s\S]*ابزار نیم‌لول[\s\S]*۴۰ \/ متر طول/);
         assert.match(invoiceHtml, /برش طولی[\s\S]*۳۰ \/ متر طول/);
         assert.match(invoiceHtml, /ساب آزمون[\s\S]*۲۰ \/ متر مربع/);
+        assert.match(invoiceHtml, /۹۲۳۲۱۸[\s\S]*نیم لول \(جلو، چپ\)[\s\S]*۵۰۰٬۰۰۰ \/ متر طول/);
+        assert.match(invoiceHtml, /نیم لول با ارز ریالی[\s\S]*۵۰٬۰۰۰ \/ متر طول/);
+        assert.match(invoiceHtml, /ابزار رایگان تاریخی[\s\S]*۰ \/ متر طول/);
+        const missingRateRow = invoiceHtml.match(/<tr[^>]*>(?:(?!<\/tr>)[\s\S])*ابزار نرخ نامعلوم(?:(?!<\/tr>)[\s\S])*<\/tr>/)?.[0];
+        assert.ok(missingRateRow);
+        assert.match(missingRateRow, /نامشخص/);
+        assert.doesNotMatch(missingRateRow, /۰ \/ متر طول/);
+        assert.match(invoiceHtml, /خدمت شمارشی تاریخی[\s\S]*۱۰۰ \/ عدد/);
+        assert.match(invoiceHtml, /نام تاریخی ابزار[\s\S]*۶۰ \/ متر طول/);
+        assert.match(invoiceHtml, /ارز تاریخی ریالی[\s\S]*۵۰۰٬۰۰۰ \/ متر طول/);
+        for (const name of ["مبنای نامنطبق", "حداقل مبهم"]) {
+          const row = invoiceHtml.match(new RegExp(`<tr[^>]*>(?:(?!<\\/tr>)[\\s\\S])*${name}(?:(?!<\\/tr>)[\\s\\S])*<\\/tr>`))?.[0];
+          assert.ok(row);
+          assert.match(row, /نامشخص/);
+        }
+        // The issued whole-loading document includes two contracts/drivers;
+        // each operation belongs to that driver's 1.25 / 3 approved share.
+        const operationRows = invoiceHtml.match(/<tr class="operation">[\s\S]*?<\/tr>/g) || [];
+        const tools = operationRows.filter(row => row.includes('ابزار نیم‌لول'));
+        assert.equal(tools.length, 2);
+        for (const row of tools) assert.match(row, /۰٫۸۳۳۳/);
+        for (const row of operationRows.filter(row => row.includes('برش طولی'))) assert.match(row, /۰٫۴۱۶۷/);
+        for (const row of operationRows.filter(row => row.includes('ساب آزمون'))) assert.match(row, /۱٫۲۵/);
+        for (const row of operationRows.filter(row => row.includes('پرداخت طولی رایگان'))) assert.match(row, /۳٫۷۵/);
+        for (const row of operationRows.filter(row => row.includes('پرداخت تعدادی رایگان'))) assert.match(row, /<td>۵<\/td>/);
+        assert.equal(operationRows.filter(row => row.includes('پرداخت طولی رایگان')).length, 2);
+        assert.equal(operationRows.filter(row => row.includes('پرداخت تعدادی رایگان')).length, 2);
+        const layers = operationRows.filter(row => row.includes('لایه رایگان آزمون'));
+        assert.equal(layers.length, 2);
+        for (const row of layers) assert.match(row, /۱٫۲۵ ست/);
         assert.match(invoiceHtml, /امضای تحویل‌گیرنده/);
         const record = await tx.salesDispatchInvoice.findUniqueOrThrow({ where: { id: issued.id } });
         const { print, pdfLayoutVersion: _pdfLayoutVersion, ...legacySnapshot } = record.snapshot as Prisma.JsonObject;
-        let historicalSnapshot = { ...legacySnapshot, print };
+        let historicalSnapshot: Record<string, unknown> = { ...legacySnapshot, print: { ...(print as Prisma.JsonObject), rows: Object.fromEntries(
+          Object.entries((print as any).rows).map(([key, rows]) => [key, (rows as any[]).map(row =>
+            row.category === 'ابزار' ? { ...row, linearMeasurement: '۹۹۹۹', description: 'جزئیات چاپی کهنه' } : row)]),
+        ) } };
         const legacyBytes = Buffer.from("legacy invoice artifact");
+        let missingHistoricalEvidence = false;
         const legacyClient = new Proxy(client, {
           get(target, key, receiver) {
+            if (missingHistoricalEvidence && key === 'accountingFinancialRecord') return { findUnique: async () => null };
             if (key === "salesDispatchInvoice") return {
               findFirst: async () => ({ ...record, snapshot: historicalSnapshot, pdf: legacyBytes, pdfSha256: bytesHash(legacyBytes) }),
             };
@@ -523,11 +586,16 @@ async function run() {
         }), async (snapshot, reason) => Buffer.from(renderSalesInvoice(snapshot, reason)));
         const refreshed = await legacyService.download(ctx, loading.id, issued.id);
         assert.equal(refreshed.number, issued.number);
+        assert.doesNotMatch(Buffer.from(refreshed.bytes).toString(), /جزئیات چاپی کهنه|۹۹۹۹/);
         assert.match(Buffer.from(refreshed.bytes).toString(), /ابزار نیم‌لول[\s\S]*۴۰ \/ متر طول/);
         assert.match(Buffer.from(refreshed.bytes).toString(), /بلوار دکتر حسابی/);
         historicalSnapshot = { ...legacySnapshot, print: undefined };
+        await tx.salesContract.updateMany({ where: { contractNumber: { in: source.lines.map(line => line.contractNumber) } },
+          data: { contractData: json({ project: { address: 'نشانی تغییرکرده پس از صدور' }, products: [] }) } });
         const withoutPrint = await legacyService.download(ctx, loading.id, issued.id);
         assert.match(Buffer.from(withoutPrint.bytes).toString(), /ابزار نیم‌لول[\s\S]*۴۰ \/ متر طول/);
+        assert.match(Buffer.from(withoutPrint.bytes).toString(), /نشانی ذخیره‌شدهٔ قرارداد/);
+        assert.doesNotMatch(Buffer.from(withoutPrint.bytes).toString(), /نشانی تغییرکرده پس از صدور/);
         assert.equal(bytesHash((await legacyService.download(ctx, loading.id, issued.id, false, true)).bytes), bytesHash(legacyBytes));
         assert.equal((await tx.salesDispatchInvoice.findUniqueOrThrow({ where: { id: issued.id } })).pdfSha256, record.pdfSha256);
         assert.equal(
@@ -678,6 +746,23 @@ async function run() {
           ).toString(),
           /باطل‌شده/,
         );
+        // Later financial invalidation and posted cargo corrections cannot import
+        // their changed quantities into the old invoice's corrected presentation.
+        historicalSnapshot = { ...legacySnapshot, print };
+        const invalidReprint = Buffer.from((await legacyService.download(
+          { ...ctx, workspace: 'logistics' }, loading.id, issued.id,
+        )).bytes).toString();
+        assert.match(invalidReprint, /نامعتبر/);
+        assert.match(invalidReprint, /نیم لول \(جلو، چپ\)[\s\S]*۵۰۰٬۰۰۰ \/ متر طول/);
+        const oldToolRows = invalidReprint.match(/<tr class="operation">[\s\S]*?<\/tr>/g) || [];
+        for (const row of oldToolRows.filter(row => row.includes('ابزار نیم‌لول'))) assert.match(row, /۰٫۸۳۳۳/);
+        await assert.rejects(() => legacyService.download(ctx, loading.id, issued.id, true), /معتبر برای چاپ/);
+        assert.equal(bytesHash((await legacyService.download(ctx, loading.id, issued.id, false, true)).bytes), bytesHash(legacyBytes));
+        assert.equal(bytesHash((await service.download(ctx, loading.id, issued.id, false, true)).bytes), record.pdfSha256);
+        missingHistoricalEvidence = true;
+        const unavailable = Buffer.from((await legacyService.download(ctx, loading.id, issued.id)).bytes).toString();
+        assert.match(unavailable, /جزئیات تاریخی.*نامشخص/);
+        assert.doesNotMatch(unavailable, /۵۰۰٬۰۰۰ \/ متر طول/);
         assert.equal(
           sourceHash(source),
           sourceHash(JSON.parse(JSON.stringify(source))),

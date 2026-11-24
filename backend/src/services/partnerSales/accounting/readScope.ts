@@ -38,6 +38,9 @@ type AccountingRowContext = { sourceKind?: string; partnerContext?: PartnerAccou
     registerReceipt?: boolean; reverseReceipt?: boolean; checkStatuses?: string[]; taxStatuses?: string[];
   } };
 
+export const readAccountingSnapshotTime = async (database: Prisma.TransactionClient) =>
+  (await database.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`)[0].now;
+
 export type AccountingReadActor = { userId: string };
 export type AccountingReadScope = Awaited<ReturnType<typeof createScope>>;
 type AccountingReadSelection = { focusedCaseId?: string; ordinaryOnly?: boolean;
@@ -304,7 +307,8 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
   // paginate or serialize it. Dashboard and report reads share this boundary.
   const authorizedInvoices = selection.ordinaryOnly ? [] : await database.accountingFinancialRecord.findMany({ where: partnerFinancial });
   await contextualize('FINANCIAL', authorizedInvoices);
-  const invoiceIds = authorizedInvoices.map(row => row.id);
+  const invoicesById = new Map(authorizedInvoices.map(row => [row.id, row]));
+  const invoiceIds = [...invoicesById.keys()];
   const [ownedReceivables, ownedPayments, ownedTaxes] = await Promise.all([
     database.accountingReceivable.findMany({ where: { invoiceRecordId: { in: invoiceIds } } }),
     database.accountingPaymentStatus.findMany({ where: { receivable: { invoiceRecordId: { in: invoiceIds } } } }),
@@ -312,13 +316,12 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
   ]);
   const invoiceByEntity = new Map(invoiceIds.map(id => [id, id]));
   // The collection writer timestamps both knowledge and effect with PostgreSQL's clock.
-  const asOf = invoiceIds.length
-    ? (await database.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`)[0].now
-    : new Date();
+  const asOf = await readAccountingSnapshotTime(database);
   const paymentsByReceivable = groupPaymentsByReceivable(ownedPayments);
+  const verifiedReceivables = new Map<string, { row: typeof ownedReceivables[number]; evidence: ReturnType<typeof readPartnerReceivableEvidence> }>();
   for (const receivable of ownedReceivables) {
     const preparation = preparationByInvoice.get(receivable.invoiceRecordId!)!;
-    readPartnerReceivableEvidence(receivable, preparation);
+    const evidence = readPartnerReceivableEvidence(receivable, preparation);
     let collected;
     try {
       collected = sumPartnerCollections(paymentsByReceivable.get(receivable.id) ?? [], { currency: receivable.currency,
@@ -330,11 +333,12 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
     if (collected === null || subtract(receivable.paidAmount.toString(), collected) !== '0') throw conflict();
     const remaining = subtract(receivable.originalAmount.toString(), collected);
     if (remaining.startsWith('-') || subtract(receivable.remainingAmount.toString(), remaining) !== '0') throw conflict();
-    const invoice = authorizedInvoices.find(row => row.id === receivable.invoiceRecordId)!;
+    const invoice = invoicesById.get(receivable.invoiceRecordId!)!;
     const statuses = invoice.status === 'VOIDED' && collected === '0' ? ['VOIDED']
       : remaining === '0' ? ['SETTLED'] : collected === '0' ? ['OPEN', 'OVERDUE'] : ['PARTIALLY_PAID', 'OVERDUE'];
     if (!statuses.includes(receivable.status)) throw conflict();
     invoiceByEntity.set(receivable.id, receivable.invoiceRecordId!);
+    verifiedReceivables.set(receivable.id, { row: receivable, evidence });
   }
   for (const payment of ownedPayments) {
     const invoiceId = invoiceByEntity.get(payment.receivableId!)!;
@@ -372,6 +376,14 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
     readCommercialForCase,
     partnerAccountingIncluded: authorizedInvoices.length > 0,
     authorizedPartnerInternalIds: allowedInternalIds,
+    verifiedPurchaseRows(invoiceId: string, receivableId: string, caseId: string) {
+      const invoice = invoicesById.get(invoiceId), receivable = verifiedReceivables.get(receivableId);
+      const preparation = preparationByInvoice.get(invoiceId);
+      if (!invoice || !preparation || preparation.owner.caseId !== caseId ||
+          !receivable || receivable.row.invoiceRecordId !== invoice.id) throw conflict();
+      return { invoice, receivable: receivable.row, evidence: receivable.evidence, preparation,
+        payments: paymentsByReceivable.get(receivableId) ?? [] };
+    },
     verifiedInvoicePreparation: (invoice: AccountingFinancialRecord, caseId: string) => {
       const preparation = preparationByInvoice.get(invoice.id);
       if (!preparation || preparation.owner.caseId !== caseId || preparation.internalRecordId !== invoice.sourceId ||

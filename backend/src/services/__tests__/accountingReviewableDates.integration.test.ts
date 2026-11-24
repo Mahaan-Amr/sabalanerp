@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import test, { mock } from 'node:test';
 import path from 'node:path';
 import { createPartnerLifecycleDatabase } from './partnerCaseLifecycleDatabase';
 
@@ -10,11 +10,14 @@ test('reviewable pages read historical dates for visible ordinary contracts and 
 }, async () => {
   const temporary = await createPartnerLifecycleDatabase({ repositoryRoot: path.resolve('.'), sourceDatabaseUrl: sourceDatabaseUrl! });
   const originalUrl = process.env.DATABASE_URL;
-  process.env.DATABASE_URL = temporary.databaseUrl;
+  const readerUrl = new URL(temporary.databaseUrl);
+  readerUrl.searchParams.set('connection_limit', '1');
+  readerUrl.searchParams.set('pool_timeout', '3');
+  process.env.DATABASE_URL = readerUrl.toString();
   try {
     const { prisma } = await import('../../lib/prisma');
     try {
-      const { listAccountingContracts } = await import('../accountingService');
+      const { listAccountingContracts, getAccountingDashboard, getAccountingDashboardChange, getAccountingFinancialTrend } = await import('../accountingService');
       const actor = await prisma.user.create({ data: { username: 'date-reader', email: 'date@example.invalid',
         firstName: 'Date', lastName: 'Reader', password: 'fixture' } });
       const department = await prisma.department.create({ data: { name: 'Sales', namePersian: 'فروش' } });
@@ -67,6 +70,51 @@ test('reviewable pages read historical dates for visible ordinary contracts and 
       assert.deepEqual(search.items.map(row => row.contractId), ['contract-2']);
       const filtered = await listAccountingContracts({ view: 'reviewable', dateFrom: '2021-02-03', dateTo: '2021-02-03', pageSize: 1 });
       assert.deepEqual(filtered.items.map(row => row.contractId), ['contract-1']);
+
+      const writer = temporary.client();
+      try {
+        let written = false;
+        prisma.$use(async (params, next) => {
+          const result = await next(params);
+          if (!written && params.model === 'SalesContract' && params.action === 'findMany') {
+            written = true;
+            await writer.salesContract.update({ where: { id: 'contract-0' }, data: {
+              totalAmount: 199, contractData: { contractDate: '2026-03-20' },
+            } });
+          }
+          return result;
+        });
+        const page = () => listAccountingContracts({ view: 'reviewable', sort: 'work_queue', sourceKind: 'SALES_CONTRACT' });
+        const during = await page();
+        assert.ok(written, 'the concurrent update committed after the review headers were selected');
+        const changed = (rows: typeof during.items) => rows.find(row => row.contractId === 'contract-0');
+        assert.equal(during.totals.contractAmount, '500');
+        assert.equal(changed(during.items)?.contractDate.toISOString(), '2024-03-20T00:00:00.000Z',
+          'reviewable dates and financial totals describe the same committed contract version');
+        const after = await page();
+        assert.equal(after.totals.contractAmount, '599');
+        assert.equal(changed(after.items)?.contractDate.toISOString(), '2026-03-20T00:00:00.000Z');
+      } finally { await writer.$disconnect(); }
+      await prisma.salesContract.update({ where: { id: 'contract-0' }, data: { status: 'CANCELLED' } });
+      const reader = { userId: actor.id };
+      const review = await listAccountingContracts({ view: 'reviewable' }, reader);
+      assert.equal(review.totals.contractAmount, '599');
+      const [databaseClock] = await prisma.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
+      const historicalTime = new Date('2000-01-15T12:00:00.000Z');
+      mock.timers.enable({ apis: ['Date'], now: historicalTime });
+      const dashboard = await getAccountingDashboard({}, '1m', undefined, reader).finally(() => mock.timers.reset());
+      assert.equal(dashboard.trendError, false, 'the dashboard can read cancelled ordinary rows using one connection');
+      assert.equal(dashboard.workspace.period.code,
+        `${databaseClock.now.getFullYear()}-${String(databaseClock.now.getMonth() + 1).padStart(2, '0')}`);
+      assert.ok(Date.parse(dashboard.trend!.points.at(-1)!.endsAt) >= databaseClock.now.getTime());
+      assert.ok('revisions' in dashboard && dashboard.revisions);
+      const revisions = dashboard.revisions;
+      const change = await getAccountingDashboardChange({ range: '1m', accessRevision: revisions.access,
+        workspaceRevision: revisions.workspace, trendRevision: revisions.trend }, reader);
+      assert.equal(change.workspaceChanged, false, 'moving the application clock across calendar days cannot advance the revision');
+      assert.equal(change.trendChanged, false);
+      const historical = await getAccountingFinancialTrend('1m', historicalTime, reader);
+      assert.equal(historical.points.at(-1)!.endsAt, historicalTime.toISOString());
     } finally {
       await prisma.$disconnect();
     }

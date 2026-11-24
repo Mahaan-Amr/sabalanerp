@@ -365,10 +365,16 @@ async function main() {
         await prisma.workspacePermission.update({ where: { userId_workspace: { userId: actor.userId, workspace: 'accounting' } },
           data: { permissionLevel: 'edit' } });
       }
-      await prisma.effectiveActionGrant.create({ data: { id: `${recordId}-explicit-read-denial`,
+      // Production immediate grants start at PostgreSQL's clock. Prisma-generated defaults can be ahead on this test host.
+      await prisma.effectiveActionGrant.create({ data: { id: `${recordId}-explicit-read-denial`, effectiveFrom: new Date(await databaseInstant()),
         principalKind: 'USER', principalId: actor.userId, subjectUserId: actor.userId, domain: 'PARTNER',
         action: 'ACCOUNTING_READ', rootKind: 'CASE', purpose: 'ACCOUNTING', scope: 'COMPANY', effect: 'DENY',
         grantedBy: actor.userId, reason: 'آزمون منع صریح خواندن پرونده همکار', correlationId: `${recordId}-read-denial` } });
+      const [denyWindow] = await prisma.$queryRaw<Array<{ active: boolean; deltaMs: number }>>`
+        SELECT "effectiveFrom" <= clock_timestamp() AS active,
+          EXTRACT(EPOCH FROM ("effectiveFrom" - clock_timestamp()))::float8 * 1000 AS "deltaMs"
+        FROM effective_action_grants WHERE id = ${`${recordId}-explicit-read-denial`}`;
+      assert.ok(denyWindow.active, `the denial fixture must be effective at the DB read instant (offset ${denyWindow.deltaMs} ms)`);
       for (const path of ['/financial-records', '/receivables', `/receivables?recordId=${receivable.id}`,
         '/payments', `/payments?recordId=${paymentEventId}`, '/tax', '/audit', '/workspace']) {
         const response = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/accounting${path}`,
@@ -429,6 +435,16 @@ async function main() {
         const postedCash = await readPayment(actionPaymentId);
         assert.equal(postedCash.partnerActions.reverseReceipt, true);
         beforeReversal = new Date(Date.parse(postedCash.occurredAt) + 1).toISOString();
+        for (const endpoint of ['financial-trend', 'dashboard']) {
+          const response = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/accounting/${endpoint}?range=1m`,
+            { headers: { cookie: `${SESSION_COOKIE}=${session.token}` } });
+          const body = await response.json() as any;
+          assert.equal(response.status, 200, JSON.stringify(body));
+          const chart = endpoint === 'dashboard' ? body.data.trend : body.data;
+          const point = chart.partnerSeries.find((series: any) => series.currency === 'IRR').points.at(-1);
+          assert.equal(point.received, '1', `${endpoint} includes the acknowledged receipt with a slow application clock`);
+          assert.equal(point.outstanding, '1599');
+        }
       } finally { mock.timers.reset(); }
       const paymentGrantKey = { userId_workspace_feature: { userId: actor.userId, workspace: 'accounting', feature: 'accounting_payments_manage' } };
       await prisma.featurePermission.update({ where: paymentGrantKey, data: { permissionLevel: 'view' } });
@@ -456,6 +472,16 @@ async function main() {
       assert.equal(earlier.status, 200);
       assert.equal((await earlier.json() as any).data.items.find((item: any) => item.sourceKind === 'PARTNER_INTERNAL_RECORD').remainingAmount,
         '1599', 'historical balance retains the receipt before its later reversal');
+      const debtReads: string[] = [];
+      let observingTrend = true;
+      prisma.$use(async (params, next) => {
+        if (observingTrend && ((params.model === 'AccountingReceivable' && params.action === 'findUnique' &&
+            params.args.where.id === receivable.id) || (params.model === 'AccountingPaymentStatus' &&
+            params.action === 'findMany' && params.args.where?.receivableId === receivable.id))) {
+          debtReads.push(`${params.model}.${params.action}`);
+        }
+        return next(params);
+      });
       const trend = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/accounting/financial-trend?range=1m`,
         { headers: { cookie: `${SESSION_COOKIE}=${session.token}` } });
       assert.equal(trend.status, 200);
@@ -466,6 +492,21 @@ async function main() {
       const currentPartnerPoint = partnerPoints.at(-1);
       assert.equal(currentPartnerPoint.received, '0');
       assert.equal(currentPartnerPoint.outstanding, '1600');
+      observingTrend = false;
+      assert.deepEqual(debtReads, [], 'periods replay published debt from complete rows in the authorized snapshot');
+      const originalMetadata = (await prisma.accountingFinancialRecord.findUniqueOrThrow({ where: { id: recordId } })).metadata as any;
+      try {
+        await prisma.accountingFinancialRecord.update({ where: { id: recordId }, data: { metadata: { ...originalMetadata,
+          partnerApproval: { ...originalMetadata.partnerApproval, financialApprovalEvidenceId: 'mismatched-published-approval' } } } });
+        const damaged = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/accounting/financial-trend?range=1m`,
+          { headers: { cookie: `${SESSION_COOKIE}=${session.token}` } });
+        assert.ok(damaged.status >= 400, 'a published approval with mismatched evidence cannot contribute to the financial trend');
+        await assert.rejects(prisma.$transaction(tx => readPartnerOutstandingHistory(tx, {
+          invoiceIds: [recordId], cutoff: new Date(), asOf: new Date(),
+        })), /integrity conflict|سازگار نیست/);
+      } finally {
+        await prisma.accountingFinancialRecord.update({ where: { id: recordId }, data: { metadata: originalMetadata } });
+      }
       const workspace = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/accounting/workspace`,
         { headers: { cookie: `${SESSION_COOKIE}=${session.token}` } });
       const workspaceBody = await workspace.json() as any;

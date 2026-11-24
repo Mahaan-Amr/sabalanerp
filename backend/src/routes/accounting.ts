@@ -1151,7 +1151,7 @@ export const createAccountingDashboardResponse = (
 ) => async (req: AuthRequest, res: Response) => {
   res.set('Cache-Control', 'private, no-store');
   try {
-    const dashboard = await loadDashboard(req.query, req.query.range, new Date(), { userId: req.user!.id },
+    const dashboard = await loadDashboard(req.query, req.query.range, undefined, { userId: req.user!.id },
       error => reportAccountingRequestFailure(res, error));
     res.json({ success: true, data: dashboard });
   } catch (error) {
@@ -1188,7 +1188,7 @@ export const createAccountingFinancialTrendResponse = (
 ) => async (req: AuthRequest, res: Response) => {
   res.set('Cache-Control', 'private, no-store');
   try {
-    const trend = await loadTrend(req.query.range, new Date(), { userId: req.user!.id });
+    const trend = await loadTrend(req.query.range, undefined, { userId: req.user!.id });
     res.json({ success: true, data: trend });
   } catch (error) {
     accountingReadFailure(res, error);

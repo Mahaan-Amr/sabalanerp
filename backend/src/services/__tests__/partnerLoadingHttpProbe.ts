@@ -43,6 +43,15 @@ async function main() {
       await prisma.user.create({ data: { id: outsiderId, username: outsiderId, email: `${outsiderId}@example.invalid`,
         password: 'not-a-login', firstName: 'Unscoped', lastName: 'Logistics' } });
       await prisma.workspacePermission.create({ data: { userId: outsiderId, workspace: 'logistics', permissionLevel: 'admin' } });
+      // Logistics grants otherwise bridge to company-wide fulfillment. Exercise a
+      // workspace administrator whose explicit Case authority excludes this loading.
+      for (const action of ['FULFILLMENT_READ', 'FULFILLMENT_WRITE']) {
+        const grantId = `${outsiderId}-${action}`;
+        await prisma.effectiveActionGrant.create({ data: { id: grantId, principalKind: 'USER', principalId: outsiderId,
+          subjectUserId: outsiderId, domain: 'PARTNER', action, rootKind: 'CASE', purpose: 'FULFILLMENT',
+          scope: 'PURPOSE_BOUND', boundRootId: `${expected.caseId}-outside-scope`, effect: 'ALLOW',
+          grantedBy: actorId, reason: 'isolated fixture for a different Case scope', correlationId: grantId } });
+      }
       const outsider = await createAuthoritativeSession(prisma, outsiderId, { ipAddress: '127.0.0.1', userAgent: 'isolated-334-loading' });
       const hidden = await request(`/loadings/${loadingId}`, 'GET', undefined, outsider.token);
       assert.equal(hidden.status, 404, JSON.stringify(hidden.body));

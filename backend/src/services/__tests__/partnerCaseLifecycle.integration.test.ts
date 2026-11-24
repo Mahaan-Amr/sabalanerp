@@ -1286,9 +1286,19 @@ test('real-schema loading source selects canonical delivery evidence without cha
       assert.equal(concurrent.ok ? null : concurrent.error.code, 'FORBIDDEN',
         'a workspace downgrade committed while loading waits must invalidate its earlier authorization snapshot');
     } finally { await waiting; }
-    if (process.env.PERSONAL_PICKUP_ACCEPTANCE !== '1') await promisify(execFile)(process.execPath, ['backend/node_modules/tsx/dist/cli.mjs',
-      'backend/src/services/__tests__/partnerLoadingHttpProbe.ts'], { timeout: 120_000, env: { ...process.env,
-        DATABASE_URL: temporary.databaseUrl, PARTNER_TEST_ACTOR_ID: actorId, PARTNER_TEST_OWNER: JSON.stringify(expected) } });
+    const lockOrderOnly = process.env.PARTNER_LOADING_LOCK_ORDER_ONLY === '1';
+    if (lockOrderOnly && process.env.PERSONAL_PICKUP_ACCEPTANCE === '1') {
+      throw new Error('Select either the Partner loading lock-order probe or the personal pickup acceptance flow');
+    }
+    if (process.env.PERSONAL_PICKUP_ACCEPTANCE !== '1') {
+      const loadingProbe = await promisify(execFile)(process.execPath, ['backend/node_modules/tsx/dist/cli.mjs',
+        'backend/src/services/__tests__/partnerLoadingHttpProbe.ts'], { timeout: 120_000, env: { ...process.env,
+          DATABASE_URL: temporary.databaseUrl, PARTNER_TEST_ACTOR_ID: actorId, PARTNER_TEST_OWNER: JSON.stringify(expected) } });
+      if (lockOrderOnly) {
+        console.log(loadingProbe.stdout.trim());
+        return;
+      }
+    }
     const accountantId = `${ids.caseId}-dispatch-accountant`;
     await database.$transaction(async tx => {
       await tx.user.create({ data: { id: accountantId, username: accountantId,

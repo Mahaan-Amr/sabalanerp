@@ -133,6 +133,10 @@ async function main() {
       assert.equal(blockedFinalization.status, 409, JSON.stringify(blockedFinalization.body));
       assert.match(blockedFinalization.body.error, /تأیید مالی/,
         'physical allocation cannot finalize before the official wholesale approval is published');
+      if (process.env.PARTNER_LOADING_LOCK_ORDER_ONLY === '1') {
+        console.log('Partner loading lock-order probe passed PostgreSQL advisory ordering and the preapproval guard');
+        return;
+      }
       assert.equal((await request(allocationPath, 'PUT', { ...allocation, reason: { invalid: true } })).status, 400,
         'malformed audit context is rejected as input, not a technical failure');
       const releasePath = `/canonical-driver-queue/${turnId}/release`;

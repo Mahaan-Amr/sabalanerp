@@ -1,5 +1,5 @@
-import { chromium } from '@playwright/test';
 import { readFile, writeFile } from 'node:fs/promises';
+import { pathToFileURL } from 'node:url';
 
 const env = process.env;
 const loopback = new Set(['127.0.0.1', 'localhost', '[::1]']);
@@ -11,7 +11,7 @@ const validOutcome = new Set([
 const timeout = 30_000;
 const targetMs = 3_000;
 
-function options() {
+export function options(env) {
   const baseURL = new URL(env.ACCOUNTING_TIMING_ORIGIN ?? 'http://127.0.0.1:3000');
   if (!loopback.has(baseURL.hostname) || !['http:', 'https:'].includes(baseURL.protocol)
     || baseURL.username || baseURL.password || baseURL.href !== baseURL.origin + '/') throw Error('LOOPBACK_ORIGIN_REQUIRED');
@@ -28,6 +28,7 @@ function options() {
     || !['baseline', 'candidate'].includes(run) || !['cold', 'warm', 'mixed'].includes(phase) || !output
     || !['accountant', 'administrator', 'authenticated'].includes(actorClass)
     || !Number.isSafeInteger(samples) || samples < 1 || samples > 1000
+    || (phase === 'mixed' && samples < 2)
     || !Number.isSafeInteger(concurrency) || concurrency < 1 || concurrency > 20 || concurrency > samples
     || !env.ACCOUNTING_TIMING_IDENTIFIER || !env.ACCOUNTING_TIMING_PASSWORD) throw Error('INVALID_TIMING_INPUT');
   return { baseURL, commit, workload, samples, concurrency, phase, actorClass, run, output };
@@ -407,8 +408,55 @@ function p95(samples, measure) {
   return { count: values.length, p95: values.length ? values[Math.ceil(values.length * 0.95) - 1] : null };
 }
 
+function readinessMetrics(samples, name, target) {
+  const failures = samples.filter(sample => sample.failed).length;
+  const firstActionMs = p95(samples, sample => sample.firstActionMs);
+  const completeMs = p95(samples, sample => sample.completeMs);
+  const chartEmptySamples = samples.filter(sample => sample.data?.chart === 'empty').length;
+  return {
+    samples: samples.length,
+    failures,
+    firstActionMs,
+    completeMs,
+    ...(target ? { target: { belowMs: targetMs, passed: samples.length > 0
+      && failures === 0 && chartEmptySamples === 0
+      && firstActionMs.count === samples.length && firstActionMs.p95 < targetMs
+      && completeMs.count === samples.length && completeMs.p95 < targetMs } } : {}),
+    ...(name === 'dashboard' ? { chartEmptySamples } : {}),
+  };
+}
+
+export function summarizeSurface(samples, { name, target, phase }) {
+  const aggregate = readinessMetrics(samples, name, target);
+  const phases = phase === 'mixed' ? ['cold', 'warm'] : [phase];
+  const byPhase = Object.fromEntries(phases.map(phase => [
+    phase, readinessMetrics(samples.filter(sample => sample.phase === phase), name, target),
+  ]));
+  if (aggregate.target) {
+    aggregate.target.passed &&= Object.values(byPhase).every(metrics => metrics.target.passed);
+  }
+  return {
+    ...aggregate,
+    byPhase,
+    ...(name === 'dispatch' ? {} : {
+      fullHttpMs: p95(samples, sample => sample.api?.fullHttpMs),
+      apiResponseBodyBytes: p95(samples, sample => sample.api?.responseBodyBytes),
+    }),
+    ...(name === 'duties' ? {
+      summaryReadyMs: p95(samples, sample => sample.summaryReadyMs),
+      summaryFullHttpMs: p95(samples, sample => sample.summary?.fullHttpMs),
+      summaryResponseBodyBytes: p95(samples, sample => sample.summary?.responseBodyBytes),
+    } : {}),
+    submitToVisibleMs: p95(samples, sample => sample.submitToVisibleMs),
+    responseToVisibleMs: p95(samples, sample => sample.responseToVisibleMs),
+    commitAcknowledgedToVisibleMs: p95(samples, sample => sample.commitAcknowledgedToVisibleMs),
+    requestCount: p95(samples, sample => sample.browser?.requestCount),
+    responseBodyBytes: p95(samples, sample => sample.browser?.responseBodyBytes),
+  };
+}
+
 async function run() {
-  const config = options();
+  const config = options(env);
   const selected = env.ACCOUNTING_TIMING_SURFACES?.split(',').map(value => value.trim()) ?? defaultSurfaces;
   if (!(selected.length === 1 && selected[0] === 'all')
     && selected.some(name => !scenarios.some(scenario => scenario.name === name))) throw Error('INVALID_TIMING_SURFACES');
@@ -422,6 +470,7 @@ async function run() {
     || new Set(commands.map(command => command.row)).size !== commands.length
     || new Set(commands.map(command => command.reference)).size !== commands.length) throw Error('INVALID_SEPIDAR_FIXTURE');
 
+  const { chromium } = await import('@playwright/test');
   const browser = await chromium.launch({ channel: 'chrome' });
   const results = [];
   const started = new Date().toISOString();
@@ -440,36 +489,9 @@ async function run() {
   } finally {
     await browser.close();
   }
-  const metrics = Object.fromEntries(measuredScenarios.map(({ name, target }) => {
-    const samples = results.filter(sample => sample.surface === name);
-    const failures = samples.filter(sample => sample.failed).length;
-    const firstActionMs = p95(samples, sample => sample.firstActionMs);
-    const completeMs = p95(samples, sample => sample.completeMs);
-    const chartEmptySamples = samples.filter(sample => sample.data?.chart === 'empty').length;
-    return [name, {
-      samples: samples.length,
-      failures,
-      firstActionMs,
-      completeMs,
-      ...(target ? { target: { belowMs: targetMs, passed: failures === 0 && chartEmptySamples === 0
-        && completeMs.count === samples.length && completeMs.p95 < targetMs && firstActionMs.p95 < targetMs } } : {}),
-      ...(name === 'dashboard' ? { chartEmptySamples } : {}),
-      ...(name === 'dispatch' ? {} : {
-        fullHttpMs: p95(samples, sample => sample.api?.fullHttpMs),
-        apiResponseBodyBytes: p95(samples, sample => sample.api?.responseBodyBytes),
-      }),
-      ...(name === 'duties' ? {
-        summaryReadyMs: p95(samples, sample => sample.summaryReadyMs),
-        summaryFullHttpMs: p95(samples, sample => sample.summary?.fullHttpMs),
-        summaryResponseBodyBytes: p95(samples, sample => sample.summary?.responseBodyBytes),
-      } : {}),
-      submitToVisibleMs: p95(samples, sample => sample.submitToVisibleMs),
-      responseToVisibleMs: p95(samples, sample => sample.responseToVisibleMs),
-      commitAcknowledgedToVisibleMs: p95(samples, sample => sample.commitAcknowledgedToVisibleMs),
-      requestCount: p95(samples, sample => sample.browser?.requestCount),
-      responseBodyBytes: p95(samples, sample => sample.browser?.responseBodyBytes),
-    }];
-  }));
+  const metrics = Object.fromEntries(measuredScenarios.map(({ name, target }) => [
+    name, summarizeSurface(results.filter(sample => sample.surface === name), { name, target, phase: config.phase }),
+  ]));
   await writeFile(config.output, JSON.stringify({
     format: 'sabalan-accounting-browser-timing/v1', started, commit: config.commit, workload: config.workload,
     run: config.run, concurrency: config.concurrency, phase: config.phase, actorClass: config.actorClass, metrics, results,
@@ -477,7 +499,9 @@ async function run() {
   if (results.some(sample => sample.failed) || Object.values(metrics).some(surface => surface.target?.passed === false)) process.exitCode = 2;
 }
 
-run().catch(() => {
-  console.error('Accounting browser timing failed to start or write evidence.');
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  run().catch(() => {
+    console.error('Accounting browser timing failed to start or write evidence.');
+    process.exitCode = 1;
+  });
+}

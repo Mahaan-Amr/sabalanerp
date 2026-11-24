@@ -7,6 +7,7 @@ test('Guard admits a canonical visit and advances it while legacy history remain
   let voids = 0;
   let exits = 0;
   let failedExits = 0;
+  const legacyQueueQueries: string[] = [];
   let authorizedExits: any[] = [{ id: 'authorization-1', waybillId: 'waybill-1', dispatchNumber: '1000000001',
     validUntil: '2026-08-08T08:00:00.000Z', admissionSnapshot: { driver: { firstName: 'راننده', lastName: 'مجاز' }, plate: { plate: '44ه444ایران44' } } }];
   await page.route('**/api/security/exit-desk/authorizations**', async (route) => {
@@ -75,10 +76,14 @@ test('Guard admits a canonical visit and advances it while legacy history remain
     }
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: canonicalTurns }) });
   });
-  await page.route('**/api/security/driver-queue**', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: [{
-    id: 'legacy-turn-1', status: 'OUT_OF_QUEUE', enteredAt: '2025-01-01T08:00:00.000Z', historicalOnly: true,
-    vehiclePair: { firstName: 'راننده', lastName: 'قدیمی', vehiclePlate: '33د333ایران33' },
-  }] }) }));
+  await page.route('**/api/security/driver-queue**', (route) => {
+    expect(route.request().method()).toBe('GET');
+    legacyQueueQueries.push(new URL(route.request().url()).searchParams.get('history') ?? '');
+    return route.fulfill({ json: { success: true, data: [{
+      id: 'legacy-turn-1', status: 'OUT_OF_QUEUE', enteredAt: '2025-01-01T08:00:00.000Z', historicalOnly: true,
+      vehiclePair: { firstName: 'راننده', lastName: 'قدیمی', vehiclePlate: '33د333ایران33' },
+    }] } });
+  });
   await page.route('**/api/security/vehicle-pairs**', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: [] }) }));
   await page.route('**/api/security/vehicle-movements**', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: [] }) }));
 
@@ -139,7 +144,9 @@ test('Guard admits a canonical visit and advances it while legacy history remain
   await workspace.getByRole('button', { name: 'خروج مجاز', exact: true }).click();
   await expect(workspace.getByRole('heading', { name: 'خروج مجاز گیت', exact: true })).toBeVisible();
   await expect(workspace.getByText('بارنامه 1000000001', { exact: true })).toBeVisible();
-  await expect(workspace.getByText('نسخه چاپی به‌تنهایی اجازه خروج نمی‌دهد', { exact: false })).toBeVisible();
+  await expect(workspace.getByText('راننده مجاز · 44ه444ایران44', { exact: true })).toBeVisible();
+  await expect(workspace.getByText('مجوز معتبر', { exact: true })).toBeVisible();
+  await expect(workspace.getByRole('button', { name: 'ثبت خروج', exact: true })).toBeEnabled();
   await workspace.getByRole('button', { name: 'ثبت خروج', exact: true }).click();
   const exitConfirmation = page.getByRole('dialog', { name: 'تأیید خروج فیزیکی' });
   await expect(exitConfirmation).toBeVisible();
@@ -157,9 +164,15 @@ test('Guard admits a canonical visit and advances it while legacy history remain
   await page.getByRole('dialog', { name: 'تأیید خروج فیزیکی' }).getByRole('button', { name: 'ثبت خروج فیزیکی', exact: true }).click();
   await expect.poll(() => failedExits).toBe(1);
   await expect(workspace.getByText(/عملیات انجام نشد\. اطلاعات را بررسی و دوباره تلاش کنید/)).toBeVisible();
+  expect(exits).toBe(1);
+  await expect(workspace.getByRole('button', { name: 'ثبت خروج', exact: true })).toHaveCount(0);
+  expect(legacyQueueQueries).toEqual([]);
   await workspace.getByRole('button', { name: 'سوابق قدیمی', exact: true }).click();
   await expect(workspace.getByRole('heading', { name: 'سوابق صف قدیمی', exact: true })).toBeVisible();
   await expect(workspace.getByText('فقط سابقه', { exact: true })).toBeVisible();
+  await expect(workspace.getByText('راننده قدیمی · 33د333ایران33', { exact: true })).toBeVisible();
+  await expect.poll(() => [...new Set(legacyQueueQueries)].sort()).toEqual(['false', 'true']);
+  await expect(workspace.getByRole('button', { name: 'ابطال پذیرش', exact: true })).toHaveCount(0);
   expect(await workspace.evaluate((element) => {
     const rect = element.getBoundingClientRect();
     return rect.left >= 0 && rect.right <= document.documentElement.clientWidth + 1;

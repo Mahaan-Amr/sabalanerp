@@ -219,7 +219,7 @@ export async function readPartnerCommercialState(tx: Tx, caseId: string,
 /** Commercial evidence for an audited Accounting snapshot that already holds
  * the shared Case fence. The owning Case also fences Inquiry successor writes. */
 export async function readAccountingCommercialState(tx: Tx, caseId: string): Promise<PartnerCommercialState | undefined> {
-  const value = await readPartnerCommercialDetailsInternal(tx, caseId, undefined, undefined, { sharePricingEvidence: true });
+  const value = await readPartnerCommercialDetailsInternal(tx, caseId, undefined, undefined, { accountingSnapshot: true });
   return value && 'commercial' in value ? value.commercial : undefined;
 }
 
@@ -240,13 +240,26 @@ export async function readPartnerCommercialEditingDetails(tx: Tx, caseId: string
 async function readPartnerCommercialDetailsInternal(tx: Tx, caseId: string,
   response?: 'READY' | 'PARTIAL' | 'WAITING' | 'REJECTED' | 'EXPIRED',
   presentation?: { complete: boolean; resubmittedWaiting: boolean },
-  { navigationOnly = false, sharePricingEvidence = false } = {}) {
-  const root = await tx.partnerSaleCase.findUnique({ where: { id: caseId }, include: { customerContract: true, profile: { select: { userId: true } } } });
+  { navigationOnly = false, accountingSnapshot = false } = {}) {
+  const root = await tx.partnerSaleCase.findUnique({ where: { id: caseId }, select: {
+    state: true, headRevision: true, integrityHash: true, pricingState: true,
+    profileId: true, profile: { select: { userId: true } },
+    customerContract: { select: { id: true, partnerKind: true, commercialFlowVersion: true,
+      status: true, salesApprovalRevision: true, customerAcceptanceRevision: true, commercialRevision: true,
+      firstFinancialRecordAt: true, commercialExpiresAt: true, dispatchExpiryExempt: true } },
+  } });
   const contract = root?.customerContract;
   if (!root || !contract || !isPartnerCommercialFlow(contract)) return undefined;
+  const final = contract.status === 'SIGNED';
+  const salesApproved = contract.salesApprovalRevision === contract.commercialRevision;
+  const customerAccepted = contract.customerAcceptanceRevision === contract.commercialRevision;
+  // Current approvals and signed, accepted pricing determine Accounting status
+  // before Inquiry presentation. Detailed reads still need the technical draft.
+  const settledAccounting = accountingSnapshot && final && root.pricingState === 'READY_TO_FINALIZE'
+    && salesApproved && customerAccepted;
   let recovery: { draftId: string; baseRevision: number; recovery: Prisma.JsonValue } | null = null;
   let pricingPresentation: Awaited<ReturnType<typeof readCasePricingPresentation>>;
-  if (response === undefined && !navigationOnly) {
+  if (response === undefined && !navigationOnly && !settledAccounting) {
     recovery = await readPartnerCaseRecovery(tx, { ownerUserId: root.profile.userId, contractId: contract.id, caseId });
     if (recovery) {
       const current = await readCasePricingPresentation(tx, { caseId, headRevision: root.headRevision,
@@ -254,18 +267,15 @@ async function readPartnerCommercialDetailsInternal(tx: Tx, caseId: string,
       response = current?.state; presentation = current; pricingPresentation = current;
     }
   }
-  const final = contract.status === 'SIGNED';
   const validPricing = root.pricingState === 'READY_TO_FINALIZE' && (final || await currentPricingEvidenceIsValid(tx,
-    { caseId, revision: root.headRevision, integrityHash: root.integrityHash }, sharePricingEvidence ? 'SHARE' : 'UPDATE'));
-  const salesApproved = contract.salesApprovalRevision === contract.commercialRevision;
-  const customerAccepted = contract.customerAcceptanceRevision === contract.commercialRevision;
+    { caseId, revision: root.headRevision, integrityHash: root.integrityHash }, accountingSnapshot ? 'SHARE' : 'UPDATE'));
   const expired = contract.status === 'EXPIRED' || partnerDeadlinePassed(contract);
   if (navigationOnly) return { actorId: root.profile.userId,
     editingStatus: partnerCommercialEditStatus({ salesApproved, customerAccepted, pricingAccepted: validPricing,
       edited: contract.commercialRevision > 1, expired, cancelled: ['CANCELLED', 'VOIDED'].includes(root.state) }),
     expiresAt: contract.commercialExpiresAt?.toISOString() ?? null,
     firstFinancialRecordAt: contract.firstFinancialRecordAt?.toISOString() ?? null };
-  const priceRejection = await tx.partnerCaseEvent.findFirst({ where: { caseId, caseRevision: root.headRevision, type: 'PARTNER_PRICING_REJECTED' }, select: { id: true } });
+  const priceRejection = !settledAccounting && await tx.partnerCaseEvent.findFirst({ where: { caseId, caseRevision: root.headRevision, type: 'PARTNER_PRICING_REJECTED' }, select: { id: true } });
   const inquiry = validPricing ? 'ACCEPTED' : response === 'EXPIRED' || response === 'REJECTED'
     || root.pricingState === 'INCOMPLETE' || root.pricingState === 'EXPIRED' ? 'CORRECTION_REQUIRED' : priceRejection ? 'REJECTED' : 'WAITING';
   const commercial: PartnerCommercialState = { version: 1, revision: contract.commercialRevision,

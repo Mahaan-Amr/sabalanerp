@@ -1707,6 +1707,36 @@ test('Partner preparation lists preserve amounts and advisory audit with one bou
     assert.equal(revisionQueries.length, 1, 'preparation evidence is loaded once for the selected Case population');
     assert.ok(!revisionQueries.some(query => query.includes('"graph"') || query.includes('"customerProjection"')),
       'preparation list reads no graph or customer output snapshot');
+    await database.salesContractEditSession.createMany({ data: [draft, finished].map(ids => ({
+      draftId: ids.caseId, ownerUserId: ids.partnerId, purpose: 'PARTNER_TECHNICAL',
+      browserSessionId: randomUUID(), leaseToken: randomUUID(), schemaVersion: 1, baseRevision: 1,
+      recovery: { partnerCaseId: ids.caseId },
+    })) });
+    await withAccountingReadScope(database, { userId: actorId }, async scope => {
+      const { readPartnerCommercialDetails } = await import('../partnerSales/cases/commercialLifecycle');
+      for (const ids of [draft, finished]) {
+        queries.length = 0;
+        const details = await readPartnerCommercialDetails(scope.database, ids.caseId);
+        const detailedQueryCount = queries.length;
+        assert.equal(details?.recovery?.draftId, ids.caseId);
+        assert.ok(details, 'the control and final Case both use the commercial workflow');
+        queries.length = 0;
+        const state = await scope.readCommercialForCase(ids.caseId);
+        assert.deepEqual(state, details.commercial);
+        console.log(`Accounting commercial ${state?.status}: ${queries.length} queries, detailed read ${detailedQueryCount}`);
+        const recoveryReads = queries.filter(query => query.includes('sales_contract_edit_sessions'));
+        if (ids === finished) {
+          assert.equal(state?.status, 'FINAL');
+          assert.equal(state?.inquiry, 'ACCEPTED');
+          assert.equal(recoveryReads.length, 0, 'final Accounting state is independent of the technical recovery');
+          assert.ok(!queries.some(query => query.includes('partner_case_events') || query.includes('"contractData"')),
+            'final state requires neither rejection history nor the customer contract payload');
+        } else {
+          assert.notEqual(state?.status, 'FINAL');
+          assert.ok(recoveryReads.some(query => query.includes('recovery::text')), 'unresolved commercial state reads the complete recovery');
+        }
+      }
+    });
   } finally { await database.$disconnect(); await temporary.cleanup(); }
 });
 

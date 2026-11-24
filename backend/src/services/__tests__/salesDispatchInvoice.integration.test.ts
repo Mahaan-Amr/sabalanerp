@@ -25,12 +25,15 @@ import {
   canonicalApprovedPricingHash,
 } from "../approvedPricing/domain";
 import { pricedAllocationIntegrityHash } from "../pricedAllocationLedger";
+import { parseSepidarInvoices, readSepidarLoadingTotal, sumSepidarInvoiceAmounts } from "../sepidarDispatchInvoices";
 
 // Explicit local URL only; the harness rolls back every business row and never consumes the real invoice sequence.
 const url = process.env.DATABASE_URL;
 const target = url && new URL(url);
 const candidateDatabaseName = process.env.SABALAN_CANDIDATE_QA_DATABASE_NAME;
-if (!target || target.hostname !== "127.0.0.1" || target.port !== "55432")
+const composeLocal = target && process.env.COMPOSE_PROJECT_NAME === "sabalanerp-local"
+  && target.hostname === "postgres" && target.port === "5432" && target.pathname === "/sabalanerp";
+if (!target || (!composeLocal && (target.hostname !== "127.0.0.1" || target.port !== "55432")))
   throw new Error(
     "Use the existing sabalanerp-local database at 127.0.0.1:55432.",
   );
@@ -419,6 +422,13 @@ async function run() {
         assert.equal(queue.rows.length, 2);
         assert.ok(queue.rows.every(row => row.total.amount === '10.000000000000' && row.total.currency === 'TOMAN'),
           'each driver summary preserves the exact priced allocation and original currency');
+        const sepidarTotal = await readSepidarLoadingTotal(tx, loading.id);
+        assert.equal(sepidarTotal, "200", "both drivers' bound net totals are converted from tomans to rials");
+        const split = parseSepidarInvoices([{ number: "۰۰۱۲۳", amountRial: "۱۲۰.۵" }, { number: "00456", amountRial: "79.5" }]);
+        assert.ok(split);
+        assert.equal(split[0].number, "00123");
+        assert.equal(sumSepidarInvoiceAmounts(split), sepidarTotal);
+        assert.equal(parseSepidarInvoices([...split, { number: "۰۰۱۲۳", amountRial: "0" }]), null);
         assert.equal(source.lines[0].width, "0.4");
         assert.match(source.lines[0].label, /سنگ مصوب/);
         const waybillSource = await new PrismaDispatchDocumentSourceReader(client, "dispatch-test", "chromium-pdf-v1")

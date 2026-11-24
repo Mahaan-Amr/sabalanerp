@@ -1,6 +1,14 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { createAuditedPartnerAuthorization } from '../authorization/audited';
 import { FEATURES } from '../../../middleware/feature';
+import { measureNotificationRead, withNotificationReadSlot } from '../../notificationReadObservation';
+
+const transferNoticeSelect = {
+  id: true, customerId: true, fromOwnerUserId: true, requestedBy: true, toProfile: { select: { userId: true } },
+} satisfies Prisma.PartnerCustomerTransferSelect;
+type TransferNotice = Prisma.PartnerCustomerTransferGetPayload<{ select: typeof transferNoticeSelect }>;
+const isTransferParticipant = (transfer: TransferNotice, actorId: string) =>
+  [transfer.fromOwnerUserId, transfer.requestedBy, transfer.toProfile.userId].includes(actorId);
 
 export async function transferDecisionRecipients(tx: Prisma.TransactionClient, transferId: string, correlationId: string) {
   const transfer = await tx.partnerCustomerTransfer.findUnique({ where: { id: transferId }, select: { customerId: true } });
@@ -31,15 +39,33 @@ export async function canReadTransferNotice(database: PrismaClient | Prisma.Tran
   const check = async (tx: Prisma.TransactionClient) => {
     const actor = await tx.user.findUnique({ where: { id: actorId }, select: { isActive: true } });
     if (!actor?.isActive) return false;
-    const transfer = await tx.partnerCustomerTransfer.findUnique({ where: { id: transferId }, select: {
-      customerId: true, fromOwnerUserId: true, requestedBy: true, toProfile: { select: { userId: true } },
-    } });
+    const transfer = await tx.partnerCustomerTransfer.findUnique({ where: { id: transferId }, select: transferNoticeSelect });
     if (!transfer) return false;
-    if ([transfer.fromOwnerUserId, transfer.requestedBy, transfer.toProfile.userId].includes(actorId)) return true;
+    if (isTransferParticipant(transfer, actorId)) return true;
     const access = await createAuditedPartnerAuthorization(tx, { actorId, purpose: 'CRM', channel: 'NOTIFICATION' },
       { correlationId: `transfer-status:${transferId}`, reason: 'Project current transfer status visibility; commands require a separate actor reason.' }, { customerTransferId: transferId })
       .authorize('CUSTOMER_TRANSFER_DECIDE', { kind: 'CUSTOMER', id: transfer.customerId });
     return access.ok && access.value.persona === 'INTERNAL';
   };
   return '$transaction' in database ? database.$transaction(check) : check(database);
+}
+
+export async function readTransferNoticeIds(database: PrismaClient | Prisma.TransactionClient, actorId: string, ids: string[]) {
+  const allowed = new Set<string>();
+  if (!ids.length) return allowed;
+  const actor = await measureNotificationRead('customerTransfer', 'authority', () =>
+    database.user.findUnique({ where: { id: actorId }, select: { isActive: true } }));
+  if (!actor?.isActive) return allowed;
+  const transfers = await measureNotificationRead('customerTransfer', 'evidence', () =>
+    database.partnerCustomerTransfer.findMany({ where: { id: { in: ids } }, select: transferNoticeSelect }));
+  for (const transfer of transfers) {
+    // The remaining audience still needs the existing scoped decision audit per
+    // transfer. Its transaction reloads authority and fences the command root.
+    if (isTransferParticipant(transfer, actorId) ||
+        await withNotificationReadSlot('customerTransfer', () => measureNotificationRead('customerTransfer', 'transaction',
+          () => canReadTransferNotice(database, actorId, transfer.id)))) {
+      allowed.add(transfer.id);
+    }
+  }
+  return allowed;
 }

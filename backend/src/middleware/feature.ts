@@ -1,6 +1,6 @@
 import { prisma } from '../lib/prisma';
 import { Response, NextFunction } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, type Prisma } from '@prisma/client';
 import { AuthRequest } from './auth';
 import { resolveNarrowFeatureAccess } from '../services/narrowFeatureAccess';
 
@@ -299,11 +299,11 @@ export const requireAnyFeatureAccessWithClient = (
 /**
  * Get user's accessible features
  */
-export const getUserFeatures = async (userId: string, userRole: string): Promise<{ feature: Feature; permission: FeaturePermission; workspace: string }[]> => {
+export const getUserFeatures = async (userId: string, userRole: string, { database = prisma, propagateErrors = false }: { database?: PrismaClient | Prisma.TransactionClient; propagateErrors?: boolean } = {}): Promise<{ feature: Feature; permission: FeaturePermission; workspace: string }[]> => {
   try {
     const features: { feature: Feature; permission: FeaturePermission; workspace: string }[] = [];
 
-    const disabledRows = await prisma.featurePermission.findMany({ where: { userId, isActive: true, permissionLevel: 'none' } });
+    const disabledRows = await database.featurePermission.findMany({ where: { userId, isActive: true, permissionLevel: 'none' } });
     const disabled = new Set(disabledRows.filter(row => row.permissionLevel === 'none' && isPermissionActiveAndNotExpired(row)).map(row => row.feature));
     // Super admin has access to all unrevoked features
     if (userRole === 'ADMIN') {
@@ -315,7 +315,7 @@ export const getUserFeatures = async (userId: string, userRole: string): Promise
     }
 
     // Get user-specific feature permissions
-    const userFeaturePermissions = await prisma.featurePermission.findMany({
+    const userFeaturePermissions = await database.featurePermission.findMany({
       where: {
         userId,
         isActive: true
@@ -323,7 +323,7 @@ export const getUserFeatures = async (userId: string, userRole: string): Promise
     });
 
     // Get role-based feature permissions
-    const roleFeaturePermissions = await prisma.roleFeaturePermission.findMany({
+    const roleFeaturePermissions = await database.roleFeaturePermission.findMany({
       where: {
         role: userRole,
         isActive: true
@@ -331,14 +331,14 @@ export const getUserFeatures = async (userId: string, userRole: string): Promise
     });
 
     // Get workspace permissions (fallback)
-    const userWorkspacePermissions = await prisma.workspacePermission.findMany({
+    const userWorkspacePermissions = await database.workspacePermission.findMany({
       where: {
         userId,
         isActive: true
       }
     });
 
-    const roleWorkspacePermissions = await prisma.roleWorkspacePermission.findMany({
+    const roleWorkspacePermissions = await database.roleWorkspacePermission.findMany({
       where: {
         role: userRole,
         isActive: true
@@ -400,6 +400,7 @@ export const getUserFeatures = async (userId: string, userRole: string): Promise
 
     return features;
   } catch (error) {
+    if (propagateErrors) throw error;
     console.error('Get user features error:', error);
     return [];
   }

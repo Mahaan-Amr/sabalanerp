@@ -1,5 +1,6 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
 import type { SafeNotification, InquiryNoticeType } from './contracts';
+import { measureNotificationRead, withNotificationReadSlot } from '../../notificationReadObservation';
 
 export const PARTNER_NOTIFICATION_RESOURCE = 'PARTNER_NOTIFICATION';
 export type NotificationDatabase = PrismaClient | Prisma.TransactionClient;
@@ -15,6 +16,7 @@ export type PartnerNotificationEvidence = {
 export interface PartnerNotificationAccess {
   lockAndAuthorize(database: Prisma.TransactionClient, notification: SafeNotification): Promise<PartnerNotificationEvidence | null>;
   canRead(database: NotificationDatabase, input: { userId: string; notificationId: string }): Promise<boolean>;
+  readableIds?(database: NotificationDatabase, input: { userId: string; notificationIds: string[] }): Promise<Set<string>>;
   resolveAction(database: NotificationDatabase, input: { userId: string; notificationId: string }): Promise<string | null>;
 }
 
@@ -32,12 +34,32 @@ export async function canReadPartnerNotification(
 ): Promise<boolean> {
   if (!access) return false;
   try {
-    const row = await database.notification.findFirst({
-      where: { id: notificationId, userId, user: { isActive: true }, event: { resourceType: PARTNER_NOTIFICATION_RESOURCE } },
-      select: { id: true },
-    });
-    return !!row && await access.canRead(database, { userId, notificationId });
+    return await readPartnerNotification(database, userId, notificationId, access);
   } catch { return false; }
+}
+
+async function readPartnerNotification(database: NotificationDatabase, userId: string, notificationId: string,
+  access: PartnerNotificationAccess) {
+  const row = await database.notification.findFirst({
+    where: { id: notificationId, userId, user: { isActive: true }, event: { resourceType: PARTNER_NOTIFICATION_RESOURCE } },
+    select: { id: true },
+  });
+  return !!row && await access.canRead(database, { userId, notificationId });
+}
+
+export async function readPartnerNotificationIds(database: NotificationDatabase, userId: string, ids: string[],
+  access = currentAccess): Promise<Set<string>> {
+  if (!access || !ids.length) return new Set();
+  const notificationIds = [...new Set(ids)];
+  if (access.readableIds) return access.readableIds(database, { userId, notificationIds });
+  const allowed = new Set<string>();
+  for (const id of notificationIds) {
+    if (await withNotificationReadSlot('partnerInquiry', () =>
+      measureNotificationRead('partnerInquiry', 'queries', () => readPartnerNotification(database, userId, id, access)))) {
+      allowed.add(id);
+    }
+  }
+  return allowed;
 }
 
 /** #334 wires the existing action route here. The destination also reauthorizes

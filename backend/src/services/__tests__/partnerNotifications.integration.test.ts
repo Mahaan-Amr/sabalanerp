@@ -6,7 +6,8 @@ import { resolve } from 'node:path';
 import { PrismaClient } from '@prisma/client';
 import { createPartnerInAppGateway } from '../partnerSales/notifications/gateway';
 import { registerPartnerNotificationAccess, resolvePartnerNotificationAction, type PartnerNotificationAccess } from '../partnerSales/notifications/access';
-import { filterCurrentlyAuthorizedNotifications } from '../notificationAuthorization';
+import { filterCurrentlyAuthorizedNotifications, readCurrentlyAuthorizedUnreadCount } from '../notificationAuthorization';
+import { notificationReadObservation } from '../notificationReadObservation';
 import { partnerNotificationsTestDatabaseUrl } from './partnerNotificationsTestDatabase';
 
 const load = createRequire(resolve(__dirname, '../../../../packages/partner-sales-contracts/package.json'));
@@ -28,9 +29,10 @@ test('concurrent delivery is durable, private, and stale notification links cann
       projectionEvidenceId: `${prefix}-projection`, notBefore: '2026-08-01T00:00:00.000Z',
     });
     let authorized = true;
+    let readFailure: Error | undefined;
     const access: PartnerNotificationAccess = {
       async lockAndAuthorize() { return authorized ? { notification, type: 'SUBMITTED', recipientUserId: user.id } : null; },
-      async canRead() { return authorized; },
+      async canRead() { if (readFailure) throw readFailure; return authorized; },
       async resolveAction() { return authorized ? '/dashboard/sales/partner-inquiries' : null; },
     };
     // Break a TypeScript structural-comparison explosion between the isolated
@@ -49,6 +51,15 @@ test('concurrent delivery is durable, private, and stale notification links cann
     registerPartnerNotificationAccess(access);
     assert.equal((await filterCurrentlyAuthorizedNotifications(applicationDatabase, user, rows)).length, 1);
     assert.equal(await resolvePartnerNotificationAction(applicationDatabase, user.id, rows[0].id), '/dashboard/sales/partner-inquiries');
+    for (const code of ['P2028', 'P2024']) {
+      readFailure = Object.assign(new Error('private query evidence'), { code });
+      const observation: NonNullable<ReturnType<typeof notificationReadObservation.getStore>> = {};
+      await assert.rejects(notificationReadObservation.run(observation,
+        () => readCurrentlyAuthorizedUnreadCount(applicationDatabase, user)), { code });
+      assert.equal(observation['partnerInquiry.queries']?.errorCode, code);
+      assert.doesNotMatch(JSON.stringify(observation), /private query evidence/);
+    }
+    readFailure = undefined;
     const changedIntent = await gateway.enqueue({ ...notification, correlationId: 'another-cause' });
     assert.equal(changedIntent.ok ? '' : changedIntent.error.code, 'IDEMPOTENCY_CONFLICT');
     for (const reason of ['reassigned', 'grant-revoked', 'customer-transferred']) {

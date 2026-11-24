@@ -1,14 +1,16 @@
 import { accessFor as purchasingAccess, canReadDocument as canReadPurchasingDocument } from './purchasing/access';
 import { asDoc as purchasingDoc } from './purchasing/repository';
-import { canReadTransferNotice } from './partnerSales/crm/transferAccess';
+import { PurchasingError } from './purchasing/domain';
+import { readTransferNoticeIds } from './partnerSales/crm/transferAccess';
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { FEATURES, getUserFeatures } from '../middleware/feature';
 import { getUserWorkspaces } from '../middleware/workspace';
 import { canAccessTicket } from './supportTicketPolicy';
-import { canReadPartnerNotification, PARTNER_NOTIFICATION_RESOURCE } from './partnerSales/notifications/access';
+import { canReadPartnerNotification, readPartnerNotificationIds, PARTNER_NOTIFICATION_RESOURCE } from './partnerSales/notifications/access';
 import { activeHrActionPermissionsForUser } from './hrAuthorizationService';
 import { canAccessPerformanceOperationalAlert } from './performanceOperationalNotificationAccess';
 import { dispatchCreditAccess, canReviewManagerDispatch } from './contractDispatchCredit';
+import { measureNotificationRead, withNotificationReadSlot } from './notificationReadObservation';
 
 export type NotificationAuthorizationUser = {
   id: string;
@@ -186,30 +188,46 @@ export const filterCurrentlyAuthorizedNotifications = async <
   database: PrismaClient | Prisma.TransactionClient,
   user: NotificationAuthorizationUser,
   rows: T[],
+  { inbox = false }: { inbox?: boolean } = {},
 ) => {
   if (user.isActive === false) return [];
+  if (inbox) rows = rows.filter(row => row.userId === undefined || row.userId === user.id);
   if (rows.some(row => row.event?.resourceType === 'PURCHASING_DOCUMENT')) {
-    const access = await purchasingAccess(database, user).catch(() => null);
-    const documents = await database.purchasingDocument.findMany({ where: { id: { in: rows.filter(r => r.event?.resourceType === 'PURCHASING_DOCUMENT').map(r => r.event?.resourceId || '') } } });
-    const readable = new Set<string>();
-    if (access) for (const doc of documents) if (await canReadPurchasingDocument(database, access, purchasingDoc(doc))) readable.add(doc.id);
+    const readable = await measureNotificationRead('purchasing', 'queries', async () => {
+      const access = await purchasingAccess(database, user).catch(error => {
+        if (!inbox || (error instanceof PurchasingError && error.status === 403)) return null;
+        throw error;
+      });
+      const allowed = new Set<string>();
+      if (!access) return allowed;
+      const documents = await database.purchasingDocument.findMany({
+        where: { id: { in: resourceIds(rows, 'PURCHASING_DOCUMENT') } },
+      });
+      for (const doc of documents) if (await canReadPurchasingDocument(database, access, purchasingDoc(doc))) allowed.add(doc.id);
+      return allowed;
+    });
     rows = rows.filter(row => row.event?.resourceType !== 'PURCHASING_DOCUMENT' || readable.has(row.event?.resourceId || ''));
   }
   // Partner restrictions precede the general ADMIN override. Unwired central
   // authorization, revoked grants and old assignments all deny access.
-  const transferRows = rows.filter(row => row.event?.resourceType === 'PARTNER_CUSTOMER_TRANSFER');
-  const transferAllowed = new Set((await Promise.all(transferRows.map(async row =>
-    row.event?.resourceId && await canReadTransferNotice(database, user.id, row.event.resourceId) ? row.id : null))).filter((id): id is string => id !== null));
+  const transferAllowed = await readTransferNoticeIds(database, user.id, resourceIds(rows, 'PARTNER_CUSTOMER_TRANSFER'));
   const partnerRows = rows.filter(row => row.event?.resourceType === PARTNER_NOTIFICATION_RESOURCE);
-  const partnerAllowed = new Set((await Promise.all(partnerRows.map(async row =>
-    await canReadPartnerNotification(database, user.id, row.id) ? row.id : null,
-  ))).filter((id): id is string => id !== null));
+  const partnerAllowed = inbox ? await readPartnerNotificationIds(database, user.id, partnerRows.map(row => row.id)) : new Set<string>();
+  if (!inbox) for (const row of partnerRows) {
+    if (await canReadPartnerNotification(database, user.id, row.id)) partnerAllowed.add(row.id);
+  }
   rows = rows.filter(row => row.event?.resourceType !== PARTNER_NOTIFICATION_RESOURCE || partnerAllowed.has(row.id));
-  if (rows.every(row => row.event?.resourceType === PARTNER_NOTIFICATION_RESOURCE)) return rows;
-  const [workspaceRows, featureRows] = await Promise.all([
-    getUserWorkspaces(user.id, user.role),
-    getUserFeatures(user.id, user.role),
-  ]);
+  const needsGeneralAccess = rows.some(({ event, type }) => event
+    && !['CONTRACT_DISPATCH', 'PARTNER_CUSTOMER_TRANSFER', PARTNER_NOTIFICATION_RESOURCE].includes(event.resourceType ?? '')
+    && (event.workspace || event.resourceType === 'HR_DUTY' || event.resourceType === 'support-ticket')
+    && (!type || !PERFORMANCE_NOTIFICATION_TYPES.has(type)));
+  const permissionOptions = inbox ? { database, propagateErrors: true } : undefined;
+  const [workspaceRows, featureRows] = needsGeneralAccess
+    ? await measureNotificationRead('workspaceFeature', 'queries', () => Promise.all([
+      getUserWorkspaces(user.id, user.role, permissionOptions),
+      getUserFeatures(user.id, user.role, permissionOptions),
+    ]))
+    : [[], []];
   const accessibleWorkspaces = workspaceRows.map((row) => String(row.workspace));
   const managedWorkspaces = workspaceRows
     .filter((row) => ['edit', 'admin'].includes(row.permission))
@@ -218,36 +236,45 @@ export const filterCurrentlyAuthorizedNotifications = async <
   const managedFeatures = featureRows
     .filter((row) => ['edit', 'admin'].includes(row.permission))
     .map((row) => `${row.workspace}:${row.feature}`);
-  const supportTicketIds = [...new Set(rows
-    .filter((row) => row.event?.resourceType === 'support-ticket' && row.event.resourceId)
-    .map((row) => row.event!.resourceId!))];
-  const crossWorkspaceDutyIds = [...new Set(rows
-    .filter((row) => row.event?.resourceType === 'HR_DUTY' && row.event.resourceId)
-    .map((row) => row.event!.resourceId!))];
+  const supportTicketIds = resourceIds(rows, 'support-ticket');
+  const crossWorkspaceDutyIds = resourceIds(rows, 'HR_DUTY');
   const hasPerformanceNotifications = rows.some((row) => row.type
     && row.type !== 'PERFORMANCE_OPERATIONAL_ALERT' && PERFORMANCE_NOTIFICATION_TYPES.has(row.type));
-  const performanceContext: Promise<PerformanceNotificationContext | null> = hasPerformanceNotifications
+  const performanceContext = () => measureNotificationRead('performance', 'authority', () => hasPerformanceNotifications
     ? Promise.all([
         database.user.findUnique({ where: { id: user.id }, select: { personnelId: true } }),
         activeHrActionPermissionsForUser(database, user.id),
       ]).then(([currentUser, permissions]) => currentUser
         ? { personnelId: currentUser.personnelId, permissions: new Set(permissions) }
         : null)
-    : Promise.resolve(null);
-  const performanceAccess = new Map<string, boolean>();
+    : Promise.resolve(null));
   const dispatchAccess = new Map<string, boolean>();
-  await Promise.all(rows.filter(row => row.event?.resourceType === 'CONTRACT_DISPATCH').map(async row => {
-    const contract = await database.salesContract.findUnique({ where: { id: row.event!.resourceId ?? '' } });
-    const allowed = !!contract && (await dispatchCreditAccess(database, contract, user.id)).read;
-    dispatchAccess.set(row.id, allowed && (row.type !== 'CONTRACT_MANAGER_DISPATCH_REQUESTED' || await canReviewManagerDispatch(database, user.id)));
-  }));
-  await Promise.all(rows.map(async (row) => {
-    const allowed = await canAccessPerformanceNotification(database, user.id, row, performanceContext);
-    if (allowed !== null) performanceAccess.set(row.id, allowed);
-  }));
-  const [tickets, designatedIncidentHandler, hrDuties] = await Promise.all([
+  const dispatchIds = resourceIds(rows, 'CONTRACT_DISPATCH');
+  if (dispatchIds.length) {
+    const contracts = await measureNotificationRead('dispatch', 'evidence', () =>
+      database.salesContract.findMany({ where: { id: { in: dispatchIds } } }));
+    for (const contract of contracts) dispatchAccess.set(contract.id,
+      await withNotificationReadSlot('dispatch', () => measureNotificationRead('dispatch', 'authority', async () =>
+        (await dispatchCreditAccess(database, contract, user.id)).read)));
+  }
+  const needsManagerReview = rows.some(row => row.event?.resourceType === 'CONTRACT_DISPATCH'
+    && row.type === 'CONTRACT_MANAGER_DISPATCH_REQUESTED' && dispatchAccess.get(row.event.resourceId ?? ''));
+  const reviewManagerDispatch = needsManagerReview && await measureNotificationRead('dispatch', 'authority', () =>
+    canReviewManagerDispatch(database, user.id));
+
+  const performanceAccess = new Map<string, boolean>();
+  const performanceRows = rows.filter(row => row.type && PERFORMANCE_NOTIFICATION_TYPES.has(row.type));
+  const context = performanceRows.length ? await performanceContext() : null;
+  for (const row of performanceRows) {
+    const key = performanceKey(row);
+    if (performanceAccess.has(key)) continue;
+    const allowed = await withNotificationReadSlot('performance', () => measureNotificationRead('performance', 'queries', () =>
+      canAccessPerformanceNotification(database, user.id, row, Promise.resolve(context))));
+    if (allowed !== null) performanceAccess.set(key, allowed);
+  }
+  const [tickets, hrDuties] = await Promise.all([
     supportTicketIds.length
-      ? database.supportTicket.findMany({
+      ? measureNotificationRead('support', 'evidence', () => database.supportTicket.findMany({
           where: { id: { in: supportTicketIds } },
           select: {
             id: true,
@@ -260,18 +287,10 @@ export const filterCurrentlyAuthorizedNotifications = async <
               select: { userId: true, role: true },
             },
           },
-        })
+        }))
       : [],
-    database.featurePermission.count({
-      where: {
-        userId: user.id,
-        feature: FEATURES.SUPPORT_SECURITY_INCIDENT_HANDLE,
-        isActive: true,
-        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
-      },
-    }).then((count) => count > 0),
     crossWorkspaceDutyIds.length
-      ? database.crossWorkspaceDuty.findMany({
+      ? measureNotificationRead('hrDuty', 'evidence', () => database.crossWorkspaceDuty.findMany({
           where: { id: { in: crossWorkspaceDutyIds } },
           select: {
             id: true,
@@ -281,9 +300,16 @@ export const filterCurrentlyAuthorizedNotifications = async <
             destinationWorkspaceCode: true,
             assignmentHistory: { select: { assignedUserId: true } },
           },
-        })
+        }))
       : [],
   ]);
+  const designatedIncidentHandler = tickets.some(ticket => ticket.restrictedIncident) &&
+    (await measureNotificationRead('support', 'authority', () => database.featurePermission.count({
+      where: {
+        userId: user.id, feature: FEATURES.SUPPORT_SECURITY_INCIDENT_HANDLE, isActive: true,
+        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+      },
+    }))) > 0;
   const ticketById = new Map<string, AuthorizedSupportTicket>(
     (tickets as AuthorizedSupportTicket[]).map((ticket) => [ticket.id, ticket]),
   );
@@ -297,11 +323,14 @@ export const filterCurrentlyAuthorizedNotifications = async <
       .filter((assignedUserId): assignedUserId is string => Boolean(assignedUserId)),
   }] as const));
   return rows.filter((row) => {
-    if (row.event?.resourceType === 'CONTRACT_DISPATCH') return dispatchAccess.get(row.id) === true;
     const event = row.event;
-    if (event?.resourceType === 'PARTNER_CUSTOMER_TRANSFER') return transferAllowed.has(row.id);
+    if (event?.resourceType === 'CONTRACT_DISPATCH') return dispatchAccess.get(event.resourceId ?? '') === true
+      && (row.type !== 'CONTRACT_MANAGER_DISPATCH_REQUESTED' || reviewManagerDispatch);
+    if (event?.resourceType === 'PARTNER_CUSTOMER_TRANSFER') return transferAllowed.has(event.resourceId ?? '');
     if (event?.resourceType === PARTNER_NOTIFICATION_RESOURCE) return partnerAllowed.has(row.id);
-    if (performanceAccess.has(row.id)) return performanceAccess.get(row.id) === true;
+    if (row.type && PERFORMANCE_NOTIFICATION_TYPES.has(row.type) && performanceAccess.has(performanceKey(row))) {
+      return performanceAccess.get(performanceKey(row)) === true;
+    }
     // Performance notifications are protected by their resource-specific checks above.
     // ADMIN bypass applies only to ordinary workspace/feature notifications.
     if (event?.feature && event.workspace && event.resourceType !== 'HR_DUTY' &&
@@ -342,3 +371,24 @@ export const filterCurrentlyAuthorizedNotifications = async <
     return !event.feature || accessibleFeatures.includes(`${event.workspace}:${event.feature}`);
   });
 };
+
+function resourceIds(rows: NotificationWithAuthorizationEvent[], resourceType: string) {
+  return [...new Set(rows.flatMap(({ event }) => event?.resourceType === resourceType && event.resourceId
+    ? [event.resourceId] : []))];
+}
+
+function performanceKey(row: NotificationWithAuthorizationEvent) {
+  return JSON.stringify([row.type, row.userId, row.event?.resourceType, row.event?.resourceId]);
+}
+
+export async function readCurrentlyAuthorizedUnreadCount(database: PrismaClient | Prisma.TransactionClient,
+  user: NotificationAuthorizationUser) {
+  const rows = await measureNotificationRead('population', 'queries', () => database.notification.findMany({
+    where: { userId: user.id, readAt: null, user: { isActive: true } },
+    select: {
+      id: true, type: true, userId: true,
+      event: { select: { workspace: true, feature: true, resourceType: true, resourceId: true } },
+    },
+  }));
+  return (await filterCurrentlyAuthorizedNotifications(database, user, rows, { inbox: true })).length;
+}

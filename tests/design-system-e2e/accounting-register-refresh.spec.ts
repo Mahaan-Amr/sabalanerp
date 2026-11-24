@@ -32,15 +32,29 @@ async function routeAccounting(page: Page, actor: { id: string; role: string }) 
       writes.push(path);
       return route.fulfill({ status: 405, json: { success: false } });
     }
-    if (path === '/api/auth/me') {
-      const expected = request.headers()['x-sabalan-expected-user'];
-      if (expected && expected !== actor.id) {
+    if (path === '/api/auth/me' || path === '/api/dashboard/profile') {
+      const isSessionProbe = path === '/api/auth/me';
+      const headers = request.headers();
+      const expectedUser = headers['x-sabalan-expected-user'];
+      const expectedSession = headers['x-sabalan-expected-session'];
+      const session = { id: `session-${actor.id}` };
+      const hasSessionBinding = expectedUser !== undefined || expectedSession !== undefined;
+      const matchesSession = expectedUser === actor.id
+        && (expectedSession === session.id || (isSessionProbe && expectedSession === undefined));
+      if (hasSessionBinding && !matchesSession) {
         return route.fulfill({ status: 401, json: { success: false, code: 'AUTH_CONTEXT_CHANGED' } });
       }
-      return route.fulfill({ json: { success: true, data: {
+      const user = {
         ...actor, username: actor.id, firstName: 'حسابدار', lastName: 'آزمون', isActive: true,
-        permissions: { features: [] },
-      }, session: { id: `session-${actor.id}` } } });
+        mustChangePassword: false,
+      };
+      if (isSessionProbe) return route.fulfill({ json: { success: true, data: user, session } });
+      return route.fulfill({ json: { success: true, data: {
+        ...user, permissions: { features: [], workspaces: [{ workspace: 'accounting', permissionLevel: 'admin' }] },
+      } } });
+    }
+    if (path === '/api/system-recovery/environment') {
+      return route.fulfill({ json: { success: true, data: { sanitizedEnvironment: false } } });
     }
     if (path === '/api/workspace-permissions/user-workspaces') return route.fulfill({ json: { success: true, data:
       [{ workspace: 'accounting', permission: 'admin' }],

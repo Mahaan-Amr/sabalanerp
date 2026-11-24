@@ -5,6 +5,7 @@ import { prisma } from '../../lib/prisma';
 import logisticsRouter from '../../routes/logistics';
 import guardRouter from '../../routes/canonical-guard-queue';
 import { createAuthoritativeSession, SESSION_COOKIE } from '../identitySessionService';
+import { assignHrVehicle, externalAssignmentScope, lockHrVehicleOperations } from '../hrVehicleOperations';
 
 // The real mounted router and application-owned client, against only the
 // parent's isolated schema. Fixture writes establish identities, not results.
@@ -70,13 +71,23 @@ async function main() {
         assert.equal(result.status, 404, `${attempt.method} ${attempt.path}: ${JSON.stringify(result.body)}`);
       }
       assert.equal((await request(`/loadings/${loadingId}`)).body.data.status, 'DRAFT');
+      const assignmentAt = new Date();
+      const licenceExpiresAt = new Date(assignmentAt.getTime() + 365 * 86_400_000);
       const driver = await prisma.externalDriver.create({ data: { firstName: 'Loading', lastName: 'Fixture',
         nationalCode: '3340000000', phone: '09120003340', status: 'ACTIVE', statusRecordedBy: actorId, createdBy: actorId,
-        documents: { create: { documentType: 'DRIVING_LICENCE', reference: 'isolated-334-driver', recordedBy: actorId } } } });
+        licenceNumber: 'isolated-334-licence', licenceClass: 'B', licenceExpiresAt,
+        documents: { create: { documentType: 'DRIVING_LICENCE', reference: 'isolated-334-driver', expiresAt: licenceExpiresAt, recordedBy: actorId } } } });
       const vehicle = await prisma.externalVehicle.create({ data: { vehicleType: 'Isolated loading fixture', status: 'ACTIVE',
         statusRecordedBy: actorId, createdBy: actorId,
-        plates: { create: { plate: '334-test', normalizedPlate: '334test', effectiveFrom: new Date(), reason: 'isolated fixture', recordedBy: actorId } },
+        plates: { create: { plate: '334-test', normalizedPlate: '334test', effectiveFrom: assignmentAt, reason: 'isolated fixture', recordedBy: actorId } },
         documents: { create: { documentType: 'VEHICLE_REGISTRATION', reference: 'isolated-334-vehicle', recordedBy: actorId } } } });
+      await prisma.$transaction(async raw => {
+        const tx = externalAssignmentScope(raw);
+        await lockHrVehicleOperations(tx);
+        await assignHrVehicle(tx, { driverId: driver.id, vehicleId: vehicle.id, confirmed: true, expectedAssignmentIds: [] }, actorId, assignmentAt);
+        await tx.driverBiometricEnrollment.create({ data: { externalDriverId: driver.id, status: 'ACTIVE',
+          confirmationPhone: driver.phone, enrolledBy: actorId } });
+      }, { isolationLevel: 'Serializable' });
       const admission = await request('/api/security/canonical-driver-queue', 'POST', { source: 'EXTERNAL', driverId: driver.id, vehicleId: vehicle.id });
       assert.equal(admission.status, 201, JSON.stringify(admission.body));
       const turnId = admission.body.data.id;

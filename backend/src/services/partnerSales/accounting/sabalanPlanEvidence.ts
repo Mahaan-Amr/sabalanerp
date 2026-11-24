@@ -40,8 +40,25 @@ async function verifyPersistedPlan(row: PersistedPlan, caseId: string): Promise<
   return parsed.data;
 }
 
-export async function resolveCurrentSabalanPlan(tx: Prisma.TransactionClient, caseId: string, fallback: PaymentPlan) {
-  const latest = await tx.partnerPaymentPlan.findFirst({ where: { caseId, purpose: 'SABALAN' },
+/** Read the latest persisted terms for each authorized Case in this snapshot.
+ * Only the selected versions need their predecessor and installment evidence. */
+export async function readCurrentSabalanPlanRows(tx: Prisma.TransactionClient, caseIds: string[]) {
+  const byCase = new Map<string, PersistedPlan>();
+  if (!caseIds.length) return byCase;
+  const latest = await tx.$queryRaw<Array<{ id: string }>>`SELECT DISTINCT ON ("caseId") id
+    FROM partner_payment_plans WHERE "caseId" = ANY(${caseIds}::text[]) AND purpose = 'SABALAN'
+    ORDER BY "caseId", version DESC, id DESC`;
+  if (latest.length) {
+    const plans = await tx.partnerPaymentPlan.findMany({ where: { id: { in: latest.map(row => row.id) } }, select: planEvidenceSelect });
+    if (plans.length !== latest.length) throw new PartnerSabalanPlanIntegrityError('Missing current Partner Sabalan plan');
+    for (const plan of plans) byCase.set(plan.caseId, plan);
+  }
+  return byCase;
+}
+
+export async function resolveCurrentSabalanPlan(tx: Prisma.TransactionClient, caseId: string, fallback: PaymentPlan,
+  currentRows?: ReadonlyMap<string, PersistedPlan>) {
+  const latest = currentRows ? currentRows.get(caseId) : await tx.partnerPaymentPlan.findFirst({ where: { caseId, purpose: 'SABALAN' },
     orderBy: [{ version: 'desc' }, { id: 'desc' }], select: planEvidenceSelect });
   return latest ? verifyPersistedPlan(latest, caseId) : fallback;
 }

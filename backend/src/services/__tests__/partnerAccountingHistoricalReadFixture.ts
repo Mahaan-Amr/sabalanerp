@@ -64,21 +64,26 @@ export async function historicalAccountingFixture(status = 'DRAFT', identity: { 
     if (method === 'findFirst' || method === 'findUnique') return null;
     throw new Error(`Unexpected persistence mutation: ${String(method)}`);
   } });
+  const profile = { id: row.profileId, userId: row.profile.userId, state: 'ACTIVE', revision: 1 };
+  const admin = { id: 'historical-admin', role: 'ADMIN', isActive: true, partnerProfile: null };
   const persistence: Record<string, unknown> = {
     effectiveAuthorizationAudit: { createMany: async (args: { data: unknown[] }) => {
       writes.push(...args.data.map(() => 'AUTHORIZATION_AUDIT'));
       return { count: args.data.length };
     } },
-    partnerSaleCase: { findMany: async () => [row], findUnique: async () => row },
+    partnerSaleCase: { findMany: async () => [{ ...row, head: { ...row.head,
+      predecessor: row.head.predecessorRevision === null ? null : { integrityHash: revision.integrityHash } } }], findUnique: async () => row },
     partnerCaseRevision: { findUnique: async () => revision },
-    partnerProfile: { findUnique: async () => ({ id: row.profileId, userId: row.profile.userId, state: 'ACTIVE', revision: 1 }) },
-    user: { findUnique: async () => ({ id: 'historical-admin', role: 'ADMIN', isActive: true, partnerProfile: null }) },
+    partnerProfile: { findMany: async () => [profile], findUnique: async () => profile },
+    user: { findMany: async () => [admin, { id: profile.userId, role: 'USER', isActive: true, partnerProfile: profile }],
+      findUnique: async () => admin },
     accountingFinancialRecord: { findMany: async (args: { where?: { NOT?: unknown; sourceId?: { in?: string[] } } }) =>
       args.where?.NOT || args.where?.sourceId?.in?.length === 0 ? [] : [invoice] },
-    partnerPaymentPlan: { findFirst: async () => persistedPlan,
+    partnerPaymentPlan: { findMany: async () => [persistedPlan], findFirst: async () => persistedPlan,
       findUnique: async (args: { where: { id: string } }) => storedPlans.get(args.where.id) ?? null },
     $queryRaw: async (strings: TemplateStringsArray) => {
       const sql = strings.join('?');
+      if (sql.includes('FROM partner_payment_plans')) return [{ id: persistedPlan.id }];
       if (sql.includes('SELECT clock_timestamp()')) return [{ now: new Date('2026-10-12T08:00:00Z') }];
       if (sql.includes('SELECT revision FROM effective_authorization_state')) return [{ revision: 1 }];
       return [];

@@ -2,6 +2,7 @@ import type { Prisma } from '@prisma/client';
 import type { PartnerActionV2 } from '@sabalanerp/partner-sales-contracts';
 import type { AuthorizationEvidence, AuthorizationRoot, AuthorizationSource } from '../authorization/contracts';
 import { readPartnerAccountingScopedAuthority } from '../authorization/centralAuthority';
+import { createFencedPartnerPermissionReader } from '../authorization/fencedPermissionReads';
 
 /** Read-only list evidence. The caller already owns the operations-control
  * boundary and repeatable-read snapshot. Share all root locks before profiles and
@@ -39,6 +40,10 @@ export async function batchAccountingCaseAuthority(tx: Prisma.TransactionClient,
   const byUser = new Map(users.map(row => [row.id, row]));
   const deleted = new Set(deletions.map(row => row.contractId));
   const actor = byUser.get(actorId);
+  // Shared by the list-only sources and advisory actions in this snapshot.
+  // Scoped grants and the decision clock are still read by each policy.
+  const permissionClient = createFencedPartnerPermissionReader(tx);
+  const resolveScopedAuthority = (root: AuthorizationRoot) => readPartnerAccountingScopedAuthority(tx, { actorId, root }, permissionClient);
   // Keep the same transaction-scoped central result as the former list path.
   let central: ReturnType<typeof readPartnerAccountingScopedAuthority> | undefined;
   let preparation: ReturnType<typeof readPartnerAccountingScopedAuthority> | undefined;
@@ -47,7 +52,7 @@ export async function batchAccountingCaseAuthority(tx: Prisma.TransactionClient,
   }, select: { feature: true, expiresAt: true } });
   let disabled: Awaited<ReturnType<typeof readDisabledFeatures>> | undefined;
   const read = async (requestedActor: string, root: AuthorizationRoot,
-    resolveAuthority: typeof readPartnerAccountingScopedAuthority): Promise<AuthorizationEvidence<PartnerActionV2>> => {
+    resolveAuthority: typeof resolveScopedAuthority): Promise<AuthorizationEvidence<PartnerActionV2>> => {
     if (requestedActor !== actorId || root.kind !== 'CASE' || !byCase.has(root.id)) {
       throw new Error('Accounting Case authority evidence missing');
     }
@@ -60,7 +65,7 @@ export async function batchAccountingCaseAuthority(tx: Prisma.TransactionClient,
         lifecycleRevision: profile.revision,
         ...(owner?.departmentId ? { departmentId: owner.departmentId } : {}) }
       : null;
-    const authority = actor?.isActive && resource ? await resolveAuthority(tx, { actorId, root })
+    const authority = actor?.isActive && resource ? await resolveAuthority(root)
       : { grants: [], authorizationRevision: 1 };
     disabled ??= await readDisabledFeatures();
     // Expiry is evaluated for each action, including READ followed by WRITE.
@@ -74,15 +79,15 @@ export async function batchAccountingCaseAuthority(tx: Prisma.TransactionClient,
       } };
   };
   const source: AuthorizationSource<PartnerActionV2> = { read: (actor, root) => read(actor, root,
-    (client, input) => central ??= readPartnerAccountingScopedAuthority(client, input)) };
+    root => central ??= resolveScopedAuthority(root)) };
   // Preparation grants start at the first preparation decision, as before.
   const preparationSource: AuthorizationSource<PartnerActionV2> = { read: (actor, root) => read(actor, root,
-    (client, input) => preparation ??= readPartnerAccountingScopedAuthority(client, input)) };
+    root => preparation ??= resolveScopedAuthority(root)) };
   // Paper signature availability previously resolved grant expiry independently.
   // Preserve that decision time through the same fenced Case membership.
   const signatureSource: AuthorizationSource<PartnerActionV2> = { read: (actor, root) =>
-    read(actor, root, readPartnerAccountingScopedAuthority) };
-  return { source, preparationSource, signatureSource, hasCase: (caseId: string) => byCase.has(caseId) };
+    read(actor, root, resolveScopedAuthority) };
+  return { source, preparationSource, signatureSource, permissionClient, hasCase: (caseId: string) => byCase.has(caseId) };
 }
 
 export type AccountingCaseAuthority = Awaited<ReturnType<typeof batchAccountingCaseAuthority>>;

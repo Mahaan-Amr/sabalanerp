@@ -5,6 +5,7 @@ import type { PartnerCommercialState } from '@sabalanerp/partner-sales-contracts
 import { createAuditedPartnerAuthorization } from '../authorization/audited';
 import type { AccountingCaseAuthority } from './batchCaseAuthority';
 import { hasSharedOperationAuthority } from '../authorization/sharedOperationAuthority';
+import type { PartnerPermissionReadClient } from '../authorization/fencedPermissionReads';
 import { readPartnerCommercialState } from '../cases/commercialLifecycle';
 import { projectPartnerInternalContent, projectPartnerInternalSummary, partnerInternalPhysicalFacts } from './internalDocumentContent';
 import { withAccountingReadScope, type AccountingReadScope } from './readScope';
@@ -25,12 +26,12 @@ function authorizePartnerPreparationRead(tx: Prisma.TransactionClient, actorId: 
 
 async function canRegisterPartnerPreparation(tx: Prisma.TransactionClient, actorId: string, caseId: string,
   inactive: boolean, commercialStatus: PartnerCommercialState['status'], source?: AccountingCaseAuthority['preparationSource'],
-  recordDecision?: RecordPreparationDecision) {
+  recordDecision?: RecordPreparationDecision, permissionClient: PartnerPermissionReadClient = tx) {
   return !inactive && commercialStatus === 'FINAL' && (await createAuditedPartnerAuthorization(tx,
     { actorId, purpose: 'ACCOUNTING', channel: 'API' }, { correlationId: randomUUID(), reason: 'بررسی امکان ثبت مالی قرارداد قطعی همکار' },
     undefined, undefined, recordDecision, source)
     .authorize('ACCOUNTING_WRITE', { kind: 'CASE', id: caseId })).ok &&
-    await hasSharedOperationAuthority(tx, actorId, 'accounting', 'accounting_invoice_candidates_manage');
+    await hasSharedOperationAuthority(permissionClient, actorId, 'accounting', 'accounting_invoice_candidates_manage');
 }
 
 /** A read-only preparation projection, never a persisted financial record.
@@ -145,13 +146,14 @@ async function readPreparationListSummary(scope: AccountingReadScope, actorId: s
   const commercialStatus = (await scope.readCommercialForCase(caseId))?.status;
   if (!commercialStatus) return null;
   const isInactive = root.customerContract.isInactive;
-  const canRegister = await canRegisterPartnerPreparation(tx, actorId, caseId, isInactive, commercialStatus, source, recordDecision);
+  const canRegister = await canRegisterPartnerPreparation(tx, actorId, caseId, isInactive, commercialStatus, source, recordDecision, caseAuthority.permissionClient);
   const owner = { caseId, revision: root.headRevision, integrityHash: root.integrityHash };
   const content = projectPartnerInternalSummary({ partnerPreparation: { ...facts, owner } });
   // Preserve the advisory paper-signature audit after registration and
   // financial evidence have been evaluated.
   await readPartnerPaperSignatureAvailability(tx, caseId, actorId, root.state, root.customerContract,
-    facts.preparationCompleted !== false, { caseAuthority: caseAuthority.signatureSource, recordDecision });
+    facts.preparationCompleted !== false, { caseAuthority: caseAuthority.signatureSource,
+      permissionClient: caseAuthority.permissionClient, recordDecision });
 
   return { id: root.internalRecord.id, owner, caseState: root.state, isInactive, commercialStatus, canRegister,
     status: 'DRAFT', amountKnown: Boolean(content.totals), amount: content.totals?.payable ?? '0',

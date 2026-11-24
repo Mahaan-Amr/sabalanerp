@@ -4,6 +4,9 @@ import express from 'express';
 import { prisma } from '../../lib/prisma';
 import router from '../../routes/accounting';
 import { SESSION_COOKIE, createAuthoritativeSession } from '../identitySessionService';
+import { getAccountingFinancialTrend } from '../accountingService';
+import { buildAccountingFinancialTrend, FINANCIAL_TREND_RANGES } from '../accountingFinancialTrend';
+import { withAccountingReadScope } from '../partnerSales/accounting/readScope';
 
 async function main() {
   const url = new URL(process.env.DATABASE_URL ?? '');
@@ -45,6 +48,20 @@ async function main() {
     } finally { measure = false; }
   }
   try {
+    const actor = { userId: actorId };
+    for (const range of FINANCIAL_TREND_RANGES) {
+      const expected = await withAccountingReadScope(prisma, actor, async scope => {
+        const [invoices, payments, auditEvents] = await Promise.all([
+          scope.database.accountingFinancialRecord.findMany({ where: scope.financial({ kind: 'INVOICE_CANDIDATE' }) }),
+          scope.database.accountingPaymentStatus.findMany({ where: scope.payment() }),
+          scope.database.accountingAuditLog.findMany({ where: scope.audit(), orderBy: { createdAt: 'asc' } }),
+        ]);
+        return buildAccountingFinancialTrend({ range, now: cutoff, invoices, payments, auditEvents });
+      });
+      const { partnerSeries, ...actual } = await getAccountingFinancialTrend(range, cutoff, actor);
+      assert.deepEqual(actual, expected);
+      assert.ok(partnerSeries);
+    }
     const outstanding = await read('receivables', 'outstanding');
     assert.equal(outstanding.data.total, 2);
     assert.deepEqual(Object.fromEntries(outstanding.data.items.map((row: any) => [row.contractId, row.remainingAmount])),

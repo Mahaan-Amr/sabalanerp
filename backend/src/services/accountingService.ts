@@ -1332,7 +1332,7 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}, ac
     return readAccountingContractPage(scope.database, query, lifecycleView, partner, asOf ?? scope.asOf);
   };
   if (existingScope) return read(existingScope);
-  if (actor) return withAccountingReadScope(prisma, actor, read);
+  if (actor) return withAccountingReadScope(prisma, actor, read, { purpose: 'CORRECTIONS' });
   return prisma.$transaction(tx => readAccountingContractPage(tx, query, lifecycleView, ordinaryOnly, asOf), {
     isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: 30_000,
   });
@@ -1659,42 +1659,43 @@ const getAccountingWorkspaceInScope = async (scope: AccountingReadScope, query: 
   const taxAttentionPopulation = resolveTaxRecordPopulation({ view: 'needs-attention' });
   const activeCorrectionPopulation = resolveCorrectionRequestPopulation({ view: 'active' });
   const activityPopulation = resolveAccountingActivityPopulation({ view: 'last30days' }, now);
-  const [openReceivables, checksDueSoon, unsettledChecks, invoiceCandidates, taxNotReady,
-    openCorrections, authorizedAuditCount, activeAccountantRows] = await Promise.all([
+  const [openReceivables, unsettledChecks, invoiceCandidates, taxNotReady,
+    openCorrections, authorizedAuditCount, activeAccountantRows] = await measureAccountingReadPhase('workspaceCounters', () => Promise.all([
     prisma.accountingReceivable.findMany({
       where: scope.receivable(receivablePopulationWhere(openReceivablePopulation) as Prisma.AccountingReceivableWhereInput),
       select: { id: true, invoiceRecordId: true, contractId: true, status: true, dueDate: true,
         remainingAmount: true, currency: true },
     }),
     prisma.accountingPaymentStatus.findMany({
-      where: scope.payment(paymentPopulationWhere(dueSoonCheckPopulation) as Prisma.AccountingPaymentStatusWhereInput),
-      select: { method: true, checkStatus: true, checkDueDate: true, amount: true, currency: true },
-    }),
-    prisma.accountingPaymentStatus.findMany({
       where: scope.payment(paymentPopulationWhere(unsettledCheckPopulation) as Prisma.AccountingPaymentStatusWhereInput),
       select: { id: true, receivableId: true, contractId: true, method: true, checkStatus: true,
         checkDueDate: true, amount: true, currency: true, status: true },
     }),
-    prisma.accountingFinancialRecord.findMany({
+    prisma.accountingFinancialRecord.groupBy({
+      by: ['currency'],
       where: scope.financial(invoiceCandidatePopulationWhere(actionableInvoicePopulation) as Prisma.AccountingFinancialRecordWhereInput),
-      select: { currency: true, amount: true },
+      _sum: { amount: true },
+      _count: { _all: true },
     }),
-    prisma.accountingTaxRecord.findMany({
+    prisma.accountingTaxRecord.groupBy({
+      by: ['submissionStatus'],
       where: scope.tax(taxRecordPopulationWhere(taxAttentionPopulation) as Prisma.AccountingTaxRecordWhereInput),
-      select: { submissionStatus: true },
+      _count: { _all: true },
     }),
-    prisma.accountingCorrectionRequest.findMany({
+    prisma.accountingCorrectionRequest.groupBy({
+      by: ['priority'],
       where: scope.correction(correctionRequestPopulationWhere(activeCorrectionPopulation) as Prisma.AccountingCorrectionRequestWhereInput),
-      select: { priority: true },
+      _count: { _all: true },
     }),
     prisma.accountingAuditLog.count({
       where: scope.audit(authorizedAuditPopulationWhere() as Prisma.AccountingAuditLogWhereInput),
     }),
-    prisma.accountingAuditLog.findMany({
+    prisma.accountingAuditLog.groupBy({
+      by: ['actorId'],
       where: scope.audit(accountingActivityPopulationWhere(activityPopulation) as Prisma.AccountingAuditLogWhereInput),
-      select: { actorId: true }, distinct: ['actorId'],
     }),
-  ]);
+  ]));
+  const checksDueSoon = unsettledChecks.filter(item => matchesPaymentPopulation(item, dueSoonCheckPopulation));
   const deadlineProjection = resolveAccountingDeadlines({
     receivables: openReceivables,
     checks: unsettledChecks,
@@ -1736,16 +1737,18 @@ const getAccountingWorkspaceInScope = async (scope: AccountingReadScope, query: 
         urgentCount: checksDueSoon.filter((item) => matchesPaymentPopulation(item, overdueCheckPopulation)).length
       },
       invoiceCandidates: {
-        count: invoiceCandidates.length,
-        ...accountingCurrencyTotals(invoiceCandidates, item => item.amount.toString()),
+        count: invoiceCandidates.reduce((sum, row) => sum + row._count._all, 0),
+        ...accountingCurrencyTotals(invoiceCandidates, item => item._sum.amount?.toString() ?? '0'),
       },
       taxNotReady: {
-        count: taxNotReady.length,
-        urgentCount: taxNotReady.filter((item) => item.submissionStatus === TaxSubmissionStatus.REJECTED).length
+        count: taxNotReady.reduce((sum, row) => sum + row._count._all, 0),
+        urgentCount: taxNotReady.find(row => row.submissionStatus === TaxSubmissionStatus.REJECTED)?._count._all ?? 0,
       },
       correctionRequests: {
-        count: openCorrections.length,
-        urgentCount: openCorrections.filter((item) => item.priority === CorrectionRequestPriority.URGENT || item.priority === CorrectionRequestPriority.HIGH).length
+        count: openCorrections.reduce((sum, row) => sum + row._count._all, 0),
+        urgentCount: openCorrections
+          .filter(row => row.priority === CorrectionRequestPriority.URGENT || row.priority === CorrectionRequestPriority.HIGH)
+          .reduce((sum, row) => sum + row._count._all, 0),
       },
       auditHistory: {
         count: authorizedAuditCount
@@ -1793,27 +1796,38 @@ const getAccountingFinancialTrendInScope = async (scope: AccountingReadScope, re
   const range = (FINANCIAL_TREND_RANGES as readonly string[]).includes(String(requestedRange))
     ? requestedRange as FinancialTrendRange
     : '6m';
-  const [invoices, payments, auditEvents] = await Promise.all([
+  const [invoices, payments] = await Promise.all([
     prisma.accountingFinancialRecord.findMany({
-      where: scope.financial({ kind: FinancialRecordKind.INVOICE_CANDIDATE }),
+      where: scope.financial({ kind: FinancialRecordKind.INVOICE_CANDIDATE, OR: [
+        { contractId: { not: null }, financiallyApprovedAt: { not: null },
+          status: { in: [AccountingRecordStatus.ISSUED, AccountingRecordStatus.POSTED, AccountingRecordStatus.VOIDED] } },
+        { sourceKind: PARTNER_INTERNAL_ACCOUNTING_SOURCE, financiallyApprovedAt: { not: null, lte: now } },
+      ] }),
       select: accountingTrendInvoiceSelect,
     }),
     prisma.accountingPaymentStatus.findMany({
-      where: scope.payment(),
+      where: scope.payment({ contractId: { not: null } }),
       select: accountingTrendPaymentSelect,
     }),
-    prisma.accountingAuditLog.findMany({
-      where: scope.audit({ OR: [
-        { entityType: 'AccountingFinancialRecord', action: { in: historicalInvoiceAuditActions } },
-        { entityType: 'AccountingPaymentStatus', action: { in: historicalPaymentAuditActions } },
-      ] }),
-      select: accountingTrendAuditSelect,
-      orderBy: { createdAt: 'asc' },
-    }),
   ]);
+  // Earlier movements still contribute to opening balances. Audit timestamps
+  // are needed only for included ordinary rows with missing dated evidence.
+  const invoiceFallbackIds = invoices.filter(row => row.contractId && (!row.systemInvoiceDate ||
+    (row.status === AccountingRecordStatus.VOIDED && !row.voidedAt))).map(row => row.id);
+  const paymentFallbackIds = payments.filter(row => !row.occurredAt || (row.method === 'CHECK' &&
+    (row.checkStatus === 'BOUNCED' || row.checkStatus === 'RETURNED'))).map(row => row.id);
+  const auditEvents = invoiceFallbackIds.length || paymentFallbackIds.length ? await prisma.accountingAuditLog.findMany({
+    where: scope.audit({ OR: [
+      { entityType: 'AccountingFinancialRecord', entityId: { in: invoiceFallbackIds }, action: { in: historicalInvoiceAuditActions } },
+      { entityType: 'AccountingPaymentStatus', entityId: { in: paymentFallbackIds }, action: { in: historicalPaymentAuditActions } },
+    ] }),
+    select: accountingTrendAuditSelect,
+    orderBy: { createdAt: 'asc' },
+  }) : [];
   const ordinary = buildAccountingFinancialTrend({ range, now, invoices, payments,
     auditEvents: await attachAccountingTrendAuditState(prisma, auditEvents) });
-  const partnerSeries = await readPartnerAccountingTrend(scope, { invoiceIds: invoices.map(row => row.id),
+  const partnerSeries = await readPartnerAccountingTrend(scope, { invoiceIds: invoices
+    .filter(row => row.sourceKind === PARTNER_INTERNAL_ACCOUNTING_SOURCE).map(row => row.id),
     periods: resolveFinancialTrendPeriods(range, now), asOf: now });
   return { ...ordinary, partnerSeries };
 };
@@ -4353,7 +4367,7 @@ export const listFinancialRecords = async (query: any = {}, actor?: AccountingRe
     pageSize,
     total
   };
-}, query.recordId ? { financialRecordId: String(query.recordId) } : {});
+}, query.recordId ? { financialRecordId: String(query.recordId) } : { purpose: 'REGISTER' });
 
 export const listReceivables = async (query: any = {}, actor?: AccountingReadActor) => withAccountingReadScope(prisma, actor, async scope => {
   const prisma = scope.database;
@@ -4495,7 +4509,7 @@ export const listReceivables = async (query: any = {}, actor?: AccountingReadAct
       },
     } : {}),
   };
-});
+}, resolveReceivablePopulation(query).outstandingAt ? {} : { purpose: 'REGISTER' });
 
 export const listPaymentStatuses = async (query: any = {}, actor?: AccountingReadActor) => withAccountingReadScope(prisma, actor, async scope => {
   const prisma = scope.database;
@@ -4598,7 +4612,7 @@ export const listPaymentStatuses = async (query: any = {}, actor?: AccountingRea
       },
     } : {}),
   };
-});
+}, { purpose: 'REGISTER' });
 
 export const listTaxRecords = async (query: any = {}, actor?: AccountingReadActor) => withAccountingReadScope(prisma, actor, async scope => {
   const prisma = scope.database;
@@ -4620,7 +4634,7 @@ export const listTaxRecords = async (query: any = {}, actor?: AccountingReadActo
     prisma.accountingTaxRecord.count({ where })
   ]);
   return { items: await attachListContext(await scope.contextualize('TAX', rows)), page, pageSize, total };
-});
+}, { purpose: 'REGISTER' });
 
 export const listCorrectionRequests = async (query: any = {}, actor?: AccountingReadActor) => withAccountingReadScope(prisma, actor, async scope => {
   const prisma = scope.database;
@@ -4681,7 +4695,7 @@ export const listCorrectionRequests = async (query: any = {}, actor?: Accounting
     pageSize,
     total
   };
-});
+}, { purpose: 'CORRECTIONS' });
 
 export const listAuditLogs = async (query: any = {}, actor?: AccountingReadActor) => withAccountingReadScope(prisma, actor, async scope => {
   const prisma = scope.database;

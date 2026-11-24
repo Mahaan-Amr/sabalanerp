@@ -6,7 +6,7 @@ import { PartnerAccountingCommandError } from './errors';
 import { PARTNER_INTERNAL_ACCOUNTING_SOURCE, matchesFinancialPreparation, preparePartnerFinancialSource,
   type PartnerFinancialPreparation } from './source';
 import { sum, negate } from '../reporting/money';
-import { sumPartnerCollections } from './collections';
+import { partnerCollectionBalancesAt } from './collections';
 import type { AccountingReadScope } from './readScope';
 import type { FinancialTrendPeriod } from '../../accountingFinancialTrend';
 import { PARTNER_REPLACEMENT_MODE, matchesPartnerStagedApproval } from './sharedCorrection';
@@ -163,6 +163,15 @@ export async function readPartnerAccountingTrend(source: Prisma.TransactionClien
     receivableId: { in: receivableIds }, createdAt: { lte: input.asOf },
   } }) : [];
   const paymentsByReceivable = groupPaymentsByReceivable(payments);
+  const cutoffs = input.periods.flatMap(period => [period.startsAt.getTime() - 1, period.endsAt.getTime() - 1]);
+  const collectionBalances = new Map(published.map(({ invoice, approval, preparation }) => {
+    const purchase = scopedPurchases?.get(invoice.id);
+    if (scopedPurchases && !purchase) throw conflict();
+    const ledger = purchase?.payments ?? paymentsByReceivable.get(approval.accountingReceivableId) ?? [];
+    const balances = cutoffs.length ? partnerCollectionBalancesAt(ledger,
+      { currency: invoice.currency, asOf: input.asOf, preparation }, cutoffs) : new Map<number, string>();
+    return [invoice.id, balances] as const;
+  }));
   const currencies = [...new Set(published.map(({ invoice }) => invoice.currency))].sort();
   const series: Array<{ currency: string; points: Array<{ periodKey: string; label: string; startsAt: string; endsAt: string;
     invoiced: string; received: string; outstanding: string }> }> = [];
@@ -178,15 +187,12 @@ export async function readPartnerAccountingTrend(source: Prisma.TransactionClien
       const receivedAmounts: string[] = [], closingBalances: string[] = [];
       const activeCases = new Set<string>();
       for (const row of selected) {
-        const { invoice, approval, preparation } = row;
+        const { invoice, approval } = row;
         const purchase = scopedPurchases?.get(invoice.id);
-        if (scopedPurchases && !purchase) throw conflict();
-        const ledger = purchase?.payments ?? paymentsByReceivable.get(approval.accountingReceivableId) ?? [];
-        const before = sumPartnerCollections(ledger, { currency,
-          cutoff: new Date(period.startsAt.getTime() - 1), asOf: input.asOf, preparation });
-        const after = sumPartnerCollections(ledger, { currency,
-          cutoff: new Date(period.endsAt.getTime() - 1), asOf: input.asOf, preparation });
-        if (before === null || after === null || invoice.receivables[0].id !== approval.accountingReceivableId) throw conflict();
+        const balances = collectionBalances.get(invoice.id);
+        const before = balances?.get(period.startsAt.getTime() - 1);
+        const after = balances?.get(period.endsAt.getTime() - 1);
+        if (before === undefined || after === undefined || invoice.receivables[0].id !== approval.accountingReceivableId) throw conflict();
         receivedAmounts.push(after, negate(before));
         const active = outstandingAt(row, period.endsAt, activeCases);
         if (!active && !within(row.effectiveAt) && !(invoice.voidedAt && within(invoice.voidedAt)) && before === after) continue;

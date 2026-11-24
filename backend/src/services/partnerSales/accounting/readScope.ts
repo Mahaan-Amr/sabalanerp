@@ -11,7 +11,7 @@ import { subtract } from '../reporting/money';
 import { PartnerAccountingCommandError } from './errors';
 import { PartnerCollectionIntegrityError, sumPartnerCollections } from './collections';
 import { partnerCheckTransitions } from './paymentPolicy';
-import { readPartnerAccountingCapabilities } from './capabilities';
+import { readPartnerAccountingListCapabilities } from './capabilities';
 import { readPartnerSnapshot, retryReadSnapshot } from '../authorization/readSnapshot';
 import { partnerTaxTransitions } from './taxPolicy';
 import { partnerPredecessorIsFrozen, readFrozenPartnerPredecessors } from '../corrections/mutationFreeze';
@@ -113,7 +113,7 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
       }
     }
     await measureAccountingReadPhase('authorizationAudit', () => appendAuthorizationDecisions(database, decisions));
-    const capabilities = await readPartnerAccountingCapabilities(database, actor.userId);
+    const capabilities = await readPartnerAccountingListCapabilities(caseAuthority?.permissionClient ?? database, actor.userId);
     canManagePayments = capabilities.payments;
     canManageTax = capabilities.tax;
     finishAuthorization();
@@ -375,6 +375,7 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
   // The collection writer timestamps both knowledge and effect with PostgreSQL's clock.
   const asOf = await readAccountingSnapshotTime(database);
   const paymentsByReceivable = groupPaymentsByReceivable(ownedPayments);
+  const receivablesByInvoice = new Map<string, typeof ownedReceivables>();
   const verifiedReceivables = new Map<string, { row: typeof ownedReceivables[number]; evidence: ReturnType<typeof readPartnerReceivableEvidence> }>();
   for (const receivable of ownedReceivables) {
     const preparation = preparationByInvoice.get(receivable.invoiceRecordId!)!;
@@ -396,6 +397,9 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
     if (!statuses.includes(receivable.status)) throw conflict();
     invoiceByEntity.set(receivable.id, receivable.invoiceRecordId!);
     verifiedReceivables.set(receivable.id, { row: receivable, evidence });
+    const siblings = receivablesByInvoice.get(invoice.id) ?? [];
+    siblings.push(receivable);
+    receivablesByInvoice.set(invoice.id, siblings);
   }
   for (const payment of ownedPayments) {
     const invoiceId = invoiceByEntity.get(payment.receivableId!)!;
@@ -443,6 +447,19 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
     readCommercialForCase: (caseId: string) => readCommercialForCase(caseId),
     partnerAccountingIncluded: authorizedInvoices.length > 0,
     authorizedPartnerInternalIds: allowedInternalIds,
+    partnerContractRecords() {
+      // The scope admitted only unlinked Partner invoices, and the receivable
+      // witness above rejects a linked Contract or Customer. Keep the same
+      // focused-record and candidate predicates used by the register's query.
+      return authorizedInvoices.filter(row => row.kind === 'INVOICE_CANDIDATE' &&
+        (!reviewRecordId || row.id === reviewRecordId))
+        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+        .map(({ id, sourceId, status, amount, currency, createdAt }) => ({
+          id, sourceId, status, amount, currency, createdAt,
+          partnerContext: contextByInvoice.get(id),
+          receivables: receivablesByInvoice.get(id) ?? [],
+        }));
+    },
     verifiedPurchaseRows(invoiceId: string, receivableId: string, caseId: string) {
       const invoice = invoicesById.get(invoiceId), receivable = verifiedReceivables.get(receivableId);
       const preparation = preparationByInvoice.get(invoiceId);

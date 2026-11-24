@@ -15,7 +15,7 @@ test('one-connection mixed list reads both flag counts before or after the same 
   try {
     const { prisma } = await import('../../lib/prisma');
     try {
-      const { listAccountingContracts } = await import('../accountingService');
+      const { getAccountingDashboard, listAccountingContracts } = await import('../accountingService');
       const { accountingReadTiming } = await import('../accountingReadTiming');
       const { seedHistoricalAccountingRead } = await import('./partnerAccountingHistoricalReadSeed');
       const { actorId, fixture } = await seedHistoricalAccountingRead(writer);
@@ -25,7 +25,13 @@ test('one-connection mixed list reads both flag counts before or after the same 
         departmentId: 'historical-department', createdBy: actorId, responsibleSellerId: actorId,
         status: 'SIGNED', totalAmount: '10.05', currency: '\u00a0ToMaN\ufeff' } });
       let written = false;
+      let partnerInvoiceReads = 0;
       prisma.$use(async (params, next) => {
+        if (params.model === 'AccountingFinancialRecord' && params.action === 'findMany'
+          && (params.args.where?.sourceKind === 'PARTNER_INTERNAL_RECORD' ||
+            params.args.where?.AND?.some((predicate: { sourceKind?: string }) => predicate.sourceKind === 'PARTNER_INTERNAL_RECORD'))) {
+          partnerInvoiceReads++;
+        }
         const rows = await next(params);
         if (!written && params.model === 'AccountingContractFlag' && params.action === 'findMany'
           && params.args.where?.sourceFinancialRecordId?.in?.includes(fixture.invoice.id)) {
@@ -46,7 +52,9 @@ test('one-connection mixed list reads both flag counts before or after the same 
       const during = await counts();
       assert.ok(written);
       assert.deepEqual(during, [0, 0]);
+      partnerInvoiceReads = 0;
       assert.deepEqual(await counts(), [1, 1]);
+      assert.equal(partnerInvoiceReads, 1, 'the register reuses the invoice population that its scope already verified');
 
       const baseInvoice = { contractId: ordinary.id, sourceId: ordinary.id, amount: '10.50',
         kind: 'INVOICE_CANDIDATE', sourceKind: 'SALES_CONTRACT', createdBy: actorId } as const;
@@ -90,6 +98,23 @@ test('one-connection mixed list reads both flag counts before or after the same 
         assert.equal(row?.accounting.receivableStatus, 'NONE');
         assert.equal(row?.accounting.taxStatus, 'NOT_READY');
       }
+      const partnerInvoice = await writer.accountingFinancialRecord.findUniqueOrThrow({ where: { id: fixture.invoice.id } });
+      await writer.accountingFinancialRecord.createMany({ data: [
+        { ...partnerInvoice, id: 'mixed-partner-voided', status: 'VOIDED', voidedAt: new Date(),
+          createdAt: new Date(partnerInvoice.createdAt.getTime() - 1000), idempotencyKey: null,
+          sourceSnapshot: partnerInvoice.sourceSnapshot ?? undefined, metadata: partnerInvoice.metadata ?? undefined },
+        { ...partnerInvoice, id: 'mixed-partner-noncandidate', kind: 'PAYMENT_RECEIPT', idempotencyKey: null,
+          sourceSnapshot: partnerInvoice.sourceSnapshot ?? undefined, metadata: partnerInvoice.metadata ?? undefined },
+      ] });
+      const actor = { userId: actorId };
+      const reviewable = await listAccountingContracts({ view: 'reviewable' }, actor);
+      assert.equal(reviewable.items.find(item => item.contractId === 'partner:mixed-partner-voided')?.accounting.invoiceStatus, 'VOIDED');
+      assert.ok(!reviewable.items.some(item => item.contractId === 'partner:mixed-partner-noncandidate'));
+      const dashboard = await getAccountingDashboard({}, '6m', undefined, actor);
+      const queued = dashboard.workspace.queues.contracts.flatMap(row => row.financialRecords.map((record: { id: string }) => record.id));
+      assert.ok(queued.includes(fixture.invoice.id));
+      assert.ok(!queued.includes('mixed-partner-noncandidate'));
+      assert.equal(dashboard.trendError, false);
       const assertAuthoritativeFallback = async () => {
         const query = { view: 'reviewable', page: 5, pageSize: 1 };
         const reference = await listAccountingContracts({ ...query, dateFrom: 'retain-entire-population' }, { userId: actorId });

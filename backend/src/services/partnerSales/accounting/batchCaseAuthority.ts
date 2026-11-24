@@ -1,4 +1,4 @@
-import type { Prisma } from '@prisma/client';
+import type { PartnerProfile, PartnerSaleCase, Prisma } from '@prisma/client';
 import type { PartnerActionV2 } from '@sabalanerp/partner-sales-contracts';
 import { lockScopedActionRevisionForRead } from '../../effectiveAuthorization/scopedActions';
 import type { AuthorizationEvidence, AuthorizationRoot, AuthorizationSource } from '../authorization/contracts';
@@ -15,21 +15,17 @@ export async function batchAccountingCaseAuthority(tx: Prisma.TransactionClient,
   // SQL takes locks in the same sorted ID order as the command's User loop,
   // regardless of the database collation.
   const ids = [...new Set(caseIds)].sort();
-  if (ids.length) await tx.$queryRaw`SELECT c.id FROM partner_sale_cases c
+  const cases = ids.length ? await tx.$queryRaw<Array<Pick<PartnerSaleCase, 'id' | 'profileId' | 'customerContractId'>>>`
+    SELECT c.id, c."profileId", c."customerContractId" FROM partner_sale_cases c
     JOIN unnest(${ids}::text[]) WITH ORDINALITY AS ordered(id, position) ON ordered.id = c.id
-    ORDER BY ordered.position FOR SHARE OF c`;
-  signal?.throwIfAborted();
-  const cases = ids.length ? await tx.partnerSaleCase.findMany({ where: { id: { in: ids } },
-    select: { id: true, profileId: true, customerContractId: true } }) : [];
+    ORDER BY ordered.position FOR SHARE OF c` : [];
   signal?.throwIfAborted();
   if (cases.length !== ids.length) throw new Error('Accounting Case authority evidence changed');
   const profileIds = [...new Set(cases.map(row => row.profileId))].sort();
-  if (profileIds.length) await tx.$queryRaw`SELECT p.id FROM partner_profiles p
+  const profiles = profileIds.length ? await tx.$queryRaw<Array<Pick<PartnerProfile, 'id' | 'userId' | 'state' | 'revision'>>>`
+    SELECT p.id, p."userId", p.state::text AS state, p.revision FROM partner_profiles p
     JOIN unnest(${profileIds}::text[]) WITH ORDINALITY AS ordered(id, position) ON ordered.id = p.id
-    ORDER BY ordered.position FOR SHARE OF p`;
-  signal?.throwIfAborted();
-  const profiles = profileIds.length ? await tx.partnerProfile.findMany({ where: { id: { in: profileIds } },
-    select: { id: true, userId: true, state: true, revision: true } }) : [];
+    ORDER BY ordered.position FOR SHARE OF p` : [];
   signal?.throwIfAborted();
   if (profiles.length !== profileIds.length) throw new Error('Accounting profile authority evidence changed');
   const userIds = [...new Set([actorId, ...profiles.map(row => row.userId)])].sort();

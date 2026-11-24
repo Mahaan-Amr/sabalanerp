@@ -20,6 +20,15 @@ export async function readPartnerAccountingCapabilities(tx: Prisma.TransactionCl
   return { payments, tax, receivables, deleteDraft: approve, approve: approve && (edit.role === 'ADMIN' || edit.workspace === 'admin') };
 }
 
+export async function readPartnerAccountingListCapabilities(tx: PartnerPermissionReadClient, actorId: string) {
+  const edit = await readPartnerAccountingEditAuthority(tx, actorId);
+  if (!edit) return { payments: false, tax: false };
+  const [payments, tax] = await Promise.all([
+    edit.allows('accounting_payments_manage'), edit.allows('accounting_tax_manage'),
+  ]);
+  return { payments, tax };
+}
+
 async function readPartnerAccountingEditAuthority(tx: PartnerPermissionReadClient, actorId: string, at?: Date) {
   const actor = await tx.user.findUnique({ where: { id: actorId }, select: { role: true, isActive: true } });
   if (!actor?.isActive) return;

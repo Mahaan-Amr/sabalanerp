@@ -1280,17 +1280,7 @@ type AccountingLifecycleView = 'active' | 'inactive' | 'pending';
 
 const readPartnerContractSources = async (scope: AccountingReadScope, actorId: string,
   lifecycleView: AccountingLifecycleView, reviewablePartner: boolean) => {
-  const records = await scope.database.accountingFinancialRecord.findMany({
-    where: scope.financial({ sourceKind: PARTNER_INTERNAL_ACCOUNTING_SOURCE,
-      kind: FinancialRecordKind.INVOICE_CANDIDATE, contractId: null, customerId: null }),
-    select: {
-      id: true, sourceId: true, status: true, amount: true, currency: true, createdAt: true,
-      receivables: { where: scope.receivable(),
-        select: { status: true, currency: true, dueDate: true, paidAmount: true, remainingAmount: true } },
-    },
-    orderBy: { createdAt: 'desc' },
-  });
-  const contextualized = await scope.contextualize('FINANCIAL', records);
+  const contextualized = scope.partnerContractRecords();
   const flags = await scope.database.accountingContractFlag.findMany({ where: {
     sourceFinancialRecordId: { in: contextualized.map(record => record.id) }, status: 'OPEN' },
     select: { sourceFinancialRecordId: true, severity: true, createdAt: true, assignedToUserId: true, title: true } });

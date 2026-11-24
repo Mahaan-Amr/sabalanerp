@@ -491,10 +491,29 @@ const readInbox = async (database: Database, input: DutyReadInput) => {
     do {
       const candidates = await findCandidates(after, batchSize);
       countAccountingReadRows(history ? 'dutyHistoryCandidates' : 'dutyActiveCandidates', candidates.length);
-      correction.prepare(candidates);
+      const evidencePrepared = correction.prepare(candidates);
+      let actionableCandidates = candidates;
+      const isSharedCorrection = (duty: Candidate) => duty.sourceType === 'SALES_CONTRACT_CORRECTION'
+        && sharedDecisionActionCodes.includes(duty.sourceActionCode);
+      const sharedCorrectionIds = history ? [] : candidates.filter(isSharedCorrection).map(duty => duty.id);
+      if (sharedCorrectionIds.length) {
+        // Another actor can complete a shared decision while its source evidence is loading.
+        await evidencePrepared;
+        const refreshed = await database.crossWorkspaceDuty.findMany({
+          where: { id: { in: sharedCorrectionIds } },
+          select: { id: true, status: true, currentAssigneeUserId: true, sourceVersion: true },
+        });
+        const currentById = new Map(refreshed.map(duty => [duty.id, duty]));
+        actionableCandidates = candidates.filter(duty => {
+          if (!isSharedCorrection(duty)) return true;
+          const current = currentById.get(duty.id);
+          return current?.status === 'OPEN' && current.currentAssigneeUserId === duty.currentAssigneeUserId
+            && current.sourceVersion === duty.sourceVersion;
+        });
+      }
       // Bound the provider reads while retaining the database ordering.
-      for (let offset = 0; offset < candidates.length; offset += 4) {
-        const batch = await Promise.all(candidates.slice(offset, offset + 4).map(authorize));
+      for (let offset = 0; offset < actionableCandidates.length; offset += 4) {
+        const batch = await Promise.all(actionableCandidates.slice(offset, offset + 4).map(authorize));
         for (const row of batch) {
           if (!row) continue;
           if (options.summaryOnly) {

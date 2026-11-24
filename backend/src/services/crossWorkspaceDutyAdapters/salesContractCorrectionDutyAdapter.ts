@@ -1139,6 +1139,7 @@ export const createSalesCorrectionInboxReader = (database: CrossWorkspaceDutyDat
         batchFinished = reading.then(() => undefined, () => undefined);
         for (const id of batch) evidence.set(id, reading);
       }
+      return batchFinished;
     },
     async loadProjection(input: CrossWorkspaceDutySourceProjectionInput) {
       const sources = await evidence.get(input.sourceId);

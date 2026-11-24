@@ -58,6 +58,69 @@ test('summary shares recovery evidence across inquiries and rereads it on the ne
   assert.equal(evidenceReads, 2, 'a new summary rereads the shared journal instead of caching across requests');
 });
 
+test('the duty summary excludes shared corrections completed while loading source evidence', async () => {
+  const now = new Date('2026-11-25T10:00:00Z');
+  const definition = SALES_CONTRACT_CORRECTION_DUTY_DEFINITIONS.ACCOUNTING_VERIFY_CONTRACT_CORRECTION;
+  const duty = {
+    id: 'verification', sourceType: 'SALES_CONTRACT_CORRECTION', sourceId: 'correction', sourceVersion: 1,
+    sourceActionCode: definition.sourceActionCode, envelopeCode: definition.envelopeCode,
+    envelopeVersion: definition.envelopeVersion, destinationWorkspaceCode: 'ACCOUNTING',
+    currentAssigneeUserId: null, sourceActorUserId: 'seller', status: 'OPEN',
+    dueAt: now, createdAt: now, updatedAt: now,
+    envelope: {
+      isActive: true, allowedFieldsJson: [...definition.allowedFields],
+      allowedEvidenceJson: [...definition.allowedEvidence], allowedActionCodesJson: [...definition.allowedActionCodes],
+      responseSchemaJson: definition.responseSchema,
+    },
+  };
+  let liveDuty = duty;
+  let sourceVersion = duty.sourceVersion;
+  let completeDuringRead = false;
+  const empty = { findMany: async () => [], findUnique: async () => null, findFirst: async () => null };
+  const database = {
+    user: { findUnique: async () => ({ isActive: true, role: 'ADMIN' }) },
+    workspacePermission: empty,
+    roleWorkspacePermission: empty,
+    featurePermission: empty,
+    roleFeaturePermission: empty,
+    hrWorkspaceAccessGrant: empty,
+    hrFeatureAccessGrant: empty,
+    crossWorkspaceDuty: {
+      findMany: async ({ where }: any) => {
+        if (where.id?.in && !where.id.in.includes(liveDuty.id)) return [];
+        if (where.status && (typeof where.status === 'string'
+          ? where.status !== liveDuty.status
+          : !where.status.in.includes(liveDuty.status))) return [];
+        return [liveDuty];
+      },
+    },
+    crossWorkspaceDutyHistoryReceipt: { findUnique: async () => null },
+    crossWorkspaceDutyAvailableReceipt: { findUnique: async () => null },
+    accountingCorrectionRequest: {
+      findMany: async () => {
+        const source = { id: 'correction', contractId: 'contract', dutySourceVersion: sourceVersion, accountantNote: 'Review' };
+        if (completeDuringRead) {
+          liveDuty = { ...liveDuty, status: 'COMPLETED' };
+          sourceVersion++;
+        }
+        return [source];
+      },
+    },
+    salesContract: {
+      findMany: async () => [{
+        id: 'contract', contractNumber: '42', status: 'SIGNED', partnerCaseId: null,
+        customer: { firstName: 'Sample', lastName: 'Customer' },
+      }],
+    },
+  };
+  const input = { actorUserId: 'actor', workspaceCode: 'accounting', now };
+  assert.equal((await getCrossWorkspaceDutySummary(database as any, input)).open, 1);
+  completeDuringRead = true;
+  const summary = await getCrossWorkspaceDutySummary(database as any, input);
+  assert.equal(summary.open, 0);
+  assert.equal(summary.attention, 0);
+});
+
 test('correction history counts exact visible duties with batched evidence and a fresh grant decision per request', async () => {
   const now = new Date('2026-11-25T10:00:00Z');
   const lastSeenAt = new Date('2026-11-24T10:00:00Z');
@@ -102,7 +165,7 @@ test('correction history counts exact visible duties with batched evidence and a
     id, contractNumber: id, status: 'SIGNED', partnerCaseId: 'partner-case',
     customer: { firstName: 'Sample', lastName: 'Customer' },
   };
-  const reads = { corrections: 0, contracts: 0, grant: 0, duty: 0 };
+  const reads = { corrections: 0, contracts: 0, grant: 0, duty: 0, activeRefresh: 0 };
   const readCorrectionIds: string[] = [];
   let directGrantRevoked = false;
   const empty = { findMany: async () => [], findUnique: async () => null, findFirst: async () => null };
@@ -123,6 +186,10 @@ test('correction history counts exact visible duties with batched evidence and a
     hrFeatureAccessGrant: empty,
     crossWorkspaceDuty: {
       findMany: async ({ where, cursor, take }: any) => {
+        if (where.id?.in) {
+          reads.activeRefresh++;
+          return rows.filter(row => where.id.in.includes(row.id));
+        }
         const eligible = rows.filter(row => (typeof where.status === 'string' ? row.status === where.status : where.status.in.includes(row.status))
           && row.destinationWorkspaceCode === where.destinationWorkspaceCode
           && (!where.updatedAt?.gt || row.updatedAt > where.updatedAt.gt));
@@ -151,7 +218,7 @@ test('correction history counts exact visible duties with batched evidence and a
   const summary = await getCrossWorkspaceDutySummary(database as any, input);
   assert.equal(summary.historyUnseen, 214);
   assert.equal(summary.open, 1, 'only the current verification stage is actionable');
-  assert.deepEqual(reads, { corrections: 2, contracts: 2, grant: 1, duty: 0 });
+  assert.deepEqual(reads, { corrections: 2, contracts: 2, grant: 1, duty: 0, activeRefresh: 1 });
   assert.equal(readCorrectionIds.filter(id => id === 'correction-0').length, 1,
     'active and history reuse the common source evidence');
 

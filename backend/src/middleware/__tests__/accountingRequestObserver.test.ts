@@ -141,12 +141,13 @@ test('dashboard reads and the exact reviewable view receive distinct fixed route
   }
 });
 
-test('duty and notification read records retain fixed labels and database failure codes', async () => {
+test('Accounting-related read records retain fixed labels and database failure codes', async () => {
   const records: Array<{ route: string; requestId: string; outcome: string; code?: string }> = [];
   const middleware = createAccountingRequestObserver('local', record => records.push(record));
   const server = createServer((request, response) => {
     middleware(request, response, () => {
-      const code = request.url?.includes('/unread-count') ? 'P2028' : request.url?.includes('/summary') ? 'P2024' : undefined;
+      const expires = request.url?.includes('/unread-count') || request.url?.includes('/sabalan-plan-candidates');
+      const code = expires ? 'P2028' : request.url?.includes('/summary') ? 'P2024' : undefined;
       if (code) {
         reportAccountingRequestFailure(response, { code, message: 'PRIVATE' });
         response.statusCode = 500;
@@ -166,6 +167,7 @@ test('duty and notification read records retain fixed labels and database failur
       ['/api/notifications/?cursor=PRIVATE', '/api/notifications', 'success', undefined],
       ['/api/notifications/metadata?workspace=PRIVATE', '/api/notifications/metadata', 'success', undefined],
       ['/api/notifications/unread-count?workspace=PRIVATE', '/api/notifications/unread-count', 'transaction_expired', 'P2028'],
+      ['/api/partner/accounting/sabalan-plan-candidates?search=PRIVATE', '/api/partner/accounting/sabalan-plan-candidates', 'transaction_expired', 'P2028'],
     ];
     for (const [path, route, outcome, code] of reads) {
       const response = await fetch(origin + path);
@@ -178,7 +180,12 @@ test('duty and notification read records retain fixed labels and database failur
     const otherDuty = await fetch(origin + '/api/duties/workspaces/sales/duties?search=PRIVATE');
     await otherDuty.text();
     assert.equal(otherDuty.headers.get('x-accounting-request-id'), null);
-    for (const path of ['/api/notifications/unread-count', '/api/duties/workspaces/accounting/summary']) {
+    for (const path of [
+      '/api/notifications/unread-count',
+      '/api/duties/workspaces/accounting/summary',
+      '/api/partner/accounting/sabalan-plan-candidates',
+      '/api/partner/accounting/sabalan-payment-plan',
+    ]) {
       const response = await fetch(origin + path, { method: 'POST' });
       await response.text();
       assert.equal(response.headers.get('x-accounting-request-id'), null);

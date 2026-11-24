@@ -28,6 +28,7 @@ const relatedReadRoutes = [
   [/^\/api\/notifications$/, '/api/notifications'],
   [/^\/api\/notifications\/metadata$/, '/api/notifications/metadata'],
   [/^\/api\/notifications\/unread-count$/, '/api/notifications/unread-count'],
+  [/^\/api\/partner\/accounting\/sabalan-plan-candidates$/, '/api/partner/accounting/sabalan-plan-candidates'],
 ] as const;
 
 function hasExactView(search: string, view: 'reviewable' | 'history') {

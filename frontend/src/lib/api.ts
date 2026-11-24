@@ -1263,8 +1263,8 @@ export const createAccountingAPI = (api: RequestClient) => ({
   reopenCloseRun: (id: string, data: { confirmed: boolean; reason: string }) => api.post(`/accounting/period-end/close-runs/${id}/reopen`, data),
   createRestatementCase: (data: any) => api.post('/accounting/period-end/restatement-cases', data),
   archiveAccountingEvidence: (data: any) => api.post('/accounting/period-end/archive-evidence', data),
-    getPartnerSabalanPlanCandidates: (request?: AxiosRequestConfig) => api.get('/partner-accounting/sabalan-plan-candidates', request),
-    setPartnerSabalanPaymentPlan: (data: any, request?: AxiosRequestConfig) => api.post('/partner-accounting/sabalan-payment-plan', data, request),
+  getPartnerSabalanPlanCandidates: (request?: AxiosRequestConfig) => api.get('/partner/accounting/sabalan-plan-candidates', request),
+  setPartnerSabalanPaymentPlan: (data: any, request?: AxiosRequestConfig) => api.post('/partner/accounting/sabalan-payment-plan', data, request),
   getWorkspace: (params?: any) => api.get('/accounting/workspace', { params }),
   getDashboard: (params: { range: '1m' | '3m' | '6m' | '1y'; due?: string; deadlineType?: string }) =>
     api.get('/accounting/dashboard', { params }),

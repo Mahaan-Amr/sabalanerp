@@ -8,6 +8,7 @@ import { Router, type Request, type Response, type RequestHandler } from 'expres
 import { PartnerEventSchema, RevisionRefSchema, SabalanInternalRecordViewSchema, SabalanPaymentPlanSetSchema, partnerError, type Result } from '@sabalanerp/partner-sales-contracts';
 import { prisma } from '../lib/prisma';
 import { protect, type AuthRequest } from '../middleware/auth';
+import { reportAccountingRequestFailure } from '../middleware/accountingRequestObserver';
 import { createPartnerAccountingAdapter } from '../services/partnerSales/accounting/adapter';
 import { createPrismaPartnerAccountingRepository } from '../services/partnerSales/accounting/prismaRepository';
 import { PartnerAccountingTechnicalError } from '../services/partnerSales/accounting/errors';
@@ -37,6 +38,7 @@ const guarded = (handler: (request: AuthRequest, response: Response) => Promise<
     return handler(request as AuthRequest, response).catch(error => {
       const supportReference = randomUUID();
       const cause = error instanceof PartnerAccountingTechnicalError ? error.diagnostic : error;
+      reportAccountingRequestFailure(response, cause);
       console.error('Partner Accounting request failed', { supportReference,
         category: cause instanceof Error ? cause.name : 'UnknownError' });
       response.status(500).json({ success: false, code: 'TECHNICAL_FAILURE', supportReference,

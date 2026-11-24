@@ -46,7 +46,7 @@ async function routeAccounting(page: Page, actor: { id: string; role: string }) 
       [{ workspace: 'accounting', permission: 'admin' }],
     } });
     if (path === '/api/dashboard/route-availability') return route.fulfill({ json: { success: true, data: { allowed: true } } });
-    if (path === '/api/partner-accounting/sabalan-plan-candidates') return route.fulfill({ status: 403, json: { success: false } });
+    if (path === '/api/partner/accounting/sabalan-plan-candidates') return route.fulfill({ status: 403, json: { success: false } });
     if (path.endsWith('/badge/me')) return route.fulfill({ json: { success: true, badge: null } });
     return route.fulfill({ json: { success: true, data: { items: [], total: 0 }, count: 0, unreadCount: 0 } });
   });

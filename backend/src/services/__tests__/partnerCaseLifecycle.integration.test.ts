@@ -51,9 +51,11 @@ function databaseUrl() {
 test('Accounting reads authorized Case heads together and rejects damaged evidence outside the first page', async () => {
   const temporary = await createPartnerLifecycleDatabase({ repositoryRoot: process.cwd(), sourceDatabaseUrl: databaseUrl() });
   const database = new PrismaClient({ datasources: { db: { url: temporary.databaseUrl } }, log: [{ level: 'query', emit: 'event' }] });
-  let headReads = 0, planReads = 0;
+  let headReads = 0, planReads = 0, commercialReads = 0, freezeReads = 0;
   database.$on('query', ({ query }) => {
+    if (query.includes('FROM "public"."partner_correction_opportunities"')) freezeReads++;
     if (/FROM (?:"public"\.)?"?partner_payment_plans"?\b/.test(query)) planReads++;
+    if (query.includes('"sales_contracts"."dispatchExpiryExempt"')) commercialReads++;
     if (query.includes('"partner_case_revisions"."internalProjection"') && query.includes('"partner_case_revisions"."graph"')) headReads++;
   });
   const first = idsFor('page-a'), second = idsFor('page-b');
@@ -69,25 +71,76 @@ test('Accounting reads authorized Case heads together and rejects damaged eviden
         const view = partnerContracts.SabalanInternalRecordViewSchema.parse((revision.internalProjection as Prisma.JsonObject).accounting);
         const prepared = await preparePartnerFinancialSource({ view: { ...view, state: 'COMMITTED' }, partnerSellerId: ids.partnerId }, owner);
         assert.ok(prepared.ok);
+        const lifecycle = createPartnerCaseLifecycleService(dependencies(tx, ids));
+        assert.ok((await lifecycle.markAwaitingCustomerConfirmation({ expected: owner, commandId: ids.caseId + '-send',
+          correlationId: ids.caseId + '-send', snapshotId: ids.caseId + '-snapshot' })).ok);
+        assert.ok((await lifecycle.markCustomerApproved({ expected: owner, commandId: ids.caseId + '-approve',
+          correlationId: ids.caseId + '-approve', snapshotId: ids.caseId + '-snapshot', verifiedAt: '2026-08-30T08:00:00.000Z' })).ok);
+        assert.ok((await lifecycle.execute(await commitCommand(ids, owner, 'SIGNED'))).ok);
         await tx.accountingFinancialRecord.create({ data: { id: ids.caseId, sourceId: ids.internalId, sourceKind: PARTNER_INTERNAL_ACCOUNTING_SOURCE,
-          kind: 'INVOICE_CANDIDATE', amount: prepared.value.amount.amount, currency: prepared.value.amount.currency, createdBy: actorId,
+          kind: 'INVOICE_CANDIDATE', status: 'ISSUED', amount: prepared.value.amount.amount, currency: prepared.value.amount.currency, createdBy: actorId,
           sourceSnapshot: { partnerPreparation: prepared.value }, metadata: { partnerCaseId: ids.caseId } } });
+        const receivableId = ids.caseId + '-receivable';
+        await tx.accountingReceivable.create({ data: { id: receivableId, invoiceRecordId: ids.caseId,
+          originalAmount: prepared.value.amount.amount, remainingAmount: prepared.value.amount.amount,
+          currency: prepared.value.amount.currency, dueDate: new Date(prepared.value.paymentPlan.effectiveDate),
+          createdBy: actorId, metadata: { partnerReceivable: {
+            id: receivableId, invoiceRecordId: ids.caseId, internalRecordId: ids.internalId, owner,
+            partnerSellerId: ids.partnerId, commercialAccountId: ids.accountId,
+            originalAmount: prepared.value.amount, paymentPlan: prepared.value.paymentPlan } } } });
       }
     });
+    assert.equal(await database.accountingFinancialRecord.count(), 2, 'both committed fixture invoices exist');
     const firstPage = () => withAccountingReadScope(database, { userId: actorId }, async scope => {
       const rows = await scope.database.accountingFinancialRecord.findMany({ where: scope.financial(), orderBy: { id: 'asc' }, take: 1 });
       return scope.contextualize('FINANCIAL', rows);
     });
-    headReads = 0; planReads = 0;
+    headReads = 0; planReads = 0; commercialReads = 0; freezeReads = 0;
     const page = await firstPage();
     assert.deepEqual(page.map(row => [row.id, row.partnerContext?.caseId]), [[first.caseId, first.caseId]]);
-    const validPageHeadReads = headReads, validPagePlanReads = planReads;
+    const validPageHeadReads = headReads, validPagePlanReads = planReads, validCommercialReads = commercialReads;
+    const validFreezeReads = freezeReads;
+    const receiptActions = () => withAccountingReadScope(database, { userId: actorId }, async scope => {
+      const receivables = await scope.database.accountingReceivable.findMany({ where: scope.receivable(), orderBy: { id: 'asc' } });
+      return (await scope.contextualize('RECEIVABLE', receivables)).map(row => row.partnerActions?.registerReceipt);
+    });
+    assert.deepEqual(await receiptActions(), [true, true]);
+    await database.$transaction(async tx => {
+      for (const ids of [first, second]) {
+        const correctionId = ids.caseId + '-correction';
+        await tx.partnerCorrectionOpportunity.create({ data: { id: correctionId, caseId: ids.caseId,
+          predecessorRevision: 1, scope: 'SHARED', scopeHash: hash, requesterId: ids.partnerId,
+          approvedBy: 'sales-manager', approvedAt: new Date('2020-01-01'), expiresAt: new Date(ids === first ? '2099-01-01' : '2020-01-04'),
+          calendarVersion: 'TEHRAN_WORKING_DAYS_V1', evidence: {} } });
+        await tx.partnerCorrectionGate.create({ data: { id: correctionId + '-sales', opportunityId: correctionId,
+          kind: 'SALES_SCOPE', outcome: 'APPROVE', actorId: 'sales-manager', commandId: correctionId + '-sales', evidence: {} } });
+      }
+    });
+    assert.deepEqual(await receiptActions(), [false, true], 'an active approved predecessor freezes receipts until expiry');
+    await database.$transaction(async tx => {
+      // Represent the saved successor without moving the effective head in this isolated fixture.
+      await tx.$executeRawUnsafe('SET LOCAL session_replication_role = replica');
+      const revision = await tx.partnerCaseRevision.findUniqueOrThrow({ where: { caseId_revision: { caseId: second.caseId, revision: 1 } } });
+      await tx.partnerCaseRevision.create({ data: { ...revision, revision: 2, predecessorRevision: 1,
+        commandId: 'page-successor', graph: revision.graph as Prisma.InputJsonValue, partySnapshots: revision.partySnapshots as Prisma.InputJsonValue,
+        wholesaleEnvelope: revision.wholesaleEnvelope as Prisma.InputJsonValue, retailEnvelope: revision.retailEnvelope as Prisma.InputJsonValue,
+        paymentEvidence: revision.paymentEvidence as Prisma.InputJsonValue, customerContent: revision.customerContent as Prisma.InputJsonValue,
+        internalProjection: revision.internalProjection as Prisma.InputJsonValue, customerProjection: revision.customerProjection as Prisma.InputJsonValue } });
+      await tx.partnerCorrectionSave.create({ data: { opportunityId: second.caseId + '-correction', caseId: second.caseId,
+        successorRevision: 2, actorId: second.partnerId, savedAt: new Date('2020-01-02'), commandId: 'page-save' } });
+      await tx.partnerCorrectionGate.create({ data: { id: 'page-reject', opportunityId: first.caseId + '-correction',
+        kind: 'ACCOUNTING_PROCESS', outcome: 'REJECT', actorId: actorId, commandId: 'page-reject', evidence: {} } });
+    });
+    assert.deepEqual(await receiptActions(), [true, false], 'a rejection releases the predecessor and a saved successor keeps it frozen after expiry');
+
     await database.$transaction(async tx => {
       await tx.$executeRawUnsafe('SET LOCAL session_replication_role = replica');
       await tx.partnerCaseRevision.update({ where: { caseId_revision: { caseId: second.caseId, revision: 1 } },
         data: { graphHash: `sha256-v1:${'e'.repeat(64)}` } });
     });
     await assert.rejects(firstPage, { code: 'INTEGRITY_CONFLICT' });
+    assert.equal(validFreezeReads, 1, 'the authorized invoice population checks correction freezes in one query');
+    assert.equal(validCommercialReads, 1, 'commercial contract state is fetched once for the authorized population');
     assert.equal(validPageHeadReads, 1, 'the whole authorized page population needs one canonical head fetch');
     assert.equal(validPagePlanReads, 1, 'two Cases using their embedded terms need one current-plan lookup');
   } finally {

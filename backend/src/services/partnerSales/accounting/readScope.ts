@@ -1,4 +1,4 @@
-import { readAccountingCommercialState, readPartnerCommercialState } from '../cases/commercialLifecycle';
+import { readAccountingCommercialRoots, readAccountingCommercialState, readPartnerCommercialState } from '../cases/commercialLifecycle';
 import { randomUUID } from 'node:crypto';
 import { Prisma, type AccountingFinancialRecord, type PrismaClient } from '@prisma/client';
 import { RevisionRefSchema, type PartnerCommercialState } from '@sabalanerp/partner-sales-contracts';
@@ -14,7 +14,7 @@ import { partnerCheckTransitions } from './paymentPolicy';
 import { readPartnerAccountingCapabilities } from './capabilities';
 import { readPartnerSnapshot } from '../authorization/readSnapshot';
 import { partnerTaxTransitions } from './taxPolicy';
-import { partnerPredecessorIsFrozen } from '../corrections/mutationFreeze';
+import { partnerPredecessorIsFrozen, readFrozenPartnerPredecessors } from '../corrections/mutationFreeze';
 import { PARTNER_ACCOUNTING_MARKER_JSON_PATH } from './provenance';
 import { assertPartnerAccountingWitnesses as assertWitnesses, readPartnerReceivableEvidence } from './receivableEvidence';
 import { assertPartnerTaxEvidence, assertSinglePartnerTaxRecord } from './taxEvidence';
@@ -76,6 +76,7 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
     Boolean(row.internalRecordId && row.customerContractId && row.internalRecord && row.customerContract));
   finishCaseSelection();
   const allowedInternalIds: string[] = [];
+  const allowedCaseIds = new Set<string>();
   const writableCases = new Set<string>();
   let canManagePayments = false;
   let canManageTax = false;
@@ -98,6 +99,7 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
     for (const row of authorityCases) {
       if ((await authority.authorize('ACCOUNTING_READ', { kind: 'CASE', id: row.id })).ok) {
         allowedInternalIds.push(row.internalRecordId);
+        allowedCaseIds.add(row.id);
         if ((await authority.authorize('ACCOUNTING_WRITE', { kind: 'CASE', id: row.id })).ok) writableCases.add(row.id);
       }
     }
@@ -189,12 +191,20 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
   const finalCases = new Set<string>();
   const commercialByCase = new Map<string, PartnerCommercialState>();
   const sharesCaseFence = Boolean(actor && !selection.focusedCaseId);
-  const readCommercial = sharesCaseFence ? readAccountingCommercialState : readPartnerCommercialState;
+  let commercialRoots: ReturnType<typeof readAccountingCommercialRoots> | undefined;
   const readCommercialForCase = async (caseId: string) => {
     if (sharesCaseFence && !caseAuthority?.hasCase(caseId)) {
       throw new Error('Accounting commercial evidence requires a fenced Case');
     }
-    return commercialByCase.get(caseId) ?? readCommercial(database, caseId);
+    const known = commercialByCase.get(caseId);
+    if (known) return known;
+    if (!sharesCaseFence) return readPartnerCommercialState(database, caseId);
+    // A fresh preparation decision can allow a previously denied Case after a grant expires.
+    if (reviewRecordId || !allowedCaseIds.has(caseId)) return readAccountingCommercialState(database, caseId);
+    commercialRoots ??= readAccountingCommercialRoots(database, allowedCaseIds);
+    const root = (await commercialRoots).get(caseId);
+    if (!root) throw new Error('Fenced Accounting commercial Case evidence missing');
+    return readAccountingCommercialState(database, caseId, root);
   };
   const frozenCases = new Set<string>();
   const preparationByInvoice = new Map<string, PartnerFinancialPreparation>();
@@ -226,6 +236,8 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
     const pendingCaseIds = [...new Set(pendingInvoices.map(({ row }) => row.id))];
     const currentViews = sharesCaseFence
       ? await readCurrentPartnerCaseViewsBatch(database, pendingCaseIds.filter(id => !healthyCases.has(id))) : undefined;
+    const frozenHeads = currentViews && !reviewRecordId ? await readFrozenPartnerPredecessors(database, Array.from(currentViews.values(),
+      ({ row }) => ({ caseId: row.id, predecessorRevision: row.headRevision }))) : undefined;
     const currentPlanRows = sharesCaseFence ? await readCurrentSabalanPlanRows(database, pendingCaseIds) : undefined;
     for (const { invoice, row, owner, preparation } of pendingInvoices) {
       if (!healthyCases.has(row.id)) {
@@ -236,7 +248,8 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
         const commercial = await readCommercialForCase(row.id);
         if (commercial) commercialByCase.set(row.id, commercial);
         if (current.row.state === 'COMMITTED' && (!commercial || commercial.status === 'FINAL')) finalCases.add(row.id);
-        if (await partnerPredecessorIsFrozen(database, row.id, current.row.headRevision)) frozenCases.add(row.id);
+        const frozen = frozenHeads ? frozenHeads.has(row.id) : await partnerPredecessorIsFrozen(database, row.id, current.row.headRevision);
+        if (frozen) frozenCases.add(row.id);
         healthyCases.add(row.id);
       }
       // The current projection already passed the canonical reconstruction.

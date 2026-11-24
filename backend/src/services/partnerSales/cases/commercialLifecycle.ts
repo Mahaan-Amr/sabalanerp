@@ -216,10 +216,27 @@ export async function readPartnerCommercialState(tx: Tx, caseId: string,
   return (await readPartnerCommercialDetails(tx, caseId, response, presentation))?.commercial;
 }
 
+const commercialRootSelect = {
+  id: true,
+  state: true, headRevision: true, integrityHash: true, pricingState: true,
+  profileId: true, profile: { select: { userId: true } },
+  customerContract: { select: { id: true, partnerKind: true, commercialFlowVersion: true,
+    status: true, salesApprovalRevision: true, customerAcceptanceRevision: true, commercialRevision: true,
+    firstFinancialRecordAt: true, commercialExpiresAt: true, dispatchExpiryExempt: true } },
+} satisfies Prisma.PartnerSaleCaseSelect;
+type CommercialRoot = Prisma.PartnerSaleCaseGetPayload<{ select: typeof commercialRootSelect }>;
+
+export async function readAccountingCommercialRoots(tx: Tx, caseIds: ReadonlySet<string>) {
+  const rows = await tx.partnerSaleCase.findMany({ where: { id: { in: [...caseIds] } }, select: commercialRootSelect });
+  return new Map(rows.map(row => [row.id, row]));
+}
+
 /** Commercial evidence for an audited Accounting snapshot that already holds
  * the shared Case fence. The owning Case also fences Inquiry successor writes. */
-export async function readAccountingCommercialState(tx: Tx, caseId: string): Promise<PartnerCommercialState | undefined> {
-  const value = await readPartnerCommercialDetailsInternal(tx, caseId, undefined, undefined, { accountingSnapshot: true });
+export async function readAccountingCommercialState(tx: Tx, caseId: string,
+  commercialRoot?: CommercialRoot): Promise<PartnerCommercialState | undefined> {
+  if (commercialRoot && commercialRoot.id !== caseId) throw new Error('Accounting commercial Case mismatch');
+  const value = await readPartnerCommercialDetailsInternal(tx, caseId, undefined, undefined, { accountingSnapshot: true, commercialRoot });
   return value && 'commercial' in value ? value.commercial : undefined;
 }
 
@@ -240,14 +257,10 @@ export async function readPartnerCommercialEditingDetails(tx: Tx, caseId: string
 async function readPartnerCommercialDetailsInternal(tx: Tx, caseId: string,
   response?: 'READY' | 'PARTIAL' | 'WAITING' | 'REJECTED' | 'EXPIRED',
   presentation?: { complete: boolean; resubmittedWaiting: boolean },
-  { navigationOnly = false, accountingSnapshot = false } = {}) {
-  const root = await tx.partnerSaleCase.findUnique({ where: { id: caseId }, select: {
-    state: true, headRevision: true, integrityHash: true, pricingState: true,
-    profileId: true, profile: { select: { userId: true } },
-    customerContract: { select: { id: true, partnerKind: true, commercialFlowVersion: true,
-      status: true, salesApprovalRevision: true, customerAcceptanceRevision: true, commercialRevision: true,
-      firstFinancialRecordAt: true, commercialExpiresAt: true, dispatchExpiryExempt: true } },
-  } });
+  { navigationOnly = false, accountingSnapshot = false, commercialRoot }: {
+    navigationOnly?: boolean; accountingSnapshot?: boolean; commercialRoot?: CommercialRoot;
+  } = {}) {
+  const root = commercialRoot ?? await tx.partnerSaleCase.findUnique({ where: { id: caseId }, select: commercialRootSelect });
   const contract = root?.customerContract;
   if (!root || !contract || !isPartnerCommercialFlow(contract)) return undefined;
   const final = contract.status === 'SIGNED';

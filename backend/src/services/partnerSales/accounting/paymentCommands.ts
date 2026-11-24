@@ -153,7 +153,9 @@ export async function executePartnerCollectionAction(database: PrismaClient, com
       if (method === 'CHECK' && (!command.check?.checkNumber?.trim() || !command.check.ownerName?.trim() ||
           !InstantSchema.safeParse(checkDueInstant).success)) throw invalid();
       delta = method === 'CHECK' ? '0' : amount;
-      payment = await tx.accountingPaymentStatus.create({ data: { receivableId: receivable.id, method, amount,
+      // History admits the row by createdAt and replays its movements by recordedAt.
+      // Register both on the database clock, even for an explicitly backdated receipt.
+      payment = await tx.accountingPaymentStatus.create({ data: { receivableId: receivable.id, method, amount, createdAt: clock.now,
         currency: receivable.currency, status: 'RECEIVED', checkStatus: method === 'CHECK' ? 'RECEIVED' : null,
         checkNumber: command.check?.checkNumber, checkOwnerName: command.check?.ownerName,
         checkDueDate: checkDueInstant ? new Date(checkDueInstant) : null,

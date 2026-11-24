@@ -9,6 +9,7 @@ import type { AddressInfo } from 'node:net';
 import accountingRouter from '../../routes/accounting';
 import partnerAccountingRouter from '../../routes/partner-accounting';
 import { createAuthoritativeSession, SESSION_COOKIE } from '../identitySessionService';
+import { readPartnerOutstandingHistory } from '../partnerSales/accounting/history';
 import { PartnerAccountingCommandError } from '../partnerSales/accounting/errors';
 import { executeContractLifecycleAction, createContractLifecycleRequest, decideContractLifecycleRequest,
   ContractLifecycleBlockedError } from '../contractLifecycleService';
@@ -145,6 +146,17 @@ async function main() {
       const cash = await action({ kind: 'REGISTER_RECEIPT', receivableId: receivable.id, method: 'CASH', amount: '50.25',
         note: 'آزمون دریافت نقدی' }, `${recordId}-cash`);
       assert.equal(cash.status, 200, JSON.stringify(cash.body));
+      const cashRow = await prisma.accountingPaymentStatus.findUniqueOrThrow({
+        where: { id: cash.body.data.affected.paymentEventIds[0] },
+      });
+      const cashLedger = cashRow.metadata as { collectionMovements: Array<{ recordedAt: string }> };
+      const cashRegistration = Date.parse(cashLedger.collectionMovements[0].recordedAt);
+      for (const [asOf, expected] of [[cashRegistration - 1, '0'], [cashRegistration, '50.25']] as const) {
+        const [historical] = await prisma.$transaction(tx => readPartnerOutstandingHistory(tx, {
+          invoiceIds: [recordId], asOf: new Date(asOf), cutoff: new Date(asOf + 1),
+        }));
+        assert.equal(historical?.paidAmount, expected, 'the receipt enters history at its database registration instant');
+      }
       await assertBalance('50.25', '1549.75');
       const reverse = { kind: 'REVERSE_RECEIPT', paymentEventId: cash.body.data.affected.paymentEventIds[0], reason: 'استرداد وجه آزمایشی' };
       const reversed = await action(reverse, `${recordId}-cash-reverse`);

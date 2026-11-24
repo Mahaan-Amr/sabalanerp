@@ -1,8 +1,16 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import test from 'node:test';
+import { Prisma } from '@prisma/client';
 import { createAccountingLedgerAdministration } from '../accountingLedgerAdministration';
 import { hashCustomerTreasuryEvidence } from '../accountingCustomerTreasury';
+import { verifyGuardPhysicalReturn } from '../dispatchCorrectionOutage';
+import { readStoneReturnAvailability } from '../stoneReturnAvailability';
+import { recordStoneReturnReceipt } from '../stoneReturnReceipts';
+import { readStoneReturnAllocationReview, saveStoneReturnAllocationDraft } from '../stoneReturnAllocationDraft';
+import { finalizeStoneReturn, readStoneReturnPostingContext } from '../stoneReturnFinalization';
+import { readShipmentQuantityProjection, shipmentQuantityEvidenceIntegrityHash } from '../shipmentQuantityProjectionStore';
 import { importBankStatementFilePrisma, resolveBankFileExceptionPrisma } from '../accountingBankFileImport';
 import { listPostedJournal, listPostedTrialBalance, verifyLedgerAuditChain } from '../accountingLedgerPrismaRepository';
 import {
@@ -18,10 +26,14 @@ import {
   exportCustomerStatementPrisma,
   projectCustomerAccountPrisma,
   provisionCustomerAccountingProfile,
+  publishInventoryCostEvidencePrisma,
+  publishInventoryValuationEvidencePrisma,
   importBankStatementLinePrisma,
   proposeBankMatchesPrisma,
   confirmBankMatchPrisma,
   listTreasuryOverviewPrisma,
+  recognizeCustomerReturnPrisma,
+  recognizeCustomerReturnWithin,
   recognizeCustomerSalePrisma,
   recordCustomerReceiptPrisma,
 } from '../accountingCustomerTreasuryPrisma';
@@ -29,7 +41,7 @@ import { createTemporaryConcurrencyDatabase } from './shipmentStatementConcurren
 
 const sourceDatabaseUrl = process.env.ACCOUNTING_LEDGER_TEST_DATABASE_URL;
 
-test('customer revenue and treasury tracer bullet persists once and projects only posted evidence', { skip: !sourceDatabaseUrl, timeout: 240_000 }, async () => {
+test('customer revenue and treasury tracer bullet persists once and projects only posted evidence', { skip: !sourceDatabaseUrl, timeout: 240_000 }, async (t) => {
   const temporary = await createTemporaryConcurrencyDatabase({ repositoryRoot: path.resolve(process.cwd(), '..'),
     sourceDatabaseUrl: sourceDatabaseUrl!, migrateEmptySchema: true });
   const database = temporary.client();
@@ -363,6 +375,408 @@ test('customer revenue and treasury tracer bullet persists once and projects onl
     assert.deepEqual(attempt.safeResponse, { status: 'accepted', nested: { receipt: 'safe' } });
     assert.equal((await database.accountingTaxInvoice.findFirstOrThrow()).status, 'SUBMITTED');
     await assert.rejects(() => database.accountingCustomerOpenItem.update({ where: { id: sale.openItem.id }, data: { originalRials: '1' } }), /ACCOUNTING_IMMUTABLE_RECORD/);
+
+    await t.test('verified Guard return is atomic with its caller and can be reposted once after rollback', async (returnTest) => {
+      const returnedAt = new Date('2026-09-28T08:00:00Z');
+      const customer = await database.crmCustomer.create({
+        data: { id: command.partySourceId, firstName: 'مشتری', lastName: 'نمونه' },
+      });
+      const department = await database.department.create({ data: { name: 'Return QA', namePersian: 'آزمون مرجوعی' } });
+      await database.user.create({ data: { id: actor.id, username: 'return-accountant',
+        email: 'return-accountant@example.invalid', password: 'test-only', firstName: 'حسابدار', lastName: 'آزمون' } });
+      const product = await database.product.create({ data: {
+        code: 'return-test-stone', name: 'Test stone', namePersian: 'سنگ آزمون',
+        cuttingDimensionCode: 'slab', cuttingDimensionName: 'Slab', cuttingDimensionNamePersian: 'اسلب',
+        stoneTypeCode: 'granite', stoneTypeName: 'Granite', stoneTypeNamePersian: 'گرانیت',
+        widthCode: 'w60', widthValue: 60, widthName: '۶۰',
+        thicknessCode: 't2', thicknessValue: 2, thicknessName: '۲',
+        mineCode: 'test', mineName: 'Test mine', mineNamePersian: 'معدن آزمون',
+        finishCode: 'flame', finishName: 'Flame', finishNamePersian: 'فلیم',
+        colorCode: 'gray', colorName: 'Gray', colorNamePersian: 'طوسی',
+        qualityCode: 'a', qualityName: 'A', qualityNamePersian: 'درجه یک', images: [],
+      } });
+      const originalLine = command.lines[0];
+      const contract = await database.salesContract.create({ data: {
+        id: command.contractId, contractNumber: command.contractId, title: 'Return QA', titlePersian: 'آزمون مرجوعی',
+        content: '', customerId: customer.id, departmentId: department.id, createdBy: actor.id, responsibleSellerId: actor.id,
+        contractData: { products: [{ rowId: originalLine.productRowId, productId: product.id, quantity: 2, unit: 'count' }] },
+      } });
+      const item = await database.contractItem.create({ data: {
+        contractId: contract.id, productId: product.id, productRowId: originalLine.productRowId, quantity: 2,
+        unitPrice: 500, totalPrice: 1000,
+      } });
+      const project = await database.projectAddress.create({ data: { customerId: customer.id, address: 'نشانی آزمون' } });
+      const loading = await database.logisticsLoading.create({ data: { loadingNumber: 'return-fixture-loading',
+        customerId: customer.id, projectId: project.id, createdBy: actor.id } });
+      const dispatchEvidence = {
+        id: 'return-fixture-dispatch', contractId: contract.id, contractItemId: item.id,
+        productRowId: originalLine.productRowId, unit: 'count', kind: 'PHYSICAL_EXIT' as const, quantity: '2.000',
+        effectiveAt: command.transferredAt.toISOString(), recordedAt: command.transferredAt.toISOString(),
+        sourceType: 'GUARD_PHYSICAL_EXIT', sourceId: 'return-fixture-exit', sourceVersion: 1,
+        metadata: { loadingId: loading.id },
+      };
+      await database.shipmentQuantityEvidence.create({ data: { ...dispatchEvidence,
+        integrityHash: shipmentQuantityEvidenceIntegrityHash({ ...dispatchEvidence, integrityHash: '' }),
+      } });
+      const movement = await database.securityVehicleMovement.create({ data: { movementNumber: 'return-fixture-movement',
+        direction: 'INBOUND', purpose: 'SALES_RETURN', status: 'INFO_COMPLETED',
+        customerId: customer.id, loadingId: loading.id, occurredAt: returnedAt, completedAt: returnedAt, createdBy: actor.id,
+      } });
+      const returnEvidence = await verifyGuardPhysicalReturn(database, { movementId: movement.id,
+        dispatchEvidenceId: dispatchEvidence.id, quantity: '1.000', actorId: actor.id,
+        authority: { actorRole: 'ADMIN', workspace: 'guard', workspacePermission: 'admin' },
+      });
+
+      const returnCommand = {
+        originalInvoiceId: sale.invoice.id, commercialCreditNumber: 'credit-1',
+        bookId: command.bookId, fiscalYearId: command.fiscalYearId, periodId: command.periodId,
+        returnedAt, evidenceIds: [returnEvidence.id], lines: [{
+          id: 'credit-line-1', originalLineId: originalLine.id, evidenceId: returnEvidence.id,
+          productRowId: originalLine.productRowId, quantity: '1.000', netRials: 500n, taxRials: 50n,
+          costRials: 300n, taxRule: originalLine.taxRule,
+        }], postingRule: command.postingRule, idempotencyKey: 'credit-1', correlationId: 'credit-correlation-1', actor,
+      };
+      const accountAt = { profileId: profile.id, asOf: new Date(Date.now() + 1_000) };
+      const journalScope = { bookId: book.id, fiscalYearId: year.id };
+      const journalBefore = await listPostedJournal(database, journalScope);
+      const abort = new Error('Caller rejected the return');
+
+      await returnTest.test('negotiated credit above the entire original invoice preserves its original reversals and rolls back atomically', async () => {
+        const originalTaxLine = await database.accountingTaxInvoiceLine.findUniqueOrThrow({
+          where: { taxInvoiceId_sourceLineId: { taxInvoiceId: sale.taxInvoice!.id, sourceLineId: originalLine.id } },
+        });
+        const negotiatedCredit = { caseId: 'stone-return-case-1', agreedGrossRials: 1_500n, lines: [{
+          lineId: 'credit-line-1', agreedUnitRateRials: '1500', rateDifferenceReason: 'توافق برای قبول برگشت',
+        }] };
+        await assert.rejects(database.$transaction(async (tx) => {
+          const staged = await recognizeCustomerReturnWithin(tx, returnCommand, negotiatedCredit);
+          assert.equal(staged.grossRials.toFixed(0), '550');
+          assert.equal((await projectCustomerAccountPrisma(tx, accountAt)).standaloneCreditRials, 1_500n);
+          const voucher = (await listPostedJournal(tx, journalScope)).find((entry) => entry.id === staged.ledgerVoucherId);
+          assert.ok(voucher);
+          const postedAmounts = voucher.lines.map((line) => [line.accountId, line.debitRials.toFixed(0), line.creditRials.toFixed(0)]);
+          assert.deepEqual(postedAmounts, [
+            [revenue.id, '500', '0'], [tax.id, '50', '0'], [revenue.id, '950', '0'],
+            [receivable.id, '0', '1500'], [inventory.id, '300', '0'], [cost.id, '0', '300'],
+          ]);
+          assert.equal(voucher.lines.find((line) => line.accountId === receivable.id)?.partyId, profile.accountingPartyId);
+          const returnTaxInvoice = await tx.accountingTaxInvoice.findUniqueOrThrow({
+            where: { id: staged.taxInvoiceId! }, include: { lines: true, outboxMessages: true },
+          });
+          assert.equal(returnTaxInvoice.referenceTaxInvoiceId, sale.taxInvoice?.id);
+          assert.equal(returnTaxInvoice.documentKind, 'RETURN');
+          assert.equal(returnTaxInvoice.outboxMessages.length, 1);
+          const [taxLine] = returnTaxInvoice.lines;
+          assert.equal(taxLine.rawBaseAmount.toFixed(0), '500');
+          assert.equal(taxLine.roundedTaxRials.toFixed(0), '50');
+          assert.equal(taxLine.costRials.toFixed(0), '300');
+          assert.equal(taxLine.taxRuleId, originalLine.taxRule.id);
+          assert.equal(taxLine.taxRuleVersion, originalLine.taxRule.version);
+          assert.equal(taxLine.citation, originalLine.taxRule.citation);
+          assert.equal(taxLine.exempt, originalLine.taxRule.exempt);
+          assert.deepEqual(taxLine.allocationEvidence, {
+            returnEvidenceId: returnEvidence.id, originalLineId: originalLine.id,
+            originalTaxLineId: originalTaxLine.id, rateBasisPoints: 1000,
+          });
+          const postedEvidence = await tx.accountingLedgerVoucher.findUniqueOrThrow({
+            where: { id: staged.ledgerVoucherId }, select: { sourcePayload: true, lines: { select: { evidenceType: true } } },
+          });
+          const payload = postedEvidence.sourcePayload as Prisma.JsonObject;
+          assert.deepEqual(payload.negotiatedCredit, {
+            caseId: 'stone-return-case-1', originalInvoiceId: sale.invoice.id, originalTaxInvoiceId: sale.taxInvoice!.id,
+            agreedGrossRials: '1500', standardGrossRials: '550', commercialDifferenceRials: '950',
+            lines: [{ lineId: 'credit-line-1', agreedUnitRateRials: '1500', rateDifferenceReason: 'توافق برای قبول برگشت',
+              originalLineId: originalLine.id, originalTaxLineId: originalTaxLine.id, returnEvidenceId: returnEvidence.id,
+              quantity: '1.000', netRials: '500', taxRials: '50', costRials: '300', taxRule: originalLine.taxRule }],
+          });
+          assert.equal(postedEvidence.lines.filter((line) => line.evidenceType === 'CUSTOMER_RETURN_COMMERCIAL_DIFFERENCE').length, 1);
+          assert.equal((await recognizeCustomerReturnWithin(tx, returnCommand, negotiatedCredit)).id, staged.id);
+          for (const changedTerms of [
+            { ...negotiatedCredit, caseId: 'different-case' },
+            { ...negotiatedCredit, agreedGrossRials: 1_501n },
+            { ...negotiatedCredit, lines: [{ ...negotiatedCredit.lines[0], agreedUnitRateRials: '1501' }] },
+            { ...negotiatedCredit, lines: [{ ...negotiatedCredit.lines[0], rateDifferenceReason: 'علت دیگری برای همان توافق' }] },
+          ]) {
+            await assert.rejects(recognizeCustomerReturnWithin(tx, returnCommand, changedTerms), { code: 'IDEMPOTENCY_KEY_REUSED' });
+          }
+          throw abort;
+        }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }), (error) => error === abort);
+        assert.equal((await projectCustomerAccountPrisma(database, accountAt)).standaloneCreditRials, 0n);
+        assert.deepEqual(await listPostedJournal(database, journalScope), journalBefore);
+      });
+      await returnTest.test('lower rates require a reason and equal net rates preserve the original VAT independently', async () => {
+        const terms = { caseId: 'stone-return-case-1', agreedGrossRials: 400n,
+          lines: [{ lineId: 'credit-line-1', agreedUnitRateRials: '400' }] };
+        const transactionOptions = { isolationLevel: Prisma.TransactionIsolationLevel.Serializable };
+        await assert.rejects(database.$transaction((tx) => recognizeCustomerReturnWithin(tx, returnCommand, terms),
+          transactionOptions), { code: 'NEGOTIATED_RETURN_RATE_REASON_REQUIRED' });
+        await assert.rejects(database.$transaction((tx) => recognizeCustomerReturnWithin(tx, returnCommand, {
+          ...terms, agreedGrossRials: 500n, lines: [{ lineId: 'credit-line-1', agreedUnitRateRials: '499.999' }],
+        }), transactionOptions), { code: 'NEGOTIATED_RETURN_RATE_REASON_REQUIRED' });
+
+        for (const { agreedGrossRials, rate, reason, adjustment } of [
+          { agreedGrossRials: 400n, rate: '400', reason: 'توافق درباره کاهش نرخ مرجوعی', adjustment: '150' },
+          { agreedGrossRials: 500n, rate: '500.00', reason: undefined, adjustment: '50' },
+        ]) {
+          await assert.rejects(database.$transaction(async (tx) => {
+            const credit = await recognizeCustomerReturnWithin(tx, returnCommand, {
+              ...terms, agreedGrossRials,
+              lines: [{ lineId: 'credit-line-1', agreedUnitRateRials: rate, rateDifferenceReason: reason }],
+            });
+            assert.equal(credit.grossRials.toFixed(0), '550');
+            assert.equal(credit.taxRials.toFixed(0), '50');
+            assert.equal((await projectCustomerAccountPrisma(tx, accountAt)).standaloneCreditRials, agreedGrossRials);
+            const voucher = (await listPostedJournal(tx, journalScope)).find((entry) => entry.id === credit.ledgerVoucherId);
+            assert.ok(voucher);
+            assert.equal(voucher.lines.find((line) => line.accountId === revenue.id && line.creditRials.gt(0))?.creditRials.toFixed(0), adjustment);
+            assert.equal(voucher.lines.find((line) => line.accountId === receivable.id)?.creditRials.toFixed(0), agreedGrossRials.toString());
+            throw abort;
+          }, transactionOptions), (error) => error === abort);
+        }
+      });
+
+      await assert.rejects(database.$transaction(async (tx) => {
+        const staged = await recognizeCustomerReturnWithin(tx, returnCommand);
+        assert.equal(staged.status, 'CREDIT_NOTE');
+        assert.equal((await projectCustomerAccountPrisma(tx, accountAt)).standaloneCreditRials, 550n);
+        throw abort;
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }), (error) => error === abort);
+      assert.equal((await projectCustomerAccountPrisma(database, accountAt)).standaloneCreditRials, 0n);
+      assert.deepEqual(await listPostedJournal(database, journalScope), journalBefore);
+
+      const credit = await recognizeCustomerReturnPrisma(database, returnCommand);
+      const replay = await recognizeCustomerReturnPrisma(database, returnCommand);
+
+      assert.equal(replay.id, credit.id);
+      assert.equal(credit.referenceInvoiceId, sale.invoice.id);
+      assert.equal((await projectCustomerAccountPrisma(database, accountAt)).standaloneCreditRials, 550n);
+      const journal = await listPostedJournal(database, journalScope);
+      const creditLine = journal.find((voucher) => voucher.id === credit.ledgerVoucherId)?.lines.find((line) => line.accountId === receivable.id);
+      assert.equal(creditLine?.partyId, profile.accountingPartyId);
+      assert.equal(creditLine.creditRials.toFixed(0), '550');
+
+      await returnTest.test('Logistics 40/35 receipt posts one negotiated credit across two invoices, rolls back fully on a second-invoice error, and replays once', async (stoneReturnTest) => {
+        const dispatchAt = new Date('2026-09-22T08:00:00Z');
+        const recognizedAt = new Date('2026-09-23T08:00:00Z');
+        const postingDate = '2026-09-24';
+        async function createOriginal(key: string, shipped: number, rate: bigint, unitCost: bigint) {
+          const contractId = `excess-return-contract-${key}`;
+          const productRowId = `excess-return-row-${key}`;
+          const commercialInvoiceNumber = `excess-original-${key}`;
+          await database.salesContract.create({ data: {
+            id: contractId, contractNumber: contractId, title: 'Return QA', titlePersian: 'آزمون مرجوعی سنگ',
+            content: '', customerId: customer.id, departmentId: department.id, createdBy: actor.id, responsibleSellerId: actor.id,
+            contractData: { products: [{ rowId: productRowId, productId: product.id, quantity: shipped + 5, unit: 'squareMeter' }] },
+          } });
+          const item = await database.contractItem.create({ data: {
+            contractId, productId: product.id, productRowId, quantity: shipped + 5,
+            unitPrice: rate.toString(), totalPrice: (BigInt(shipped + 5) * rate).toString(),
+          } });
+          await provisionCustomerAccountingProfile(database, { ...profileInput, relationshipId: contractId,
+            evidence: { contractId, version: 1, state: 'APPROVED' } });
+          const events = [
+            { kind: 'CONTRACTED_SET' as const, sourceType: 'CONTRACT_QUANTITY_VERSION', quantity: shipped + 5 },
+            { kind: 'ALLOCATION_FINALIZED' as const, sourceType: 'LOGISTICS_ALLOCATION_REVISION', quantity: shipped },
+            { kind: 'PHYSICAL_EXIT' as const, sourceType: 'GUARD_PHYSICAL_EXIT', quantity: shipped },
+          ];
+          for (const [index, event] of events.entries()) {
+            const evidence = {
+              id: `excess-return-${key}-${index}`, contractId, contractItemId: item.id, productRowId,
+              unit: 'squareMeter', kind: event.kind, quantity: `${event.quantity}.000`,
+              effectiveAt: dispatchAt.toISOString(), recordedAt: dispatchAt.toISOString(),
+              sourceType: event.sourceType, sourceId: `excess-return-${key}-${index}`, sourceVersion: 1,
+              metadata: index === 2 ? { loadingId: loading.id } : {},
+            };
+            await database.shipmentQuantityEvidence.create({ data: { ...evidence,
+              integrityHash: shipmentQuantityEvidenceIntegrityHash({ ...evidence, integrityHash: '' }),
+            } });
+          }
+          const dispatchEvidenceId = `excess-return-${key}-2`;
+          const valuation = await publishInventoryValuationEvidencePrisma(database, {
+            shipmentQuantityEvidenceId: dispatchEvidenceId, valuationVersion: 1, valuationMethod: 'SPECIFIC_IDENTIFICATION',
+            inventoryDocumentId: `valuation-${key}`, unitCostRials: unitCost, actorId: actor.id,
+          });
+          const cost = await publishInventoryCostEvidencePrisma(database, { legalEntityId: entity.id, valuationEvidenceId: valuation.id });
+          const netRials = BigInt(shipped) * rate;
+          const costRials = BigInt(shipped) * unitCost;
+          const policy = await createControlTransferPolicyPrisma(database, {
+            contractId, version: 1, carriage: 'CONTRACTUAL_EXCEPTION', recognitionPoint: 'EXPLICIT_EXCEPTION',
+            exceptionReason: 'شرط تحویل ویژه مصوب قرارداد آزمون', exceptionOccurredAt: recognizedAt,
+            effectiveFrom: dispatchAt, exceptionTerms: [{ productRowId, quantity: String(shipped),
+              netRials: netRials.toString(), costRials: costRials.toString() }], actor,
+          });
+          const baseEvidence = { id: policy.id, version: 1, type: 'CONTRACTUAL_EXCEPTION', occurredAt: recognizedAt,
+            contractId, contractVersion: 1, productRows: [{ id: productRowId, quantity: String(shipped) }] };
+          const posted = await recognizeCustomerSalePrisma(database, { ...command, contractId, commercialInvoiceNumber,
+            transferredAt: recognizedAt, idempotencyKey: commercialInvoiceNumber, correlationId: commercialInvoiceNumber,
+            policy: { ...command.policy, id: policy.id },
+            evidence: { ...baseEvidence, hash: hashCustomerTreasuryEvidence(baseEvidence) },
+            lines: [{ ...originalLine, id: key, productRowId, quantity: String(shipped), netRials, taxRials: netRials / 10n,
+              costRials, costEvidenceId: cost.id }],
+          });
+          assert.equal(posted.kind, 'POSTED');
+          if (posted.kind !== 'POSTED') throw new Error('Original sale did not post');
+          return { contractId, originalInvoiceId: posted.invoice.id, originalTaxInvoiceId: posted.invoice.taxInvoiceId,
+            originalLineId: key, dispatchEvidenceId };
+        }
+        const first = await createOriginal('a', 20, 1_200_000n, 100n);
+        const second = await createOriginal('b', 30, 2_100_000n, 200n);
+        const { data: accepted } = await recordStoneReturnReceipt(database, actor.id, {
+          requestId: randomUUID(), customerId: customer.id, productId: product.id, unit: 'squareMeter',
+          receivedQuantity: '40', acceptedQuantity: '35', rejectionReason: 'لب‌پریدگی',
+        });
+        assert.ok(accepted.inventoryIdentityId);
+        const [{ quantity: available }] = (await readStoneReturnAvailability(database, [product.id])).get(product.id)!;
+        assert.equal(available, '35');
+        const rows = [{ ...first, quantity: '15' }, { ...second, quantity: '20' }];
+        const draftInput = { expectedVersion: 0, rows: [rows[0]] };
+        const partial = await saveStoneReturnAllocationDraft(database, accepted.id, actor.id, draftInput);
+        const returnCommand = { expectedVersion: partial.draft.version, requestId: 'certify-multi-reference',
+          date: postingDate, periodId: command.periodId, postingRuleId: postingRule.id, confirmed: true,
+          agreedUnitRateRials: '2500000.024' };
+        const accountant = { id: actor.id, profile: 'ACCOUNTANT' as const };
+        await assert.rejects(finalizeStoneReturn(database, accepted.id, accountant, returnCommand), /کامل پوشش دهد/);
+        const complete = await saveStoneReturnAllocationDraft(database, accepted.id, actor.id,
+          { ...draftInput, expectedVersion: partial.draft.version, rows });
+        returnCommand.expectedVersion = complete.draft.version;
+        const postingContext = await readStoneReturnPostingContext(database, accepted.id, postingDate);
+        assert.deepEqual(postingContext.periods.map(item => item.id), [command.periodId]);
+        assert.deepEqual(postingContext.rules.map(item => item.id), [postingRule.id]);
+        assert.deepEqual(postingContext.originalAmounts, { originalNetRials: '60000000', originalTaxRials: '6000000' });
+
+        const creditAt = async (asOf = new Date()) =>
+          (await projectCustomerAccountPrisma(database, { ...accountAt, asOf })).standaloneCreditRials;
+        const accountBefore = await creditAt();
+        const availableToLoad = async () => Promise.all([first, second].map(async ({ contractId }) =>
+          (await readShipmentQuantityProjection(database, { contractId })).rows[0].quantities?.availableToLoad));
+        assert.deepEqual(await availableToLoad(), ['5.000', '5.000']);
+
+        // Fail only the second original after shipment retirement, the first invoice and its inventory layer were staged.
+        await database.$executeRawUnsafe(`CREATE FUNCTION qa_reject_second_excess_return() RETURNS trigger AS $$
+        BEGIN
+          IF NEW."referenceInvoiceId" = (SELECT max(id) FROM "accounting_commercial_customer_invoices"
+            WHERE number IN ('excess-original-a', 'excess-original-b'))
+          THEN RAISE EXCEPTION 'QA_SECOND_EXCESS_RETURN_FAILED'; END IF;
+          RETURN NEW;
+        END; $$ LANGUAGE plpgsql`);
+        await database.$executeRawUnsafe(`CREATE TRIGGER qa_reject_second_excess_return BEFORE INSERT
+          ON "accounting_commercial_customer_invoices" FOR EACH ROW EXECUTE FUNCTION qa_reject_second_excess_return()`);
+        try {
+          await assert.rejects(finalizeStoneReturn(database, accepted.id, accountant, returnCommand), /QA_SECOND_EXCESS_RETURN_FAILED/);
+        } finally {
+          await database.$executeRawUnsafe('DROP TRIGGER qa_reject_second_excess_return ON "accounting_commercial_customer_invoices"');
+          await database.$executeRawUnsafe('DROP FUNCTION qa_reject_second_excess_return()');
+        }
+        const failed = await readStoneReturnAllocationReview(database, accepted.id);
+        assert.equal(failed.allocationStatus, 'DRAFT');
+        assert.equal(failed.finalization, null);
+        assert.equal(await creditAt(), accountBefore);
+        assert.deepEqual(await availableToLoad(), ['5.000', '5.000']);
+        assert.equal(await database.accountingInventoryValuationLayer.count({ where: { identityId: accepted.inventoryIdentityId } }), 0);
+        assert.equal(await database.shipmentQuantityEvidence.count({ where: { kind: 'EXCESS_RETURN_FINALIZED' } }), 0);
+
+        const outcomes = await Promise.all([
+          finalizeStoneReturn(database, accepted.id, accountant, returnCommand),
+          finalizeStoneReturn(database, accepted.id, accountant, returnCommand),
+        ]);
+        assert.equal(outcomes.filter(outcome => outcome.replayed).length, 1);
+        assert.equal(outcomes[0].data.id, outcomes[1].data.id);
+        const reviewed = await readStoneReturnAllocationReview(database, accepted.id);
+        assert.equal(reviewed.allocationStatus, 'FINALIZED');
+        assert.equal(reviewed.finalization?.draftVersion, complete.draft.version);
+        assert.equal(reviewed.unallocatedQuantity, '0.000');
+        assert.equal(reviewed.draft?.id, complete.draft.id);
+        assert.equal(reviewed.draft?.attributionReason, null);
+        assert.deepEqual(reviewed.draft?.rows.map(row => row.dispatchEvidenceId).sort(), [first.dispatchEvidenceId, second.dispatchEvidenceId].sort());
+        await assert.rejects(saveStoneReturnAllocationDraft(database, accepted.id, actor.id,
+          { ...draftInput, expectedVersion: complete.draft.version, rows }), /قبلاً ثبت قطعی/);
+        await assert.rejects(finalizeStoneReturn(database, accepted.id, accountant, { ...returnCommand, date: '2026-09-25' }), /فرمان دیگری/);
+
+        await assert.rejects(finalizeStoneReturn(database, accepted.id, accountant, {
+          ...returnCommand, agreedUnitRateRials: '2500000.025',
+        }), /فرمان دیگری/);
+
+        const summary = outcomes[0].data.summary as Prisma.JsonObject;
+        assert.equal(summary.agreedUnitRateRials, '2500000.024');
+        assert.equal(summary.rateDifferenceReason, null);
+        assert.equal(summary.originalNetRials, '60000000');
+        assert.equal(summary.originalTaxRials, '6000000');
+        // Rounding the two invoice shares independently would lose one rial.
+        assert.equal(summary.customerCreditRials, '87500001');
+        const credits = (summary.credits as Prisma.JsonArray) as Prisma.JsonObject[];
+        assert.equal(credits.length, 2);
+        const posted = await listPostedJournal(database, journalScope);
+        const invoiceCredits = credits.map(item => {
+          const voucher = posted.find(entry => entry.id === item.voucherId);
+          assert.ok(voucher);
+          assert.equal(voucher.postedAt?.getTime(), outcomes[0].data.finalizedAt.getTime());
+          const credit = voucher.lines.find(line => line.accountId === receivable.id);
+          assert.ok(credit);
+          assert.equal(item.customerCreditRials, credit.creditRials.toFixed(0));
+          const revenueDebits = voucher.lines.filter(line => line.accountId === revenue.id && line.debitRials.gt(0));
+          assert.deepEqual(revenueDebits.map(line => line.debitRials.toFixed(0)), [
+            item.originalNetRials,
+            (BigInt(credit.creditRials.toFixed(0)) - BigInt(String(item.originalNetRials)) - BigInt(String(item.originalTaxRials))).toString(),
+          ]);
+          return credit.creditRials.toFixed(0);
+        });
+        assert.equal(invoiceCredits.reduce((sum, part) => sum + BigInt(part), 0n), 87_500_001n);
+        assert.equal(await creditAt(outcomes[0].data.finalizedAt) - accountBefore, 87_500_001n);
+        assert.equal(await creditAt(new Date(outcomes[0].data.finalizedAt.getTime() - 1)), accountBefore);
+        assert.deepEqual(await availableToLoad(), ['5.000', '5.000']);
+        const shares = await Promise.all([first, second].map(async ({ contractId }) =>
+          (await readShipmentQuantityProjection(database, { contractId })).rows[0].quantities));
+        assert.deepEqual(shares.map(row => [row?.contracted, row?.physicallyDispatched, row?.excessRetired]),
+          [['10.000', '5.000', '15.000'], ['15.000', '10.000', '20.000']]);
+        assert.deepEqual((await readStoneReturnAvailability(database, [product.id])).get(product.id), [{ unit: 'squareMeter', quantity: '35' }]);
+        const layers = await database.accountingInventoryValuationLayer.findMany({ where: { identityId: accepted.inventoryIdentityId },
+          orderBy: { quantity: 'asc' } });
+        assert.deepEqual(layers.map(layer => [layer.quantity.toFixed(), layer.valueRials.toFixed()]), [['15', '1500'], ['20', '4000']]);
+        const returnTax = await database.accountingTaxInvoice.findMany({ where: {
+          documentKind: 'RETURN', referenceTaxInvoiceId: { in: [first.originalTaxInvoiceId!, second.originalTaxInvoiceId!] },
+        }, orderBy: { netRials: 'asc' } });
+        assert.deepEqual(returnTax.map(invoice => [invoice.referenceTaxInvoiceId, invoice.taxRials.toFixed(0)]), [
+          [first.originalTaxInvoiceId, '1800000'], [second.originalTaxInvoiceId, '4200000'],
+        ]);
+
+        await stoneReturnTest.test('two independently saved cases cannot consume the same remaining sale quantity', async () => {
+          const quantity = '3.000001';
+          const prepare = async () => {
+            const { data } = await recordStoneReturnReceipt(database, actor.id, {
+              requestId: randomUUID(), customerId: customer.id, productId: product.id, unit: 'squareMeter',
+              receivedQuantity: quantity, acceptedQuantity: quantity,
+            });
+            const draft = await saveStoneReturnAllocationDraft(database, data.id, actor.id, {
+              expectedVersion: 0, rows: [{ ...first, quantity }],
+            });
+            return { receipt: data, draft: draft.draft };
+          };
+          const cases = [await prepare(), await prepare()];
+          const attempts = await Promise.allSettled(cases.map(({ receipt, draft }) => finalizeStoneReturn(database, receipt.id, accountant, {
+            ...returnCommand, expectedVersion: draft.version, requestId: draft.id,
+          })));
+          assert.equal(attempts.filter(result => result.status === 'fulfilled').length, 1);
+          const rejected = attempts.find(result => result.status === 'rejected');
+          assert.match(String(rejected?.reason), /مانده قابل برگشت/);
+          const reviewedCases = await Promise.all(cases.map(({ receipt }) => readStoneReturnAllocationReview(database, receipt.id)));
+          assert.deepEqual(reviewedCases.map(review => review.allocationStatus).sort(), ['DRAFT', 'FINALIZED']);
+          const finalized = attempts.find(result => result.status === 'fulfilled');
+          assert.ok(finalized);
+          const finalizedSummary = finalized.value.data.summary as Prisma.JsonObject;
+          const [credit] = finalizedSummary.credits as Prisma.JsonObject[];
+          const line = await database.accountingTaxInvoiceLine.findFirstOrThrow({ where: { taxInvoiceId: String(credit.taxInvoiceId) } });
+          assert.equal(line.roundedTaxRials.toFixed(), '360000');
+          assert.equal(line.rawTaxAmount.toFixed(), '360000.12');
+          assert.equal(line.rawBaseAmount.toFixed(), '3600001.2');
+          const rounding = (line.allocationEvidence as Prisma.JsonObject).returnRounding as Prisma.JsonObject;
+          assert.equal(rounding.policy, 'CUMULATIVE_PROPORTION_HALF_UP_IRR_V1');
+          assert.equal(rounding.originalQuantity, '20');
+          assert.equal(rounding.priorReturnedQuantity, '15');
+          assert.equal(rounding.returnedQuantity, '3.000001');
+          assert.equal(rounding.cumulativeReturnedQuantity, '18.000001');
+        });
+      });
+    });
   } finally {
     await database.$disconnect();
     await temporary.cleanup();

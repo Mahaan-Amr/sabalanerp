@@ -10,6 +10,7 @@ import ProductImportExportModal from '@/components/ProductImportExportModal';
 import SuccessModal from '@/components/SuccessModal';
 import { ErpBadge, ErpButton, ErpCard, ErpSheet, ErpEmptyState, ErpInlineState, ErpListPage, ErpLoading, ErpPagination, ErpToolbar } from '@/components/erp';
 import { getSalesOperationalErrorKind, getSalesOperationalErrorMessage } from '@/features/sales/salesOperationalError';
+import { displayStoneReturnQuantity } from '@/features/stone-returns/stoneReturnApi';
 import { createLatestRequestTracker } from '@/features/sales/latestRequestTracker';
 
 const generateFullProductName = (product: Product): string => {
@@ -273,7 +274,10 @@ export default function ProductsPage() {
             mobileLabel: 'وضعیت',
             cell: (product) => (
               <div className="flex flex-wrap gap-1">
-                <ErpBadge tone={product.isAvailable ? 'success' : 'danger'}>{product.isAvailable ? 'موجود' : 'ناموجود'}</ErpBadge>
+                {!product.availableReturnStock?.length && <ErpBadge tone={product.isAvailable ? 'success' : 'danger'}>{product.isAvailable ? 'موجود' : 'ناموجود'}</ErpBadge>}
+                {product.availableReturnStock?.map(stock => <ErpBadge key={stock.unit} tone="success">
+                  مرجوعی قابل فروش: {displayStoneReturnQuantity(stock.quantity, stock.unit)}
+                </ErpBadge>)}
                 <ErpBadge tone={product.isActive ? 'info' : 'neutral'}>{product.isActive ? 'فعال' : 'غیرفعال'}</ErpBadge>
                 {product.deletedAt && <ErpBadge tone="danger">حذف شده</ErpBadge>}
               </div>

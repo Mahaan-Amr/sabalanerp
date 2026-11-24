@@ -43,6 +43,7 @@ export interface Product {
   basePrice: number | null;
   currency: string;
   isAvailable: boolean;
+  availableReturnStock?: { unit: string; quantity: string }[];
   leadTime: number | null;
   
   // Additional Info

@@ -18,3 +18,8 @@ test('every prior Accounting navigation destination remains reachable through on
   assert.equal(new Set(accountingNavigationGroups.map(group => accountingGroupHref(group.id))).size, accountingNavigationGroups.length);
   assert(accountingNavigationGroups.every(group => group.links.every(link => link.label && link.href.startsWith('/dashboard/accounting/'))));
 });
+
+test('Accounting opens returned stone receipts from Review and Follow-up', () => {
+  const review = accountingNavigationGroups.find(group => group.id === 'review');
+  assert(review?.links.some(link => link.label === 'مرجوعی‌ها' && link.href === '/dashboard/accounting/returns'));
+});

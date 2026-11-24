@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { OperationMinimumRowStatus, OperationMinimumCatalogHint } from '../product-modal-system/OperationMinimumContext';
 import { ErpButton, ErpInput, ErpInlineState, ErpPressable } from '@/components/erp';
+import { displayStoneReturnQuantity } from '@/features/stone-returns/stoneReturnApi';
 import { resolveBackendAssetUrl } from '@/lib/api';
 import {
   formatDisplayNumber,
@@ -555,7 +556,11 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
         activeType={catalog.activeType} onTypeChange={catalog.selectType}
         typeOptions={catalog.typeOptions.map(type => ({ id: type.id, label: TYPE_LABELS[type.id] ?? type.name, count: type.count }))}
         items={catalog.products.map(product => ({ id: product.id, name: product.namePersian || product.name,
-          facts: `${getProductFacts(product)} · ${inferCatalogTypeLabel(product, catalog.activeType)}` }))}
+          facts: `${getProductFacts(product)} · ${inferCatalogTypeLabel(product, catalog.activeType)}`,
+          availability: product.availableReturnStock?.length
+            ? `مرجوعی قابل فروش: ${product.availableReturnStock.map(stock => displayStoneReturnQuantity(stock.quantity, stock.unit)).join('، ')}`
+            : undefined,
+        }))}
         onSelect={item => { const product = catalog.products.find(product => product.id === item.id); if (product) catalog.selectProduct(product); }} />
 
       <section className="sds-workspace-surface p-4" aria-label="محصولات قرارداد">

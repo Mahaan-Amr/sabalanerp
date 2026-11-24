@@ -1,7 +1,7 @@
 'use client';
 import { LogisticsPage } from '@/features/logistics/LogisticsWorkspace';
 import { useEffect, useState } from 'react';
-import { FaBan, FaCheck, FaClipboardList, FaPlus, FaSync, FaTrash, FaTruck, FaUsers } from 'react-icons/fa';
+import { FaBan, FaCheck, FaClipboardList, FaPlus, FaUndoAlt, FaSync, FaTrash, FaTruck, FaUsers } from 'react-icons/fa';
 import { ErpActionMenu, ErpBadge, ErpButton, ErpEmptyState, ErpInlineState, ErpNeumorphicMetricGrid, ErpLoading, ErpSection, type ErpNeumorphicMetric } from '@/components/erp';
 import { dashboardAPI, logisticsAPI } from '@/lib/api';
 import { hrDutyApi, type DestinationDuty } from '@/features/hr-duties/hrDutyApi';
@@ -46,6 +46,7 @@ export default function LogisticsDashboardPage() {
   return <LogisticsPage title="لجستیک" actions={[
     { label: 'بارگیری جدید', icon: FaPlus, href: '/dashboard/logistics/loadings/new', tone: 'primary', variant: 'solid' },
     { label: 'بارگیری‌ها', icon: FaClipboardList, href: '/dashboard/logistics/loadings' },
+    { label: 'مرجوعی‌ها', icon: FaUndoAlt, href: '/dashboard/logistics/returns' },
     { label: 'به‌روزرسانی', icon: FaSync, onClick: load },
   ]}>
     {error && <ErpInlineState kind="error" title={error} action={{ label: 'تلاش دوباره', onClick: load }} />}

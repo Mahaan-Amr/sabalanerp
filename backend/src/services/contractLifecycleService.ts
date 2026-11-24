@@ -46,6 +46,7 @@ const conclusivePhysicalKinds: ShipmentQuantityEvidenceKind[] = [
   ShipmentQuantityEvidenceKind.MANUAL_OUTAGE_EXIT,
   ShipmentQuantityEvidenceKind.DISPATCH_CORRECTION_POSTED,
   ShipmentQuantityEvidenceKind.GUARD_RETURN_VERIFIED,
+  ShipmentQuantityEvidenceKind.EXCESS_RETURN_FINALIZED,
   ShipmentQuantityEvidenceKind.LEGACY_DISPATCHED,
 ];
 

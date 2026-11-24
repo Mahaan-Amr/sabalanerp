@@ -1,3 +1,4 @@
+import { readProductCatalogAvailabilityPage } from '../services/stoneReturnAvailability';
 import { prisma } from '../lib/prisma';
 import express, { Response } from 'express';
 import { body, query, validationResult } from 'express-validator';
@@ -334,9 +335,6 @@ router.get('/', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERM
     if (req.query.quality) {
       whereClause.qualityCode = parseInt(req.query.quality as string);
     }
-    if (req.query.isAvailable !== undefined) {
-      whereClause.isAvailable = req.query.isAvailable === 'true';
-    }
     if (req.query.contractType) {
       const contractTypeFieldMap: Record<string, string> = {
         longitudinal: 'availableInLongitudinalContracts',
@@ -350,26 +348,12 @@ router.get('/', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERM
       }
     }
 
-    console.log('Products query whereClause:', whereClause);
-    
-    const [products, total] = await Promise.all([
-      prisma.product.findMany({
-        where: whereClause,
-        skip,
-        take: limit,
-        orderBy: [
-          { createdAt: 'desc' }
-        ]
-      }),
-      prisma.product.count({ where: whereClause })
-    ]);
-
-    console.log('Products found:', products.length, 'Total:', total);
-    console.log('Sample product isActive values:', products.slice(0, 3).map(p => ({ id: p.id, name: p.namePersian, isActive: p.isActive })));
+    const availability = req.query.isAvailable === undefined ? undefined : req.query.isAvailable === 'true';
+    const { products, total, returnStock } = await readProductCatalogAvailabilityPage(prisma, whereClause, availability, skip, limit);
 
     return res.json({
       success: true,
-      data: products,
+      data: products.map(product => ({ ...product, availableReturnStock: returnStock.get(product.id) ?? [] })),
       pagination: {
         page,
         limit,

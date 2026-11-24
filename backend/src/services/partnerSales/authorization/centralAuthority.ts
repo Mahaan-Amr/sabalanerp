@@ -1,7 +1,7 @@
 import { partnerOperationFeature } from './operationFeature';
 import type { Prisma } from '@prisma/client';
 import { PartnerActionV2Schema, PermissionContextSchema, type PartnerActionV2 } from '@sabalanerp/partner-sales-contracts';
-import { readScopedActions, resolveScopedActions } from '../../effectiveAccessService';
+import { readFencedScopedActions, readScopedActions, resolveScopedActions } from '../../effectiveAccessService';
 import type { ResolvePartnerAuthority } from './prisma';
 import type { AuthorizationEvidence, AuthorizationRoot } from './contracts';
 import { resolvePartnerWorkspaceAuthority } from './workspaceAuthority';
@@ -19,9 +19,14 @@ export const readResponderScopedAuthority: ResolvePartnerAuthority<PartnerAction
 export const resolvePartnerAccountingScopedAuthority: ResolvePartnerAuthority<PartnerActionV2> = (tx, input) =>
   resolvePartnerScopedAuthorityInPurpose(tx, input, 'ACCOUNTING');
 
+/** Accounting list projections hold the shared Case, Profile and User fences.
+ * The same policy runs behind the shared central revision lock. */
+export const readPartnerAccountingScopedAuthority: ResolvePartnerAuthority<PartnerActionV2> = (tx, input) =>
+  resolvePartnerScopedAuthorityInPurpose(tx, input, 'ACCOUNTING', readFencedScopedActions);
+
 async function resolvePartnerScopedAuthorityInPurpose(tx: Prisma.TransactionClient,
-  input: { actorId: string; root: AuthorizationRoot }, purpose?: 'ACCOUNTING' | 'RESPONDER') {
-  const resolveActions = purpose === 'RESPONDER' ? readScopedActions : resolveScopedActions;
+  input: { actorId: string; root: AuthorizationRoot }, purpose?: 'ACCOUNTING' | 'RESPONDER',
+  resolveActions = purpose === 'RESPONDER' ? readScopedActions : resolveScopedActions) {
   const current = await resolveActions(tx, input.actorId, 'PARTNER');
   const workspace = await resolvePartnerWorkspaceAuthority(tx, input.actorId, purpose,
     { fencedPermissionReads: purpose === 'ACCOUNTING' });

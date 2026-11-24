@@ -2,15 +2,14 @@ import { Prisma, type PrismaClient } from '@prisma/client';
 import { measureAccountingReadPhase } from '../../accountingReadTiming';
 import { lockPartnerOperationsControl, lockPartnerOperationsControlForRead } from './technicalRollout';
 
-/** Multi-root reads enter the same lock graph as Partner writers before any
- * profile/Case authority. A permission or Case changed during the wait requires
- * a fresh repeatable-read snapshot, never partial output or stale authority. */
+/** Enter the rollout fence before resource authority. A permission or Case
+ * changed during a lock wait requires a fresh repeatable-read snapshot. */
 export async function readPartnerSnapshot<T>(database: PrismaClient, read: (tx: Prisma.TransactionClient) => Promise<T>, options: { multiRootAuthority?: boolean } = {}) {
   for (let attempt = 0; ; attempt += 1) {
     try {
       return await database.$transaction(async tx => {
-        // Multi-root authority takes inquiry/profile update locks; serialize its
-        // complete lock graph before acquiring any root.
+        // Callers acquiring command locks serialize the complete resource graph.
+        // Shared callers must keep subsequent row locks compatible with readers.
         const lock = options.multiRootAuthority === false ? lockPartnerOperationsControlForRead : lockPartnerOperationsControl;
         await measureAccountingReadPhase('lockWait', async () => { await lock(tx); });
         return read(tx);

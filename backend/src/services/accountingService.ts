@@ -107,7 +107,7 @@ import {
 import { executePartnerCollectionAction } from './partnerSales/accounting/paymentCommands';
 import { withAccountingReadScope, type AccountingReadActor, type AccountingReadScope } from './partnerSales/accounting/readScope';
 import { createAuditedPartnerAuthorization } from './partnerSales/authorization/audited';
-import { resolvePartnerAccountingScopedAuthority } from './partnerSales/authorization/centralAuthority';
+import { readPartnerAccountingScopedAuthority } from './partnerSales/authorization/centralAuthority';
 import { readPartnerSnapshot } from './partnerSales/authorization/readSnapshot';
 import { batchAccountingCaseAuthority } from './partnerSales/accounting/batchCaseAuthority';
 import { appendAuthorizationDecisions, type AuthorizationDecisionAudit } from './effectiveAuthorization/audit';
@@ -1853,9 +1853,9 @@ export const getAccountingDashboardChange = async (query: any = {}, actor: Accou
     {
       const cases = await database.partnerSaleCase.findMany({ where: { internalRecordId: { not: null },
         customerContractId: { not: null } }, select: { id: true, internalRecordId: true }, orderBy: { id: 'asc' } });
-      let actorAuthority: ReturnType<typeof resolvePartnerAccountingScopedAuthority> | undefined;
-      const readActorAuthority: typeof resolvePartnerAccountingScopedAuthority = (tx, input) =>
-        actorAuthority ??= resolvePartnerAccountingScopedAuthority(tx, input);
+      let actorAuthority: ReturnType<typeof readPartnerAccountingScopedAuthority> | undefined;
+      const readActorAuthority: typeof readPartnerAccountingScopedAuthority = (tx, input) =>
+        actorAuthority ??= readPartnerAccountingScopedAuthority(tx, input);
       const decisions: AuthorizationDecisionAudit[] = [];
       const evidenceSource = await batchAccountingCaseAuthority(database, actor.userId, cases.map(row => row.id));
       const authority = createAuditedPartnerAuthorization(database,
@@ -1871,7 +1871,7 @@ export const getAccountingDashboardChange = async (query: any = {}, actor: Accou
     }
     return getDashboardRevisions(database, actor.userId, allowedInternalIds, query, query.range ?? '6m', new Date());
   };
-  const revisions = await readPartnerSnapshot(prisma, check, { multiRootAuthority: true });
+  const revisions = await readPartnerSnapshot(prisma, check, { multiRootAuthority: false });
   return { revisions,
     accessChanged: query.accessRevision !== revisions.access,
     workspaceChanged: query.workspaceRevision !== revisions.workspace,

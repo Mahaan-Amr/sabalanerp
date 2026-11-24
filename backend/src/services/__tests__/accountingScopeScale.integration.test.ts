@@ -61,11 +61,12 @@ for (const role of ['ADMIN', 'USER'] as const) test(`Accounting scope keeps per-
       (async () => { try {
         const expectedIds = new Set([${JSON.stringify(fixture.row.id)}, ...Array.from({ length: 42 }, (_, index) => 'scale-' + index)]);
         const deletedId = '${role}' === 'USER' ? 'scale-0' : null;
-        const read = () => withAccountingReadScope(prisma, { userId: 'historical-admin' }, async scope => {
+        const read = (hold = async () => {}) => withAccountingReadScope(prisma, { userId: 'historical-admin' }, async scope => {
           const visible = await scope.database.accountingFinancialRecord.findMany({ where: scope.financial(), select: { id: true } });
           assert.ok(visible.some(row => row.id === 'historical-invoice'));
           const visibleAudits = await scope.database.accountingAuditLog.count({ where: scope.audit({ action: 'SCALE_AUDIT_FIXTURE' }) });
           assert.equal(visibleAudits, 30);
+          await hold();
         });
         const checkAudits = async expectedGroups => {
           const events = await prisma.$queryRaw\`SELECT action, "rootId", "rootKind", "actorId", allowed, code, "correlationId", "authorizationRevision", "evaluatedAt" FROM effective_authorization_audit WHERE purpose = 'ACCOUNTING' AND channel = 'LIST'\`;
@@ -97,7 +98,18 @@ for (const role of ['ADMIN', 'USER'] as const) test(`Accounting scope keeps per-
         assert.ok(singleMs < 1000, '43-Case Accounting scope should finish within the local read budget; took ' + singleMs + ' ms');
         await checkAudits(1);
         const concurrentStarted = performance.now();
-        await Promise.all([read(), read()]);
+        let releaseFirst, enterFirst, enterSecond, timer;
+        const firstRelease = new Promise(resolve => { releaseFirst = resolve; });
+        const firstEntered = new Promise(resolve => { enterFirst = resolve; });
+        const secondEntered = new Promise(resolve => { enterSecond = resolve; });
+        const first = read(async () => { enterFirst(); await firstRelease; });
+        const second = firstEntered.then(() => read(async () => { enterSecond(true); }));
+        const overlapped = await Promise.race([
+          secondEntered, first.then(() => false),
+          new Promise(resolve => { timer = setTimeout(() => resolve(false), 1500); }),
+        ]).finally(() => { clearTimeout(timer); releaseFirst(); });
+        await Promise.all([first, second]);
+        assert.equal(overlapped, true, 'a second fully authorized read must enter while the first snapshot is held');
         const twoConcurrentMs = Math.round(performance.now() - concurrentStarted);
         await checkAudits(3);
         const document = await readPartnerInternalDocument('historical-case', 'historical-admin');
@@ -134,6 +146,38 @@ for (const role of ['ADMIN', 'USER'] as const) test(`Accounting scope keeps per-
             assert.equal(await withAccountingReadScope(prisma, { userId: 'historical-admin' }, async scope =>
               (await scope.database.partnerProfile.findUnique({ where: { id: '${fixture.row.profileId}' },
                 select: { state: true } }))?.state), 'SUSPENDED');
+            let releasePermissions, enterPermissions, findWriter;
+            const permissionsRelease = new Promise(resolve => { releasePermissions = resolve; });
+            const permissionsEntered = new Promise(resolve => { enterPermissions = resolve; });
+            const writerSession = new Promise(resolve => { findWriter = resolve; });
+            const permissionSnapshot = read(async () => { enterPermissions(); await permissionsRelease; });
+            const dropPermission = permissionsEntered.then(() => writer.$transaction(async tx => {
+              const [{ pid }] = await tx.$queryRaw\`SELECT pg_backend_pid() AS pid\`;
+              findWriter(pid);
+              // Deleting the permission row takes no User lock. The deferred
+              // revision trigger must wait until the readers commit.
+              await tx.workspacePermission.deleteMany({ where: { userId: 'historical-admin', workspace: 'accounting' } });
+            }));
+            try {
+              const pid = await Promise.race([writerSession, permissionSnapshot, dropPermission]);
+              const stop = performance.now() + 1500;
+              let blocked = false;
+              while (!blocked && performance.now() < stop) {
+                const [{ waiting }] = await prisma.$queryRaw\`SELECT cardinality(pg_blocking_pids(\${pid})) > 0 AS waiting\`;
+                blocked = waiting;
+                if (!blocked) await new Promise(resolve => setTimeout(resolve, 10));
+              }
+              assert.equal(blocked, true, 'permission revocation must wait at the central revision fence');
+            } finally {
+              releasePermissions();
+              await Promise.all([permissionSnapshot, dropPermission]);
+            }
+            const afterPermission = await withAccountingReadScope(prisma, { userId: 'historical-admin' }, scope =>
+              scope.database.accountingFinancialRecord.count({ where: scope.financial({ sourceKind: 'PARTNER_INTERNAL_RECORD' }) }));
+            assert.equal(afterPermission, 0, 'the next read excludes Partner evidence after a committed permission revocation');
+            await writer.workspacePermission.create({ data: {
+              userId: 'historical-admin', workspace: 'accounting', permissionLevel: 'admin',
+            } });
             let releaseRead;
             let enteredRead;
             const entered = new Promise(resolve => { enteredRead = resolve; });

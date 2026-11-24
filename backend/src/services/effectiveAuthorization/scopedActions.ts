@@ -25,6 +25,15 @@ export async function resolveScopedActions(tx: Prisma.TransactionClient, actorId
   return scopedActionSnapshot(tx, actorId, domain, version);
 }
 
+/** Fenced projection. The caller already holds the actor's shared User lock.
+ * The central row excludes grant and Accounting workspace permission writers
+ * until the read and its audit commit together. */
+export async function readFencedScopedActions(tx: Prisma.TransactionClient, actorId: string, domain: string) {
+  const [version] = await tx.$queryRaw<Array<{ revision: number }>>`
+    SELECT revision FROM effective_authorization_state WHERE id = 1 FOR SHARE`;
+  return scopedActionSnapshot(tx, actorId, domain, version);
+}
+
 /** Advisory/read-model visibility only. It never authorizes a mutation and so
  * must not join the command lock graph. The returned revision lets callers
  * identify the snapshot they displayed. */

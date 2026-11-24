@@ -4,6 +4,7 @@ import { Prisma } from '@prisma/client';
 import type { PartnerCommercialState } from '@sabalanerp/partner-sales-contracts';
 import { createAuditedPartnerAuthorization } from '../authorization/audited';
 import { resolvePartnerAccountingScopedAuthority } from '../authorization/centralAuthority';
+import { prismaAuthorizationSource } from '../authorization/prisma';
 import { hasSharedOperationAuthority } from '../authorization/sharedOperationAuthority';
 import { readPartnerCommercialState } from '../cases/commercialLifecycle';
 import { projectPartnerInternalContent, projectPartnerInternalSummary, partnerInternalPhysicalFacts } from './internalDocumentContent';
@@ -20,8 +21,11 @@ export async function readPartnerPreparationDocument(tx: Prisma.TransactionClien
   presentation: 'detail' | 'list' = 'detail',
   accountingAuthority: typeof resolvePartnerAccountingScopedAuthority = resolvePartnerAccountingScopedAuthority,
   commercialInSnapshot?: PartnerCommercialState) {
+  // List callers already fenced the Case, Profile and Users in the shared
+  // Accounting scope. Taking command locks here would upgrade those fences.
+  const source = presentation === 'list' ? prismaAuthorizationSource(tx, accountingAuthority, undefined, 'ACCOUNTING_SNAPSHOT') : undefined;
   const allowed = await createAuditedPartnerAuthorization(tx, { actorId, purpose: 'ACCOUNTING', channel: 'LIST' },
-    { correlationId: randomUUID() }, undefined, accountingAuthority).authorize('ACCOUNTING_READ', { kind: 'CASE', id: caseId });
+    { correlationId: randomUUID() }, undefined, accountingAuthority, undefined, source).authorize('ACCOUNTING_READ', { kind: 'CASE', id: caseId });
   if (!allowed.ok) return null;
   const root = await tx.partnerSaleCase.findUnique({ where: { id: caseId }, include: {
     head: true, internalRecord: true, customerContract: true, trackingCode: true,
@@ -33,7 +37,7 @@ export async function readPartnerPreparationDocument(tx: Prisma.TransactionClien
   if (!commercial) return null;
   const write = !root.customerContract.isInactive && commercial.status === 'FINAL' && (await createAuditedPartnerAuthorization(tx,
     { actorId, purpose: 'ACCOUNTING', channel: 'API' }, { correlationId: randomUUID(), reason: 'بررسی امکان ثبت مالی قرارداد قطعی همکار' },
-    undefined, accountingAuthority)
+    undefined, accountingAuthority, undefined, source)
     .authorize('ACCOUNTING_WRITE', { kind: 'CASE', id: caseId })).ok &&
     await hasSharedOperationAuthority(tx, actorId, 'accounting', 'accounting_invoice_candidates_manage');
   const owner = { caseId, revision: root.headRevision, integrityHash: root.integrityHash };
@@ -56,7 +60,7 @@ export async function readPartnerPreparationDocument(tx: Prisma.TransactionClien
       productRowId: String(row.productRowId), description: String(row.description), quantity: String(row.quantity),
       unit: String(row.unit), unitPrice: '0', totalPrice: '0',
     }));
-  return { customerSignature: await readPartnerCustomerSignature(tx, caseId, actorId), id: root.internalRecord.id, preparationOnly: true, amountKnown, commercial, canRegister: write,
+  return { customerSignature: await readPartnerCustomerSignature(tx, caseId, actorId, presentation === 'list' ? 'ACCOUNTING_SNAPSHOT' : 'COMMAND'), id: root.internalRecord.id, preparationOnly: true, amountKnown, commercial, canRegister: write,
     caseState: root.state, isInactive: root.customerContract.isInactive, owner, status: 'DRAFT', amount: content.totals?.payable ?? '0',
     receivedAmount: '0', remainingAmount: content.totals?.payable ?? '0', currency: 'IRT', createdAt: root.createdAt,
     systemInvoiceNumber: null, systemInvoiceDate: null, sepidarAmount: null, metadata: undefined,
@@ -90,7 +94,7 @@ export async function listPartnerPreparationDocuments(actorId: string, lifecycle
 }
 
 /** Reuse this request's validated authorization snapshot, never a second root
- * transaction competing for the global operations lock. List rows need no print geometry. */
+ * transaction competing for the operations-control lock. List rows need no print geometry. */
 export async function listPartnerPreparationDocumentsInScope(scope: AccountingReadScope, actorId: string,
   lifecycleView: 'active' | 'inactive' | 'pending' = 'active',
   reviewable?: { existingInternalIds: readonly string[] }) {

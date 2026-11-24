@@ -4,7 +4,7 @@ import { Prisma, type PrismaClient } from '@prisma/client';
 import { RevisionRefSchema, type PartnerCommercialState } from '@sabalanerp/partner-sales-contracts';
 import { createAuditedPartnerAuthorization } from '../authorization/audited';
 import { appendAuthorizationDecisions, type AuthorizationDecisionAudit } from '../../effectiveAuthorization/audit';
-import { resolvePartnerAccountingScopedAuthority } from '../authorization/centralAuthority';
+import { readPartnerAccountingScopedAuthority, resolvePartnerAccountingScopedAuthority } from '../authorization/centralAuthority';
 import { readCurrentPartnerCaseViews, readPartnerRevisionProjections } from '../cases/lifecycle';
 import { PARTNER_INTERNAL_ACCOUNTING_SOURCE, matchesFinancialPreparation, preparePartnerFinancialSource, type PartnerFinancialPreparation, type PartnerAccountingSource } from './source';
 import { subtract } from '../reporting/money';
@@ -48,7 +48,9 @@ type AccountingReadSelection = { focusedCaseId?: string; ordinaryOnly?: boolean;
  * pagination, aggregate calculations and independent focused-record lookup. */
 export function withAccountingReadScope<T>(database: PrismaClient, actor: AccountingReadActor | undefined,
   read: (scope: AccountingReadScope) => Promise<T>, selection: AccountingReadSelection = {}): Promise<T> {
-  if (actor) return readPartnerSnapshot(database, async tx => read(await createScope(tx, actor, selection)), { multiRootAuthority: true });
+  if (actor) return readPartnerSnapshot(database, async tx => read(await createScope(tx, actor, selection)), {
+    multiRootAuthority: Boolean(selection.focusedCaseId),
+  });
   return database.$transaction(async tx => read(await createScope(tx, actor, selection)), {
     isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: 30_000,
   });
@@ -78,13 +80,14 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
   let canManagePayments = false;
   let canManageTax = false;
   let actorAuthority: ReturnType<typeof resolvePartnerAccountingScopedAuthority> | undefined;
+  const resolveActorAuthority = selection.focusedCaseId ? resolvePartnerAccountingScopedAuthority : readPartnerAccountingScopedAuthority;
   const readActorAuthority: typeof resolvePartnerAccountingScopedAuthority = (tx, input) =>
-    actorAuthority ??= resolvePartnerAccountingScopedAuthority(tx, input);
+    actorAuthority ??= resolveActorAuthority(tx, input);
   if (actor && !selection.ordinaryOnly) {
     const finishAuthorization = startAccountingReadPhase('authorization');
     // The central actor grants and workspace bridge are identical for every
-    // Case in this repeatable-read snapshot. Root locks, resource evidence,
-    // expiry checks and a distinct audited decision still run for each Case.
+    // Case in this repeatable-read snapshot. Resource locks and evidence,
+    // expiry checks and a distinct audited decision still apply to each Case.
     const decisions: AuthorizationDecisionAudit[] = [];
     const authorityCases = reviewOwners ? cases.filter(row => reviewOwners.internalRecordIds.has(row.internalRecordId)
       || reviewOwners.contractIds.has(row.customerContractId)) : cases;

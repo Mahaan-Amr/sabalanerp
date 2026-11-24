@@ -13,6 +13,7 @@
     "dispatch-document:recovery": "tsx scripts/dispatch-document-recovery.ts",
     "dev": "tsx watch src/index.ts",
     "build": "tsc && tsc -p tsconfig.cutover.json",
+    "build:image": "tsc -p tsconfig.image.json && tsc -p tsconfig.cutover.json",
     "test:remaining-recovery": "tsx src/services/__tests__/remainingRecoveryGuidance.test.ts",
     "test:remaining-recovery:integration": "tsx src/services/__tests__/remainingRecoveryWrite.integration.test.ts",
     "test:contract-monetary-reconciliation": "tsx --test src/services/__tests__/partnerCanonicalRowAmounts.test.ts src/services/__tests__/partnerCanonicalWholesale.test.ts src/services/__tests__/partnerInternalAccountingDocument.test.ts",

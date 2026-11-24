@@ -94,8 +94,35 @@ async function main() {
       const allocationReopened = await request(`/loadings/${loadingId}`);
       assert.equal(allocationReopened.body.data.allocations[0].lines[0].quantity, '0.500',
         'reopening the actual loading retains the driver allocation');
-      const blockedFinalization = await request(`/loadings/${loadingId}/finalize`, 'POST', { expected,
+      const finalize = () => request(`/loadings/${loadingId}/finalize`, 'POST', { expected,
         reason: 'نهایی‌سازی تحویل پرونده همکار' }, session.token, `${expected.caseId}-finalize-before-approval`);
+      let finalizing: ReturnType<typeof finalize> | undefined;
+      try {
+        await prisma.$transaction(async tx => {
+          await tx.$queryRaw`SELECT id FROM partner_operations_controls WHERE id = 'partner-operations' FOR UPDATE`;
+          await tx.$queryRaw`SELECT id FROM partner_sale_cases WHERE id = ${expected.caseId} FOR UPDATE`;
+          finalizing = finalize();
+          const deadline = Date.now() + 3000;
+          let blocked = false;
+          while (Date.now() < deadline) {
+            await tx.$queryRaw`SELECT pg_stat_clear_snapshot()::text`;
+            const [wait] = await tx.$queryRaw<Array<{ blocked: boolean }>>`
+              SELECT EXISTS (
+                SELECT 1 FROM pg_stat_activity
+                WHERE datname = current_database() AND wait_event_type = 'Lock'
+                  AND pg_backend_pid() = ANY(pg_blocking_pids(pid))
+              ) AS blocked`;
+            if (wait.blocked) { blocked = true; break; }
+            await new Promise(resolve => setTimeout(resolve, 20));
+          }
+          assert.equal(blocked, true, 'finalization reached the held Partner root fence');
+          const [{ acquired }] = await tx.$queryRaw<Array<{ acquired: boolean }>>`
+            SELECT pg_try_advisory_xact_lock(hashtext(${`LOGISTICS_LOADING:${loadingId}`})) AS acquired`;
+          assert.equal(acquired, true,
+            'finalization must leave the loading lock available to a concurrent authorized Accounting transaction');
+        });
+      } finally { await finalizing; }
+      const blockedFinalization = await finalizing!;
       assert.equal(blockedFinalization.status, 409, JSON.stringify(blockedFinalization.body));
       assert.match(blockedFinalization.body.error, /تأیید مالی/,
         'physical allocation cannot finalize before the official wholesale approval is published');

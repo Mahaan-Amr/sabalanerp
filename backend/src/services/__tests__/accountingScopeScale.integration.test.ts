@@ -163,7 +163,7 @@ for (const role of ['ADMIN', 'USER'] as const) test(`Accounting scope keeps per-
               const stop = performance.now() + 1500;
               let blocked = false;
               while (!blocked && performance.now() < stop) {
-                const [{ waiting }] = await prisma.$queryRaw\`SELECT cardinality(pg_blocking_pids(\${pid})) > 0 AS waiting\`;
+                const [{ waiting }] = await prisma.$queryRaw\`SELECT cardinality(pg_blocking_pids(\${pid}::integer)) > 0 AS waiting\`;
                 blocked = waiting;
                 if (!blocked) await new Promise(resolve => setTimeout(resolve, 10));
               }

@@ -4441,7 +4441,7 @@ export const listReceivables = async (query: any = {}, actor?: AccountingReadAct
       updatedAt: cutoff,
     }));
     const partnerRows = partnerInvoiceIds.length ? await readPartnerOutstandingHistory(prisma, { invoiceIds: partnerInvoiceIds,
-      cutoff, asOf: new Date() }) : [];
+      cutoff, asOf: scope.asOf }) : [];
     countAccountingReadRows('historicalPartnerBalances', partnerRows.length);
     const ordinaryPage = projections.slice(skip, skip + pageSize);
     const partnerPage = partnerRows.slice(Math.max(0, skip - projections.length), Math.max(0, skip + pageSize - projections.length));

@@ -52,6 +52,7 @@ for (const width of [1280, 390]) {
     await page.route(`**/api/dispatch-credit/contracts/${id}/requests`, async route => {
       const body = route.request().postDataJSON(); expect(body.kind).toBe('MANAGER'); expect(body.promisedDate).toBeUndefined();
       requests++;
+      view.canRequestManager = false;
       view.authorities = [{ id: 'manager-grant', kind: 'MANAGER', status: 'PENDING', revision: 1, promisedDate: null,
         requestedBy: 'admin', amountRials: '0', canDecide: false }];
       await reply(route, view.authorities[0]);
@@ -77,6 +78,7 @@ for (const width of [1280, 390]) {
     await dialog.getByRole('button', { name: 'ارسال درخواست', exact: true }).click();
     await expect(dialog).toBeHidden();
     await expect(page.getByText('مجوز مدیریتی — در انتظار تصمیم', { exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'درخواست تأیید مدیریتی', exact: true })).toBeDisabled();
     await expect(page.getByRole('button', { name: 'تأیید', exact: true })).toHaveCount(0);
     await expect(page.getByText('شرط مالی ارسال برقرار است.', { exact: true })).toHaveCount(0);
     expect(requests).toBe(1);
@@ -98,6 +100,7 @@ for (const width of [1280, 390]) {
     await expect(page.getByText('شرط مالی ارسال برقرار است.', { exact: true })).toBeVisible();
     await expect(page.getByText(/تأییدکننده: مدیر تأییدکننده آزمون/)).toBeVisible();
     await expect(page.getByText(/زمان تصمیم:/)).toBeVisible();
+    await expect(page.getByRole('button', { name: 'لغو مجوز ارسال', exact: true })).toBeVisible();
     expect(decisions).toBe(2);
     await assertNoHorizontalOverflow(page);
     await page.screenshot({ path: info.outputPath(`manager-decision-${width}-${theme}.png`), fullPage: true });

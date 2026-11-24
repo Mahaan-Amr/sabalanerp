@@ -68,7 +68,7 @@ export default function ContractDispatchCreditPanel({ contractId, refreshKey, ch
   return <div className="space-y-3">
     <div className="flex flex-wrap gap-2">{children}
       {(view?.access.request || view?.access.manage || view?.access.managerDecision) && <ErpButton label="درخواست تأیید مدیریتی" variant="outline" tone="primary"
-        disabled={pending || !view.canRequestManager || !!view.activeManagerId || view.authorities.some(row => row.kind === 'MANAGER' && row.status === 'PENDING')}
+        disabled={pending || !view.canRequestManager}
         onClick={() => open({ kind: 'MANAGER' })} />}
     </div>
     {error && !operation && <ErpInlineState kind="error" title={error} action={{ label: 'تلاش دوباره', onClick: () => void load() }} />}

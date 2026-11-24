@@ -284,7 +284,8 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
   }
   const evidence = buildRevisionEvidence({ command, resolved: resolved.value, graph: validated.value.graph,
     graphHash: validated.value.graphHash, rows: approvedRows });
-  const physical = await validatePartnerCommercialPhysicalFloor(tx, caseId, approvedRows);
+  const physical = await validatePartnerCommercialPhysicalFloor(tx, caseId, approvedRows,
+    { allowMissingContractedEvidence: current.state === 'COMMITTED' });
   if (!physical.ok) return physical;
   if (!evidence.ok) {
     if (evidence.error.code === 'INTEGRITY_CONFLICT') await dependencies.recordEvidenceReview(tx, {

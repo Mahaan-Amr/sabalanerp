@@ -18,7 +18,7 @@ import type { PartnerCorrectionDependencyInput } from './dependencyChecks';
 import { partnerVoidingInspectionHash } from './voiding';
 import { authorizePartnerTechnicalRollout, lockPartnerOperationsControl } from '../authorization/technicalRollout';
 import { readPartnerWorkingCalendar } from './calendar';
-import { readPartnerShipmentQuantityProjection } from '../fulfillment/quantityStore';
+import { readPartnerCorrectionQuantityProjection } from '../fulfillment/quantityStore';
 
 type Tx = Prisma.TransactionClient;
 type SharedSave = Extract<PartnerCommand, { type: 'SHARED_CORRECTION_SAVE' }>;
@@ -30,11 +30,10 @@ async function dependencySnapshot(tx: Tx, input: { caseId: string; contractId: s
   predecessorRevision: number; predecessorGraph: unknown; successorGraph: unknown;
   successorProducts: Array<{ productRowId: string; quantity: string; unit: string }>;
   suppliedEvidenceIds: string[] }): Promise<Result<PartnerCorrectionDependencyInput>> {
-  const [bindings, projections, lineages, plan, receipts] = await Promise.all([
+  const [bindings, projections, plan, receipts] = await Promise.all([
     tx.partnerCaseRowBinding.findMany({ where: { caseId: input.caseId, revision: input.predecessorRevision },
       select: { productRowId: true, quantity: true, unit: true } }),
-    readPartnerShipmentQuantityProjection(tx, input.caseId),
-    tx.partnerFulfillmentLineage.findMany({ where: { caseId: input.caseId }, select: { id: true, productRowId: true } }),
+    readPartnerCorrectionQuantityProjection(tx, input.caseId),
     tx.partnerPaymentPlan.findFirst({ where: { caseId: input.caseId, purpose: 'RETAIL',
       caseRevision: { lte: input.predecessorRevision } }, orderBy: { version: 'desc' } }),
     tx.partnerRetailReceipt.findMany({ where: { caseId: input.caseId }, orderBy: { id: 'asc' }, select: {
@@ -43,13 +42,11 @@ async function dependencySnapshot(tx: Tx, input: { caseId: string; contractId: s
   ]);
   if (!plan) return { ok: false, error: partnerError('DEPENDENCY_BLOCKED') };
   const projectionByRow = new Map(projections.rows.map(row => [row.productRowId, row]));
-  const lineageByRow = new Map(lineages.map(row => [row.productRowId, row]));
   const physicalRows: PartnerCorrectionDependencyInput['physical']['rows'] = [];
   const physicalEvidenceIds: string[] = [];
   for (const binding of bindings) {
     const projection = projectionByRow.get(binding.productRowId);
-    const lineage = lineageByRow.get(binding.productRowId);
-    if (!lineage || !projection?.quantities || projection.health !== 'CURRENT' || projection.unit !== binding.unit ||
+    if (!projection?.quantities || projection.health !== 'CURRENT' || projection.unit !== binding.unit ||
         !projection.sourceEvidenceIds.length) return { ok: false, error: partnerError('DEPENDENCY_BLOCKED') };
     const evidenceIds = projection.sourceEvidenceIds;
     physicalEvidenceIds.push(...evidenceIds);

@@ -2746,7 +2746,7 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
         }
       }
     }
-    if (!amountsEqual(sepidarAmount, before.amount)) {
+    if (before.sourceKind === PARTNER_INTERNAL_ACCOUNTING_SOURCE ? !sepidarAmount.equals(before.amount) : !amountsEqual(sepidarAmount, before.amount)) {
       throw new Error('Sepidar amount must match the Sabalan invoice amount');
     }
 

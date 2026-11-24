@@ -30,6 +30,7 @@ for (const width of [1280, 390]) for (const theme of ['light', 'dark'] as const)
     });
     await page.route(`**/api/dispatch-credit/contracts/${contractId}/requests`, async route => {
       expect(route.request().postDataJSON()).toEqual({ kind: 'MANAGER', reason: '' }); requests++;
+      view.canRequestManager = false;
       view.authorities = [{ id: 'partner-manager-request', kind: 'MANAGER', status: 'PENDING', revision: 3, promisedDate: null,
         requestedBy: 'accountant', amountRials: '0', canDecide: false }];
       await reply(route, view.authorities[0]);

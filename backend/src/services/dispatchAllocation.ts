@@ -20,19 +20,20 @@ import {
   persistShipmentQuantityProjection,
   shipmentQuantityEvidenceIntegrityHash,
 } from './shipmentQuantityProjectionStore';
-import { assertCanonicalDispatchCommandAllowed } from './dispatchCutover';
+import { assertCanonicalDispatchCommandAllowed, DispatchCutoverBusyError, PilotSafetyPauseError,
+  retryDispatchCutoverContention } from './dispatchCutover';
 import { isPostCutoverFinalization } from './dispatchDocuments/featureGate';
 import { loadShipmentStatementRuntimeStateUnderLock } from './dispatchDocuments/runtimeState';
 import { assessBoundAllocationPricingFreshness } from './allocationPricingReadModel';
 import type { createDispatchDocuments } from './dispatchDocuments/service';
 import { AllocationPricingBindingError, assertExactStableReservationTransfer, bindFinalizedAllocationPricing, bindApprovedAllocationPriceEvidence } from './allocationPricingBinding';
 import { createPrismaAllocationPricingBindingPort } from './allocationPricingPrismaAdapter';
-import { canonicalHash, canonicalJson, RevisionRefSchema, IdSchema, FulfillmentViewSchema, partnerError,
+import { canonicalHash, canonicalJson, RevisionRefSchema, IdSchema, partnerError,
   type Result, type RevisionRef } from '@sabalanerp/partner-sales-contracts';
 import { createPartnerFulfillmentAdapter } from './partnerSales/fulfillment/adapter';
 import { createPrismaPartnerFulfillmentRepository } from './partnerSales/fulfillment/prismaRepository';
-import { lockPartnerOperationsControl, authorizePartnerTechnicalRollout } from './partnerSales/authorization/technicalRollout';
-import { partnerPredecessorIsFrozen } from './partnerSales/corrections/mutationFreeze';
+import { lockPartnerOperationsControl } from './partnerSales/authorization/technicalRollout';
+import { readLoadablePartnerDraftDeliveries } from './partnerSales/fulfillment/draftEligibility';
 import { authorizePartnerLoading, validPartnerLoadingActor as validLoadingActor, type PartnerLoadingActor } from './partnerSales/fulfillment/loadingAuthority';
 import { allocateLoadingNumber } from './logisticsLoadingNumber';
 import type { PartnerLoadingSource } from './partnerSales/fulfillment/repository';
@@ -163,41 +164,33 @@ export const withLogisticsLoadingReadScope = <T>(prisma: Database, input: Partne
 
 export const findLoadablePartnerDeliveries = (db: Database, input: PartnerLoadingActor & { customerIds: string[] }) =>
   readPartnerSnapshot(db, async tx => {
+    try {
+      await assertCanonicalDispatchCommandAllowed(tx, { readOnly: true });
+    } catch (error) {
+      if (error instanceof PilotSafetyPauseError) return [];
+      throw error;
+    }
     const sales = await tx.partnerSaleCase.findMany({ where: {
       state: 'COMMITTED', customerId: { in: input.customerIds },
       customerContract: { is: { isInactive: false, status: { notIn: ['CANCELLED', 'EXPIRED'] } } },
-    }, select: { id: true, customerId: true, profileId: true, headRevision: true, integrityHash: true,
-      customerContract: { select: { contractNumber: true } }, head: { select: { internalProjection: true } } } });
+    }, select: { id: true } });
+    const adapter = createPartnerFulfillmentAdapter(createPrismaPartnerFulfillmentRepository({ database: tx, ...input }));
     const results: { id: string; customerId: string; sourceKind: 'PARTNER_CASE'; owner: RevisionRef;
       deliveryId: string; projectName: string; address: string; date: string; contractNumber: string; remainingCount: number }[] = [];
     for (const sale of sales) {
-      if (!sale.customerContract || !(await authorizePartnerLoading(tx, input, sale.id, 'READ')).ok) continue;
-      const view = FulfillmentViewSchema.safeParse((sale.head.internalProjection as Prisma.JsonObject | null)?.fulfillment);
-      if (!view.success || view.data.owner.caseId !== sale.id || view.data.owner.revision !== sale.headRevision
-        || view.data.owner.integrityHash !== sale.integrityHash) continue;
-      if (!(await authorizePartnerTechnicalRollout(tx, sale.profileId, 'COMMITTED_FULFILLMENT')).ok
-        || await partnerPredecessorIsFrozen(tx, sale.id, sale.headRevision)) continue;
-      const projection = await readPartnerShipmentQuantityProjection(tx, sale.id);
-      const balanceByRow = new Map(projection.rows.map(row => [row.productRowId, row]));
-      const used = await tx.logisticsAllocationRevisionLine.groupBy({
-        by: ['partnerDeliveryId', 'productRowId'],
-        where: { sourceKind: 'PARTNER_CASE', partnerCaseId: sale.id, revision: {
-          candidate: { status: { in: [AccountingDispatchCandidateStatus.PENDING, AccountingDispatchCandidateStatus.ACCEPTED] } },
-        } },
-        _sum: { quantity: true },
-      });
-      const usedByRow = new Map(used.map(row => [JSON.stringify([row.partnerDeliveryId, row.productRowId]), row._sum.quantity]));
-      for (const delivery of view.data.deliveries) {
-        const remainingCount = delivery.items.filter(item => {
-          const balance = balanceByRow.get(item.productRowId);
-          return balance?.health === 'CURRENT' && balance.quantities
-            && new ExactQuantityDecimal(balance.quantities.availableToLoad).gt(0)
-            && new ExactQuantityDecimal(item.quantity).gt(usedByRow.get(JSON.stringify([delivery.deliveryId, item.productRowId])) ?? 0);
-        }).length;
-        if (remainingCount) results.push({
-          id: `partner:${sale.id}:${delivery.deliveryId}`, customerId: sale.customerId, sourceKind: 'PARTNER_CASE',
-          owner: view.data.owner, deliveryId: delivery.deliveryId, projectName: delivery.destination, address: delivery.destination,
-          date: delivery.date, contractNumber: sale.customerContract.contractNumber, remainingCount,
+      if (!(await authorizePartnerLoading(tx, input, sale.id, 'READ')).ok ||
+          !(await authorizePartnerLoading(tx, input, sale.id, 'DISCOVER_CREATE')).ok) continue;
+      const deliveries = await readLoadablePartnerDraftDeliveries(tx, sale.id);
+      if (!deliveries.length) continue;
+      const sources = await adapter.readDraftLoadingSources(deliveries[0].owner, deliveries.map(delivery => delivery.deliveryId));
+      if (!sources.ok) continue;
+      for (const delivery of deliveries) {
+        const source = sources.value.get(delivery.deliveryId);
+        if (!source?.ok || source.value.recipient.customerId !== delivery.customerId) continue;
+        results.push({
+          id: `partner:${sale.id}:${delivery.deliveryId}`, customerId: delivery.customerId, sourceKind: 'PARTNER_CASE',
+          owner: delivery.owner, deliveryId: delivery.deliveryId, projectName: delivery.destination, address: delivery.destination,
+          date: delivery.date, contractNumber: delivery.contractNumber, remainingCount: delivery.remainingCount,
         });
       }
     }
@@ -208,7 +201,8 @@ export const findLoadablePartnerDeliveries = (db: Database, input: PartnerLoadin
  * Case delivery. Draft creation does not reserve quantities or approve prices. */
 export const createPartnerCaseLoading = (prisma: Database, input: PartnerLoadingActor & {
   expected: RevisionRef; deliveryId: string; idempotencyKey: string;
-}): Promise<Result<{ loadingId: string; replayed: boolean }>> => serializable(prisma, async tx => {
+}): Promise<Result<{ loadingId: string; replayed: boolean }>> =>
+  retryDispatchCutoverContention<Result<{ loadingId: string; replayed: boolean }>>(prisma, () => serializable(prisma, async tx => {
   if (!validLoadingActor(input) || !RevisionRefSchema.safeParse(input.expected).success ||
       !IdSchema.safeParse(input.deliveryId).success || !IdSchema.safeParse(input.idempotencyKey).success) return partnerFailure('INVALID_PAYLOAD');
   await lockPartnerOperationsControl(tx);
@@ -216,7 +210,9 @@ export const createPartnerCaseLoading = (prisma: Database, input: PartnerLoading
   const authorized = await authorizePartnerLoading(tx, input, input.expected.caseId, 'CREATE');
   if (!authorized.ok) return authorized;
   const adapter = createPartnerFulfillmentAdapter(createPrismaPartnerFulfillmentRepository({ database: tx, ...input }));
-  const source = await adapter.readLoadingSource(input.expected, input.deliveryId);
+  const viewAuthorized = await authorizePartnerLoading(tx, input, input.expected.caseId, 'READ');
+  if (!viewAuthorized.ok) return viewAuthorized;
+  const source = await adapter.readDraftLoadingSource(input.expected, input.deliveryId);
   if (!source.ok) return source;
   const identity = { actorId: input.actorId, operation: 'PARTNER_LOADING_CREATE', targetScope: input.expected.caseId, key: input.idempotencyKey };
   const payloadHash = await canonicalHash({ operation: identity.operation, expected: input.expected, deliveryId: input.deliveryId });
@@ -232,11 +228,9 @@ export const createPartnerCaseLoading = (prisma: Database, input: PartnerLoading
         canonicalJson(loading.partnerSourceSnapshot) !== canonicalJson(source.value)) return partnerFailure('INTEGRITY_CONFLICT');
     return { ok: true, value: { loadingId: loading.id, replayed: true } };
   }
-  const caseRow = await tx.partnerSaleCase.findUniqueOrThrow({ where: { id: input.expected.caseId }, select: { profileId: true } });
-  const rollout = await authorizePartnerTechnicalRollout(tx, caseRow.profileId, 'COMMITTED_FULFILLMENT');
-  if (!rollout.ok) return rollout;
-  if (await partnerPredecessorIsFrozen(tx, input.expected.caseId, input.expected.revision)) return partnerFailure('STATE_CONFLICT');
-  await assertCanonicalDispatchCommandAllowed(tx);
+  const deliveries = await readLoadablePartnerDraftDeliveries(tx, input.expected.caseId);
+  if (!deliveries.some(delivery => delivery.deliveryId === input.deliveryId && delivery.customerId === source.value.recipient.customerId)) return partnerFailure('DEPENDENCY_BLOCKED');
+  await assertCanonicalDispatchCommandAllowed(tx, { partnerLocksHeld: true });
   const loading = await tx.logisticsLoading.create({ data: { loadingNumber: await allocateLoadingNumber(tx),
     sourceKind: 'PARTNER_CASE', customerId: source.value.recipient.customerId,
     partnerCaseId: input.expected.caseId, partnerCaseRevision: input.expected.revision,
@@ -249,6 +243,10 @@ export const createPartnerCaseLoading = (prisma: Database, input: PartnerLoading
       sourceHash: loading.partnerSourceHash, correlationId: input.correlationId, idempotencyKey: input.idempotencyKey,
       reason: input.reason ?? null, effectiveAuthority: authorized.value } });
   return { ok: true, value: { loadingId: loading.id, replayed: false } };
+})).catch(error => {
+  if (error instanceof PilotSafetyPauseError) return partnerFailure('DEPENDENCY_BLOCKED');
+  if (error instanceof DispatchCutoverBusyError) return partnerFailure('STATE_CONFLICT');
+  throw error;
 });
 
 export const readPartnerCaseLoading = (prisma: Database, input: PartnerLoadingActor & {

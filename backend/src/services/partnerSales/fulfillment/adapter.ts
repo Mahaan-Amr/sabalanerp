@@ -54,7 +54,7 @@ export function createPartnerFulfillmentAdapter(repository: PartnerFulfillmentRe
     if (!loaded.ok) return loaded;
     const validated = validateSource(view, loaded.value);
     if (!validated.ok) return validated;
-    const dependencies = await tx.readQuantityDependencies(view.owner);
+    const dependencies = await tx.readQuantityDependencies(view.owner, mode);
     const products = new Map(validated.value.view.products.map(row => [row.productRowId, row]));
     const counts = new Map<string, number>();
     for (const row of dependencies) counts.set(row.productRowId, (counts.get(row.productRowId) || 0) + 1);
@@ -87,35 +87,59 @@ export function createPartnerFulfillmentAdapter(repository: PartnerFulfillmentRe
   });
   const inspectDependencies: FulfillmentPartnerPort['inspectDependencies'] = view => inspect(view, 'SUCCESSOR');
 
-  const readLoading = (expected: FulfillmentView['owner'], deliveryId: string, historical: boolean): Promise<Result<PartnerLoadingSource>> => repository.transaction(async tx => {
-      if (!contracts.RevisionRefSchema.safeParse(expected).success || !contracts.IdSchema.safeParse(deliveryId).success) return failure('INVALID_PAYLOAD');
-      const loaded = await tx.readAuthorizedSource(expected, historical ? 'INSPECT_LOADING' : 'SELECT_DELIVERY');
+  const readLoadingSources = (expected: FulfillmentView['owner'], deliveryIds: string[],
+    action: 'SELECT_DELIVERY' | 'SELECT_DRAFT_DELIVERY' | 'INSPECT_LOADING')
+    : Promise<Result<Map<string, Result<PartnerLoadingSource>>>> => repository.transaction(async tx => {
+      if (!contracts.RevisionRefSchema.safeParse(expected).success ||
+          deliveryIds.some(id => !contracts.IdSchema.safeParse(id).success)) return failure('INVALID_PAYLOAD');
+      const loaded = await tx.readAuthorizedSource(expected, action);
       if (!loaded.ok) return loaded;
       const stale = contracts.checkExpectedRevision(expected, loaded.value.view.owner);
       if (stale) return { ok: false, error: stale };
-      const validated = validateSource(loaded.value.view, loaded.value, historical);
+      const validated = validateSource(loaded.value.view, loaded.value, action === 'INSPECT_LOADING');
       if (!validated.ok) return validated;
       const source = validated.value;
-      const delivery = source.view.deliveries.find(row => row.deliveryId === deliveryId);
-      if (!delivery) return failure('NOT_FOUND');
-      const rows: PartnerLoadingSource['rows'] = [];
-      for (const item of delivery.items) {
-        const product = source.view.products.find(row => row.productRowId === item.productRowId)!;
-        const lineage = await tx.findLineage(expected.caseId, item.productRowId);
-        if (!lineage || lineage.sourceKind !== 'PARTNER_CASE' || lineage.caseId !== expected.caseId ||
-            lineage.internalRecordId !== source.view.recordId || lineage.productRowId !== item.productRowId ||
-            lineage.unit !== product.unit || lineage.recipient.customerId !== source.customer.customerId ||
-            lineage.createdFrom.caseId !== expected.caseId || lineage.createdFrom.revision > expected.revision) return failure('INTEGRITY_CONFLICT');
-        rows.push({ lineageId: lineage.lineageId, productRowId: item.productRowId, description: product.description,
-          unit: product.unit, plannedQuantity: canonicalQuantity(item.quantity)! });
+      const deliveries = new Map(source.view.deliveries.map(delivery => [delivery.deliveryId, delivery]));
+      const products = new Map(source.view.products.map(product => [product.productRowId, product]));
+      const productRowIds = [...new Set(deliveryIds.flatMap(id => deliveries.get(id)?.items.map(item => item.productRowId) ?? []))];
+      const lineages = tx.findLineages ? await tx.findLineages(expected.caseId, productRowIds) :
+        new Map(await Promise.all(productRowIds.map(async id => [id, await tx.findLineage(expected.caseId, id)] as const)));
+      const results = new Map<string, Result<PartnerLoadingSource>>();
+      for (const deliveryId of deliveryIds) {
+        const delivery = deliveries.get(deliveryId);
+        if (!delivery) {
+          results.set(deliveryId, failure('NOT_FOUND'));
+          continue;
+        }
+        const rows: PartnerLoadingSource['rows'] = [];
+        for (const item of delivery.items) {
+          const product = products.get(item.productRowId)!;
+          const lineage = lineages.get(item.productRowId);
+          if (!lineage || lineage.sourceKind !== 'PARTNER_CASE' || lineage.caseId !== expected.caseId ||
+              lineage.internalRecordId !== source.view.recordId || lineage.productRowId !== item.productRowId ||
+              lineage.unit !== product.unit || lineage.recipient.customerId !== source.customer.customerId ||
+              lineage.createdFrom.caseId !== expected.caseId || lineage.createdFrom.revision > expected.revision) break;
+          rows.push({ lineageId: lineage.lineageId, productRowId: item.productRowId, description: product.description,
+            unit: product.unit, plannedQuantity: canonicalQuantity(item.quantity)! });
+        }
+        results.set(deliveryId, rows.length !== delivery.items.length ? failure('INTEGRITY_CONFLICT') :
+          { ok: true, value: { sourceKind: 'PARTNER_CASE', owner: source.view.owner,
+            internalRecordId: source.view.recordId, deliveryId, plannedDate: delivery.date,
+            recipient: { ...source.customer, destination: delivery.destination }, rows } });
       }
-      return { ok: true, value: { sourceKind: 'PARTNER_CASE', owner: source.view.owner,
-        internalRecordId: source.view.recordId, deliveryId, plannedDate: delivery.date,
-        recipient: { ...source.customer, destination: delivery.destination }, rows } };
+      return { ok: true, value: results };
     });
+  const readLoading = async (expected: FulfillmentView['owner'], deliveryId: string,
+    action: Parameters<typeof readLoadingSources>[2]): Promise<Result<PartnerLoadingSource>> => {
+    const results = await readLoadingSources(expected, [deliveryId], action);
+    return results.ok ? results.value.get(deliveryId)! : results;
+  };
   return {
-    readLoadingSource: (expected: FulfillmentView['owner'], deliveryId: string) => readLoading(expected, deliveryId, false),
-    readLoadingEvidence: (expected: FulfillmentView['owner'], deliveryId: string) => readLoading(expected, deliveryId, true),
+    readLoadingSource: (expected: FulfillmentView['owner'], deliveryId: string) => readLoading(expected, deliveryId, 'SELECT_DELIVERY'),
+    readDraftLoadingSources: (expected: FulfillmentView['owner'], deliveryIds: string[]) =>
+      readLoadingSources(expected, deliveryIds, 'SELECT_DRAFT_DELIVERY'),
+    readDraftLoadingSource: (expected: FulfillmentView['owner'], deliveryId: string) => readLoading(expected, deliveryId, 'SELECT_DRAFT_DELIVERY'),
+    readLoadingEvidence: (expected: FulfillmentView['owner'], deliveryId: string) => readLoading(expected, deliveryId, 'INSPECT_LOADING'),
     inspectDependencies,
     inspectVoidingDependencies: (view: FulfillmentView) => inspect(view, 'VOIDING'),
     ensureCommittedLineage: (view: FulfillmentView, command: PartnerFulfillmentCommand) => repository.transaction(async tx => {

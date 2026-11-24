@@ -24,14 +24,14 @@ export async function lockPartnerOperationsControlForRead(tx: Prisma.Transaction
  * surfaces. Direct conversion bypasses it completely; older profiles retain
  * their named-cohort eligibility until migrated. */
 export async function authorizePartnerTechnicalRollout(tx: Prisma.TransactionClient, profileId: string,
-  operation: 'READ' | 'MUTATE' | 'CONTROL' | 'COMMITTED_FULFILLMENT'): Promise<Result<void>> {
+  operation: 'READ' | 'MUTATE' | 'CONTROL' | 'COMMITTED_FULFILLMENT' | 'READ_COMMITTED_FULFILLMENT'): Promise<Result<void>> {
   const direct = tx.partnerConversionDisposition && await tx.partnerConversionDisposition.findFirst({ where: {
     profileId, sourceType: 'PARTNER_ACTIVATION', disposition: 'DIRECT_V4',
   }, select: { id: true } });
   // Direct conversion is the complete availability decision. It must not
   // depend on the existence or value of a legacy global rollout row.
   if (direct) return { ok: true, value: undefined };
-  const control = operation === 'READ'
+  const control = operation === 'READ' || operation === 'READ_COMMITTED_FULFILLMENT'
     ? await tx.partnerOperationsControl.findUnique({ where: { id: PARTNER_OPERATIONS_CONTROL_ID },
       select: { cohortId: true, operationalPaused: true } })
     : await lockPartnerOperationsControl(tx);
@@ -40,7 +40,7 @@ export async function authorizePartnerTechnicalRollout(tx: Prisma.TransactionCli
   // remains available after legacy rollout cohort changes;
   // the fulfillment boundary separately proves COMMITTED source and current
   // actor authority under the global/Case locks acquired before this call.
-  if (operation === 'COMMITTED_FULFILLMENT') return { ok: true, value: undefined };
+  if (operation === 'COMMITTED_FULFILLMENT' || operation === 'READ_COMMITTED_FULFILLMENT') return { ok: true, value: undefined };
   if (!control.cohortId) return { ok: false, error: partnerError('COHORT_NOT_READY') };
   const memberships = await tx.partnerCohortMembership.findMany({ where: { profileId,
     cohortId: control.cohortId, cohort: { activationEnabled: true } }, select: { cohortId: true } });

@@ -5,7 +5,8 @@ import { readCurrentPartnerCaseViews } from './lifecycle';
 import { readPersistedPartnerEvents } from '../events/persisted';
 import { subtract, sum } from '../reporting/money';
 import { caseComparableAmount } from '../reporting/comparable';
-import { synchronizePartnerContractedQuantities, validatePartnerCommercialPhysicalFloor } from '../fulfillment/quantityStore';
+import { synchronizeCorrectedPartnerDraftQuantities } from '../fulfillment/draftEligibility';
+import { validatePartnerCommercialPhysicalFloor } from '../fulfillment/quantityStore';
 
 const json = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value));
 
@@ -17,7 +18,7 @@ export async function recordPartnerRecommitment(tx: Prisma.TransactionClient, ca
   const views = await readCurrentPartnerCaseViews(tx, caseId);
   if (!views?.accounting || !views.row.internalRecordId || !views.row.commitmentEventId) throw new Error('شواهد تعهد خرید کامل نیست.');
   const physicalFloor = await validatePartnerCommercialPhysicalFloor(tx, caseId,
-    views.accounting.products.filter(product => product.productType !== 'service'));
+    views.accounting.products.filter(product => product.productType !== 'service'), { allowMissingContractedEvidence: true });
   if (!physicalFloor.ok) throw new Error(physicalFloor.error.message);
   const root = views.row;
   const events = readPersistedPartnerEvents({ id: caseId, internalRecordId: root.internalRecordId! }, rows);
@@ -52,5 +53,5 @@ export async function recordPartnerRecommitment(tx: Prisma.TransactionClient, ca
     integrityHash: owner.integrityHash, sequence: (rows.at(-1)?.sequence ?? 0) + 2, stateRevision: current.stateRevision,
     type: recommit.type, fromState: 'COMMITTED', toState: 'COMMITTED', actorId, commandId, correlationId: commandId,
     recordedAt: clock.now, effectiveDate: new Date(`${recommit.effectiveDate}T00:00:00Z`), evidence: json({ publicEvent: recommit }) } });
-  await synchronizePartnerContractedQuantities(tx, caseId);
+  await synchronizeCorrectedPartnerDraftQuantities(tx, caseId);
 }

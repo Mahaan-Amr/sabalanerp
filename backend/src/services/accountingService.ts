@@ -1403,13 +1403,17 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}, ac
     getCustomerName(contract.customer || {}), contract.customer?.nationalCode,
     metadataObject(contract.customer?.customFields).economicCode, contract.status,
   ])) : rawContracts;
-  let datedContracts = ordinary.prepared ?? await attachAccountingListDates(prisma, headerCandidates);
+  // Review ranking and financial totals use commercial and Accounting fields.
+  // Historical dates affect membership only through search and date filters.
+  const pageDatesOnly = query.view === 'reviewable' && !search && !query.dateFrom && !query.dateTo;
+  let populationContracts = ordinary.prepared ?? (pageDatesOnly ? headerCandidates
+    : await attachAccountingListDates(prisma, headerCandidates));
   if (search) {
     const matches = accountingContractSearch(search);
     // Conservative prefilter: derived financial statuses are not known yet.
     // Keep every possible status as a candidate; the exact filter below still
     // decides membership after enrichment. Never discard a status/date search.
-    datedContracts = datedContracts.filter(contract => {
+    populationContracts = populationContracts.filter(contract => {
       const date = getContractDateValue(contract);
       return matches([contract.contractNumber, contract.titlePersian || contract.title || 'قرارداد فروش',
         getCustomerName(contract.customer || {}), contract.customer?.nationalCode,
@@ -1417,7 +1421,7 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}, ac
         ...financialStatuses, ...(date ? [date.toISOString(), getTehranDateKey(date)] : [])]);
     });
   }
-  let contracts = ordinary.prepared ?? await attachAccountingCollections(datedContracts);
+  let contracts = ordinary.prepared ?? await attachAccountingCollections(populationContracts);
   const rowTime = new Date();
   let items: any[] = await Promise.all(contracts.map((contract) => buildContractRow(contract, settings, true, rowTime)));
   {
@@ -1575,13 +1579,23 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}, ac
   const total = ordinaryAggregate ? Number(ordinaryAggregate.count) + partnerItems.length : items.length;
   const contractsById = new Map(contracts.map(contract => [contract.id, contract]));
   finishPopulation();
-  const pagedItems = await measureAccountingReadPhase('rowHydration', () => Promise.all(items.slice(skip, skip + pageSize).map(async item => {
-    const contract = item.sourceKind === PARTNER_INTERNAL_ACCOUNTING_SOURCE ? undefined : contractsById.get(item.contractId);
-    if (!contract) return item;
-    const full = await buildContractRow(contract, settings, false, rowTime);
-    // Filters, ordering and totals all refer to the same summary calculation.
-    return { ...full, accounting: item.accounting };
-  })));
+  const pagedItems = await measureAccountingReadPhase('rowHydration', async () => {
+    const pageItems = items.slice(skip, skip + pageSize);
+    if (pageDatesOnly) {
+      const visibleContracts = pageItems.filter(item => item.sourceKind !== PARTNER_INTERNAL_ACCOUNTING_SOURCE)
+        .map(item => contractsById.get(item.contractId));
+      for (const contract of await attachAccountingListDates(prisma, visibleContracts)) {
+        contractsById.set(contract.id, contract);
+      }
+    }
+    return Promise.all(pageItems.map(async item => {
+      const contract = item.sourceKind === PARTNER_INTERNAL_ACCOUNTING_SOURCE ? undefined : contractsById.get(item.contractId);
+      if (!contract) return item;
+      const full = await buildContractRow(contract, settings, false, rowTime);
+      // Filters, ordering and totals all refer to the same summary calculation.
+      return { ...full, accounting: item.accounting };
+    }));
+  });
 
   const totals = (ordinaryAggregate ? partnerItems : items).reduce((acc, item) => ({
     contractAmount: acc.contractAmount.plus(accountingAmountInRials(item.accounting.totalContractAmount, item.accounting.currency)),

@@ -75,7 +75,9 @@ test('replacement overview and source readiness stay usable while an audit check
     releaseAudit();
   }
 
-  await expect(audit.getByText('بررسی زنجیره ممیزی جایگزینی انجام نشد.')).toBeVisible();
+  const auditError = audit.getByRole('alert').filter({ hasText: 'سرویس موقتاً پاسخ‌گو نیست.' });
+  await expect(auditError).toBeVisible();
+  await expect(auditError).toContainText(/کد پیگیری [a-z0-9-]+ را به پشتیبانی اعلام کنید\./i);
   await expect(readiness.getByText('گزارش رسمی مسدود است.')).toBeVisible();
   auditStatus = 200;
   await audit.getByRole('button', { name: 'بررسی دوباره' }).click();
@@ -85,7 +87,7 @@ test('replacement overview and source readiness stay usable while an audit check
   auditStatus = 503;
   await audit.getByRole('button', { name: 'بررسی دوباره' }).click();
   await expect(audit.getByText('نتیجهٔ آخرین بررسی کامل‌شده')).toBeVisible();
-  await expect(audit.getByText('بررسی زنجیره ممیزی جایگزینی انجام نشد.')).toBeVisible();
+  await expect(auditError).toBeVisible();
 
   auditStatus = 403;
   await audit.getByRole('button', { name: 'بررسی دوباره' }).click();

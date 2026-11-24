@@ -47,21 +47,23 @@ test('CRM search keeps the last expression and changing page leaves profile and 
   });
 
   await page.goto('/dashboard/crm/customers');
-  await expect(page.getByText('نمایش اولیه آزمون', { exact: true }).first()).toBeVisible();
+  const directory = page.getByRole('table');
+  const customerName = (firstName: string) => directory.getByText(`${firstName} آزمون`, { exact: true });
+  await expect(customerName('نمایش اولیه')).toBeVisible();
   const profileAtOpen = profileRequests;
   const search = page.getByRole('searchbox');
   try {
     await search.fill('قدیمی');
     await oldRequestStarted;
     await search.fill('تازه');
-    await expect(page.getByText('پاسخ تازه آزمون', { exact: true }).first()).toBeVisible();
+    await expect(customerName('پاسخ تازه')).toBeVisible();
   } finally {
     releaseOldResult();
   }
   await oldRequestDone;
-  await expect(page.getByText('پاسخ قدیمی آزمون', { exact: true })).toHaveCount(0);
+  await expect(customerName('پاسخ قدیمی')).toHaveCount(0);
   await page.getByRole('button', { name: 'بعدی', exact: true }).click();
-  await expect(page.getByText('صفحه دوم آزمون', { exact: true }).first()).toBeVisible();
+  await expect(customerName('صفحه دوم')).toBeVisible();
   expect(profileRequests).toBe(profileAtOpen);
   expect(detailRequests).toBe(0);
 });

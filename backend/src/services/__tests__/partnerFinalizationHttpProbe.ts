@@ -13,6 +13,7 @@ import { ProtectedTemplateVault } from '../biometricTemplateVault';
 import { readdir } from 'node:fs/promises';
 import path from 'node:path';
 import type { Prisma } from '@prisma/client';
+import { createReadyPartnerLoadingDriver } from './partnerLoadingDriverFixture';
 
 async function main() {
   const url = new URL(process.env.DATABASE_URL || '');
@@ -81,14 +82,10 @@ async function main() {
       assert.equal(created.status, 201, JSON.stringify(created.body));
       const loadingId = created.body.data.loadingId;
       const source = (await request(`/loadings/${loadingId}`)).body.data.source;
-      const driver = await prisma.externalDriver.create({ data: { firstName: 'Final', lastName: 'Dispatch',
-        nationalCode: '3340000001', phone: '09120003341', status: 'ACTIVE', statusRecordedBy: actorId, createdBy: actorId,
-        documents: { create: { documentType: 'DRIVING_LICENCE', reference: 'isolated-334-final-driver', recordedBy: actorId } } } });
-      const vehicle = await prisma.externalVehicle.create({ data: { vehicleType: 'Final Partner dispatch', status: 'ACTIVE',
-        statusRecordedBy: actorId, createdBy: actorId,
-        plates: { create: { plate: '334-final', normalizedPlate: '334final', effectiveFrom: new Date(),
-          reason: 'isolated finalization fixture', recordedBy: actorId } },
-        documents: { create: { documentType: 'VEHICLE_REGISTRATION', reference: 'isolated-334-final-vehicle', recordedBy: actorId } } } });
+      const { driver, vehicle } = await createReadyPartnerLoadingDriver(prisma, actorId, {
+        firstName: 'Final', lastName: 'Dispatch', nationalCode: '3340000001', phone: '09120003341',
+        plate: '334-final', normalizedPlate: '334final', vehicleType: 'Final Partner dispatch',
+      });
       const admission = await request('/api/security/canonical-driver-queue', 'POST',
         { source: 'EXTERNAL', driverId: driver.id, vehicleId: vehicle.id }, logisticsSession.token, `${expected.caseId}-final-turn`);
       assert.equal(admission.status, 201, JSON.stringify(admission.body));
@@ -102,9 +99,13 @@ async function main() {
           productRowId: source.rows[0].productRowId, quantity: '0.250', unit: source.rows[0].unit }] },
       logisticsSession.token, `${expected.caseId}-final-allocation`);
       assert.equal(allocated.status, 200, JSON.stringify(allocated.body));
-      const finalized = await request(`/loadings/${loadingId}/finalize`, 'POST', { expected,
+      const finalize = () => request(`/loadings/${loadingId}/finalize`, 'POST', { expected,
         reason: 'نهایی‌سازی بارگیری با شواهد مالی رسمی' }, logisticsSession.token, `${expected.caseId}-finalize`);
+      const finalized = await finalize();
       assert.equal(finalized.status, 200, JSON.stringify(finalized.body));
+      const finalizedAgain = await finalize();
+      assert.equal(finalizedAgain.status, 200, JSON.stringify(finalizedAgain.body));
+      assert.equal(finalizedAgain.body.data.id, finalized.body.data.id, 'authorized replay returns the same allocation batch');
       assert.equal((await prisma.partnerOperationsControl.findUniqueOrThrow({ where: { id: 'partner-operations' } })).operationalPaused,
         true, 'committed loading create, reserve, allocate, and finalize must survive the emergency pause');
       const revisionId = finalized.body.data.revisions[0].id;

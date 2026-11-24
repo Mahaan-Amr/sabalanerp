@@ -1,26 +1,39 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { resolve } from 'node:path';
 import test from 'node:test';
 import { PrismaClient } from '@prisma/client';
 import * as PartnerContracts from '@sabalanerp/partner-sales-contracts';
 import { FEATURES } from '../../middleware/feature';
+import { listAccountingContracts } from '../accountingService';
 import { filterCurrentlyAuthorizedNotifications, readCurrentlyAuthorizedUnreadCount } from '../notificationAuthorization';
 import { notificationReadObservation } from '../notificationReadObservation';
+import { withAccountingReadScope } from '../partnerSales/accounting/readScope';
 import { PARTNER_NOTIFICATION_RESOURCE, registerPartnerNotificationAccess } from '../partnerSales/notifications/access';
 import { inquiryNotificationAccess } from '../partnerSales/notifications/inquiryDelivery';
 import { planInquiryNotifications } from '../partnerSales/notifications/inquiries';
+import { createDispatchDocumentsTemporaryDatabase } from './dispatchDocumentsTemporaryDatabase';
 import { partnerNotificationsTestDatabaseUrl } from './partnerNotificationsTestDatabase';
 
 test('a mixed notification backlog keeps exact totals, verifies each notice and refreshes current authority', async t => {
-  const database = new PrismaClient({
-    datasources: { db: { url: partnerNotificationsTestDatabaseUrl() } },
-    log: [{ level: 'query', emit: 'event' }],
+  const fixture = await createDispatchDocumentsTemporaryDatabase({
+    repositoryRoot: resolve(__dirname, '../../../..'),
+    sourceDatabaseUrl: partnerNotificationsTestDatabaseUrl(),
+    schemaOnly: true,
   });
-  let trackedQueries: number | undefined;
-  database.$on('query', () => { if (trackedQueries !== undefined) trackedQueries++; });
-  registerPartnerNotificationAccess(inquiryNotificationAccess);
+  const database = new PrismaClient({
+    datasources: { db: { url: fixture.databaseUrl } }, log: [{ level: 'query', emit: 'event' }],
+  });
+  const applicationDatabase = database as unknown as PrismaClient;
+  let trackedQueries: string[] | undefined;
+  database.$on('query', ({ query }) => { trackedQueries?.push(query.trim()); });
+  async function captureQueries<T>(read: () => Promise<T>) {
+    const queries: string[] = [];
+    trackedQueries = queries;
+    try { return { result: await read(), queries }; }
+    finally { trackedQueries = undefined; }
+  }
   const prefix = `notice-backlog-${randomUUID()}`;
-  const rolledBack = new Error('fixture rolled back');
   const actorId = `${prefix}-actor`;
   const ownerId = `${prefix}-owner`;
   const nextResponderId = `${prefix}-next`;
@@ -28,12 +41,13 @@ test('a mixed notification backlog keeps exact totals, verifies each notice and 
   const fixtureRows = 240;
   const accountingRows = 12;
   const personalRows = 6;
+  const tamperedId = `${prefix}-tampered`;
   try {
-    await assert.rejects(database.$transaction(async tx => {
+    registerPartnerNotificationAccess(inquiryNotificationAccess);
+    await database.$transaction(async tx => {
       await tx.user.createMany({ data: [actorId, ownerId, nextResponderId].map(id => ({
         id, email: `${id}@example.invalid`, username: id, password: 'not-a-login', firstName: 'Notification', lastName: 'Fixture',
       })) });
-      const actor = await tx.user.findUniqueOrThrow({ where: { id: actorId } });
       await tx.workspacePermission.create({ data: { userId: actorId, workspace: 'accounting', permissionLevel: 'view' } });
       await tx.featurePermission.create({ data: {
         userId: actorId, workspace: 'accounting', feature: FEATURES.ACCOUNTING_CONTRACTS_VIEW, permissionLevel: 'view',
@@ -67,7 +81,7 @@ test('a mixed notification backlog keeps exact totals, verifies each notice and 
         return { id: `${event.id}-notice`, deduplicationKey: event.id, type: 'PARTNER_INQUIRY_SUBMITTED',
           resourceType: PARTNER_NOTIFICATION_RESOURCE, resourceId: event.id, payload };
       }));
-      const tamperedEvent = { ...partnerEvents[0], id: `${prefix}-tampered`, deduplicationKey: `${prefix}-tampered`,
+      const tamperedEvent = { ...partnerEvents[0], id: tamperedId, deduplicationKey: tamperedId,
         payload: { ...partnerEvents[0].payload, correlationId: `${prefix}-mismatch` } };
       const accountingEvents = Array.from({ length: accountingRows }, (_, index) => ({
         id: `${prefix}-accounting-${index}`, deduplicationKey: `${prefix}-accounting-${index}`,
@@ -83,52 +97,74 @@ test('a mixed notification backlog keeps exact totals, verifies each notice and 
         { ...genericNotice, type: 'SYSTEM', readAt: now },
         { ...genericNotice, userId: nextResponderId, eventId: partnerEvents[1].id, type: partnerEvents[1].type },
       ] });
-      const candidates = await tx.notification.findMany({ where: { userId: actorId, readAt: null }, include: { event: true } });
-      const preview = () => filterCurrentlyAuthorizedNotifications(tx, actor, candidates, { inbox: true });
-      const expected = fixtureRows + accountingRows + personalRows;
-      // Compare the legacy locked Partner reader and the projection on the same
-      // immutable evidence and current actor. Keep the sample size small for CI.
-      const partnerSample = candidates.filter(row => row.event?.resourceType === PARTNER_NOTIFICATION_RESOURCE
-        && row.id !== tamperedEvent.id).slice(0, 12);
-      trackedQueries = 0;
-      const locked = await filterCurrentlyAuthorizedNotifications(tx, actor, partnerSample);
-      const legacyQueries = trackedQueries;
-      trackedQueries = 0;
-      const batched = await filterCurrentlyAuthorizedNotifications(tx, actor, partnerSample, { inbox: true });
-      const batchQueries = trackedQueries;
-      trackedQueries = undefined;
-      assert.equal(locked.length, 12);
-      assert.deepEqual(batched.map(row => row.id), locked.map(row => row.id));
-      assert.ok(batchQueries * 3 < legacyQueries, `query events: legacy ${legacyQueries}, batched ${batchQueries}`);
-      t.diagnostic(`12 inquiry notices: legacy ${legacyQueries} SQL query events, batched ${batchQueries}`);
+    }, { timeout: 45_000 });
 
-      const samples: NonNullable<ReturnType<typeof notificationReadObservation.getStore>> = {};
-      const [count, accounting] = await Promise.all([
-        notificationReadObservation.run(samples, () => readCurrentlyAuthorizedUnreadCount(tx, actor)),
-        database.accountingFinancialRecord.findMany({ select: { id: true }, take: 100 }),
-      ]);
-      assert.ok(Array.isArray(accounting));
-      assert.equal(count, expected);
-      assert.equal(samples['partnerInquiry.transaction']?.calls, 3);
-      assert.equal(samples['partnerInquiry.evidence']?.calls, 12);
-      assert.equal(samples['partnerInquiry.authority']?.calls, 12);
-      assert.equal((await preview()).length, expected);
-      assert.equal(await readCurrentlyAuthorizedUnreadCount(tx, { ...actor, id: nextResponderId }), 0,
-        'a copied notice cannot confer recipient authority');
+    const actor = await database.user.findUniqueOrThrow({ where: { id: actorId } });
+    const getCandidates = () => database.notification.findMany({
+      where: { userId: actorId, readAt: null }, include: { event: true },
+    });
+    const preview = async () => filterCurrentlyAuthorizedNotifications(
+      applicationDatabase, actor, await getCandidates(), { inbox: true },
+    );
+    const unreadCount = () => readCurrentlyAuthorizedUnreadCount(applicationDatabase, actor);
+    const expected = fixtureRows + accountingRows + personalRows;
+    // Compare both read paths on the same immutable evidence and current actor.
+    const partnerSample = (await getCandidates()).filter(row => row.event?.resourceType === PARTNER_NOTIFICATION_RESOURCE
+      && row.id !== tamperedId).slice(0, 12);
+    const locked = await captureQueries(() =>
+      filterCurrentlyAuthorizedNotifications(applicationDatabase, actor, partnerSample));
+    const batched = await captureQueries(() =>
+      filterCurrentlyAuthorizedNotifications(applicationDatabase, actor, partnerSample, { inbox: true }));
+    assert.equal(locked.result.length, 12);
+    assert.deepEqual(batched.result.map(row => row.id), locked.result.map(row => row.id));
+    assert.equal(locked.queries.filter(query => query === 'COMMIT').length, 12);
+    assert.equal(batched.queries.filter(query => query === 'COMMIT').length, 1);
+    assert.ok(batched.queries.length * 3 < locked.queries.length,
+      `query events: legacy ${locked.queries.length}, batched ${batched.queries.length}`);
+    t.diagnostic(`12 inquiry notices: legacy ${locked.queries.length} SQL query events and 12 commits, `
+      + `batched ${batched.queries.length} SQL query events and 1 commit`);
 
-      await tx.partnerInquiryAssignment.create({ data: { inquiryId: inquiryIds[0], revision: 2, actorId: ownerId,
-        responderId: nextResponderId, reason: 'Reassigned in fixture', eligibilityEvidence: { fixture: true } } });
-      assert.equal(await readCurrentlyAuthorizedUnreadCount(tx, actor), expected - fixtureRows / 2);
-      await tx.featurePermission.update({ where: { userId_workspace_feature: { userId: actorId, workspace: 'accounting', feature: FEATURES.ACCOUNTING_CONTRACTS_VIEW } },
-        data: { permissionLevel: 'none' } });
-      await tx.effectiveActionGrant.update({ where: { id: `${prefix}-grant` }, data: {
-        revokedAt: new Date(), revokedBy: ownerId, revocationReason: 'Revoked in fixture', revocationCorrelationId: prefix,
-      } });
-      assert.equal(await readCurrentlyAuthorizedUnreadCount(tx, actor), personalRows);
-      assert.equal((await preview()).length, personalRows);
-      throw rolledBack;
-    }, { timeout: 45_000 }), error => error === rolledBack);
+    const countObservation: NonNullable<ReturnType<typeof notificationReadObservation.getStore>> = {};
+    const previewObservation: typeof countObservation = {};
+    const accountingActor = { userId: actorId };
+    const { result: [count, visible, accounting], queries } = await captureQueries(() => Promise.all([
+      notificationReadObservation.run(countObservation, unreadCount),
+      notificationReadObservation.run(previewObservation, preview),
+      withAccountingReadScope(applicationDatabase, accountingActor, scope =>
+        listAccountingContracts({ view: 'reviewable', page: 1, pageSize: 50 }, accountingActor, scope),
+        { purpose: 'REGISTER' }),
+    ]));
+    assert.equal(accounting.total, 0);
+    assert.deepEqual(accounting.items, []);
+    assert.equal(count, expected);
+    assert.equal(visible.length, expected);
+    assert.ok(!visible.some(row => row.id === tamperedId));
+    for (const observation of [countObservation, previewObservation]) {
+      assert.equal(observation['partnerInquiry.transaction']?.calls, 3);
+      assert.equal(observation['partnerInquiry.evidence']?.calls, 12);
+      assert.equal(observation['partnerInquiry.authority']?.calls, 12);
+      assert.ok(Object.values(observation).every(sample => sample.errorCode === undefined));
+    }
+    const commits = queries.filter(query => query === 'COMMIT').length;
+    assert.equal(commits, 7, 'count and preview each commit three batches and the Accounting register commits one snapshot');
+    assert.equal(queries.filter(query => query === 'BEGIN').length, commits);
+    assert.ok(!queries.includes('ROLLBACK'));
+    t.diagnostic(`Concurrent unread count, preview and Accounting register: ${queries.length} SQL query events, ${commits} commits`);
+    assert.equal(await readCurrentlyAuthorizedUnreadCount(applicationDatabase, { ...actor, id: nextResponderId }), 0,
+      'a copied notice cannot confer recipient authority');
+
+    await database.partnerInquiryAssignment.create({ data: { inquiryId: inquiryIds[0], revision: 2, actorId: ownerId,
+      responderId: nextResponderId, reason: 'Reassigned in fixture', eligibilityEvidence: { fixture: true } } });
+    assert.equal(await unreadCount(), expected - fixtureRows / 2);
+    await database.featurePermission.update({ where: { userId_workspace_feature: { userId: actorId, workspace: 'accounting', feature: FEATURES.ACCOUNTING_CONTRACTS_VIEW } },
+      data: { permissionLevel: 'none' } });
+    await database.effectiveActionGrant.update({ where: { id: `${prefix}-grant` }, data: {
+      revokedAt: new Date(), revokedBy: ownerId, revocationReason: 'Revoked in fixture', revocationCorrelationId: prefix,
+    } });
+    assert.equal(await unreadCount(), personalRows);
+    assert.equal((await preview()).length, personalRows);
   } finally {
-    await database.$disconnect();
+    try { await database.$disconnect(); }
+    finally { await fixture.cleanup(); }
   }
 });

@@ -53,8 +53,8 @@ function WorkspaceDutyQueue({ workspace, metricPresentation = 'default' }: Queue
   const [view, setView] = useState<DestinationDutyView>('assigned');
   const [search, setSearch] = useState('');
   const [historySearch, setHistorySearch] = useState('');
-  const queueSequence = useRef(0);
-  const summarySequence = useRef(0);
+  const queueSequence = useRef({ value: 0 });
+  const summarySequence = useRef({ value: 0 });
   useEffect(() => {
     const timer = window.setTimeout(() => setHistorySearch(search.trim()), 300);
     return () => window.clearTimeout(timer);
@@ -67,13 +67,13 @@ function WorkspaceDutyQueue({ workspace, metricPresentation = 'default' }: Queue
 
   const loadSummary = useCallback(async (changed = false) => {
     if (!user) return;
-    const sequence = ++summarySequence.current;
+    const sequence = ++summarySequence.current.value;
     dispatchSummary({ type: 'start' });
     try {
       const summary = await requestCrossWorkspaceDutySummary(user, workspace, changed);
-      if (sequence === summarySequence.current) dispatchSummary({ type: 'success', data: summary });
+      if (sequence === summarySequence.current.value) dispatchSummary({ type: 'success', data: summary });
     } catch {
-      if (sequence === summarySequence.current) {
+      if (sequence === summarySequence.current.value) {
         dispatchSummary({ type: 'failure', message: 'شمارش وظایف در دسترس نیست.' });
       }
     }
@@ -81,13 +81,13 @@ function WorkspaceDutyQueue({ workspace, metricPresentation = 'default' }: Queue
 
   const query = view === 'history' ? historySearch : '';
   const load = useCallback(async (previous?: QueueData) => {
-    const sequence = ++queueSequence.current;
+    const sequence = ++queueSequence.current.value;
     dispatch({ type: 'start' });
     try {
-      const result = view === 'history'
+      const result: { data: DestinationDuty[]; nextCursor?: string | null } = view === 'history'
         ? (await hrDutyApi.historyPage(workspace, query, previous?.nextCursor ?? undefined)).data
         : (await hrDutyApi.list(workspace, view)).data;
-      if (sequence !== queueSequence.current) return;
+      if (sequence !== queueSequence.current.value) return;
       const duties = result.data;
       dispatch({
         type: 'success',
@@ -95,7 +95,7 @@ function WorkspaceDutyQueue({ workspace, metricPresentation = 'default' }: Queue
           duties: previous ? [...previous.duties, ...duties] : duties,
           view,
           search: query,
-          nextCursor: 'nextCursor' in result ? result.nextCursor : null,
+          nextCursor: result.nextCursor ?? null,
         },
       });
 
@@ -110,7 +110,7 @@ function WorkspaceDutyQueue({ workspace, metricPresentation = 'default' }: Queue
         // Keep the current count until the receipt can be confirmed.
       }
     } catch (error) {
-      if (sequence !== queueSequence.current) return;
+      if (sequence !== queueSequence.current.value) return;
       dispatch({ type: 'failure', message: getSalesOperationalErrorMessage(error, {
         failedAction: 'به‌روزرسانی وظایف',
         nextStep: 'صفحه را تازه‌سازی و دوباره تلاش کنید.',
@@ -119,15 +119,17 @@ function WorkspaceDutyQueue({ workspace, metricPresentation = 'default' }: Queue
   }, [view, workspace, query]);
 
   useEffect(() => {
+    const sequence = queueSequence.current;
     void load();
-    return () => { queueSequence.current++; };
+    return () => { sequence.value++; };
   }, [load]);
   useEffect(() => {
+    const sequence = summarySequence.current;
     const onChange = () => void loadSummary(true);
     void loadSummary();
     window.addEventListener(CROSS_WORKSPACE_DUTY_CHANGED_EVENT, onChange);
     return () => {
-      summarySequence.current++;
+      sequence.value++;
       window.removeEventListener(CROSS_WORKSPACE_DUTY_CHANGED_EVENT, onChange);
     };
   }, [loadSummary]);

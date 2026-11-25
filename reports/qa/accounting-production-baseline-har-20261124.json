@@ -1,0 +1,483 @@
+{
+  "sourceSha256": "a7db843aecc8e66efd6b4b0da2b470b0bc36efca3a5ca39b878747c0f9772ddd",
+  "origin": "https://sabalanerp.com",
+  "browserBuildIds": [
+    "erp_20261123t081608z-3b748867a174-release"
+  ],
+  "traceEntryCount": 114,
+  "firstRequestStart": "2026-11-24T12:46:52.982Z",
+  "lastRequestStart": "2026-11-24T12:47:30.396Z",
+  "documentEventsMs": {
+    "contentLoaded": 231.969,
+    "windowLoad": 725.189
+  },
+  "statusCounts": {
+    "101": 1,
+    "200": 108,
+    "304": 5
+  },
+  "requests": [
+    {
+      "startedAt": "2026-11-24T12:46:52.982Z",
+      "path": "/dashboard/accounting",
+      "status": 200,
+      "durationMs": 69.244,
+      "waitMs": 66.537,
+      "receiveMs": 0.583,
+      "responseContentBytes": 22673
+    },
+    {
+      "startedAt": "2026-11-24T12:46:53.706Z",
+      "path": "/api/auth/me",
+      "status": 200,
+      "durationMs": 375.047,
+      "waitMs": 371.359,
+      "receiveMs": 0.393,
+      "responseContentBytes": 568
+    },
+    {
+      "startedAt": "2026-11-24T12:46:53.707Z",
+      "path": "/api/auth/me",
+      "status": 200,
+      "durationMs": 427.679,
+      "waitMs": 424.066,
+      "receiveMs": 0.392,
+      "responseContentBytes": 568
+    },
+    {
+      "startedAt": "2026-11-24T12:46:54.092Z",
+      "path": "/api/dashboard/route-availability",
+      "status": 200,
+      "durationMs": 97.342,
+      "waitMs": 95.751,
+      "receiveMs": 0.381,
+      "responseContentBytes": 54
+    },
+    {
+      "startedAt": "2026-11-24T12:46:54.093Z",
+      "path": "/api/dashboard/profile",
+      "status": 200,
+      "durationMs": 183.362,
+      "waitMs": 166.455,
+      "receiveMs": 15.651,
+      "responseContentBytes": 64042
+    },
+    {
+      "startedAt": "2026-11-24T12:46:54.136Z",
+      "path": "/api/auth/me",
+      "status": 200,
+      "durationMs": 140.591,
+      "waitMs": 139.028,
+      "receiveMs": 0.552,
+      "responseContentBytes": 568
+    },
+    {
+      "startedAt": "2026-11-24T12:46:54.366Z",
+      "path": "/api/auth/me",
+      "status": 200,
+      "durationMs": 96.544,
+      "waitMs": 94.036,
+      "receiveMs": 1.147,
+      "responseContentBytes": 568
+    },
+    {
+      "startedAt": "2026-11-24T12:46:54.366Z",
+      "path": "/api/auth/me",
+      "status": 200,
+      "durationMs": 190.151,
+      "waitMs": 94.292,
+      "receiveMs": 0.383,
+      "responseContentBytes": 568
+    },
+    {
+      "startedAt": "2026-11-24T12:46:54.466Z",
+      "path": "/api/duties/workspaces/accounting/summary",
+      "status": 200,
+      "durationMs": 6215.473,
+      "waitMs": 6211.374,
+      "receiveMs": 0.473,
+      "responseContentBytes": 161
+    },
+    {
+      "startedAt": "2026-11-24T12:46:54.466Z",
+      "path": "/api/dashboard/profile",
+      "status": 200,
+      "durationMs": 135.658,
+      "waitMs": 101.626,
+      "receiveMs": 30.316,
+      "responseContentBytes": 64042
+    },
+    {
+      "startedAt": "2026-11-24T12:46:54.467Z",
+      "path": "/api/accounting/dashboard",
+      "range": "6m",
+      "status": 200,
+      "durationMs": 17388.417,
+      "waitMs": 17271.689,
+      "receiveMs": 113.793,
+      "responseContentBytes": 74494
+    },
+    {
+      "startedAt": "2026-11-24T12:46:54.467Z",
+      "path": "/api/hr-hiring/dashboard-metrics",
+      "status": 200,
+      "durationMs": 538.508,
+      "waitMs": 535.522,
+      "receiveMs": 0.417,
+      "responseContentBytes": 163
+    },
+    {
+      "startedAt": "2026-11-24T12:46:54.558Z",
+      "path": "/api/auth/me",
+      "status": 200,
+      "durationMs": 128.793,
+      "waitMs": 127.305,
+      "receiveMs": 0.364,
+      "responseContentBytes": 568
+    },
+    {
+      "startedAt": "2026-11-24T12:46:54.688Z",
+      "path": "/api/notifications",
+      "status": 200,
+      "durationMs": 1468.468,
+      "waitMs": 1466.665,
+      "receiveMs": 0.562,
+      "responseContentBytes": 2391
+    },
+    {
+      "startedAt": "2026-11-24T12:46:54.688Z",
+      "path": "/api/notifications",
+      "status": 200,
+      "durationMs": 652.719,
+      "waitMs": 650.193,
+      "receiveMs": 0.552,
+      "responseContentBytes": 1557
+    },
+    {
+      "startedAt": "2026-11-24T12:46:54.689Z",
+      "path": "/api/notifications/unread-count",
+      "status": 200,
+      "durationMs": 18137.867,
+      "waitMs": 18135.165,
+      "receiveMs": 0.97,
+      "responseContentBytes": 37
+    },
+    {
+      "startedAt": "2026-11-24T12:46:54.689Z",
+      "path": "/api/notifications",
+      "status": 200,
+      "durationMs": 17494.175,
+      "waitMs": 16026.223,
+      "receiveMs": 0.601,
+      "responseContentBytes": 2391
+    },
+    {
+      "startedAt": "2026-11-24T12:46:54.689Z",
+      "path": "/api/notifications",
+      "status": 200,
+      "durationMs": 1038.9,
+      "waitMs": 386.713,
+      "receiveMs": 0.516,
+      "responseContentBytes": 1557
+    },
+    {
+      "startedAt": "2026-11-24T12:46:54.690Z",
+      "path": "/api/notifications/unread-count",
+      "status": 200,
+      "durationMs": 19935.39,
+      "waitMs": 1798.432,
+      "receiveMs": 0.449,
+      "responseContentBytes": 37
+    },
+    {
+      "startedAt": "2026-11-24T12:46:54.690Z",
+      "path": "/api/dashboard/route-availability",
+      "status": 200,
+      "durationMs": 226.224,
+      "waitMs": 224.211,
+      "receiveMs": 0.473,
+      "responseContentBytes": 54
+    },
+    {
+      "startedAt": "2026-11-24T12:46:54.691Z",
+      "path": "/api/dashboard/route-availability",
+      "status": 200,
+      "durationMs": 229.904,
+      "waitMs": 228.057,
+      "receiveMs": 0.53,
+      "responseContentBytes": 54
+    },
+    {
+      "startedAt": "2026-11-24T12:46:54.691Z",
+      "path": "/api/dashboard/route-availability",
+      "status": 200,
+      "durationMs": 242.648,
+      "waitMs": 239.905,
+      "receiveMs": 0.987,
+      "responseContentBytes": 54
+    },
+    {
+      "startedAt": "2026-11-24T12:46:54.691Z",
+      "path": "/api/dashboard/route-availability",
+      "status": 200,
+      "durationMs": 675.159,
+      "waitMs": 673.064,
+      "receiveMs": 0.415,
+      "responseContentBytes": 54
+    },
+    {
+      "startedAt": "2026-11-24T12:46:54.692Z",
+      "path": "/api/dashboard/route-availability",
+      "status": 200,
+      "durationMs": 699.802,
+      "waitMs": 697.915,
+      "receiveMs": 0.374,
+      "responseContentBytes": 215
+    },
+    {
+      "startedAt": "2026-11-24T12:46:54.692Z",
+      "path": "/api/dashboard/route-availability",
+      "status": 200,
+      "durationMs": 708.374,
+      "waitMs": 706.563,
+      "receiveMs": 0.513,
+      "responseContentBytes": 215
+    },
+    {
+      "startedAt": "2026-11-24T12:46:54.692Z",
+      "path": "/api/dashboard/route-availability",
+      "status": 200,
+      "durationMs": 733.687,
+      "waitMs": 731.966,
+      "receiveMs": 0.353,
+      "responseContentBytes": 215
+    },
+    {
+      "startedAt": "2026-11-24T12:46:54.693Z",
+      "path": "/api/dashboard/route-availability",
+      "status": 200,
+      "durationMs": 747.193,
+      "waitMs": 745.679,
+      "receiveMs": 0.375,
+      "responseContentBytes": 215
+    },
+    {
+      "startedAt": "2026-11-24T12:47:09.478Z",
+      "path": "/api/auth/me",
+      "status": 200,
+      "durationMs": 116.217,
+      "waitMs": 109.143,
+      "receiveMs": 5.864,
+      "responseContentBytes": 568
+    },
+    {
+      "startedAt": "2026-11-24T12:47:09.604Z",
+      "path": "/api/hr-hiring/dashboard-metrics",
+      "status": 200,
+      "durationMs": 298.722,
+      "waitMs": 295.993,
+      "receiveMs": 0.467,
+      "responseContentBytes": 163
+    },
+    {
+      "startedAt": "2026-11-24T12:47:13.763Z",
+      "path": "/api/auth/me",
+      "status": 200,
+      "durationMs": 76.962,
+      "waitMs": 71.649,
+      "receiveMs": 0.385,
+      "responseContentBytes": 568
+    },
+    {
+      "startedAt": "2026-11-24T12:47:13.841Z",
+      "path": "/api/duties/workspaces/accounting/summary",
+      "status": 200,
+      "durationMs": 6469.163,
+      "waitMs": 6467.73,
+      "receiveMs": 0.567,
+      "responseContentBytes": 161
+    },
+    {
+      "startedAt": "2026-11-24T12:47:13.879Z",
+      "path": "/api/auth/me",
+      "status": 200,
+      "durationMs": 327.861,
+      "waitMs": 326.397,
+      "receiveMs": 0.483,
+      "responseContentBytes": 568
+    },
+    {
+      "startedAt": "2026-11-24T12:47:14.208Z",
+      "path": "/api/hr-hiring/dashboard-metrics",
+      "status": 200,
+      "durationMs": 664.854,
+      "waitMs": 663.081,
+      "receiveMs": 0.398,
+      "responseContentBytes": 163
+    },
+    {
+      "startedAt": "2026-11-24T12:47:14.209Z",
+      "path": "/api/accounting/dashboard/change",
+      "range": "6m",
+      "status": 200,
+      "durationMs": 1828.705,
+      "waitMs": 1827.039,
+      "receiveMs": 0.368,
+      "responseContentBytes": 337
+    },
+    {
+      "startedAt": "2026-11-24T12:47:14.626Z",
+      "path": "/api/auth/me",
+      "status": 200,
+      "durationMs": 109.804,
+      "waitMs": 108.296,
+      "receiveMs": 0.363,
+      "responseContentBytes": 568
+    },
+    {
+      "startedAt": "2026-11-24T12:47:14.737Z",
+      "path": "/api/auth/me",
+      "status": 200,
+      "durationMs": 95.134,
+      "waitMs": 93.84,
+      "receiveMs": 0.378,
+      "responseContentBytes": 568
+    },
+    {
+      "startedAt": "2026-11-24T12:47:14.833Z",
+      "path": "/api/notifications",
+      "status": 200,
+      "durationMs": 2030.635,
+      "waitMs": 2028.644,
+      "receiveMs": 0.413,
+      "responseContentBytes": 2391
+    },
+    {
+      "startedAt": "2026-11-24T12:47:14.834Z",
+      "path": "/api/notifications",
+      "status": 200,
+      "durationMs": 513.209,
+      "waitMs": 510.802,
+      "receiveMs": 0.474,
+      "responseContentBytes": 1557
+    },
+    {
+      "startedAt": "2026-11-24T12:47:14.835Z",
+      "path": "/api/notifications/unread-count",
+      "status": 200,
+      "durationMs": 3338.716,
+      "waitMs": 3336.631,
+      "receiveMs": 0.435,
+      "responseContentBytes": 37
+    },
+    {
+      "startedAt": "2026-11-24T12:47:24.387Z",
+      "path": "/api/auth/me",
+      "status": 200,
+      "durationMs": 62.202,
+      "waitMs": 60.338,
+      "receiveMs": 0.724,
+      "responseContentBytes": 568
+    },
+    {
+      "startedAt": "2026-11-24T12:47:24.451Z",
+      "path": "/api/auth/me",
+      "status": 200,
+      "durationMs": 67.227,
+      "waitMs": 65.768,
+      "receiveMs": 0.419,
+      "responseContentBytes": 568
+    },
+    {
+      "startedAt": "2026-11-24T12:47:24.519Z",
+      "path": "/api/notifications",
+      "status": 200,
+      "durationMs": 572.814,
+      "waitMs": 570.007,
+      "receiveMs": 0.581,
+      "responseContentBytes": 2391
+    },
+    {
+      "startedAt": "2026-11-24T12:47:24.520Z",
+      "path": "/api/notifications",
+      "status": 200,
+      "durationMs": 377.094,
+      "waitMs": 370.201,
+      "receiveMs": 5.051,
+      "responseContentBytes": 1557
+    },
+    {
+      "startedAt": "2026-11-24T12:47:24.520Z",
+      "path": "/api/notifications/unread-count",
+      "status": 200,
+      "durationMs": 1878.946,
+      "waitMs": 1824.47,
+      "receiveMs": 52.531,
+      "responseContentBytes": 37
+    },
+    {
+      "startedAt": "2026-11-24T12:47:30.243Z",
+      "path": "/api/auth/me",
+      "status": 200,
+      "durationMs": 78.858,
+      "waitMs": 67.637,
+      "receiveMs": 0.544,
+      "responseContentBytes": 568
+    },
+    {
+      "startedAt": "2026-11-24T12:47:30.323Z",
+      "path": "/api/auth/me",
+      "status": 200,
+      "durationMs": 71.2,
+      "waitMs": 69.986,
+      "receiveMs": 0.365,
+      "responseContentBytes": 568
+    },
+    {
+      "startedAt": "2026-11-24T12:47:30.395Z",
+      "path": "/api/notifications",
+      "status": 200,
+      "durationMs": 549.891,
+      "waitMs": 547.945,
+      "receiveMs": 1.079,
+      "responseContentBytes": 2391
+    },
+    {
+      "startedAt": "2026-11-24T12:47:30.395Z",
+      "path": "/api/notifications",
+      "status": 200,
+      "durationMs": 335.406,
+      "waitMs": 330.777,
+      "receiveMs": 3.761,
+      "responseContentBytes": 1557
+    },
+    {
+      "startedAt": "2026-11-24T12:47:30.395Z",
+      "path": "/api/notifications/unread-count",
+      "status": 200,
+      "durationMs": 1962.308,
+      "waitMs": 1960.881,
+      "receiveMs": 0.461,
+      "responseContentBytes": 37
+    },
+    {
+      "startedAt": "2026-11-24T12:47:30.395Z",
+      "path": "/api/hr-hiring/dashboard-metrics",
+      "status": 200,
+      "durationMs": 477.61,
+      "waitMs": 476.151,
+      "receiveMs": 0.541,
+      "responseContentBytes": 163
+    },
+    {
+      "startedAt": "2026-11-24T12:47:30.396Z",
+      "path": "/api/accounting/dashboard/change",
+      "range": "6m",
+      "status": 200,
+      "durationMs": 772.078,
+      "waitMs": 770.61,
+      "receiveMs": 0.536,
+      "responseContentBytes": 337
+    }
+  ]
+}

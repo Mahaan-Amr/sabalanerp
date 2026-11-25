@@ -1,6 +1,6 @@
 # Roadmap for Accounting page loads under three seconds
 
-Production took a median 7.29 seconds to display the Accounting dashboard and 7.33 seconds to display the first 50 reviewable contracts after the November 24 update. Duties took 11.73 and 22.46 seconds. These are browser spot checks on deployed commit `697e8946e61cc2811072c5ffdb7f1f769d6e05ef`. [Measurement procedure](accounting-measurement-478.md)
+Production took a median 7.29 seconds to display the Accounting dashboard and 7.33 seconds to display the first 50 reviewable contracts after the November 24 update. Duties took 11.73 and 22.46 seconds. These are browser spot checks on deployed commit `697e8946e61cc2811072c5ffdb7f1f769d6e05ef`. [Measurement procedure](accounting-measurement-478.md) · [Production comparison](accounting-production-comparison-20261124.md) · [Source and timing analysis](accounting-under-three-seconds-20261124.md)
 
 ## What counts as done
 

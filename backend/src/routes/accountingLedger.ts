@@ -244,6 +244,11 @@ router.post('/customer-accounts/:id/operations', ...customerPostingAccess, (req,
   confirmed: req.body.confirmed === true, idempotencyKey: String(req.body.idempotencyKey || ''), actor: actorOf(req),
   openingReview: req.body.openingReview == null ? undefined : {
     expectedSnapshotHash: String(req.body.openingReview.expectedSnapshotHash || ''), identityConfirmed: req.body.openingReview.identityConfirmed === true,
+    sepidarEvidence: req.body.openingReview.sepidarEvidence == null ? undefined : {
+      sourcePackageHash: String(req.body.openingReview.sepidarEvidence.sourcePackageHash ?? ''),
+      sourceCustomerId: String(req.body.openingReview.sepidarEvidence.sourceCustomerId ?? ''),
+      sourceVoucherItemId: String(req.body.openingReview.sepidarEvidence.sourceVoucherItemId ?? ''),
+    },
     totalConfirmed: req.body.openingReview.totalConfirmed === true, lines: customerCommandArray(req.body.openingReview.lines, 'ریز افتتاحیه').map(line => ({
       key: String(line.key || ''), kind: line.kind, amountRials: wholeRials(line.amountRials), reference: String(line.reference || ''),
       financialRecordId: line.financialRecordId, contractId: line.contractId,

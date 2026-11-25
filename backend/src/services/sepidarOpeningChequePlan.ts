@@ -50,6 +50,17 @@ type Effect = Readonly<{
   asset: number; assetSign: 1n | -1n; counterAccounts: readonly number[]; counterDetailId?: string;
 }>;
 
+type PlannedChequeEvent = {
+  historyId: string;
+  previousHistoryId: string;
+  sequence: number;
+  eventType: Effect['eventType'];
+  status: ChequeStatus;
+  occurredAt: string;
+  document: SourceDocument;
+  targetPosting: ReviewedPosting;
+};
+
 type ErrorCode = 'INVALID_SCOPE' | 'INVALID_INSTRUMENT' | 'INVALID_OPENING_LINE' | 'INVALID_HISTORY'
   | 'UNSUPPORTED_HISTORY' | 'INVALID_DOCUMENT' | 'INVALID_POSTING' | 'OPEN_HISTORY';
 
@@ -209,7 +220,7 @@ export function previewSepidarOpeningCheques(evidence: SepidarOpeningChequeEvide
     const serial = chequeSerialInDescription(instrument.serialNumber);
     let status: ChequeStatus = 'RECEIVED';
     let last: SourceEvent | undefined;
-    const events = [];
+    const events: PlannedChequeEvent[] = [];
     for (let index = 0; index < chain.size; index++) {
       const event = chain.get(last?.id ?? basisHistoryId);
       requireEvidence(event && normalizedInstant(event.occurredAt) && event.occurredAt >= basisAt

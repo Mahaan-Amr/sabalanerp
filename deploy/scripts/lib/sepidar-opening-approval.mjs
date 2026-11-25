@@ -12,8 +12,8 @@ const timestamp = value => typeof value === 'string' && Number.isFinite(Date.par
 
 const comparedIdentity = ['releaseId', 'deploymentId', 'buildCommit', 'migrationSha256',
   'candidateImage', 'retainedImage', 'checkpointHash', 'qualificationHash', 'bookId',
-  'counterAccountId', 'sourcePackageHash', 'accountingApprovalHash'];
-const commandFields = ['idempotencyKey', 'profileId', 'actorId', 'sourceCustomerId',
+  'counterAccountId', 'sourcePackageHash', 'accountingApprovalHash', 'basisAt'];
+const commandFields = ['idempotencyKey', 'destinationKey', 'actorId', 'sourceCustomerId',
   'sourceVoucherItemId', 'commandHash', 'totalRials'];
 
 const exactFields = (value, fields) => value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -27,7 +27,7 @@ export function verifySepidarOpeningApproval(envelope, observed, approver) {
   if (!exactFields(envelope, ['payload', 'signature']) || !observed || !approver) reject();
   const { payload, signature } = envelope;
   if (!exactFields(payload, [...comparedIdentity, 'format', 'decision', 'keyId', 'issuedAt',
-    'expiresAt', 'basisAt', 'commands'])) reject();
+    'expiresAt', 'commands'])) reject();
 
   if (payload.format !== 'sepidar-customer-opening-approval-v1' || payload.decision !== 'GO'
     || !nonempty(payload.keyId) || payload.keyId !== approver.keyId
@@ -52,9 +52,10 @@ export function verifySepidarOpeningApproval(envelope, observed, approver) {
   const commands = payload.commands;
   if (!Array.isArray(commands) || commands.length < 1 || commands.length > 500 || commands.some(command =>
     !exactFields(command, commandFields) || !nonempty(command.idempotencyKey) || command.idempotencyKey.length < 8
-    || !nonempty(command.profileId) || !nonempty(command.actorId) || !sourceId(command.sourceCustomerId)
+    || !nonempty(command.destinationKey) || command.destinationKey === 'customer:'
+    || !nonempty(command.actorId) || !sourceId(command.sourceCustomerId)
     || !sourceId(command.sourceVoucherItemId) || !hash(command.commandHash) || !rialAmount(command.totalRials))) reject();
-  for (const field of ['idempotencyKey', 'profileId', 'sourceCustomerId', 'sourceVoucherItemId']) {
+  for (const field of ['idempotencyKey', 'destinationKey', 'sourceCustomerId', 'sourceVoucherItemId']) {
     if (new Set(commands.map(command => command[field])).size !== commands.length) reject();
   }
 

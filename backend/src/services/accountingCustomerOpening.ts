@@ -1,4 +1,4 @@
-import { Prisma, type PrismaClient } from '@prisma/client';
+import { Prisma, type PrismaClient, type AccountingCustomerPostingRule, type AccountingLedgerAccount, type AccountingLedgerAccountDimensionRule } from '@prisma/client';
 import { hashAccountingEvidence } from './accountingLedgerFoundation';
 import { AccountingCustomerTreasuryError } from './accountingCustomerTreasury';
 
@@ -18,6 +18,19 @@ export type CustomerOpeningReview = {
 };
 const invalid = (message: string): never => { throw new AccountingCustomerTreasuryError('OPENING_REVIEW_INVALID', message, 409); };
 const rials = (value: { toString(): string }) => BigInt(value.toString());
+
+export function isSepidarOpeningClearingAccount(
+  counter: (AccountingLedgerAccount & { dimensionRules: AccountingLedgerAccountDimensionRule[] }) | null,
+  rule: AccountingCustomerPostingRule, bookId: string, basisAt: Date,
+) {
+  return Boolean(counter && counter.bookId === bookId && counter.level === 'MOIN' && !counter.retiredAt
+    && ['ASSET', 'LIABILITY', 'EQUITY'].includes(counter.statementRole)
+    && counter.partyRequirement === 'FORBIDDEN' && counter.financialAccountRequirement === 'FORBIDDEN'
+    && !counter.dimensionRules.some(dimension => dimension.requirement === 'REQUIRED')
+    && counter.effectiveFrom <= basisAt && (!counter.effectiveTo || counter.effectiveTo >= basisAt)
+    && ![rule.receivableAccountId, rule.customerAdvanceAccountId, rule.revenueAccountId, rule.outputTaxAccountId,
+      rule.inventoryAccountId, rule.costAccountId, rule.bankClearingAccountId].includes(counter.id));
+}
 
 export async function customerOpeningSnapshot(database: Database, input: { customerId: string; profileId?: string; bookId: string; basisAt: Date }) {
   if (!Number.isFinite(input.basisAt.getTime()) || input.basisAt > new Date()) invalid('تاریخ مبنای افتتاحیه معتبر نیست.');

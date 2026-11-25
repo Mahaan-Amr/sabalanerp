@@ -11,7 +11,7 @@ import { createAccountingLedgerApplication, hashAccountingEvidence, IRR_ROUNDING
 import { createAccountingLedgerPrismaRepository } from './accountingLedgerPrismaRepository';
 import { withAccountingReadScope } from './partnerSales/accounting/readScope';
 import { customerCreditBalance } from './specialCustomerCredit';
-import { customerOpeningSnapshot, reconcileCustomerOpening, type CustomerOpeningReview } from './accountingCustomerOpening';
+import { customerOpeningSnapshot, isSepidarOpeningClearingAccount, reconcileCustomerOpening, type CustomerOpeningReview } from './accountingCustomerOpening';
 import { requireSepidarCustomerOpeningWithin } from './sepidarCustomerOpeningAdmission';
 import { recordCustomerReceiptPartsWithin, type CustomerReceiptPart } from './accountingCustomerReceiptParts';
 import { correctCustomerReceiptWithin, type CustomerReceiptAllocationReversal } from './accountingCustomerReceiptCorrection';
@@ -371,14 +371,12 @@ export async function recordCustomerAccountOperation(database: PrismaClient, id:
         counterAccountId: counterpart.id, commandHash: hash, idempotencyKey: input.idempotencyKey,
       } : undefined;
       if (sepidarAdmission) {
-        if (counterpart.level !== 'MOIN' || !['ASSET', 'LIABILITY', 'EQUITY'].includes(counterpart.statementRole)
-          || counterpart.partyRequirement !== 'FORBIDDEN' || counterpart.financialAccountRequirement !== 'FORBIDDEN'
-          || counterpart.dimensionRules.some(dimension => dimension.requirement === 'REQUIRED')
-          || counterpart.effectiveFrom > input.occurredAt || (counterpart.effectiveTo && counterpart.effectiveTo < input.occurredAt)
-          || [rule.revenueAccountId, rule.outputTaxAccountId, rule.inventoryAccountId, rule.costAccountId, rule.bankClearingAccountId].includes(counterpart.id)) {
+        if (!isSepidarOpeningClearingAccount(counterpart, rule, resolved.book!.id, input.occurredAt)) {
           return fail('SEPIDAR_CLEARING_ACCOUNT_INVALID', 'حساب واسط افتتاحیه سپیدار باید معین ترازنامه‌ای مستقل، فعال و بدون تفصیلی اجباری باشد.');
         }
         await requireSepidarCustomerOpeningWithin(tx, sepidarAdmission);
+        // The customer lock above does not serialize conflicting claims across two different destination profiles.
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`sepidar-opening-source:${profile.legalEntityId}:${sepidarAdmission.sourceVoucherItemId}`}))`;
         if (await tx.accountingCustomerOpeningReview.findFirst({ where: { profile: { legalEntityId: profile.legalEntityId },
           evidence: { path: ['review', 'sepidarEvidence', 'sourceVoucherItemId'], equals: sepidarAdmission.sourceVoucherItemId },
         }, select: { id: true } })) {

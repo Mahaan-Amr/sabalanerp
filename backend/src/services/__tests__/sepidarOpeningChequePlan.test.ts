@@ -2,6 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { previewSepidarOpeningCheques, SepidarOpeningChequePlanError, type SepidarOpeningChequeEvidence } from '../sepidarOpeningChequePlan';
 
+import { hashAccountingEvidence } from '../accountingLedgerFoundation';
+import { applySepidarOpeningBankHistories } from '../sepidarOpeningChequeApplication';
+
 const basis = '2026-03-20T20:30:00.000Z';
 const depositAt = '2026-04-01T08:00:00.000Z';
 const collectAt = '2026-04-03T08:00:00.000Z';
@@ -115,7 +118,7 @@ test('a grouped source bank row can be split across exact cheque postings with a
   }), (error: unknown) => error instanceof SepidarOpeningChequePlanError && error.code === 'INVALID_POSTING');
 });
 
-test('a nontrade assignment returns to custody before the separate return to the original customer', () => {
+test('a nontrade assignment returns to custody before the separate return to the original customer', async () => {
   const original = bankHistory();
   const assignmentAt = '2026-04-14T08:00:00.000Z';
   const evidence: SepidarOpeningChequeEvidence = {
@@ -173,7 +176,141 @@ test('a nontrade assignment returns to custody before the separate return to the
     }], ledgerLines: evidence.ledgerLines.slice(0, 2).map(line => line.accountId === 124 ? { ...line, accountId: 193 } : line),
   };
   assert.equal(previewSepidarOpeningCheques(trade).instruments[0].finalStatus, 'ENDORSED');
+  await assert.rejects(bankApplicationFixture(trade).run, { code: 'UNSUPPORTED_POSTING_OWNER' });
   assert.throws(() => previewSepidarOpeningCheques({ ...trade,
     instruments: [{ ...trade.instruments[0], sayadId: null }],
   }), (error: unknown) => error instanceof SepidarOpeningChequePlanError && error.code === 'INVALID_POSTING');
+});
+
+function bankApplicationFixture(evidence = bankHistory()) {
+  const plan = previewSepidarOpeningCheques(evidence);
+  const [cheque] = plan.instruments;
+  const ledgerLine = (id: string, accountId: string, amount: bigint, bank = false) => ({
+    id, accountId, partyId: bank ? null : 'party', financialAccountId: bank ? 'bank' : null, dimensions: [],
+    debitRials: amount > 0n ? amount : 0n, creditRials: amount < 0n ? -amount : 0n,
+  });
+  const voucher = (at: string, sourceType: string, sourceId: string, sourcePayload: unknown,
+    lines: ReturnType<typeof ledgerLine>[]) => ({
+    bookId: 'book', status: 'POSTED', documentDate: new Date(at), occurredAt: new Date(at), reversalOfId: null,
+    sourceType, sourceId, sourceVersion: 1, sourceHash: hashAccountingEvidence(sourcePayload), lines,
+  });
+  const vouchers = new Map([
+    [plan.openingVoucherId, voucher(basis, 'SEPIDAR_CHEQUE_OPENING', plan.sourceOpeningVoucherId, {
+      snapshotSha256: plan.snapshotSha256, sourceOpeningVoucherId: plan.sourceOpeningVoucherId, basisAt: plan.basisAt,
+    }, [ledgerLine(cheque.opening.targetLineId, cheque.opening.targetAccountId, 100n)])],
+    ...cheque.events.map(event => [event.targetPosting.voucherId, voucher(event.occurredAt, 'SEPIDAR_CHEQUE_EVENT', event.historyId, {
+      snapshotSha256: plan.snapshotSha256, sourceInstrumentId: cheque.instrument.id, historyId: event.historyId,
+      previousHistoryId: event.previousHistoryId, document: event.document, bankFinancialAccountId: 'bank',
+      allocations: event.targetPosting.lines.map(({ sourceLineId, signedRials, targetAccountId }) =>
+        ({ sourceLineId, signedRials: signedRials.toString(), targetAccountId })),
+    }, event.targetPosting.lines.map(line => ledgerLine(line.targetLineId, line.targetAccountId,
+      line.signedRials, line.targetAccountId === 'cash')))] as const),
+  ]);
+  const active = { legalEntityId: 'entity', activeFrom: new Date('2020-01-01'), activeTo: null };
+  const state = { allowed: true, failOnAnchor: false, rejectDuplicate: false, locks: 0,
+    instrument: null as Record<string, unknown> | null, anchor: null as Record<string, unknown> | null };
+  const database = {
+    $transaction: async (operation: (tx: unknown) => unknown, options: { isolationLevel: string }) => {
+      assert.equal(options.isolationLevel, 'Serializable');
+      const txState = structuredClone(state);
+      const tx = {
+        $queryRaw: async () => [{ admitted: txState.allowed }],
+        $executeRaw: async () => { txState.locks++; },
+        accountingBook: { findUnique: async () => ({ legalEntityId: 'entity' }) },
+        accountingFinancialAccount: { findUnique: async ({ where: { id } }) =>
+          ({ ...active, id, kind: id === 'till' ? 'CASH' : 'BANK', currency: 'IRR' }) },
+        accountingCustomerProfile: { findUnique: async () => ({ ...active, accountingPartyId: 'party' }) },
+        accountingLedgerVoucher: { findUnique: async ({ where: { id } }) => vouchers.get(id) },
+        accountingSepidarOpeningCheque: {
+          findMany: async () => txState.anchor ? [txState.anchor] : [],
+          findUnique: async () => txState.anchor ? { ...txState.anchor, instrument: txState.instrument } : null,
+          create: async ({ data }) => {
+            if (txState.failOnAnchor) throw new Error('anchor write failed');
+            txState.anchor = data;
+          },
+        },
+        accountingCheckInstrument: {
+          findFirst: async () => txState.rejectDuplicate ? { id: 'existing-check' } : null,
+          create: async ({ data: { events, ...record } }) => {
+            txState.instrument = { id: 'instrument', ...record, receipt: null,
+              events: events.create.map(event => ({ ...event, id: 'event-' + event.sequence, postingRuleVersion: null })) };
+            return { id: 'instrument', events: [{ id: 'event-1' }] };
+          },
+        },
+      };
+      const result = await operation(tx);
+      Object.assign(state, txState);
+      return result;
+    },
+  } as unknown as Parameters<typeof applySepidarOpeningBankHistories>[0];
+  const input = { evidence, custodyFinancialAccountId: 'till', actor: { id: 'accountant', profile: 'ACCOUNTANT' as const } };
+  const run = async () => {
+    const previous = process.env.DEPLOYMENT_RELEASE_ID;
+    process.env.DEPLOYMENT_RELEASE_ID = 'fixture-release';
+    try {
+      return await applySepidarOpeningBankHistories(database, input);
+    } finally {
+      if (previous === undefined) delete process.env.DEPLOYMENT_RELEASE_ID;
+      else process.env.DEPLOYMENT_RELEASE_ID = previous;
+    }
+  };
+  return { run, state, vouchers };
+}
+
+test('bank history application closes admission before locking or writing', async () => {
+  const { run, state } = bankApplicationFixture();
+  state.allowed = false;
+  await assert.rejects(run, { code: 'ADMISSION_CLOSED' });
+  assert.equal(state.locks, 0);
+  assert.equal(state.instrument, null);
+  assert.equal(state.anchor, null);
+});
+
+test('bank history application anchors the opening amount and replays only the exact terminal outcome', async () => {
+  const { run, state } = bankApplicationFixture();
+  const applied = await run();
+  assert.deepEqual(applied.instruments, [{ instrumentId: 'instrument', replayed: false }]);
+  assert.equal(state.anchor?.amountRials, '100');
+  assert.equal(state.anchor?.openingLedgerLineId, 'opening-line');
+  assert.equal(state.anchor?.openingEventId, 'event-1');
+  assert.equal(state.instrument?.status, 'CLEARED');
+  assert.equal(state.instrument?.clearedRials, '100');
+  assert.equal(state.instrument?.custodianId, null);
+  assert.equal(state.instrument?.receipt, null);
+  const events = state.instrument?.events as Array<Record<string, unknown>>;
+  assert.deepEqual(events.map(event => [event.eventType, event.ledgerVoucherId, event.fromCustodianId, event.toCustodianId]), [
+    ['RECEIVED', null, null, 'till'],
+    ['DEPOSITED', 'deposit-voucher', 'till', 'bank'],
+    ['CLEARED', 'collect-voucher', 'bank', null],
+  ]);
+  assert.deepEqual((await run()).instruments, [{ instrumentId: 'instrument', replayed: true }]);
+  assert(state.anchor);
+  state.anchor.planSha256 = 'different';
+  await assert.rejects(run, { code: 'REPLAY_CONFLICT' });
+});
+
+test('bank history rejects a mismatched opening amount or bank dimension before any write', async () => {
+  const { run, state, vouchers } = bankApplicationFixture();
+  const opening = vouchers.get('opening-voucher')!;
+  opening.lines[0].debitRials = 99n;
+  await assert.rejects(run, { code: 'OPENING_AMOUNT_CONFLICT' });
+  opening.lines[0].debitRials = 100n;
+  const collected = vouchers.get('collect-voucher')!;
+  collected.lines.find(line => line.accountId === 'cash')!.financialAccountId = 'unreviewed-bank';
+  await assert.rejects(run, { code: 'INVALID_TARGET' });
+  assert.equal(state.instrument, null);
+  assert.equal(state.anchor, null);
+});
+
+test('bank history fails on existing instruments and rolls back its canonical rows if anchoring fails', async () => {
+  const { run, state } = bankApplicationFixture();
+  state.rejectDuplicate = true;
+  await assert.rejects(run, { code: 'IDENTITY_CONFLICT' });
+  state.rejectDuplicate = false;
+  state.failOnAnchor = true;
+  await assert.rejects(run, /anchor write failed/);
+  assert.equal(state.instrument, null);
+  assert.equal(state.anchor, null);
+  state.failOnAnchor = false;
+  assert.equal((await run()).instruments[0].replayed, false);
 });

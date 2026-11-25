@@ -12,6 +12,7 @@ import { createAccountingLedgerPrismaRepository } from './accountingLedgerPrisma
 import { withAccountingReadScope } from './partnerSales/accounting/readScope';
 import { customerCreditBalance } from './specialCustomerCredit';
 import { customerOpeningSnapshot, reconcileCustomerOpening, type CustomerOpeningReview } from './accountingCustomerOpening';
+import { requireSepidarCustomerOpeningWithin } from './sepidarCustomerOpeningAdmission';
 import { recordCustomerReceiptPartsWithin, type CustomerReceiptPart } from './accountingCustomerReceiptParts';
 import { correctCustomerReceiptWithin, type CustomerReceiptAllocationReversal } from './accountingCustomerReceiptCorrection';
 import { recordCustomerCheckBankWithin } from './accountingCustomerCheckBank';
@@ -318,10 +319,30 @@ export async function recordCustomerAccountOperation(database: PrismaClient, id:
   if (input.actor.profile === 'VIEWER') return fail('ACCOUNTING_WRITE_FORBIDDEN', 'مجوز ثبت عملیات مالی ندارید.', 403);
   if (!input.confirmed || input.reason.trim().length < 8 || !input.reference.trim() || input.idempotencyKey.length < 8) return fail('ACCOUNTING_EVIDENCE_REQUIRED', 'دلیل، مرجع مستندات و تأیید ثبت قطعی الزامی است.', 400);
   if (!Number.isFinite(input.occurredAt.getTime()) || input.occurredAt > new Date()) return fail('INVALID_OPERATION_DATE', 'تاریخ عملیات باید معتبر و تا امروز باشد.', 400);
-  return database.$transaction(async tx => {
-    if (input.kind === 'OPENING' && input.openingReview) await requireCustomerSourceSharesWithin(tx);
+  const sepidar = input.openingReview?.sepidarEvidence;
+  const sourceId = /^[1-9][0-9]*$/;
+  if (sepidar && (input.kind !== 'OPENING' || typeof sepidar.sourcePackageHash !== 'string' || !/^[0-9a-f]{64}$/.test(sepidar.sourcePackageHash)
+    || typeof sepidar.sourceCustomerId !== 'string' || !sourceId.test(sepidar.sourceCustomerId)
+    || typeof sepidar.sourceVoucherItemId !== 'string' || !sourceId.test(sepidar.sourceVoucherItemId)
+    || input.idempotencyKey !== input.idempotencyKey.trim() || Boolean(input.financialAccountId || input.bankLedgerId || input.receiptId || input.creditItemId))) {
+    return fail('SEPIDAR_OPENING_EVIDENCE_INVALID', 'مدرک منشأ انتقال افتتاحیه سپیدار معتبر نیست.', 400);
+  }
+  const record = () => database.$transaction(async tx => {
+    if (input.kind === 'OPENING' && input.openingReview && !sepidar) await requireCustomerSourceSharesWithin(tx);
     const resolved = await resolveCustomerWorkspace(tx, id);
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`customer-account:${resolved.customerId}`}))`;
+    const payload = customerAccountOperationEvidence(resolved.customerId, input);
+    const hash = hashAccountingEvidence(payload);
+    if (sepidar) {
+      const prior = await tx.accountingCustomerOpeningReview.findUnique({ where: { idempotencyKey: input.idempotencyKey } });
+      if (prior) {
+        if (prior.profileId !== resolved.profile?.id || prior.commandHash !== hash || prior.createdBy !== input.actor.id) {
+          return fail('IDEMPOTENCY_KEY_REUSED', 'این درخواست قبلاً با اطلاعات دیگری ثبت شده است.');
+        }
+        const evidence = prior.evidence as { voucherIds: string[] };
+        return { profileId: prior.profileId, voucherId: evidence.voucherIds[0] ?? null, openingReviewId: prior.id };
+      }
+    }
     const profile = await ensureCustomerWorkspaceProfile(tx, id, input.actor, input.occurredAt);
     const [period, rule] = await Promise.all([
       tx.accountingPostingPeriod.findUnique({ where: { id: input.periodId }, include: { fiscalYear: true } }),
@@ -329,14 +350,8 @@ export async function recordCustomerAccountOperation(database: PrismaClient, id:
     ]);
     if (!period || !rule || period.fiscalYear.bookId !== resolved.book?.id || rule.legalEntityId !== profile.legalEntityId
       || rule.effectiveFrom > input.occurredAt || (rule.effectiveTo && rule.effectiveTo < input.occurredAt)) return fail('INVALID_ACCOUNTING_CONTEXT', 'دوره یا قاعده حسابداری این مشتری معتبر نیست.');
-    const payload = { customerId: resolved.customerId, kind: input.kind, amountRials: input.amountRials, periodId: input.periodId,
-      postingRuleId: input.postingRuleId, counterAccountId: input.counterAccountId ?? null, financialAccountId: input.financialAccountId ?? null,
-      bankLedgerId: input.bankLedgerId ?? null, receiptId: input.receiptId ?? null, creditItemId: input.creditItemId ?? null,
-      occurredAt: input.occurredAt, reason: input.reason.trim(), reference: input.reference.trim(), expectedBalanceRials: input.expectedBalanceRials ?? null,
-      ...(input.openingReview ? { openingReview: input.openingReview } : {}) };
-    const hash = hashAccountingEvidence(payload);
     if (input.kind === 'OPENING' && input.openingReview) {
-      const priorReview = await tx.accountingCustomerOpeningReview.findUnique({ where: { idempotencyKey: input.idempotencyKey } });
+      const priorReview = sepidar ? null : await tx.accountingCustomerOpeningReview.findUnique({ where: { idempotencyKey: input.idempotencyKey } });
       if (priorReview) {
         if (priorReview.profileId !== profile.id || priorReview.commandHash !== hash) return fail('IDEMPOTENCY_KEY_REUSED', 'این درخواست قبلاً با اطلاعات دیگری ثبت شده است.');
         const evidence = priorReview.evidence as { voucherIds: string[] };
@@ -348,9 +363,28 @@ export async function recordCustomerAccountOperation(database: PrismaClient, id:
       const snapshot = await customerOpeningSnapshot(tx, { customerId: resolved.customerId, profileId: profile.id, bookId: resolved.book!.id, basisAt: input.occurredAt });
       const transfers = reconcileCustomerOpening(snapshot, input.amountRials, input.openingReview);
       if (!input.counterAccountId || [rule.receivableAccountId, rule.customerAdvanceAccountId].includes(input.counterAccountId)) return fail('COUNTER_ACCOUNT_REQUIRED', 'حساب مقابل افتتاحیه معتبر و متفاوت انتخاب کنید.');
-      const counterpart = await tx.accountingLedgerAccount.findUnique({ where: { id: input.counterAccountId } });
+      const counterpart = await tx.accountingLedgerAccount.findUnique({ where: { id: input.counterAccountId }, include: { dimensionRules: true } });
       if (!counterpart || counterpart.bookId !== resolved.book!.id || counterpart.retiredAt) return fail('COUNTER_ACCOUNT_REQUIRED', 'حساب مقابل افتتاحیه متعلق به دفتر و فعال باشد.');
       if (counterpart.statementRole === 'ASSET' && counterpart.partyRequirement === 'REQUIRED') return fail('INSTRUMENT_SOURCE_REQUIRED', 'افتتاحیه ابزار دریافتنی باید با منشأ ابزار تطبیق شود؛ اعتبار مستقل جای دریافت چک نیست.');
+      const sepidarAdmission = sepidar ? {
+        ...sepidar, bookId: resolved.book!.id, profileId: profile.id, actorId: input.actor.id, occurredAt: input.occurredAt,
+        counterAccountId: counterpart.id, commandHash: hash, idempotencyKey: input.idempotencyKey,
+      } : undefined;
+      if (sepidarAdmission) {
+        if (counterpart.level !== 'MOIN' || !['ASSET', 'LIABILITY', 'EQUITY'].includes(counterpart.statementRole)
+          || counterpart.partyRequirement !== 'FORBIDDEN' || counterpart.financialAccountRequirement !== 'FORBIDDEN'
+          || counterpart.dimensionRules.some(dimension => dimension.requirement === 'REQUIRED')
+          || counterpart.effectiveFrom > input.occurredAt || (counterpart.effectiveTo && counterpart.effectiveTo < input.occurredAt)
+          || [rule.revenueAccountId, rule.outputTaxAccountId, rule.inventoryAccountId, rule.costAccountId, rule.bankClearingAccountId].includes(counterpart.id)) {
+          return fail('SEPIDAR_CLEARING_ACCOUNT_INVALID', 'حساب واسط افتتاحیه سپیدار باید معین ترازنامه‌ای مستقل، فعال و بدون تفصیلی اجباری باشد.');
+        }
+        await requireSepidarCustomerOpeningWithin(tx, sepidarAdmission);
+        if (await tx.accountingCustomerOpeningReview.findFirst({ where: { profile: { legalEntityId: profile.legalEntityId },
+          evidence: { path: ['review', 'sepidarEvidence', 'sourceVoucherItemId'], equals: sepidarAdmission.sourceVoucherItemId },
+        }, select: { id: true } })) {
+          return fail('SEPIDAR_OPENING_SOURCE_ALREADY_RECORDED', 'مدرک افتتاحیه سپیدار قبلاً منتقل شده است.');
+        }
+      }
       const app = createAccountingLedgerApplication(createAccountingLedgerPrismaRepository(tx, true), { now: () => new Date(), nextReference: () => `ACC-${randomUUID()}` });
       const voucherIds: string[] = [];
       const itemLinks: Array<{ lineKey: string; itemId: string }> = [];
@@ -375,7 +409,9 @@ export async function recordCustomerAccountOperation(database: PrismaClient, id:
       }
       const review = await tx.accountingCustomerOpeningReview.create({ data: { profileId: profile.id, basisAt: input.occurredAt,
         totalRials: input.amountRials.toString(), transferRials: transfers.reduce((sum, line) => sum + (line.kind === 'CREDIT' ? -line.transferRials : line.transferRials), 0n).toString(),
-        snapshotHash: snapshot.snapshotHash, evidence: JSON.parse(JSON.stringify({ review: input.openingReview, voucherIds, itemLinks }, (_key, value) => typeof value === 'bigint' ? value.toString() : value)),
+        snapshotHash: snapshot.snapshotHash, evidence: JSON.parse(JSON.stringify({ review: input.openingReview, voucherIds, itemLinks,
+          ...(sepidarAdmission ? { sepidarAdmission, reason: payload.reason, reference: payload.reference } : {}),
+        }, (_key, value) => typeof value === 'bigint' ? value.toString() : value)),
         idempotencyKey: input.idempotencyKey, commandHash: hash, createdBy: input.actor.id } });
       await createAccountingLedgerPrismaRepository(tx, true).appendAudit({ action: 'CUSTOMER_OPENING_REVIEWED', result: 'SUCCEEDED', actorId: input.actor.id,
         effectiveProfile: input.actor.profile, entityType: 'CUSTOMER_OPENING', entityId: review.id, correlationId: input.idempotencyKey, reason: input.reason.trim(), payloadHash: hash });
@@ -460,4 +496,22 @@ export async function recordCustomerAccountOperation(database: PrismaClient, id:
     }
     return { profileId: profile.id, voucherId: posted.id };
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 30_000 });
+  if (!sepidar) return record();
+  for (let attempt = 0; ; attempt += 1) {
+    try { return await record(); }
+    catch (error) {
+      if (attempt >= 2 || !(error instanceof Prisma.PrismaClientKnownRequestError)
+        || (!['P2034', 'P2002'].includes(error.code) && error.meta?.code !== '40001')) throw error;
+    }
+  }
+}
+
+/** Canonical review evidence shared by manifest preparation and posting. */
+export function customerAccountOperationEvidence(customerId: string, input: CustomerAccountOperation) {
+  return { customerId, kind: input.kind, amountRials: input.amountRials, periodId: input.periodId,
+    postingRuleId: input.postingRuleId, counterAccountId: input.counterAccountId ?? null, financialAccountId: input.financialAccountId ?? null,
+    bankLedgerId: input.bankLedgerId ?? null, receiptId: input.receiptId ?? null, creditItemId: input.creditItemId ?? null,
+    occurredAt: input.occurredAt, reason: input.reason.trim(), reference: input.reference.trim(), expectedBalanceRials: input.expectedBalanceRials ?? null,
+    ...(input.openingReview ? { openingReview: input.openingReview } : {}),
+    ...(input.openingReview?.sepidarEvidence ? { actorId: input.actor.id, idempotencyKey: input.idempotencyKey } : {}) };
 }

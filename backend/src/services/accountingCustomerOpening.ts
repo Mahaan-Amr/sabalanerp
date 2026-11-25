@@ -7,8 +7,14 @@ export type CustomerOpeningLine = {
   key: string; kind: 'RECEIVABLE' | 'CREDIT'; amountRials: bigint; reference: string;
   existingSourceIds: string[]; financialRecordId?: string; contractId?: string;
 };
+export type SepidarCustomerOpeningEvidence = {
+  sourcePackageHash: string;
+  sourceCustomerId: string;
+  sourceVoucherItemId: string;
+};
 export type CustomerOpeningReview = {
   expectedSnapshotHash: string; identityConfirmed: boolean; totalConfirmed: boolean; lines: CustomerOpeningLine[];
+  sepidarEvidence?: SepidarCustomerOpeningEvidence;
 };
 const invalid = (message: string): never => { throw new AccountingCustomerTreasuryError('OPENING_REVIEW_INVALID', message, 409); };
 const rials = (value: { toString(): string }) => BigInt(value.toString());

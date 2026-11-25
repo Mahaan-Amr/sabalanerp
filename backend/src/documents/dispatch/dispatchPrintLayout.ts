@@ -34,15 +34,22 @@ export function shipmentParties(name: string, contracts: DispatchContractContact
   const sender = distinctSellers.size === 1 ? grid(company + sellerFields(contacts[0]))
     : grid(company) + contacts.map(contact =>
       grid(field('قرارداد', ltr(contact.contractNumber)) + sellerFields(contact))).join('');
-  return printSection(invoice ? 'مشخصات فروشنده' : 'مشخصات فرستنده', sender, 'contact-section')
-    + contacts.map(contact => printSection(
-      contacts.length > 1 ? `مشخصات خریدار و پروژه · قرارداد ${escapePrint(printDigits(contact.contractNumber))}` : 'مشخصات خریدار و پروژه',
-      grid(field('خریدار', escapePrint(name)) + field('تلفن مشتری', ltr(contact.customerPhone))
-        + field('طرف‌حساب', escapePrint(counterparty || name))
-        + field('پروژه', escapePrint(contact.project || '_')) + field('مدیر پروژه', escapePrint(contact.manager || '_'))
-        + field('تلفن مدیر پروژه', ltr(contact.managerPhone))
-        + `<div class="address">${field('نشانی پروژه', escapePrint(contact.address || '_'))}</div>`), 'contact-section',
-    )).join('');
+  const phoneNumbers = [...new Set(contacts.map(contact => contact.customerPhone).filter(Boolean))];
+  const buyer = field('خریدار', escapePrint(name))
+    + field('تلفن مشتری', phoneNumbers.length ? phoneNumbers.map(ltr).join('، ') : ltr(''))
+    + field('طرف‌حساب', escapePrint(counterparty || name));
+  const project = (contact: DispatchContractContact) =>
+    field('پروژه', escapePrint(contact.project || '_')) + field('مدیر پروژه', escapePrint(contact.manager || '_'))
+    + field('تلفن مدیر پروژه', ltr(contact.managerPhone))
+    + `<div class="address">${field('نشانی پروژه', escapePrint(contact.address || '_'))}</div>`;
+  const parties = contacts.length === 1
+    ? printSection('مشخصات خریدار و پروژه', grid(buyer + project(contacts[0])), 'contact-section')
+    : printSection('مشخصات خریدار', grid(buyer), 'contact-section')
+      + contacts.map(contact => printSection(
+        `مشخصات پروژه · قرارداد ${escapePrint(printDigits(contact.contractNumber))}`,
+        grid(project(contact)), 'contact-section',
+      )).join('');
+  return printSection(invoice ? 'مشخصات فروشنده' : 'مشخصات فرستنده', sender, 'contact-section') + parties;
 }
 
 export function shipmentTerms(contractNumbers: string[]) {

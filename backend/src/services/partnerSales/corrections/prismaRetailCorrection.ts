@@ -13,7 +13,7 @@ import { createPartnerRetailCorrectionService, type RetailCorrectionRecord,
 import { readPartnerWorkingCalendar } from './calendar';
 import { readRetailCorrectionState, retailStateScope } from './persistedRetailState';
 import { prepareRetailSuccessor } from './retailSuccessor';
-import { synchronizePartnerContractedQuantities } from '../fulfillment/quantityStore';
+import { synchronizeCorrectedPartnerDraftQuantities } from '../fulfillment/draftEligibility';
 import * as outputContracts from '@sabalanerp/partner-sales-contracts';
 import { createCustomerOutputSnapshots } from '../customerOutput/snapshots';
 
@@ -163,7 +163,7 @@ async function stageNormalized(tx: Tx, before: RetailCorrectionRecord, after: Re
       effectiveDate: new Date(`${event.effectiveDate}T00:00:00.000Z`), evidence: json({ publicEvent: event }) } });
     await tx.sabalanToPartnerSaleRecord.update({ where: { caseId: after.caseId }, data: {
       expectedRevision: after.effective.owner.revision, integrityHash: after.effective.owner.integrityHash } });
-    await synchronizePartnerContractedQuantities(tx, after.caseId);
+    await synchronizeCorrectedPartnerDraftQuantities(tx, after.caseId);
   }
 }
 

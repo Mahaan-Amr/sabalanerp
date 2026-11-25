@@ -7,6 +7,10 @@ import { resolveWorkspaceDutyAuthority } from './crossWorkspaceDutyAuthority';
 import { assertCommercialActionAvailable, refreshDispatchExpiryExemption } from './ordinaryContractLifecycle';
 import { hasSpecialCustomerCreditAuthorization } from './specialCustomerCreditPolicy';
 import { canManageCustomerCredit, lockCustomerCredit } from './specialCustomerCredit';
+import { readPartnerDraftCase } from './partnerSales/fulfillment/draftEligibility';
+import { isCurrentPartnerManagerRequest, readPartnerDraftManagerApproval } from './partnerSales/fulfillment/draftManagerApproval';
+import { closeContractDispatchDuty } from './crossWorkspaceDutyAdapters/contractDispatchDutyAdapter';
+import { synchronizePartnerContractedQuantities } from './partnerSales/fulfillment/quantityStore';
 import { publishNotificationEvent } from './notificationService';
 
 export type CreditDb = PrismaClient | Prisma.TransactionClient;
@@ -184,8 +188,13 @@ export const createDispatchRequest = async (db: CreditDb, contract: SalesContrac
     if (!['MANAGER', 'DATE'].includes(input.kind)) throw new Error('این درخواست برای قرارداد همکار مجاز نیست.');
   } else assertCommercialActionAvailable(contract);
   let date = input.kind === 'MANAGER' || input.kind === 'TRANSFER' ? null : promisedDate(input.promisedDate);
-  if (input.kind === 'MANAGER') await assertDispatchFinality(db, contract);
-  if (input.kind === 'MANAGER' && await activeManagerApproval(db, contract)) throw new Error('تأیید مدیریتی این نسخه برقرار است؛ تغییر موعد را جداگانه درخواست کنید.');
+  const draftCase = input.kind === 'MANAGER' && contract.partnerCaseId ? await readPartnerDraftCase(db, contract.partnerCaseId) : null;
+  if (input.kind === 'MANAGER') {
+    await assertDispatchFinality(db, contract);
+    if (contract.partnerCaseId && !draftCase) throw new Error('نسخه مؤثر پرونده همکار برای درخواست تأیید مدیریتی آماده نیست.');
+    const active = draftCase ? await readPartnerDraftManagerApproval(db, contract, draftCase.view.owner) : await activeManagerApproval(db, contract);
+    if (active) throw new Error('تأیید مدیریتی این نسخه برقرار است؛ تغییر موعد را جداگانه درخواست کنید.');
+  }
   if (input.kind !== 'MANAGER' && !input.reason?.trim()) throw new Error('دلیل درخواست الزامی است.');
   if (input.kind === 'CUSTOMER_DATE' && !hasSpecialCustomerCreditAuthorization(contract)) throw new Error('مجوز اعتباری مشتری برای نسخه جاری برقرار نیست.');
   if (input.kind !== 'MANAGER' && input.kind !== 'CUSTOMER_DATE') {
@@ -200,12 +209,21 @@ export const createDispatchRequest = async (db: CreditDb, contract: SalesContrac
     }
   }
   const pending = await db.contractDispatchAuthority.findFirst({ where: { contractId: contract.id, kind: input.kind, status: 'PENDING' } });
-  if (pending) throw new Error('درخواست قبلی هنوز در انتظار تصمیم است.');
+  if (pending) {
+    if (!draftCase || await isCurrentPartnerManagerRequest(db, pending, contract, draftCase.view.owner)) {
+      throw new Error('درخواست قبلی هنوز در انتظار تصمیم است.');
+    }
+    const superseded = await db.contractDispatchAuthority.update({ where: { id: pending.id }, data: { status: 'SUPERSEDED' } });
+    const note = 'درخواست تأیید مدیریتی با تغییر نسخه مؤثر پرونده همکار جایگزین شد.';
+    await auditDispatchCredit(db, contract.id, actorId, 'DISPATCH_MANAGER_SUPERSEDED', pending.id, pending, superseded, note);
+    await closeContractDispatchDuty(db, pending.id, actorId, 'SUPERSEDE', note);
+  }
   const request = await db.contractDispatchAuthority.create({ data: { contractId: contract.id, kind: input.kind,
     revision: contract.commercialRevision, promisedDate: date, requestedBy: actorId, reason: input.reason?.trim(),
     targetAuthorityId: input.kind === 'CUSTOMER_DATE' ? null : input.targetAuthorityId,
     targetSellerId: input.kind === 'CUSTOMER_DATE' ? null : input.targetSellerId } });
-  await auditDispatchCredit(db, contract.id, actorId, 'DISPATCH_AUTHORITY_REQUESTED', request.id, null, request);
+  await auditDispatchCredit(db, contract.id, actorId, 'DISPATCH_AUTHORITY_REQUESTED', request.id, null,
+    draftCase ? { ...request, partnerCaseOwner: draftCase.view.owner } : request);
   return request;
 };
 
@@ -221,6 +239,12 @@ export const decideDispatchRequest = async (db: CreditDb, id: string, actorId: s
     : request.kind === 'MANAGER' ? request.requestedBy !== actorId && await canReviewManagerDispatch(db, actorId, request.contract)
     : request.kind === 'CUSTOMER_DATE' ? await canManageCustomerCredit(db, actorId) : await canManageDispatch(db, actorId);
   if (!authorized) throw new Error('مجوز تصمیم برای این درخواست ندارید.');
+  const draftCase = request.kind === 'MANAGER' && request.contract.partnerCaseId
+    ? await readPartnerDraftCase(db, request.contract.partnerCaseId) : null;
+  if (request.kind === 'MANAGER' && request.contract.partnerCaseId &&
+      !await isCurrentPartnerManagerRequest(db, request, request.contract, draftCase?.view.owner ?? null)) {
+    throw new Error('نسخه مؤثر پرونده همکار تغییر کرده است؛ برای نسخه جاری درخواست جدید ثبت کنید.');
+  }
   if (action === 'DECLINE' && !reason?.trim()) throw new Error('دلیل رد درخواست الزامی است.');
   if (action === 'APPROVE' && request.kind === 'MANAGER') await assertDispatchFinality(db, request.contract);
   const decisionDate = action === 'APPROVE' && request.kind === 'MANAGER' ? promisedDate(approvalPromisedDate) : request.promisedDate;
@@ -249,9 +273,22 @@ export const decideDispatchRequest = async (db: CreditDb, id: string, actorId: s
         requestedBy: request.requestedBy, decidedBy: actorId } });
     }
   }
+  if (draftCase && action === 'APPROVE') {
+    // The old commercial grant continues to operate until the independent
+    // decision succeeds. Replace it atomically with the new Case-bound grant.
+    const existing = await db.contractDispatchAuthority.findMany({ where: { contractId: request.contractId,
+      kind: 'MANAGER', revision: request.revision, status: 'APPROVED' } });
+    for (const prior of existing) {
+      const superseded = await db.contractDispatchAuthority.update({ where: { id: prior.id }, data: { status: 'SUPERSEDED' } });
+      await auditDispatchCredit(db, request.contractId, actorId, 'DISPATCH_MANAGER_SUPERSEDED', prior.id, prior,
+        { ...superseded, successorAuthorityId: id });
+    }
+  }
   const updated = await db.contractDispatchAuthority.update({ where: { id }, data: { status: action === 'APPROVE' ? 'APPROVED' : 'REJECTED',
     decidedBy: actorId, decidedAt: new Date(), promisedDate: decisionDate, reason: reason?.trim() || request.reason } });
-  await auditDispatchCredit(db, request.contractId, actorId, `DISPATCH_${request.kind}_${action}`, id, request, updated, reason);
+  const evidence = draftCase ? { ...updated, partnerCaseOwner: draftCase.view.owner } : updated;
+  await auditDispatchCredit(db, request.contractId, actorId, `DISPATCH_${request.kind}_${action}`, id, request, evidence, reason);
+  if (draftCase && action === 'APPROVE') await synchronizePartnerContractedQuantities(db, draftCase.row.id, { initialize: true });
   if (request.kind === 'MANAGER') {
     await publishNotificationEvent(db, { type: 'CONTRACT_MANAGER_DISPATCH_DECIDED',
       deduplicationKey: `manager-dispatch-decided:${id}`, recipientIds: [request.requestedBy], actorId,

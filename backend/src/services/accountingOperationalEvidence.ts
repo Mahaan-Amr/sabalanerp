@@ -14,7 +14,7 @@ type EvidenceDatabase = PrismaClient | Prisma.TransactionClient;
 const publishAccountingOperationalEvidence = async (
   prisma: EvidenceDatabase,
   input: {
-    ownerWorkspace: 'accounting' | 'sales' | 'inventory' | 'security' | 'purchasing';
+    ownerWorkspace: 'accounting' | 'sales' | 'inventory' | 'security' | 'purchasing' | 'logistics';
     sourceType: string;
     sourceId: string;
     sourceVersion: number;
@@ -58,6 +58,13 @@ export const publishGuardInboundOperationalEvidence = (
   input: { sourceId: string; sourceVersion: number; sourcePayload: unknown; occurredAt: Date },
 ) => publishAccountingOperationalEvidence(prisma, {
   ownerWorkspace: 'security', sourceType: 'GUARD_INBOUND_MOVEMENT', ...input,
+});
+
+export const publishStoneReturnAcceptanceEvidence = (
+  prisma: EvidenceDatabase,
+  input: { sourceId: string; sourcePayload: unknown; occurredAt: Date },
+) => publishAccountingOperationalEvidence(prisma, {
+  ownerWorkspace: 'logistics', sourceType: 'LOGISTICS_STONE_RETURN_ACCEPTANCE', sourceVersion: 1, ...input,
 });
 
 export const publishInventoryPurchaseOperationalEvidence = (

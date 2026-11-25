@@ -10,6 +10,7 @@ export interface ContractCatalogItem {
   id: string;
   name: string;
   facts: string;
+  availability?: string;
 }
 
 export interface ContractCatalogTypeOption {
@@ -84,7 +85,9 @@ export function ContractProductCatalog({ query, onQueryChange, activeType, onTyp
             onMouseEnter={() => setHighlightedIndex(index)} onClick={() => onSelect(item)}
             className={`sds-divider grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b px-2 py-2.5 text-right last:border-b-0 ${highlighted ? 'bg-[var(--sds-accent-soft)]' : ''}`}>
             <span className="min-w-0"><strong className="sds-text-primary block truncate text-sm">{item.name}</strong>
-              <span className={`sds-text-muted mt-0.5 block text-xs ${wrapFacts?'whitespace-normal break-words':'truncate'}`}>{item.facts}</span></span>
+              <span className={`sds-text-muted mt-0.5 block text-xs ${wrapFacts?'whitespace-normal break-words':'truncate'}`}>{item.facts}</span>
+              {item.availability && <span className="sds-text-secondary mt-0.5 block text-xs">{item.availability}</span>}
+            </span>
             <span className="text-xs font-medium text-[var(--sds-accent)]">انتخاب</span>
           </ErpPressable>;
         })}

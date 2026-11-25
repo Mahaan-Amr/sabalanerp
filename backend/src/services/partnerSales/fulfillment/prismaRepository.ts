@@ -11,7 +11,7 @@ import { hasSharedOperationAuthority } from '../authorization/sharedOperationAut
 import { lockPartnerOperationsControl } from '../authorization/technicalRollout';
 import { readCurrentPartnerCaseViews, readPartnerRevisionProjections } from '../cases/lifecycle';
 import { buildPartnerPhysicalLineage, canonicalPartnerQuantity } from './lineage';
-import { capturePartnerContractedQuantities, readPartnerShipmentQuantityProjection } from './quantityStore';
+import { capturePartnerContractedQuantities, readPartnerCorrectionQuantityProjection, readPartnerShipmentQuantityProjection } from './quantityStore';
 import type {
   PartnerFulfillmentCommandReceipt, PartnerFulfillmentCommandScope, PartnerFulfillmentRepository,
   PartnerFulfillmentSource, PartnerPhysicalLineage, PartnerQuantityDependency,
@@ -37,6 +37,40 @@ function decodeLineage(row: { id: string; caseId: string; caseRevision: number; 
     recipient: recipient as PartnerPhysicalLineage['recipient'], deliveryIds: row.deliveryIds as string[] };
 }
 
+/** Prove each immutable origin once per transaction and compare every row
+ * with the lineage that follows from that verified revision. */
+export function createPartnerPhysicalLineageValidator(tx: Prisma.TransactionClient) {
+  const origins = new Map<string, ReturnType<typeof readOrigin>>();
+  async function readOrigin(owner: PartnerPhysicalLineage['createdFrom']) {
+    if (!await readPartnerRevisionProjections(tx, owner)) return null;
+    const revision = await tx.partnerCaseRevision.findUniqueOrThrow({ where: { caseId_revision: {
+      caseId: owner.caseId, revision: owner.revision } }, include: { case: { select: { customerId: true } } } });
+    const view = FulfillmentViewSchema.safeParse(object(revision.internalProjection)?.fulfillment);
+    const recipient = object(object(revision.partySnapshots)?.customer);
+    if (!view.success || !recipient || typeof recipient.displayName !== 'string' || typeof recipient.phone !== 'string') return null;
+    const destination = view.data.deliveries[0]?.destination ?? recipient.address;
+    if (typeof destination !== 'string') return null;
+    return { view: view.data, products: new Map(view.data.products.map(product => [product.productRowId, product])),
+      customer: { customerId: revision.case.customerId, displayName: recipient.displayName, phone: recipient.phone, destination } };
+  }
+  return async (row: Parameters<typeof decodeLineage>[0]) => {
+    const lineage = decodeLineage(row);
+    if (!lineage) return null;
+    const key = JSON.stringify([row.caseId, row.caseRevision, row.integrityHash]);
+    let pending = origins.get(key);
+    if (!pending) {
+      pending = readOrigin(lineage.createdFrom);
+      origins.set(key, pending);
+    }
+    const origin = await pending;
+    if (!origin) return null;
+    const product = origin.products.get(row.productRowId);
+    if (!product || !canonicalPartnerQuantity(product.quantity)) return null;
+    const expected = await buildPartnerPhysicalLineage(origin, product);
+    return await canonicalHash(lineage) === await canonicalHash(expected) ? lineage : null;
+  };
+}
+
 export function createPrismaPartnerFulfillmentRepository(input: {
   database: PrismaClient | Prisma.TransactionClient;
   actorId: string;
@@ -48,10 +82,15 @@ export function createPrismaPartnerFulfillmentRepository(input: {
       const run = async (tx: Prisma.TransactionClient) => {
         let mutating = false;
         await lockPartnerOperationsControl(tx);
-        const source = async (expected: PartnerFulfillmentSource['view']['owner'], action: 'MATERIALIZE' | 'SELECT_DELIVERY' | 'INSPECT_LOADING' | 'INSPECT_DEPENDENCIES' | 'INSPECT_VOIDING',
+        const validateLineage = createPartnerPhysicalLineageValidator(tx);
+        const source = async (expected: PartnerFulfillmentSource['view']['owner'], action: 'MATERIALIZE' | 'SELECT_DELIVERY' | 'SELECT_DRAFT_DELIVERY' | 'INSPECT_LOADING' | 'INSPECT_DEPENDENCIES' | 'INSPECT_VOIDING',
           authenticatedActorId?: string): Promise<Result<PartnerFulfillmentSource>> => {
           if (authenticatedActorId && authenticatedActorId !== input.actorId) return { ok: false, error: partnerError('FORBIDDEN') };
-          await tx.$queryRaw`SELECT id FROM partner_sale_cases WHERE id = ${expected.caseId} FOR UPDATE`;
+          // A draft reader already owns the operations fence and a consistent
+          // snapshot. Its writer also holds the Case before authorizing.
+          if (action !== 'SELECT_DRAFT_DELIVERY') {
+            await tx.$queryRaw`SELECT id FROM partner_sale_cases WHERE id = ${expected.caseId} FOR UPDATE`;
+          }
           const row = await tx.partnerSaleCase.findUnique({ where: { id: expected.caseId }, select: {
             id: true, state: true, headRevision: true, integrityHash: true, customerId: true, internalRecordId: true,
             head: { select: { graphHash: true, graph: true, internalProjection: true, partySnapshots: true } },
@@ -113,20 +152,12 @@ export function createPrismaPartnerFulfillmentRepository(input: {
           findLineage: async (caseId, productRowId) => {
             const row = await tx.partnerFulfillmentLineage.findUnique({ where: {
               caseId_productRowId: { caseId, productRowId } } });
-            if (!row) return null;
-            const lineage = decodeLineage(row);
-            if (!lineage || !await readPartnerRevisionProjections(tx, lineage.createdFrom)) return null;
-            const origin = await tx.partnerCaseRevision.findUniqueOrThrow({ where: { caseId_revision: {
-              caseId, revision: lineage.createdFrom.revision } }, include: { case: { select: { customerId: true } } } });
-            const view = FulfillmentViewSchema.safeParse(object(origin.internalProjection)?.fulfillment);
-            const recipient = object(object(origin.partySnapshots)?.customer);
-            if (!view.success || !recipient || typeof recipient.displayName !== 'string' || typeof recipient.phone !== 'string') return null;
-            const destination = view.data.deliveries[0]?.destination ?? recipient.address;
-            const product = view.data.products.find(item => item.productRowId === productRowId);
-            if (!product || !canonicalPartnerQuantity(product.quantity) || typeof destination !== 'string') return null;
-            const expected = await buildPartnerPhysicalLineage({ view: view.data, customer: {
-              customerId: origin.case.customerId, displayName: recipient.displayName, phone: recipient.phone, destination } }, product);
-            return await canonicalHash(lineage) === await canonicalHash(expected) ? lineage : null;
+            return row ? validateLineage(row) : null;
+          },
+          findLineages: async (caseId, productRowIds) => {
+            const rows = await tx.partnerFulfillmentLineage.findMany({ where: { caseId, productRowId: { in: productRowIds } } });
+            const validated = await Promise.all(rows.map(validateLineage));
+            return new Map(validated.flatMap(lineage => lineage ? [[lineage.productRowId, lineage] as const] : []));
           },
           commitLineages: async ({ command, intentHash, lineages }) => {
             mutating = true;
@@ -162,12 +193,13 @@ export function createPrismaPartnerFulfillmentRepository(input: {
               outcome: json({ schemaVersion: 1, fulfillmentCommand: receipt }) } });
             return { ok: true, value: receipt };
           },
-          readQuantityDependencies: async expected => {
+          readQuantityDependencies: async (expected, mode) => {
             const caseRow = await tx.partnerSaleCase.findUnique({ where: { id: expected.caseId },
               select: { internalRecordId: true } });
             if (!caseRow?.internalRecordId) return [];
             const internalRecordId = caseRow.internalRecordId;
-            const projection = await readPartnerShipmentQuantityProjection(tx, expected.caseId);
+            const projection = await (mode === 'SUCCESSOR' ? readPartnerCorrectionQuantityProjection(tx, expected.caseId)
+              : readPartnerShipmentQuantityProjection(tx, expected.caseId));
             return projection.rows.map((row): PartnerQuantityDependency => ({ sourceKind: 'PARTNER_CASE', owner: expected,
               internalRecordId, productRowId: row.productRowId, unit: row.unit,
               contracted: row.quantities?.contracted ?? '', finalizedReserved: row.quantities?.finalizedReserved ?? '',

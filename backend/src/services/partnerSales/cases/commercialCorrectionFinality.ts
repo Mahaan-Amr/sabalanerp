@@ -6,7 +6,8 @@ import { readPersistedPartnerEvents } from '../events/persisted';
 import { caseComparableAmount } from '../reporting/comparable';
 import { subtract, sum } from '../reporting/money';
 import { readCurrentPartnerCaseViews } from './lifecycle';
-import { synchronizePartnerContractedQuantities, validatePartnerCommercialPhysicalFloor } from '../fulfillment/quantityStore';
+import { synchronizeCorrectedPartnerDraftQuantities } from '../fulfillment/draftEligibility';
+import { validatePartnerCommercialPhysicalFloor } from '../fulfillment/quantityStore';
 
 const json = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value));
 
@@ -25,7 +26,7 @@ export async function recordPartnerCommercialCorrectionFinality(
   if (!effective || effective.owner.revision === root.headRevision) return;
   if (effective.owner.revision > root.headRevision) throw new Error('سابقه نسخه مؤثر قرارداد ناسازگار است.');
   const physical = await validatePartnerCommercialPhysicalFloor(tx, caseId,
-    views.accounting.products.filter(product => product.productType !== 'service'));
+    views.accounting.products.filter(product => product.productType !== 'service'), { allowMissingContractedEvidence: true });
   if (!physical.ok) throw new Error(physical.error.message);
   const request = await tx.accountingCorrectionRequest.findFirst({ where: { contractId: contract.id,
     status: { in: ['APPROVED_FOR_SALES_EDIT', 'RESOLVED'] } }, orderBy: { createdAt: 'desc' } });
@@ -80,5 +81,5 @@ export async function recordPartnerCommercialCorrectionFinality(
       ...(index === 1 ? { stateRevision: root.stateRevision + 1, fromState: 'COMMITTED', toState: 'COMMITTED' } : {}),
       effectiveDate: new Date(`${effectiveDate}T00:00:00Z`), evidence: json({ publicEvent: event }) } });
   }
-  await synchronizePartnerContractedQuantities(tx, caseId);
+  await synchronizeCorrectedPartnerDraftQuantities(tx, caseId);
 }

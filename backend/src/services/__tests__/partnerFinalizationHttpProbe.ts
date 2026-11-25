@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import express from 'express';
+import { randomUUID } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 import { prisma } from '../../lib/prisma';
 import logisticsRouter from '../../routes/logistics';
@@ -67,11 +68,12 @@ async function main() {
         }, { timeout: 30_000 });
         return waiting!;
       };
-      const payload = { sourceKind: 'PARTNER_CASE', expected, deliveryId: 'second-delivery',
+      const repairFixture = process.env.PARTNER_TEST_REPAIR_FINALIZE === '1';
+      const payload = { sourceKind: 'PARTNER_CASE', expected, deliveryId: repairFixture ? 'separate-delivery' : 'second-delivery',
         reason: 'ثبت بارگیری نهایی پرونده همکار با قیمت مصوب' };
       const control = await prisma.partnerOperationsControl.findUniqueOrThrow({ where: { id: 'partner-operations' } });
       if (!control.cohortId) throw new Error('Partner rollout cohort fixture is missing');
-      await prisma.$transaction(async tx => {
+      if (!repairFixture) await prisma.$transaction(async tx => {
         await tx.partnerOperationsControl.update({ where: { id: 'partner-operations' }, data: { operationalPaused: true } });
         await tx.partnerReleaseCohort.update({ where: { id: control.cohortId! }, data: {
           activationEnabled: false, operationalPaused: true,
@@ -81,14 +83,20 @@ async function main() {
       assert.equal(created.status, 201, JSON.stringify(created.body));
       const loadingId = created.body.data.loadingId;
       const source = (await request(`/loadings/${loadingId}`)).body.data.source;
+      const licenceExpiresAt = new Date('2099-01-01');
       const driver = await prisma.externalDriver.create({ data: { firstName: 'Final', lastName: 'Dispatch',
-        nationalCode: '3340000001', phone: '09120003341', status: 'ACTIVE', statusRecordedBy: actorId, createdBy: actorId,
-        documents: { create: { documentType: 'DRIVING_LICENCE', reference: 'isolated-334-final-driver', recordedBy: actorId } } } });
+        nationalCode: '3340000001', phone: '09120003341', licenceNumber: '3340000001', licenceClass: '1', licenceExpiresAt,
+        status: 'ACTIVE', statusRecordedBy: actorId, createdBy: actorId,
+        documents: { create: { documentType: 'DRIVING_LICENCE', expiresAt: licenceExpiresAt, reference: 'isolated-334-final-driver', recordedBy: actorId } } } });
       const vehicle = await prisma.externalVehicle.create({ data: { vehicleType: 'Final Partner dispatch', status: 'ACTIVE',
         statusRecordedBy: actorId, createdBy: actorId,
         plates: { create: { plate: '334-final', normalizedPlate: '334final', effectiveFrom: new Date(),
           reason: 'isolated finalization fixture', recordedBy: actorId } },
         documents: { create: { documentType: 'VEHICLE_REGISTRATION', reference: 'isolated-334-final-vehicle', recordedBy: actorId } } } });
+      await prisma.externalDriverVehicleAssignment.create({ data: { driverId: driver.id, vehicleId: vehicle.id,
+        effectiveFrom: new Date(), reason: 'isolated Partner loading fixture', recordedBy: actorId } });
+      await prisma.driverBiometricEnrollment.create({ data: { externalDriverId: driver.id, status: 'ACTIVE',
+        confirmationPhone: driver.phone, enrolledBy: actorId } });
       const admission = await request('/api/security/canonical-driver-queue', 'POST',
         { source: 'EXTERNAL', driverId: driver.id, vehicleId: vehicle.id }, logisticsSession.token, `${expected.caseId}-final-turn`);
       assert.equal(admission.status, 201, JSON.stringify(admission.body));
@@ -105,7 +113,7 @@ async function main() {
       const finalized = await request(`/loadings/${loadingId}/finalize`, 'POST', { expected,
         reason: 'نهایی‌سازی بارگیری با شواهد مالی رسمی' }, logisticsSession.token, `${expected.caseId}-finalize`);
       assert.equal(finalized.status, 200, JSON.stringify(finalized.body));
-      assert.equal((await prisma.partnerOperationsControl.findUniqueOrThrow({ where: { id: 'partner-operations' } })).operationalPaused,
+      if (!repairFixture) assert.equal((await prisma.partnerOperationsControl.findUniqueOrThrow({ where: { id: 'partner-operations' } })).operationalPaused,
         true, 'committed loading create, reserve, allocate, and finalize must survive the emergency pause');
       const revisionId = finalized.body.data.revisions[0].id;
       const candidateId = finalized.body.data.revisions[0].candidate.id;
@@ -115,6 +123,7 @@ async function main() {
       assert.equal(revision.lines.every(line => line.sourceContractId === null && line.sourceContractItemId === null), true);
       assert.equal(revision.pricingReferences.length, 0, 'Partner pricing must not manufacture ordinary pricing references');
       assert.equal(revision.partnerPricing?.events.length, 1);
+      if (repairFixture) return;
       const workspacePermissionBeforeRaces = await prisma.workspacePermission.findUnique({ where: { userId_workspace: {
         userId: accountantId, workspace: 'accounting',
       } } });
@@ -173,6 +182,14 @@ async function main() {
       await prisma.workspacePermission.create({ data: { userId: readerId, workspace: 'accounting', permissionLevel: 'view', grantedBy: accountantId } });
       await prisma.featurePermission.create({ data: { userId: readerId, workspace: 'accounting',
         feature: 'accounting_dispatch_candidates_view', permissionLevel: 'view', grantedBy: accountantId } });
+      const denyAccountingCaseAction = (userId: string, action: 'ACCOUNTING_READ' | 'ACCOUNTING_WRITE') =>
+        prisma.effectiveActionGrant.create({ data: { id: `${userId}-explicit-denial-${action}`,
+          principalKind: 'USER', principalId: userId, subjectUserId: userId, domain: 'PARTNER', action,
+          rootKind: 'CASE', purpose: 'ACCOUNTING', scope: 'PURPOSE_BOUND', boundRootId: expected.caseId, effect: 'DENY',
+          grantedBy: actorId, reason: 'isolated Partner dispatch document authorization fixture',
+          correlationId: `${userId}-explicit-denial-${action}`,
+        } });
+      await denyAccountingCaseAction(readerId, 'ACCOUNTING_READ');
       const readerSession = await createAuthoritativeSession(prisma, readerId,
         { ipAddress: '127.0.0.1', userAgent: 'isolated-334-waybill-only' });
       const fetchArtifact = (artifactId: string, token: string) => fetch(`${base}/api/accounting/dispatch-waybills/${waybillId}/artifacts/${artifactId}`,
@@ -182,28 +199,33 @@ async function main() {
       assert.equal((await fetchArtifact(waybill.id, readerSession.token)).status, 200,
         'waybill-only Accounting readers can hand the price-free document to the customer');
       assert.equal((await fetchArtifact(statement.id, readerSession.token)).status, 404,
-        'ordinary Accounting page authority cannot expose Partner wholesale pricing');
+        'a Case denial prevents reading the wholesale statement');
       assert.equal((await fetchArtifact(statement.id, accountingSession.token)).status, 200,
         'the assigned internal Accounting actor can read the wholesale statement');
       const combinedDenied = await request(`/api/accounting/dispatch-candidates/${candidateId}/document-read-model?waybillId=${waybillId}`,
         'GET', undefined, readerSession.token);
       assert.equal(combinedDenied.status, 404, 'the combined model is wholesale-sensitive');
       let otp = '';
+      const connector = new DeterministicBiometricSimulator();
       const confirmation = new DispatchConfirmationService(prisma, {
-        connector: new DeterministicBiometricSimulator(),
+        connector,
         vault: new ProtectedTemplateVault({ activeKeyId: 'test', keys: { test: Buffer.alloc(32, 7) } }),
         otpSecret: 'issue-334-isolated-dispatch-confirmation-secret',
         sendOtp: async message => { otp = message.code; },
       });
       const confirmationSession = await confirmation.startSession({ waybillId, actorId: accountantId,
         workstationId: 'ISSUE-334-ACCOUNTING-DESK' });
-      assert.ok(otp, 'the external-driver confirmation must issue an OTP');
-      await confirmation.verifyOtp({ sessionId: confirmationSession.id, code: otp, actorId: accountantId });
-      const authorization = await confirmation.approveByGuard({ sessionId: confirmationSession.id,
-        guardActorId: actorId, reauthenticatedAt: new Date() });
+      const failedCapture = await connector.execute({ commandId: randomUUID(), nonce: randomUUID(), workstationId: 'ISSUE-334-ACCOUNTING-DESK',
+        issuedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 60_000).toISOString(), operation: 'VERIFY',
+        payload: { challengeId: confirmationSession.id, simulation: { scenario: 'DISCONNECT' } } });
+      await confirmation.recordInternalBiometricResult({ sessionId: confirmationSession.id, actorId: accountantId, result: failedCapture });
+      await confirmation.beginInternalFallback({ sessionId: confirmationSession.id, actorId: accountantId });
+      assert.ok(otp, 'a qualifying biometric failure opens the external-driver OTP path');
+      const { authorization } = await confirmation.verifyOtp({ sessionId: confirmationSession.id, code: otp, actorId: accountantId });
       await prisma.effectiveActionGrant.updateMany({ where: { principalId: accountantId, domain: 'PARTNER',
         action: 'ACCOUNTING_WRITE', revokedAt: null }, data: { revokedAt: new Date(), revokedBy: accountantId,
         revocationReason: 'آزمون لغو دسترسی نوشتن اسناد', revocationCorrelationId: `${expected.caseId}-revoke-document-write` } });
+      await denyAccountingCaseAction(accountantId, 'ACCOUNTING_WRITE');
       const deniedReplay = await request(`/api/accounting/dispatch-candidates/${candidateId}/decision`, 'POST', { action: 'ACCEPT' },
         accountingSession.token, `${expected.caseId}-issue-documents`);
       assert.equal(deniedReplay.status, 403, 'idempotent Partner document commands must recheck current Case write authority');
@@ -222,6 +244,7 @@ async function main() {
       await prisma.effectiveActionGrant.updateMany({ where: { principalId: accountantId, domain: 'PARTNER',
         action: 'ACCOUNTING_READ', revokedAt: null }, data: { revokedAt: new Date(), revokedBy: accountantId,
         revocationReason: 'آزمون لغو دسترسی سند عمده', revocationCorrelationId: `${expected.caseId}-revoke-statement` } });
+      await denyAccountingCaseAction(accountantId, 'ACCOUNTING_READ');
       assert.equal((await fetchArtifact(statement.id, accountingSession.token)).status, 404,
         'every statement access rechecks current Case authority');
       assert.equal((await fetchArtifact(waybill.id, accountingSession.token)).status, 200,

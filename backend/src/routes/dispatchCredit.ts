@@ -1,5 +1,7 @@
 import { lockDispatchContract, dispatchCommerciallyFinal } from '../services/contractDispatchTarget';
 import { partnerCommercialDispatchEligible } from '../services/partnerSales/fulfillment/commercialSettlement';
+import { readPartnerDraftCase } from '../services/partnerSales/fulfillment/draftEligibility';
+import { isCurrentPartnerManagerRequest, readPartnerDraftManagerApproval } from '../services/partnerSales/fulfillment/draftManagerApproval';
 import express from 'express';
 import { prisma } from '../lib/prisma';
 import { protect } from '../middleware/auth';
@@ -70,19 +72,28 @@ router.get('/contracts/:id', handle(async req => {
   const authorityUsers = await prisma.user.findMany({ where: { id: { in: [...new Set([contract.responsibleSellerId, ...authorities.flatMap(row => [row.sellerId, row.decidedBy]).filter((id): id is string => !!id)])] } },
     select: { id: true, firstName: true, lastName: true, username: true } });
   const names = new Map(authorityUsers.map(user => [user.id, `${user.firstName} ${user.lastName}`.trim() || user.username]));
+  const draftCase = contract.partnerCaseId ? await readPartnerDraftCase(prisma, contract.partnerCaseId) : null;
+  const commercialManager = await activeManagerApproval(prisma, contract);
+  const draftManager = contract.partnerCaseId
+    ? draftCase && await readPartnerDraftManagerApproval(prisma, contract, draftCase.view.owner)
+    : commercialManager;
+  const pendingManager = authorities.find(row => row.kind === 'MANAGER' && row.status === 'PENDING');
+  const hasCurrentManagerRequest = !!pendingManager && (!contract.partnerCaseId ||
+    await isCurrentPartnerManagerRequest(prisma, pendingManager, contract, draftCase?.view.owner ?? null));
   return { authorities: authorities.map(row => ({ ...row, sellerName: row.sellerId ? names.get(row.sellerId) : undefined,
     deciderName: row.decidedBy ? names.get(row.decidedBy) : undefined,
-    canDecide: row.status === 'PENDING' && (row.kind === 'MANAGER' ? access.managerDecision && row.requestedBy !== req.user.id
+    canDecide: row.status === 'PENDING' && (row.kind === 'MANAGER' ? hasCurrentManagerRequest && access.managerDecision && row.requestedBy !== req.user.id
       : row.kind === 'CUSTOMER_DATE' ? false : row.kind === 'TRANSFER' ? row.targetSellerId === req.user.id : access.manage) })),
     customerCredit: contract.customerCreditCustomerId ? { amountRials: contract.customerCreditAmountRials.toString(),
       consumedRials: (await consumedCustomerCredit(prisma, contract)).toString(), promisedDate: contract.customerCreditPromisedDate,
       active: hasSpecialCustomerCreditAuthorization(contract) } : null,
     canManageCustomerDate: await canManageCustomerCredit(prisma, req.user.id),
-    actorId: req.user.id, canRequestManager: dispatchCommerciallyFinal(contract) && !['CANCELLED','EXPIRED'].includes(contract.status) && !contract.isInactive,
+    actorId: req.user.id, canRequestManager: dispatchCommerciallyFinal(contract) && !['CANCELLED','EXPIRED'].includes(contract.status) &&
+      !contract.isInactive && (!contract.partnerCaseId || !!draftCase) && !draftManager && !hasCurrentManagerRequest,
     responsibleSeller: { id: contract.responsibleSellerId, displayName: names.get(contract.responsibleSellerId) ?? 'فروشنده مسئول' },
     access, eligible: contract.partnerCaseId ? await prisma.$transaction(tx => partnerCommercialDispatchEligible(tx, contract.partnerCaseId!)) : await ordinaryContractDispatchEligible(prisma, contract),
     balance: contract.partnerCaseId ? null : await creditBalance(prisma, contract.responsibleSellerId),
-    activeManagerId: (await activeManagerApproval(prisma, contract))?.id ?? null };
+    activeManagerId: commercialManager?.id ?? null, draftManagerId: contract.partnerCaseId ? draftManager?.id ?? null : null };
 }));
 router.post('/contracts/:id/requests', handle(req => prisma.$transaction(async tx => {
   await accessibleContract(tx, req.params.id, req.user.id);

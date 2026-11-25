@@ -164,7 +164,7 @@ export default function AccountingDispatchPage() {
 
   const runDispatch = async (
     command: () => Promise<any>,
-    notice: string | ((data: any) => DispatchNotice),
+    notice: string | ((data: any) => DispatchNotice | null),
     recover?: (error: any) => Promise<boolean>,
   ): Promise<boolean> => {
     if (dispatchPendingRef.current) return false;
@@ -625,7 +625,7 @@ export default function AccountingDispatchPage() {
                           dispatchConfirmationAPI.beginFallback(
                             confirmation.id,
                           ),
-                        "روش جایگزین فعال است. پس از تأیید رمز راننده، تأیید سرپرست گارد لازم است.",
+                        "رمز تأیید برای راننده ارسال شد.",
                       )
                     }
                   />
@@ -639,8 +639,12 @@ export default function AccountingDispatchPage() {
                     if (dispatchTimelineStale || dispatchPending || otpCode.length !== 6) return;
                     void runDispatch(
                       () => dispatchConfirmationAPI.verifyOtp(confirmation.id, otpCode),
-                      "رمز راننده تأیید شد. تأیید نهایی را سرپرست گارد تکمیل می‌کند.",
-                    );
+                      (data) => data?.authorization?.id
+                        ? null
+                        : { kind: "error", text: "وضعیت مجوز خروج نامشخص است. پروندهٔ ارسال را بررسی کنید." },
+                    ).then((succeeded) => {
+                      if (succeeded) setOtpCode("");
+                    });
                   }}
                 >
                   <ErpField label="رمز یک‌بارمصرف راننده" hint="کد ۶ رقمی پیامک‌شده به راننده را وارد کنید.">
@@ -680,7 +684,9 @@ export default function AccountingDispatchPage() {
                 <div className="mt-4">
                   <ErpInlineState
                     kind="success"
-                    title="مجوز خروج برای گارد صادر شده است."
+                    title={confirmation.method?.endsWith("_FALLBACK")
+                      ? "رمز راننده تأیید شد و مجوز خروج صادر شد."
+                      : "مجوز خروج برای گارد صادر شده است."}
                   />
                   <div className="mt-2">
                     <ErpButton

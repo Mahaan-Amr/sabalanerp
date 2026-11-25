@@ -48,8 +48,9 @@ async function run() {
       ? ['accounting_dispatch_candidates_view', 'accounting_dispatch_candidates_manage', 'accounting_dispatch_confirmation_manage']
       : ['accounting_dispatch_confirmation_manage', 'accounting_records_approve_void', 'accounting_receivables_manage'];
     for (const feature of features) {
-      await prisma.featurePermission.create({ data: { userId: accountantId, workspace: 'accounting',
-        feature, permissionLevel: 'edit', grantedBy: logisticsId } });
+      await prisma.featurePermission.upsert({ where: { userId_workspace_feature: { userId: accountantId, workspace: 'accounting', feature } },
+        create: { userId: accountantId, workspace: 'accounting', feature, permissionLevel: 'edit', grantedBy: logisticsId },
+        update: { permissionLevel: 'edit' } });
     }
     const [loader, accountant, officer] = await Promise.all([logisticsId, accountantId, guardId].map(id =>
       createAuthoritativeSession(prisma, id, { ipAddress: '127.0.0.1', userAgent: 'personal-pickup-local-acceptance' })));
@@ -117,7 +118,7 @@ async function run() {
           include: { customerContract: true, profile: { include: { user: true } } } });
         assert.ok(selectedCase.customerContract);
         const invoice = await prisma.accountingFinancialRecord.findFirstOrThrow({ where: { sourceId: selectedCase.internalRecordId! } });
-        await request(accountant.token, '/accounting/actions', 200, { kind: 'APPROVE_FINANCIAL_INVOICE',
+        if (!invoice.financiallyApprovedAt) await request(accountant.token, '/accounting/actions', 200, { kind: 'APPROVE_FINANCIAL_INVOICE',
           invoiceId: invoice.id, systemInvoiceNumber: `${invoice.id}-qa`, systemInvoiceDate: new Date().toISOString(),
           sepidarAmount: '1600', note: 'تأیید مالی آزمایشی فروش همکار' });
         await request(accountant.token, '/partner-accounting/receivables', 200, { expected, invoiceRecordId: invoice.id });

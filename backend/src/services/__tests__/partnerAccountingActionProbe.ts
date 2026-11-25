@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { prisma } from '../../lib/prisma';
-import { executeAccountingAction } from '../accountingService';
+import { AccountingVoidBlockedError, executeAccountingAction } from '../accountingService';
 import { createPartnerAccountingAdapter } from '../partnerSales/accounting/adapter';
 import { createPrismaPartnerAccountingRepository } from '../partnerSales/accounting/prismaRepository';
 import express from 'express';
@@ -24,7 +24,7 @@ async function main() {
     await assert.rejects(executeAccountingAction({ kind: 'VOID_ACCOUNTING_RECORD', recordId,
       reason: 'آزمون منع دور زدن گردش اصلاح پرونده', externalReference: 'isolated-external-reference',
       downstreamNote: 'isolated-test' }, actor), error =>
-      error instanceof PartnerAccountingCommandError && error.code === 'FORBIDDEN');
+      error instanceof AccountingVoidBlockedError && /پرونده ابطال/.test(error.message));
     const record = await prisma.accountingFinancialRecord.findUniqueOrThrow({ where: { id: recordId } });
     assert.notEqual(record.status, 'VOIDED');
     const receivable = await prisma.accountingReceivable.findFirstOrThrow({ where: { invoiceRecordId: recordId } });
@@ -150,12 +150,17 @@ async function main() {
         domain: 'PARTNER', action: 'ACCOUNTING_WRITE', revokedAt: null } });
       await prisma.effectiveActionGrant.update({ where: { id: grant.id }, data: { revokedAt: new Date(),
         revokedBy: actor.userId, revocationReason: 'آزمون لغو دسترسی', revocationCorrelationId: `${recordId}-revoke` } });
+      const denied = await prisma.effectiveActionGrant.create({ data: { ...grant, id: `${grant.id}-deny`,
+        effect: 'DENY', scope: 'PURPOSE_BOUND', boundRootId: caseId,
+        correlationId: `${recordId}-deny`, reason: 'مسدودسازی دسترسی همین پرونده در آزمون' } });
       const deniedReplay = await action(reverse, `${recordId}-cash-reverse`);
       assert.equal(deniedReplay.status, 403, 'even exact replay requires current Partner authority');
       await prisma.featurePermission.create({ data: { userId: actor.userId, workspace: 'accounting',
         feature: 'accounting_tax_manage', permissionLevel: 'edit', grantedBy: actor.userId } });
       const deniedTax = await action({ kind: 'MARK_TAX_READY', invoiceId: recordId, readiness: 'READY' }, `${recordId}-tax-denied`);
       assert.equal(deniedTax.status, 403, 'ordinary tax permission cannot mutate a Partner invoice without current Case authority');
+      await prisma.effectiveActionGrant.update({ where: { id: denied.id }, data: { revokedAt: new Date(),
+        revokedBy: actor.userId, revocationReason: 'پایان آزمون مسدودسازی دسترسی', revocationCorrelationId: `${recordId}-deny-end` } });
       await prisma.effectiveActionGrant.create({ data: { ...grant, id: `${grant.id}-renewed`,
         correlationId: `${recordId}-renewed`, reason: 'مجوز جدید پس از آزمون لغو' } });
       assert.equal((await action({ kind: 'MARK_TAX_READY', invoiceId: recordId, readiness: 'READY' }, `${recordId}-tax-ready`)).status, 200);

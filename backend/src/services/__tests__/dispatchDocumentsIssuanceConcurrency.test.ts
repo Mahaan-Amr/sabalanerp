@@ -227,15 +227,13 @@ const run = async () => {
     } });
     await confirmation.beginInternalFallback({ sessionId: session.id, actorId: actor.id });
     assert.match(deliveredOtp, /^\d{6}$/);
-    await confirmation.verifyOtp({ sessionId: session.id, code: deliveredOtp, actorId: actor.id });
+    const { authorization } = await confirmation.verifyOtp({ sessionId: session.id, code: deliveredOtp, actorId: actor.id });
     const { actor: guard, authority: guardAuthority } = await createAuthorizedActorFixture(observer, {
       runId: database.runId, workspace: 'security', feature: 'security_dispatch_confirmation_approve',
       withSecurityPersonnel: true });
-    const authorization = await confirmation.approveByGuard({ sessionId: session.id, guardActorId: guard.id,
-      reauthenticatedAt: new Date(), reason: 'Issue 260 production lifecycle race' });
     const predecessor = await observer.accountingDispatchWaybill.findUniqueOrThrow({ where: { id: waybillId },
       include: { candidate: { include: { allocationRevision: true } } } });
-    assert.equal(authorization.waybillId, predecessor.id,
+    assert.equal((await observer.dispatchExitAuthorization.findUniqueOrThrow({ where: { id: authorization.id } })).waybillId, predecessor.id,
       'the production confirmation flow authors an active authorization for this run-scoped waybill');
     const replacementId = randomUUID();
     const replacementNumber = await second.allocateWaybillNumber();

@@ -46,7 +46,7 @@ test('every financial approval captures an immutable contract-row version withou
       contractedQuantity: new Prisma.Decimal(contractData.products[0].quantity),
       unit: 'count',
     }] }) },
-    shipmentQuantityEvidence: { createMany: async ({ data }: any) => { created.push(...data); return { count: data.length }; } },
+    shipmentQuantityEvidence: { findMany: async () => [], createMany: async ({ data }: any) => { created.push(...data); return { count: data.length }; } },
   } as any;
 
   await captureContractQuantityVersionAtFinancialApproval(tx, {
@@ -81,7 +81,7 @@ test('shipment capture uses the approved-pricing scale-three quantity instead of
       id: 'pricing-row-optimizer', contractItemId: 'frozen-item-optimizer', linkedContractItemId: 'item-optimizer',
       contractedQuantity: new Prisma.Decimal('58.333'), unit: 'meter',
     }] }) },
-    shipmentQuantityEvidence: { createMany: async ({ data }: any) => { created.push(...data); return { count: data.length }; } },
+    shipmentQuantityEvidence: { findMany: async () => [], createMany: async ({ data }: any) => { created.push(...data); return { count: data.length }; } },
   } as any;
 
   await captureContractQuantityVersionAtFinancialApproval(tx, {

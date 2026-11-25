@@ -115,8 +115,10 @@ test('resending a fallback OTP uses the current confirmation phone', async () =>
   };
   const sent: string[] = [];
   const tx = {
+    $executeRaw: async () => undefined,
     $executeRawUnsafe: async () => undefined,
     dispatchCutoverControl: { findUnique: async () => null },
+    dispatchConfirmationSession: { findUnique: async () => session },
     internalDriverProfile: {
       findUniqueOrThrow: async () => ({ personnelId: 'personnel' }),
       findUnique: async () => ({ status: 'ACTIVE', personnel: { isActive: true }, eligibilityPeriods: [{ status: 'ELIGIBLE' }] }),

@@ -43,7 +43,7 @@ const fixture = async (work: (f: any) => Promise<void>, commit = false) => {
       const turn = await admit();
       const customer = await tx.crmCustomer.create({ data: { companyName: key, firstName: 'آزمون', lastName: key } });
       const project = await tx.projectAddress.create({ data: { customerId: customer.id, address: 'نشانی آزمون' } });
-      const loading = await tx.logisticsLoading.create({ data: { loadingNumber: key, customerId: customer.id, projectId: project.id, createdBy: actor.id, status: 'FINALIZED' } });
+      const loading = await tx.logisticsLoading.create({ data: { loadingNumber: key, customerId: customer.id, projectId: project.id, createdBy: actor.id, status: 'FINALIZED' }, select: { id: true } });
       await tx.guardDriverQueueTurn.update({ where: { id: turn.id }, data: { status: 'LOADING_FINALIZED', loadingId: loading.id } });
       const batch = await tx.logisticsAllocationBatch.create({ data: { loadingId: loading.id, idempotencyKey: key, finalizedBy: actor.id } });
       const revision = await tx.logisticsAllocationRevision.create({ data: { batchId: batch.id, loadingId: loading.id, queueTurnId: turn.id, revisionNumber: 1, snapshot: {}, integrityHash: key + '-revision', finalizedBy: actor.id, sealedAt: now } });
@@ -120,8 +120,8 @@ test('external biometrics issues authorization and exit rejects a loading withou
   assert.equal((await f.tx.guardDriverQueueTurn.findUniqueOrThrow({ where: { id: turn.id } })).status, 'LOADING_FINALIZED');
 }));
 
-test('external fallback requires qualifying failures, OTP, separate Guard actor and exception reason', () => fixture(async f => {
-  await f.assign(); await f.enroll(); const { bill } = await f.waybill();
+test('external fallback issues one audited exit permit when Accounting verifies the OTP', () => fixture(async f => {
+  await f.assign(); await f.enroll(); const { turn, bill } = await f.waybill();
   const session = await f.service.startSession({ waybillId: bill.id, actorId: f.actor.id, workstationId: 'TEST' });
   await assert.rejects(() => f.service.beginInternalFallback({ sessionId: session.id, actorId: f.actor.id }), /qualifying/);
   const first = await f.service.verifyInternalBiometric({ sessionId: session.id, actorId: f.actor.id, scenario: 'NON_MATCH' });
@@ -138,11 +138,24 @@ test('external fallback requires qualifying failures, OTP, separate Guard actor 
     SELECT code FROM public.dispatch_otp_challenges WHERE id = ${challenge.id}
   `;
   assert.deepEqual(persisted, { code: null }, 'the retained column stays empty');
-  await f.service.verifyOtp({ sessionId: session.id, code: f.messages[0].code });
-  await assert.rejects(() => f.service.approveByGuard({ sessionId: session.id, guardActorId: f.actor.id, reauthenticatedAt: new Date(), reason: 'test' }), /different actor/);
-  await assert.rejects(() => f.service.approveByGuard({ sessionId: session.id, guardActorId: 'other-guard', reauthenticatedAt: new Date() }), /reason/);
-  const auth = await f.service.approveByGuard({ sessionId: session.id, guardActorId: 'other-guard', reauthenticatedAt: new Date(), reason: 'خطای حسگر در آزمون' });
+  const input = { sessionId: session.id, code: f.messages[0].code, actorId: f.actor.id };
+  await assert.rejects(() => f.service.verifyOtp({ ...input, actorId: 'other-accountant' }), /همان حساب/);
+  const incorrectCode = input.code === '000000' ? '000001' : '000000';
+  await assert.rejects(() => f.service.verifyOtp({ ...input, code: incorrectCode }), /اشتباه/);
+  assert.equal(await f.tx.dispatchExitAuthorization.count({ where: { sessionId: session.id } }), 0);
+  const result = await f.service.verifyOtp(input);
+  assert.deepEqual(await f.service.verifyOtp(input), result);
+  const auth = await f.tx.dispatchExitAuthorization.findUniqueOrThrow({ where: { sessionId: session.id } });
+  assert.equal(auth.id, result.authorization.id);
   assert.equal(auth.method, 'EXTERNAL_FALLBACK');
+  assert.equal(auth.status, 'ACTIVE');
+  assert.deepEqual(auth.evidenceSnapshot.otpChallengeIds, [challenge.id]);
+  assert.deepEqual(auth.evidenceSnapshot.guardApprovalIds, []);
+  assert.equal(await f.tx.dispatchConfirmationAlert.count({ where: { sessionId: session.id } }), 1);
+
+  const exitDesk = new PhysicalGateExitService(f.client);
+  assert.ok((await exitDesk.listCurrentlyAuthorized()).some(item => item.id === auth.id && item.queueTurnId === turn.id));
+  assert.equal(await f.tx.guardPhysicalExit.count({ where: { authorizationId: auth.id } }), 0);
 }));
 
 test('expiry immediately blocks external confirmation and readiness; mixed source assignments fail', () => fixture(async f => {

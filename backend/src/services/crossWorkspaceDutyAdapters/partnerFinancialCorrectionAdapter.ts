@@ -3,7 +3,7 @@ import { enqueueContractCancellationNotice } from '../contractCancellationNotice
 import { readRetailCorrectionState } from '../partnerSales/corrections/persistedRetailState';
 import { caseComparableAmount } from '../partnerSales/reporting/comparable';
 import { subtract } from '../partnerSales/reporting/money';
-import { synchronizePartnerContractedQuantities } from '../partnerSales/fulfillment/quantityStore';
+import { synchronizeCorrectedPartnerDraftQuantities } from '../partnerSales/fulfillment/draftEligibility';
 import { validatePartnerSharedAccountingEffect, stagePartnerAccountingReplacement } from '../partnerSales/accounting/sharedCorrection';
 import { approvePartnerFinancialSourceWithinTransaction } from '../partnerSales/accounting/financialApproval';
 import { Prisma, type PrismaClient } from '@prisma/client';
@@ -421,7 +421,6 @@ async function activateShared(tx: Transaction, input: {
     reason: input.command.reason, evidence: json({ publicEvent, dependencyEvidenceIds: input.dependencyEvidenceIds,
       gateActors: input.gateActors, adjustmentEventIds: adjustmentIds }) } });
   eventIds.push(effectiveId);
-  await synchronizePartnerContractedQuantities(tx, current.id);
   if (accounting.value.replacement && accounting.value.predecessor && accounting.value.approval) {
     const { replacement, predecessor, approval } = accounting.value;
     const hadPublishedReceivable = await tx.accountingReceivable.count({ where: { invoiceRecordId: predecessor.id } }) > 0;
@@ -439,6 +438,7 @@ async function activateShared(tx: Transaction, input: {
     if (typeof approvalEventId !== 'string') throw new Error('Partner replacement publication evidence missing');
     if (hadPublishedReceivable) eventIds.push(approvalEventId);
   }
+  await synchronizeCorrectedPartnerDraftQuantities(tx, current.id);
   return { ok: true, value: { eventIds } };
 }
 

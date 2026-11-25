@@ -36,7 +36,8 @@ test('the protected opening manifest admits only one exact customer command afte
       },
     }});
     const manifest = JSON.stringify({
-      format: 'sepidar-customer-opening-approval-v1', releaseId: release, buildCommit: commit,
+      format: 'sepidar-customer-opening-approval-v1', releaseId: release, deploymentId: id, buildCommit: commit,
+      checkpointHash: 'd'.repeat(64),
       bookId: f.book.id, counterAccountId: clearing.id, sourcePackageHash: source,
       accountingApprovalHash: 'e'.repeat(64), basisAt: basis, expiresAt: new Date(Date.now() + 240_000).toISOString(),
       commands: [{ idempotencyKey: key, profileId: profile.id, actorId: f.actor.id,

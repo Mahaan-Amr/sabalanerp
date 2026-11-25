@@ -27,7 +27,7 @@ CREATE TABLE public.sepidar_customer_opening_manifests (
 );
 
 CREATE TABLE public.sepidar_customer_opening_admissions (
-  idempotency_key text PRIMARY KEY CHECK (length(idempotency_key) >= 8),
+  idempotency_key text NOT NULL CHECK (length(idempotency_key) >= 8),
   manifest_sha256 text NOT NULL REFERENCES public.sepidar_customer_opening_manifests(manifest_sha256) ON DELETE RESTRICT,
   profile_id text NOT NULL REFERENCES public.accounting_customer_profiles(id) ON DELETE RESTRICT,
   actor_id text NOT NULL CHECK (length(actor_id) > 0),
@@ -35,6 +35,7 @@ CREATE TABLE public.sepidar_customer_opening_admissions (
   source_voucher_item_id text NOT NULL CHECK (source_voucher_item_id ~ '^[1-9][0-9]*$'),
   command_hash text NOT NULL CHECK (command_hash ~ '^[0-9a-f]{64}$'),
   approved_total_rials numeric(20,0) NOT NULL,
+  PRIMARY KEY (manifest_sha256, idempotency_key),
   UNIQUE (manifest_sha256, profile_id),
   UNIQUE (manifest_sha256, source_voucher_item_id)
 );
@@ -101,6 +102,8 @@ BEGIN
   approved_expiry := (manifest ->> 'expiresAt')::timestamptz;
   IF manifest ->> 'format' IS DISTINCT FROM 'sepidar-customer-opening-approval-v1'
     OR manifest ->> 'releaseId' IS DISTINCT FROM p_release_id
+    OR manifest ->> 'deploymentId' IS DISTINCT FROM p_deployment_id
+    OR manifest ->> 'checkpointHash' IS DISTINCT FROM operation."checkpointJson" ->> 'checksum'
     OR manifest ->> 'buildCommit' IS DISTINCT FROM operation."targetCommit"
     OR COALESCE(manifest ->> 'accountingApprovalHash', '') !~ '^[0-9a-f]{64}$'
     OR COALESCE(manifest ->> 'sourcePackageHash', '') !~ '^[0-9a-f]{64}$'
@@ -182,26 +185,35 @@ CREATE FUNCTION public.verify_sepidar_customer_opening_review() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public AS $$
 DECLARE
   evidence jsonb;
-  release_commit text;
-  release_id text;
 BEGIN
   evidence := NEW.evidence -> 'sepidarAdmission';
   IF evidence IS NULL AND NEW.evidence #> '{review,sepidarEvidence}' IS NULL THEN
     RETURN NEW;
   END IF;
-  SELECT operation."targetCommit", manifest.release_id INTO release_commit, release_id
-  FROM public.sepidar_customer_opening_admissions approval
-  JOIN public.sepidar_customer_opening_manifests manifest USING (manifest_sha256)
-  JOIN public.deployment_operations operation ON operation.id = manifest.deployment_id
-  WHERE approval.idempotency_key = NEW."idempotencyKey"
-    AND approval.approved_total_rials = NEW."totalRials";
-
-  IF NOT FOUND OR public.sepidar_customer_opening_runtime_admitted(
-    release_commit, release_id, evidence ->> 'bookId', NEW."profileId", NEW."createdBy",
-    NEW."basisAt" AT TIME ZONE 'UTC', evidence ->> 'counterAccountId', NEW."commandHash",
-    evidence ->> 'sourcePackageHash', evidence ->> 'sourceCustomerId',
-    evidence ->> 'sourceVoucherItemId', NEW."idempotencyKey"
-  ) IS DISTINCT FROM TRUE THEN
+  IF evidence ->> 'sourcePackageHash' IS DISTINCT FROM NEW.evidence #>> '{review,sepidarEvidence,sourcePackageHash}'
+    OR evidence ->> 'sourceCustomerId' IS DISTINCT FROM NEW.evidence #>> '{review,sepidarEvidence,sourceCustomerId}'
+    OR evidence ->> 'sourceVoucherItemId' IS DISTINCT FROM NEW.evidence #>> '{review,sepidarEvidence,sourceVoucherItemId}'
+    OR NOT EXISTS (
+      SELECT 1 FROM public.sepidar_customer_opening_admissions approval
+      JOIN public.sepidar_customer_opening_manifests manifest USING (manifest_sha256)
+      JOIN public.deployment_operations operation ON operation.id = manifest.deployment_id
+      WHERE approval.idempotency_key = NEW."idempotencyKey"
+        AND approval.approved_total_rials = NEW."totalRials"
+        AND approval.profile_id = NEW."profileId" AND approval.actor_id = NEW."createdBy"
+        AND approval.command_hash = NEW."commandHash"
+        AND approval.source_customer_id = evidence ->> 'sourceCustomerId'
+        AND approval.source_voucher_item_id = evidence ->> 'sourceVoucherItemId'
+        AND manifest.basis_at = NEW."basisAt" AT TIME ZONE 'UTC'
+        AND manifest.source_package_hash = evidence ->> 'sourcePackageHash'
+        AND manifest.book_id = evidence ->> 'bookId'
+        AND manifest.counter_account_id = evidence ->> 'counterAccountId'
+        AND public.sepidar_customer_opening_runtime_admitted(
+          operation."targetCommit", manifest.release_id, evidence ->> 'bookId',
+          NEW."profileId", NEW."createdBy", NEW."basisAt" AT TIME ZONE 'UTC',
+          evidence ->> 'counterAccountId', NEW."commandHash", evidence ->> 'sourcePackageHash',
+          evidence ->> 'sourceCustomerId', evidence ->> 'sourceVoucherItemId', NEW."idempotencyKey"
+        ) IS TRUE
+    ) THEN
     RAISE EXCEPTION 'SEPIDAR_CUSTOMER_OPENING_CLOSED';
   END IF;
   RETURN NEW;

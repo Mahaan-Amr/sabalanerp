@@ -206,7 +206,7 @@ export async function applySepidarOpeningBankHistories(database: Pick<PrismaClie
     const book = await tx.accountingBook.findUnique({ where: { id: plan.bookId } });
     requireValid(book, 'INVALID_TARGET');
     await verifyTargets(tx, plan, evidence, book.legalEntityId, custodyFinancialAccountId);
-    const results = [];
+    const results: Array<{ instrumentId: string; replayed: boolean }> = [];
     for (const cheque of plan.instruments) {
       results.push(await recordInstrument(tx, plan, cheque, book.legalEntityId, actorId, planSha256, custodyFinancialAccountId));
     }

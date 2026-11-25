@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { Prisma, type PrismaClient } from '@prisma/client';
+import { Prisma, type AccountingNormalSide, type PrismaClient } from '@prisma/client';
 import { AccountingLedgerError } from './accountingLedgerFoundation';
 
 export const validatePeriodTransition = (
@@ -150,7 +150,7 @@ export const createAccountingLedgerAdministration = (database: PrismaClient) => 
 
   createAccount: async (input: {
     bookId: string; codeSchemeId: string; code: string; titlePersian: string;
-    level: 'GROUP' | 'KOL' | 'MOIN'; normalSide: 'DEBIT' | 'CREDIT';
+    level: 'GROUP' | 'KOL' | 'MOIN'; normalSide: AccountingNormalSide;
     statementRole: 'ASSET' | 'LIABILITY' | 'EQUITY' | 'REVENUE' | 'EXPENSE' | 'OTHER_COMPREHENSIVE_INCOME' | 'MEMO';
     currencyBehavior: 'BASE_ONLY' | 'MULTI_CURRENCY'; parentId?: string; effectiveFrom: Date; actorId: string;
     contraAccountId?: string;

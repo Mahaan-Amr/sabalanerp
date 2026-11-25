@@ -523,6 +523,12 @@ _Avoid_: customer balance, customer activity, a journal entry, waiting for payme
 The Customer's derived balance from posted accounting entries and their effective settlements, optionally filtered by Contract and other permitted Accounting Dimensions. It is never an editable field on the Customer Accounting Profile.
 _Avoid_: CRM credit estimate, Contract total, draft invoice amount, a separately maintained counter, or a balance changed without posted evidence
 
+**Sepidar Opening Transfer**:
+A reviewed movement of customer balances and cheque carrying positions at a Fiscal Year boundary from a specific Sepidar source into the Primary Accounting Book. Each transferred amount has a source identity and remains distinguishable from transactions that took place afterward.
+
+**Opening Transfer Clearing Account**:
+The dedicated ledger account approved by Accounting to balance staged transfer entries while the full opening is reconciled. Its balance is traceable to the outstanding portion of that transfer.
+
 **Customer Accounting Activity**:
 The drillable posted invoices, advances, receipts, checks, returns, reversals, corrections, and settlements attributed to one Customer Accounting Profile. Draft operational records remain visible in their own workflow but do not enter this activity as posted truth.
 _Avoid_: every CRM interaction, an unposted payment plan, a mutable summary, or activity without a source document and journal line

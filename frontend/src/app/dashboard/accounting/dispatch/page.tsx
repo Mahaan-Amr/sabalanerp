@@ -440,7 +440,7 @@ function AccountingDispatchWorkspace({ actorId }: { actorId: string }) {
   const filteredCandidateRows = candidateRows.filter(candidateMatches);
   const visibleFilters = (rows: DispatchTableRow[]) => dispatchTableFilters(rows,
     { id: "dispatch-search", type: "search", label: "جست‌وجو در ردیف‌ها", value: search, onChange: value => { setSearch(value); setPage(1); },
-      placeholder: "بارگیری، فاکتور سپیدار، راننده، مشتری یا بارنامه" },
+      placeholder: "بارگیری، فاکتور فروش، فاکتور سپیدار، راننده، مشتری یا بارنامه" },
     { id: "dispatch-status", label: "وضعیت", value: statusFilter, onChange: value => { setStatusFilter(value); setPage(1); } },
     { id: "dispatch-sepidar", label: "فاکتور سپیدار", value: invoiceFilter, onChange: value => { setInvoiceFilter(value); setPage(1); } },
   );

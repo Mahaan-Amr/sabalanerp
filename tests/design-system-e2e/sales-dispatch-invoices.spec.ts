@@ -107,6 +107,7 @@ test("Accounting reissues a paired cancellation on the same loading", async ({ p
   await page.route(candidateList, route => reply(route, [{
     id: "recovery-candidate", loadingId, status: "ACCEPTED", canManage: true,
     summary: { loadingNumber: "12", driverName: "راننده آزمون" },
+    currentSalesInvoice: requests ? { id: "invoice-13", number: "13" } : null,
     waybills: [
       { id: "waybill-8", number: "8", status: "VOIDED" },
       { id: "waybill-11", number: "11", status: "VOIDED" },
@@ -119,7 +120,7 @@ test("Accounting reissues a paired cancellation on the same loading", async ({ p
   await page.route(`**/api/accounting/loadings/${loadingId}/sales-invoices`, route => reply(route, {
     ready: Boolean(requests), documentsComplete: Boolean(requests), recovery: requests ? null : recovery,
     invoices: [
-      ...(requests ? [{ id: "invoice-12", number: "12", status: "ISSUED" }] : []),
+      ...(requests ? [{ id: "invoice-13", number: "13", status: "ISSUED" }] : []),
       { id: "invoice-9", number: "9", status: "VOIDED", voidReason: "ابطال ثبت‌شده" },
     ],
   }));
@@ -130,10 +131,15 @@ test("Accounting reissues a paired cancellation on the same loading", async ({ p
       recovery: { waybillId: "waybill-11", invoiceId: "invoice-9", reason: "صدور مجدد برای همان بارگیری" },
     });
     requests++;
-    await replyWithIssueReceipt(route, { id: "invoice-12", number: "12" });
+    await replyWithIssueReceipt(route, { id: "invoice-13", number: "13" });
   });
   await page.goto("/dashboard/accounting/dispatch");
-  await page.getByRole("table").getByRole("button", { name: "جزئیات اقلام و اسناد بارگیری" }).click();
+  const table = page.getByRole("table");
+  const row = table.getByRole("row", { name: /راننده آزمون/ });
+  await expect(table.getByRole("columnheader", { name: "شماره فاکتور فروش", exact: true })).toBeVisible();
+  await expect(table.getByRole("columnheader", { name: "بارنامه", exact: true })).toHaveCount(0);
+  await expect(row.getByRole("cell").filter({ hasText: /^—$/ }).last()).toBeVisible();
+  await row.getByRole("button", { name: "جزئیات اقلام و اسناد بارگیری" }).click();
   const details = page.getByRole("dialog", { name: "جزئیات اقلام و اسناد بارگیری" });
   const recover = details.getByRole("button", { name: "صدور مجدد بارنامه و فاکتور", exact: true });
   await recover.click();
@@ -145,10 +151,15 @@ test("Accounting reissues a paired cancellation on the same loading", async ({ p
   await details.getByRole("textbox", { name: "دلیل صدور مجدد" }).fill("صدور مجدد برای همان بارگیری");
   await assertNoHorizontalOverflow(page);
   await confirm.click();
-  await expect(details.getByText("فاکتور ۱۲ · صادرشده", { exact: true })).toBeVisible();
+  await expect(details.getByText("فاکتور ۱۳ · صادرشده", { exact: true })).toBeVisible();
   await expect(details.getByText("فاکتور ۹ · باطل‌شده", { exact: true })).toBeVisible();
   await expect(recover).toHaveCount(0);
   expect(requests).toBe(1);
+  await page.keyboard.press("Escape");
+  await expect(details).toBeHidden();
+  await expect(row.getByRole("cell", { name: "۱۳", exact: true })).toBeVisible();
+  await page.getByRole("searchbox").fill("۱۳");
+  await expect(row).toBeVisible();
 });
 
 test("Accounting repairs an invalid invoice while its replacement waybill remains active", async ({ page }) => {

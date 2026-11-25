@@ -22,6 +22,7 @@ export type DispatchTableCandidate = SepidarInvoiceOwner & {
   partnerCaseNumber?: string | null;
   lines?: { contractNumber?: string | null }[];
   waybills?: { id: string; number: string; status: string }[];
+  currentSalesInvoice?: { number: string } | null;
 };
 export type DispatchTableRow = {
   id: string;
@@ -94,10 +95,12 @@ export function dispatchTableColumns(showHistoricalWaybills: boolean): ErpColumn
     { id: "status", header: "وضعیت", sortValue: row => row.statuses.map(candidateStatusLabel).join("، "),
       cell: row => <div className="flex flex-wrap gap-1">{row.statuses.map(status =>
         <ErpBadge key={status} tone={statusTone(status)}><span className="whitespace-nowrap">{candidateStatusLabel(status)}</span></ErpBadge>)}</div> },
-    { id: "waybill", header: "بارنامه", sortValue: row => shownWaybills(row).map(waybill => waybill.number).join("، "),
+    showHistoricalWaybills ? { id: "waybill", header: "بارنامه", sortValue: row => shownWaybills(row).map(waybill => waybill.number).join("، "),
       cell: row => shownWaybills(row).length ? <ul className="space-y-1">{shownWaybills(row).map(waybill =>
         <li key={waybill.id}><bdi>{waybill.number.replace(/[0-9]/g, digit => "۰۱۲۳۴۵۶۷۸۹"[Number(digit)])}</bdi>
-          {waybill.status === "VOIDED" && <span className="ms-1 text-xs sds-text-secondary">باطل‌شده</span>}</li>)}</ul> : "—" },
+          {waybill.status === "VOIDED" && <span className="ms-1 text-xs sds-text-secondary">باطل‌شده</span>}</li>)}</ul> : "—" }
+      : { id: "sales-invoice", header: "شماره فاکتور فروش", sortValue: row => row.owner.currentSalesInvoice?.number,
+          cell: row => <bdi>{row.owner.currentSalesInvoice?.number.replace(/[0-9]/g, digit => "۰۱۲۳۴۵۶۷۸۹"[Number(digit)]) ?? "—"}</bdi> },
   ];
 }
 
@@ -115,7 +118,7 @@ export function matchDispatchTableRow(row: DispatchTableRow, query: string, stat
   const tokens = searchText(query).split(/[\s،,]+/).filter(Boolean);
   if (!tokens.length) return true;
   const values = [
-    loadingReference(row), ...sepidarInvoicesOf(row.owner).map(invoice => invoice.number),
+    loadingReference(row), row.owner.currentSalesInvoice?.number, ...sepidarInvoicesOf(row.owner).map(invoice => invoice.number),
     ...row.statuses.map(candidateStatusLabel), ...contractsOf(row.members),
     ...row.members.flatMap(({ summary, waybills, partnerCaseNumber }) => [partnerCaseNumber, summary?.loadingNumber, summary?.driverName, summary?.plate,
       summary?.customerName, summary?.projectName, summary?.projectAddress,

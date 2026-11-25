@@ -32,7 +32,29 @@ const stoneDraftName = '20261123111000_stone_return_allocation_drafts';
 const sepidarInvoiceName = '20261123130000_sepidar_dispatch_invoices';
 const excessShipmentName = '20261123130000_stone_excess_shipment_return';
 const stoneFinalizationName = '20261123140000_stone_return_finalizations';
+const neutralNormalSideName = '20261125110000_accounting_neutral_normal_side';
+const projectReturnGuardAdmissionName = '20261125110000_project_return_guard_admission';
+const sepidarOpeningAdmissionName = '20261125112000_sepidar_customer_opening_admission';
+const projectReturnGuardReleaseName = '20261125140000_project_return_guard_release';
+const sepidarChequeAnchorsName = '20261125142000_sepidar_opening_cheque_anchors';
+const projectReturnVersionImmutabilityName = '20261125180000_project_return_version_immutability';
 const nextReleaseCatalog = {
+  [neutralNormalSideName]: { tables: [], functions: [] },
+  [projectReturnGuardAdmissionName]: { tables: ['guard_driver_queue_turns'], functions: [] },
+  [sepidarOpeningAdmissionName]: {
+    tables: ['sepidar_customer_opening_manifests', 'sepidar_customer_opening_admissions', 'accounting_customer_opening_reviews'],
+    functions: ['protect_sepidar_customer_opening_admission', 'sepidar_customer_opening_lock',
+      'sepidar_customer_opening_register_manifest', 'sepidar_customer_opening_runtime_admitted',
+      'verify_sepidar_customer_opening_review'],
+  },
+  [sepidarChequeAnchorsName]: {
+    tables: ['accounting_sepidar_opening_cheques'], functions: ['sepidar_opening_cheques_runtime_admitted'],
+  },
+  [projectReturnVersionImmutabilityName]: {
+    tables: ['project_return_cases', 'project_return_versions', 'project_return_version_projects',
+      'project_return_version_items', 'project_return_operations'],
+    functions: ['project_return_preserve_case_origin', 'accounting_reject_immutable_change'],
+  },
   [stoneReceiptName]: { tables: ['stone_return_receipts'], functions: ['accounting_guard_supply_chain_append_only'] },
   [stoneDraftName]: { tables: ['stone_return_allocation_drafts', 'stone_return_allocation_draft_rows'], functions: [] },
   [sepidarInvoiceName]: { tables: ['sepidar_dispatch_invoices', 'logistics_loadings'], functions: [] },
@@ -180,10 +202,26 @@ const currentRelease = {
   [sepidarInvoiceName]: ['25baa74bd56d1eb91ca61762f3bc1adb3b80c777227c11274cbfe48ad55770b7', 4],
   [excessShipmentName]: ['7ecdf5832b9fff8ebfbf75efc50d99e2c8f09bccb56a0d6d472d902318d8c7d1', 3],
   [stoneFinalizationName]: ['bbfc6766644d09496ba4c7d3863678bd3b25099f152add64e777ef9458467749', 5],
+  [neutralNormalSideName]: ['34bceddc44844c0d9fafd04283443b8760eff45b04352c6cb541b2412f43017c', 1],
+  [projectReturnGuardAdmissionName]: ['171b85f08d2c108a4f92f26db55a9ab4a7e5c9f314ad3456845b0e9321a36368', 6],
+  [sepidarOpeningAdmissionName]: ['0a2af7b9a23bb3cc59317a217e7a0ac70c5f1fb31d6d5874637e06238090d02c', 22],
+  '20261125120000_project_return_receipts': ['a038e89a2de227dae5618127442b3021c0fb5086f598b9e788515830e42887c5', 21],
+  '20261125130000_project_return_item_intake': ['ecb28278ed9d81207c4431dae18c4d8e882664ab65cc13f1c334f65adad460f5', 2],
+  [projectReturnGuardReleaseName]: ['b866c9423f4bbad519039752934a1b99efc2e93a10c027e99757a1c16bd46fa9', 3],
+  [sepidarChequeAnchorsName]: ['22df33edac5450c16418e9cb172ba2dda02a30cf6d80af99b98ee6f15431c0f5', 5],
+  '20261125150000_project_return_allocation_draft': ['b836609df21d5e56e8db516ea5a95aabc9a7cdccb91aa4c7d74b958935403fde', 3],
+  '20261125160000_project_return_operational_rework': ['fe2004b04ac269cd139c89f6ecb0f441fda7c61ab56b771976136be545234f84', 5],
+  '20261125170000_project_return_finalized_correction': ['18a57ef4b04b5f102cf3fce199a9f4e1551f958b8e57b5427219042d43f64285', 3],
+  [projectReturnVersionImmutabilityName]: ['7f4969f2669c87e127b0604b09a4a2cad0623335abfab9649283b35eface7176', 10],
 } as const;
 export const protectedCurrentReleaseNames: readonly string[] = Object.freeze(Object.keys(currentRelease));
 // Each release extends the ledger while preserving the prior release-set hashes.
-const protectedReleaseEpochEnds = Object.freeze([12, 22, 24, 25, 35, 36, 37, 38, 41, 42, 43, 44, 45, 46, 47, 48, 49, 54]);
+const protectedReleaseEpochEnds = Object.freeze([12, 22, 24, 25, 35, 36, 37, 38, 41, 42, 43, 44, 45, 46, 47, 48, 49, 54, 65]);
+const wrappedCurrentReleaseMigrations = new Set([
+  '20261108000100_start_new_waybill_numbers_at_one', retireAttachmentScanStatusName,
+  protectPartnerNumberReservationName, sepidarInvoiceName, projectReturnGuardAdmissionName,
+  projectReturnGuardReleaseName, projectReturnVersionImmutabilityName,
+]);
 const releaseSetSha256 = (files: CurrentFile[], index: number) => sha(files.slice(0,
   protectedReleaseEpochEnds.find(end => index < end)!).map(file => file.sha256).join('\n'));
 
@@ -222,8 +260,7 @@ export function compileProtectedCurrentRelease(files: ReadonlyArray<readonly [st
     if (!Buffer.isBuffer(bytes) || sha(bytes) !== sha256) failure('PROTECTED_CURRENT_RELEASE_SQL_IDENTITY_MISMATCH');
     const sql = bytes.toString('utf8');
     let statements = splitCurrentReleaseSql(sql);
-    if (name === '20261108000100_start_new_waybill_numbers_at_one'
-      || name === retireAttachmentScanStatusName || name === protectPartnerNumberReservationName || name === sepidarInvoiceName) {
+    if (wrappedCurrentReleaseMigrations.has(name)) {
       const opening = statements[0]?.replace(/^(?:--[^\r\n]*\r?\n\s*)+/, '');
       if (statements.length !== expectedCount + 2 || opening !== 'BEGIN;' || statements.at(-1) !== 'COMMIT;') {
         failure('PROTECTED_CURRENT_RELEASE_TRANSACTION_WRAPPER_UNPROVEN');
@@ -371,7 +408,72 @@ async function catalog(tx: Prisma.TransactionClient, input: {
   const runtimeAcl = input.appliedNames ? await protectedCurrentReleaseRuntimeAclProof(tx, input.appliedNames) : undefined;
   const shipmentEvidence = input.appliedNames?.has(excessShipmentName)
     ? { shipmentEvidenceKinds: await shipmentEvidenceKinds(tx) } : {};
-  return sha(JSON.stringify(canonical({ tables, functions, ...pickupSource, ...partnerReadinessProjection, ...runtimeAcl, ...shipmentEvidence })));
+  const newEnums = {
+    ...(input.appliedNames?.has(neutralNormalSideName) && {
+      normalSide: await proveReleaseEnum(tx, 'AccountingNormalSide', ['DEBIT', 'CREDIT', 'NEUTRAL']),
+    }),
+    ...(input.appliedNames?.has(projectReturnGuardAdmissionName) && {
+      guardProjectReturnStatus: await proveReleaseEnum(tx, 'GuardProjectReturnStatus',
+        ['AWAITING_RECEIPT', 'CANCELLED_WITHOUT_DELIVERY', 'RECEIVED']),
+    }),
+    ...(input.appliedNames?.has('20261125160000_project_return_operational_rework') && {
+      projectReturnOperationStatus: await proveReleaseEnum(tx, 'ProjectReturnOperationStatus',
+        ['ACTIVE', 'REWORK_REQUESTED', 'RETURNED_TO_LOGISTICS', 'CANCELLED']),
+      projectReturnOperationKind: await proveReleaseEnum(tx, 'ProjectReturnOperationKind',
+        ['EDITED', 'CANCELLED', 'REWORK_REQUESTED', 'RETURNED_TO_LOGISTICS']),
+    }),
+  };
+  const sepidarOpening = input.appliedNames?.has(sepidarOpeningAdmissionName)
+    ? { sepidarOpening: await proveClosedSepidarOpening(tx) } : {};
+  return sha(JSON.stringify(canonical({ tables, functions, ...pickupSource, ...partnerReadinessProjection,
+    ...runtimeAcl, ...shipmentEvidence, ...newEnums, ...sepidarOpening })));
+}
+
+async function proveReleaseEnum(tx: Prisma.TransactionClient, name: string, expected: string[]) {
+  const rows = await tx.$queryRaw<Array<{ label: string }>>`
+    SELECT enumlabel::text AS label FROM pg_enum
+    WHERE enumtypid = to_regtype(format('public.%I', ${name}::text)) ORDER BY enumsortorder`;
+  const labels = rows.map(row => row.label);
+  if (JSON.stringify(labels) !== JSON.stringify(expected)) failure('PROTECTED_CURRENT_RELEASE_ENUM_DRIFT');
+  return labels;
+}
+
+async function proveClosedSepidarOpening(tx: Prisma.TransactionClient) {
+  const [proof] = await tx.$queryRaw<Array<{ closed: boolean; routines: bigint; grants: bigint }>>`
+    WITH controller AS (
+      SELECT r.oid FROM pg_roles r JOIN pg_authid a USING (oid)
+      WHERE r.rolname = 'sabalan_sepidar_opening_controller'
+        AND NOT (r.rolcanlogin OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole
+          OR r.rolinherit OR r.rolreplication OR r.rolbypassrls)
+        AND a.rolpassword IS NULL AND r.rolconfig IS NULL
+        AND NOT EXISTS (SELECT FROM pg_auth_members WHERE roleid = r.oid OR member = r.oid)
+        AND NOT EXISTS (SELECT FROM pg_db_role_setting WHERE setrole = r.oid)
+        AND NOT EXISTS (SELECT FROM pg_shdepend
+          WHERE refclassid = 'pg_authid'::regclass AND refobjid = r.oid AND deptype = 'o')
+    ), expected(name, grantee) AS (VALUES
+      ('protect_sepidar_customer_opening_admission', NULL),
+      ('sepidar_customer_opening_lock', 'sabalan_sepidar_opening_controller'),
+      ('sepidar_customer_opening_register_manifest', 'sabalan_sepidar_opening_controller'),
+      ('sepidar_customer_opening_runtime_admitted', 'sabalan_application_runtime'),
+      ('verify_sepidar_customer_opening_review', NULL)
+    ), routines AS (
+      SELECT p.*, expected.grantee FROM pg_proc p JOIN expected ON name = p.proname
+      WHERE p.pronamespace = 'public'::regnamespace AND p.proowner = current_user::regrole
+    ), grants AS (
+      SELECT r.grantee AS expected, a.*, pg_get_userbyid(a.grantee) AS recipient
+      FROM routines r CROSS JOIN LATERAL aclexplode(COALESCE(r.proacl, acldefault('f', r.proowner))) a
+      WHERE a.grantee <> r.proowner OR a.grantor <> r.proowner OR a.is_grantable
+    )
+    SELECT EXISTS (SELECT FROM controller)
+      AND NOT EXISTS (SELECT FROM public.sepidar_customer_opening_manifests)
+      AND NOT EXISTS (SELECT FROM public.sepidar_customer_opening_admissions)
+      AND NOT EXISTS (SELECT FROM grants WHERE grantee = 0 OR recipient IS DISTINCT FROM expected
+        OR privilege_type <> 'EXECUTE' OR grantor <> current_user::regrole OR is_grantable) AS closed,
+      (SELECT count(*) FROM routines) AS routines, (SELECT count(*) FROM grants) AS grants`;
+  if (!proof?.closed || proof.routines !== 5n || proof.grants !== 3n) {
+    failure('PROTECTED_CURRENT_RELEASE_SEPIDAR_OPENING_CLOSED_UNPROVEN');
+  }
+  return 'CLOSED';
 }
 
 /** Also required when discovery finds no pending work. A successful no-op

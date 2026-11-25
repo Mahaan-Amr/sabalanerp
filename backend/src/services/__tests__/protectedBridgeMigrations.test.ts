@@ -81,12 +81,27 @@ test('the complete current release is admitted only with its reviewed ordered SQ
     '20261123130000_sepidar_dispatch_invoices',
     '20261123130000_stone_excess_shipment_return',
     '20261123140000_stone_return_finalizations',
+    '20261125110000_accounting_neutral_normal_side',
+    '20261125110000_project_return_guard_admission',
+    '20261125112000_sepidar_customer_opening_admission',
+    '20261125120000_project_return_receipts',
+    '20261125130000_project_return_item_intake',
+    '20261125140000_project_return_guard_release',
+    '20261125142000_sepidar_opening_cheque_anchors',
+    '20261125150000_project_return_allocation_draft',
+    '20261125160000_project_return_operational_rework',
+    '20261125170000_project_return_finalized_correction',
+    '20261125180000_project_return_version_immutability',
   ];
   const files = names.map(name => [name, fs.readFileSync(path.join(directory, name, 'migration.sql'))] as const);
   const release = compileProtectedCurrentRelease(files);
   assert.deepEqual(release.map(row => row.name), names);
   assert.ok(release.every(row => row.statements.length > 0));
   assert.ok(release.flatMap(row => row.statements).every(sql => !/^\s*(?:BEGIN|COMMIT)\s*;?\s*$/i.test(sql)));
+  assert.deepEqual(release.slice(54).map(row => row.statements.length), [1, 6, 22, 21, 2, 3, 5, 3, 5, 3, 10]);
+  assert.ok(release[56].tables.includes('accounting_customer_opening_reviews'));
+  assert.ok(release[56].functions.includes('sepidar_customer_opening_runtime_admitted'));
+  assert.ok(release[64].tables.includes('project_return_version_items'));
   assert.equal(createHash('sha256').update(release.slice(0, 12).map(row => row.sha256).join('\n')).digest('hex'),
     'af48acb67350bc35b1ac156029d41011a9dc301cc605bce2729e978ae65e07e2');
   assert.ok(!release[10].statements.join(' ').includes('setval('));

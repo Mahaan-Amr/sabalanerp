@@ -43,6 +43,7 @@ const digits = (value: unknown) => integer(value).toLocaleString('fa-IR');
 const dateFa = (value: string) => value ? new Date(value).toLocaleDateString('fa-IR') : '—';
 const statusFa: Record<string, string> = { DRAFT: 'پیش‌نویس', ACTIVE: 'فعال', OPEN: 'باز', SOFT_CLOSED: 'بسته موقت', HARD_CLOSED: 'بسته قطعی', POSTED: 'قطعی', REVERSED: 'برگشت‌شده' };
 const levelFa: Record<string, string> = { GROUP: 'گروه', KOL: 'کل', MOIN: 'معین' };
+const normalSideFa: Record<string, string> = { DEBIT: 'بدهکار', CREDIT: 'بستانکار', NEUTRAL: 'بدون جهت' };
 const numericInput = (value: string) => value
   .replace(/[۰-۹]/g, (digit) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(digit)))
   .replace(/[٠-٩]/g, (digit) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(digit)))
@@ -413,7 +414,7 @@ function AccountingLedgerWorkspace({ actorId }: { actorId: string }) {
             <label><span className="mb-2 block text-sm">عنوان فارسی</span><ErpInput value={account.titlePersian} onChange={(event) => setAccount({ ...account, titlePersian: event.target.value })} /></label>
             <label><span className="mb-2 block text-sm">سطح</span><ErpSearchableSelect value={account.level} onChange={(event) => setAccount({ ...account, level: event.target.value, parentId: '' })}><option value="GROUP">گروه</option><option value="KOL">کل</option><option value="MOIN">معین</option></ErpSearchableSelect></label>
             <label><span className="mb-2 block text-sm">والد مستقیم</span><ErpSearchableSelect disabled={account.level === 'GROUP'} value={account.parentId} onChange={(event) => setAccount({ ...account, parentId: event.target.value })}><option value="">انتخاب والد</option>{accounts.filter((item: any) => item.level === (account.level === 'MOIN' ? 'KOL' : 'GROUP')).map((item: any) => <option key={item.id} value={item.id}>{item.code} · {item.titlePersian}</option>)}</ErpSearchableSelect></label>
-            <label><span className="mb-2 block text-sm">ماهیت</span><ErpSearchableSelect value={account.normalSide} onChange={(event) => setAccount({ ...account, normalSide: event.target.value })}><option value="DEBIT">بدهکار</option><option value="CREDIT">بستانکار</option></ErpSearchableSelect></label>
+            <label><span className="mb-2 block text-sm">ماهیت</span><ErpSearchableSelect value={account.normalSide} onChange={(event) => setAccount({ ...account, normalSide: event.target.value })}>{Object.entries(normalSideFa).map(([side, label]) => <option key={side} value={side}>{label}</option>)}</ErpSearchableSelect></label>
             <label><span className="mb-2 block text-sm">نقش صورت مالی</span><ErpSearchableSelect value={account.statementRole} onChange={(event) => setAccount({ ...account, statementRole: event.target.value })}><option value="ASSET">دارایی</option><option value="LIABILITY">بدهی</option><option value="EQUITY">حقوق مالکانه</option><option value="REVENUE">درآمد</option><option value="EXPENSE">هزینه</option><option value="MEMO">انتظامی</option></ErpSearchableSelect></label>
             <label><span className="mb-2 block text-sm">حساب کاهنده مرتبط</span><ErpSearchableSelect value={account.contraAccountId} onChange={(event) => setAccount({ ...account, contraAccountId: event.target.value })}><option value="">بدون حساب کاهنده</option>{accounts.filter((item: any) => item.id !== account.parentId).map((item: any) => <option key={item.id} value={item.id}>{item.code} · {item.titlePersian}</option>)}</ErpSearchableSelect></label>
             {account.level === 'MOIN' && <label><span className="mb-2 block text-sm">قاعده طرف حساب</span><ErpSearchableSelect value={account.partyRequirement} onChange={(event) => setAccount({ ...account, partyRequirement: event.target.value })}><option value="FORBIDDEN">ممنوع</option><option value="OPTIONAL">اختیاری</option><option value="REQUIRED">اجباری</option></ErpSearchableSelect></label>}
@@ -424,7 +425,21 @@ function AccountingLedgerWorkspace({ actorId }: { actorId: string }) {
           <div className="mt-4 flex justify-end"><ErpButton label="افزودن حساب" disabled={saving || !account.code || !account.titlePersian || !account.effectiveFrom || (account.level !== 'GROUP' && !account.parentId)} onClick={() => run(() => accountingAPI.createLedgerAccount({ ...account, bookId: book.id, codeSchemeId: scheme.id, parentId: account.parentId || undefined, dimensionRules: Object.entries(account.dimensionRules || {}).filter(([, requirement]) => requirement).map(([dimensionTypeId, requirement]) => ({ dimensionTypeId, requirement })) }), 'حساب به نسخه کدینگ افزوده شد.', undefined, "ledger-3")} /></div>
         {commandFeedback?.scope === "ledger-3" && <ErpInlineState kind={commandFeedback.kind} title={commandFeedback.title} />}
 </ErpSection>
-        <ErpSection title="درخت حساب‌ها">{accounts.length === 0 ? <ErpEmptyState title="هنوز حسابی تعریف نشده است." /> : <div className="grid gap-2 md:grid-cols-2">{accounts.map((item: any) => <ErpCard key={item.id} className="p-3"><div className="flex flex-wrap items-center justify-between gap-3 [&>*]:min-w-0 [&>*]:max-w-full [&>*]:break-words"><strong>{item.code} · {item.titlePersian}</strong><ErpBadge tone={item.retiredAt ? 'warning' : 'info'}>{item.retiredAt ? 'غیرفعال' : levelFa[item.level]}</ErpBadge></div></ErpCard>)}</div>}</ErpSection>
+        <ErpSection title="درخت حساب‌ها">
+          {accounts.length === 0 ? <ErpEmptyState title="هنوز حسابی تعریف نشده است." /> : (
+            <div className="grid gap-2 md:grid-cols-2">
+              {accounts.map((item: any) => (
+                <ErpCard key={item.id} className="p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3 [&>*]:min-w-0 [&>*]:max-w-full [&>*]:break-words">
+                    <strong>{item.code} · {item.titlePersian}</strong>
+                    <ErpBadge tone={item.retiredAt ? 'warning' : 'info'}>{item.retiredAt ? 'غیرفعال' : levelFa[item.level]}</ErpBadge>
+                  </div>
+                  <p className="mt-1 text-sm sds-text-secondary">ماهیت {normalSideFa[item.normalSide]}</p>
+                </ErpCard>
+              ))}
+            </div>
+          )}
+        </ErpSection>
         <ErpSection title="ابعاد و تفصیلی‌ها">
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4"><label><span className="mb-2 block text-sm">کد بُعد</span><ErpInput value={dimension.code} onChange={(event) => setDimension({ ...dimension, code: event.target.value })} /></label><label><span className="mb-2 block text-sm">عنوان فارسی بُعد</span><ErpInput value={dimension.titlePersian} onChange={(event) => setDimension({ ...dimension, titlePersian: event.target.value })} /></label><label><span className="mb-2 block text-sm">منبع</span><ErpInput value={dimension.sourceKind} onChange={(event) => setDimension({ ...dimension, sourceKind: event.target.value })} /></label><label><span className="mb-2 block text-sm">تاریخ اثر</span><ErpPersianDateField valueFormat="iso-date" value={dimension.effectiveFrom} onChange={(value) => setDimension({ ...dimension, effectiveFrom: value })} /></label></div>
           <div className="mt-3 flex justify-end"><ErpButton label="افزودن بُعد" disabled={!dimension.code || !dimension.titlePersian || !dimension.effectiveFrom} onClick={() => run(() => accountingAPI.createLedgerDimension({ ...dimension, bookId: book.id }), 'بُعد حسابداری ایجاد شد.', undefined, "ledger-4")} /></div>

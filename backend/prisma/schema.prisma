@@ -8041,6 +8041,7 @@ enum AccountingLedgerAccountLevel {
 enum AccountingNormalSide {
   DEBIT
   CREDIT
+  NEUTRAL
 }
 
 enum AccountingStatementRole {

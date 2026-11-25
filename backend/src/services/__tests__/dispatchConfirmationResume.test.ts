@@ -15,6 +15,7 @@ test('reopening driver confirmation resumes the active session or shows the issu
   let authorization: { id: string; sessionId: string; method: string; driverSource: string; waybillIntegrityHash: string } | null = null;
   const auditEvents: string[] = [];
   const tx = {
+    $executeRaw: async () => undefined,
     $executeRawUnsafe: async () => undefined,
     dispatchCutoverControl: { findUnique: async () => null },
     accountingDispatchWaybill: { findUnique: async () => waybill },

@@ -136,9 +136,9 @@ test("Accounting reissues a paired cancellation on the same loading", async ({ p
   await page.goto("/dashboard/accounting/dispatch");
   const table = page.getByRole("table");
   const row = table.getByRole("row", { name: /راننده آزمون/ });
-  await expect(table.getByRole("columnheader", { name: "شماره فاکتور فروش", exact: true })).toBeVisible();
-  await expect(table.getByRole("columnheader", { name: "بارنامه", exact: true })).toHaveCount(0);
-  await expect(row.getByRole("cell").filter({ hasText: /^—$/ }).last()).toBeVisible();
+  await expect(table.getByRole("columnheader", { name: /شماره فاکتور فروش/ })).toBeVisible();
+  await expect(table.getByRole("columnheader", { name: /مرتب‌سازی بارنامه/ })).toHaveCount(0);
+  await expect(row.getByRole("cell").nth(-2)).toHaveText("—");
   await row.getByRole("button", { name: "جزئیات اقلام و اسناد بارگیری" }).click();
   const details = page.getByRole("dialog", { name: "جزئیات اقلام و اسناد بارگیری" });
   const recover = details.getByRole("button", { name: "صدور مجدد بارنامه و فاکتور", exact: true });

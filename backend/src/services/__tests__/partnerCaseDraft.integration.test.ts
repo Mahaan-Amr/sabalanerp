@@ -1661,6 +1661,110 @@ test('Accounting qualification creates a lifecycle committed Case in an isolated
   }
 });
 
+test('Partner preparation lists preserve amounts and advisory audit with one bounded revision read', async () => {
+  const temporary = await createPartnerLifecycleDatabase({ repositoryRoot: path.resolve(__dirname, '../../../..'),
+    sourceDatabaseUrl: databaseUrl() });
+  const database = new PrismaClient({ datasources: { db: { url: temporary.databaseUrl } },
+    log: [{ emit: 'event', level: 'query' }] });
+  const queries: string[] = [];
+  database.$on('query', event => queries.push(event.query));
+  try {
+    await database.partnerOperationsControl.create({ data: { id: 'partner-operations' } });
+    await database.effectiveAuthorizationState.create({ data: { id: 1, revision: 1 } });
+    let finished!: Record<string, string>;
+    let draft!: Record<string, string>;
+    await fixture(async (tx, ids) => {
+      await finalCommercialFixture(tx, ids);
+      await tx.workspacePermission.create({ data: { userId: ids.managerId, workspace: 'accounting', permissionLevel: 'admin' } });
+      for (const [feature, permissionLevel] of [['accounting_contracts_view', 'view'], ['accounting_actions_manage', 'edit'],
+        ['accounting_invoice_candidates_manage', 'edit']] as const) {
+        await tx.featurePermission.create({ data: { userId: ids.managerId, workspace: 'accounting', feature, permissionLevel } });
+      }
+      finished = ids;
+    }, undefined, false, { databaseUrl: temporary.databaseUrl, commit: true });
+    await fixture(async (tx, ids) => {
+      assert.ok((await service(tx, ids).execute(await command(ids))).ok);
+      draft = ids;
+    }, undefined, false, { databaseUrl: temporary.databaseUrl, commit: true });
+    const actorId = finished.managerId;
+    const { withAccountingReadScope } = await import('../partnerSales/accounting/readScope');
+    const { listPartnerPreparationDocumentsInScope } = await import('../partnerSales/accounting/preFinancialDocument');
+    queries.length = 0;
+    const rows = await withAccountingReadScope(database, { userId: actorId }, scope =>
+      listPartnerPreparationDocumentsInScope(scope, actorId));
+    const auditInsertCount = queries.filter(query => query.includes('INSERT INTO') &&
+      query.includes('effective_authorization_audit')).length;
+    assert.equal(auditInsertCount, 2, 'the scope and preparation list each flush one batch of authorization decisions');
+    assert.deepEqual(new Set(rows.map(row => row.owner.caseId)), new Set([finished.caseId, draft.caseId]));
+    const finalRow = rows.find(row => row.owner.caseId === finished.caseId);
+    assert.ok(finalRow);
+    assert.equal(finalRow.amount, '200');
+    assert.equal(finalRow.amountKnown, true);
+    assert.equal(finalRow.canRegister, true);
+    assert.deepEqual((await database.effectiveAuthorizationAudit.findMany({
+      where: { actorId, action: 'ACCOUNTING_WRITE', channel: 'API', allowed: true, reason: { not: null } },
+      select: { rootId: true }, orderBy: { rootId: 'asc' },
+    })).map(event => event.rootId), [finished.caseId, draft.caseId].sort(),
+    'finance registration and advisory paper signature decisions remain audited');
+    const revisionQueries = queries.filter(query => query.includes('partner_case_revisions') && query.includes('"internalProjection"'));
+    assert.equal(revisionQueries.length, 1, 'preparation evidence is loaded once for the selected Case population');
+    assert.ok(!revisionQueries.some(query => query.includes('"graph"') || query.includes('"customerProjection"')),
+      'preparation list reads no graph or customer output snapshot');
+    await database.salesContractEditSession.createMany({ data: [draft, finished].map(ids => ({
+      draftId: ids.caseId, ownerUserId: ids.partnerId, purpose: 'PARTNER_TECHNICAL',
+      browserSessionId: randomUUID(), leaseToken: randomUUID(), schemaVersion: 1, baseRevision: 1,
+      recovery: { partnerCaseId: ids.caseId },
+    })) });
+    await withAccountingReadScope(database, { userId: actorId }, async scope => {
+      const { readPartnerCommercialDetails } = await import('../partnerSales/cases/commercialLifecycle');
+      for (const ids of [draft, finished]) {
+        queries.length = 0;
+        const details = await readPartnerCommercialDetails(scope.database, ids.caseId);
+        const detailedQueryCount = queries.length;
+        assert.equal(details?.recovery?.draftId, ids.caseId);
+        assert.ok(details, 'the control and final Case both use the commercial workflow');
+        queries.length = 0;
+        const state = await scope.readCommercialForCase(ids.caseId);
+        assert.deepEqual(state, details.commercial);
+        console.log(`Accounting commercial ${state?.status}: ${queries.length} queries, detailed read ${detailedQueryCount}`);
+        const recoveryReads = queries.filter(query => query.includes('sales_contract_edit_sessions'));
+        if (ids === finished) {
+          assert.equal(state?.status, 'FINAL');
+          assert.equal(state?.inquiry, 'ACCEPTED');
+          assert.equal(recoveryReads.length, 0, 'final Accounting state is independent of the technical recovery');
+          assert.ok(!queries.some(query => query.includes('partner_case_events') || query.includes('"contractData"')),
+            'final state requires neither rejection history nor the customer contract payload');
+        } else {
+          assert.notEqual(state?.status, 'FINAL');
+          assert.ok(recoveryReads.some(query => query.includes('recovery::text')), 'unresolved commercial state reads the complete recovery');
+        }
+      }
+    });
+
+    const { readCurrentPartnerCaseViews } = await import('../partnerSales/cases/lifecycle');
+    const { preparePartnerFinancialSource } = await import('../partnerSales/accounting/source');
+    const current = await readCurrentPartnerCaseViews(database, finished.caseId);
+    assert.ok(current?.accounting);
+    const prepared = await preparePartnerFinancialSource({ view: { ...current.accounting, state: 'COMMITTED' },
+      partnerSellerId: finished.partnerId }, current.accounting.owner);
+    assert.ok(prepared.ok);
+    const invoice = await database.accountingFinancialRecord.create({ data: {
+      kind: 'INVOICE_CANDIDATE', status: 'DRAFT', sourceKind: 'PARTNER_INTERNAL_RECORD',
+      sourceId: prepared.value.internalRecordId, amount: prepared.value.amount.amount,
+      currency: prepared.value.amount.currency, createdBy: actorId,
+      sourceSnapshot: JSON.parse(JSON.stringify({ partnerPreparation: prepared.value })),
+      metadata: { partnerCaseId: finished.caseId },
+    } });
+    queries.length = 0;
+    const [projected] = await withAccountingReadScope(database, { userId: actorId }, scope =>
+      scope.contextualize('FINANCIAL', [{ id: invoice.id }]));
+    assert.equal(projected.partnerContext?.caseId, finished.caseId);
+    const invoiceReads = queries.filter(query => query.includes('SELECT') &&
+      query.includes('"accounting_financial_records"."sourceSnapshot"'));
+    assert.equal(invoiceReads.length, 1, 'the authorized invoice evidence is fetched once per snapshot');
+  } finally { await database.$disconnect(); await temporary.cleanup(); }
+});
+
 async function approvePartnerEdit(tx: Prisma.TransactionClient, input: {
   contractId: string; actorUserId: string; reason: string; requestKey: string; now: Date;
 }) {

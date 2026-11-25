@@ -5,6 +5,7 @@ import { prisma } from '../../lib/prisma';
 import logisticsRouter from '../../routes/logistics';
 import guardRouter from '../../routes/canonical-guard-queue';
 import { createAuthoritativeSession, SESSION_COOKIE } from '../identitySessionService';
+import { createReadyPartnerLoadingDriver } from './partnerLoadingDriverFixture';
 
 // The real mounted router and application-owned client, against only the
 // parent's isolated schema. Fixture writes establish identities, not results.
@@ -43,11 +44,14 @@ async function main() {
       await prisma.user.create({ data: { id: outsiderId, username: outsiderId, email: `${outsiderId}@example.invalid`,
         password: 'not-a-login', firstName: 'Unscoped', lastName: 'Logistics' } });
       await prisma.workspacePermission.create({ data: { userId: outsiderId, workspace: 'logistics', permissionLevel: 'admin' } });
+      // Logistics grants otherwise bridge to company-wide fulfillment. Exercise a
+      // workspace administrator whose explicit Case authority excludes this loading.
       for (const action of ['FULFILLMENT_READ', 'FULFILLMENT_WRITE']) {
-        await prisma.effectiveActionGrant.create({ data: { id: `${outsiderId}-${action}`, principalKind: 'USER', principalId: outsiderId,
+        const grantId = `${outsiderId}-${action}`;
+        await prisma.effectiveActionGrant.create({ data: { id: grantId, principalKind: 'USER', principalId: outsiderId,
           subjectUserId: outsiderId, domain: 'PARTNER', action, rootKind: 'CASE', purpose: 'FULFILLMENT',
-          scope: 'PURPOSE_BOUND', boundRootId: expected.caseId, effect: 'DENY', grantedBy: actorId,
-          reason: 'isolated logistics denial fixture', correlationId: `${outsiderId}-${action}` } });
+          scope: 'PURPOSE_BOUND', boundRootId: `${expected.caseId}-outside-scope`, effect: 'ALLOW',
+          grantedBy: actorId, reason: 'isolated fixture for a different Case scope', correlationId: grantId } });
       }
       const outsider = await createAuthoritativeSession(prisma, outsiderId, { ipAddress: '127.0.0.1', userAgent: 'isolated-334-loading' });
       const hidden = await request(`/loadings/${loadingId}`, 'GET', undefined, outsider.token);
@@ -67,19 +71,10 @@ async function main() {
         assert.equal(result.status, 404, `${attempt.method} ${attempt.path}: ${JSON.stringify(result.body)}`);
       }
       assert.equal((await request(`/loadings/${loadingId}`)).body.data.status, 'DRAFT');
-      const licenceExpiresAt = new Date('2099-01-01');
-      const driver = await prisma.externalDriver.create({ data: { firstName: 'Loading', lastName: 'Fixture',
-        nationalCode: '3340000000', phone: '09120003340', licenceNumber: '3340000000', licenceClass: '1', licenceExpiresAt,
-        status: 'ACTIVE', statusRecordedBy: actorId, createdBy: actorId,
-        documents: { create: { documentType: 'DRIVING_LICENCE', expiresAt: licenceExpiresAt, reference: 'isolated-334-driver', recordedBy: actorId } } } });
-      const vehicle = await prisma.externalVehicle.create({ data: { vehicleType: 'Isolated loading fixture', status: 'ACTIVE',
-        statusRecordedBy: actorId, createdBy: actorId,
-        plates: { create: { plate: '334-test', normalizedPlate: '334test', effectiveFrom: new Date(), reason: 'isolated fixture', recordedBy: actorId } },
-        documents: { create: { documentType: 'VEHICLE_REGISTRATION', reference: 'isolated-334-vehicle', recordedBy: actorId } } } });
-      await prisma.externalDriverVehicleAssignment.create({ data: { driverId: driver.id, vehicleId: vehicle.id,
-        effectiveFrom: new Date(), reason: 'isolated Partner loading fixture', recordedBy: actorId } });
-      await prisma.driverBiometricEnrollment.create({ data: { externalDriverId: driver.id, status: 'ACTIVE',
-        confirmationPhone: driver.phone, enrolledBy: actorId } });
+      const { driver, vehicle } = await createReadyPartnerLoadingDriver(prisma, actorId, {
+        firstName: 'Loading', lastName: 'Fixture', nationalCode: '3340000000', phone: '09120003340',
+        plate: '334-test', normalizedPlate: '334test', vehicleType: 'Isolated loading fixture',
+      });
       const admission = await request('/api/security/canonical-driver-queue', 'POST', { source: 'EXTERNAL', driverId: driver.id, vehicleId: vehicle.id });
       assert.equal(admission.status, 201, JSON.stringify(admission.body));
       const turnId = admission.body.data.id;
@@ -106,11 +101,42 @@ async function main() {
       const allocationReopened = await request(`/loadings/${loadingId}`);
       assert.equal(allocationReopened.body.data.allocations[0].lines[0].quantity, '0.500',
         'reopening the actual loading retains the driver allocation');
-      const blockedFinalization = await request(`/loadings/${loadingId}/finalize`, 'POST', { expected,
+      const finalize = () => request(`/loadings/${loadingId}/finalize`, 'POST', { expected,
         reason: 'نهایی‌سازی تحویل پرونده همکار' }, session.token, `${expected.caseId}-finalize-before-approval`);
+      let finalizing: ReturnType<typeof finalize> | undefined;
+      try {
+        await prisma.$transaction(async tx => {
+          await tx.$queryRaw`SELECT id FROM partner_operations_controls WHERE id = 'partner-operations' FOR UPDATE`;
+          await tx.$queryRaw`SELECT id FROM partner_sale_cases WHERE id = ${expected.caseId} FOR UPDATE`;
+          finalizing = finalize();
+          const deadline = Date.now() + 3000;
+          let blocked = false;
+          while (Date.now() < deadline) {
+            await tx.$queryRaw`SELECT pg_stat_clear_snapshot()::text`;
+            const [wait] = await tx.$queryRaw<Array<{ blocked: boolean }>>`
+              SELECT EXISTS (
+                SELECT 1 FROM pg_stat_activity
+                WHERE datname = current_database() AND wait_event_type = 'Lock'
+                  AND pg_backend_pid() = ANY(pg_blocking_pids(pid))
+              ) AS blocked`;
+            if (wait.blocked) { blocked = true; break; }
+            await new Promise(resolve => setTimeout(resolve, 20));
+          }
+          assert.equal(blocked, true, 'finalization reached the held Partner root fence');
+          const [{ acquired }] = await tx.$queryRaw<Array<{ acquired: boolean }>>`
+            SELECT pg_try_advisory_xact_lock(hashtext(${`LOGISTICS_LOADING:${loadingId}`})) AS acquired`;
+          assert.equal(acquired, true,
+            'finalization must leave the loading lock available to a concurrent authorized Accounting transaction');
+        });
+      } finally { await finalizing; }
+      const blockedFinalization = await finalizing!;
       assert.equal(blockedFinalization.status, 409, JSON.stringify(blockedFinalization.body));
       assert.match(blockedFinalization.body.error, /تأیید مالی/,
         'physical allocation cannot finalize before the official wholesale approval is published');
+      if (process.env.PARTNER_LOADING_LOCK_ORDER_ONLY === '1') {
+        console.log('Partner loading lock-order probe passed PostgreSQL advisory ordering and the preapproval guard');
+        return;
+      }
       assert.equal((await request(allocationPath, 'PUT', { ...allocation, reason: { invalid: true } })).status, 400,
         'malformed audit context is rejected as input, not a technical failure');
       const releasePath = `/canonical-driver-queue/${turnId}/release`;
@@ -140,12 +166,14 @@ async function main() {
       assert.notEqual(otherDraft.body.data.id, allocated.body.data.id);
       assert.equal((await request(releasePath, 'POST', { ...release, loadingId: secondLoadingId })).status, 200);
       await prisma.workspacePermission.create({ data: { userId: outsiderId, workspace: 'security', permissionLevel: 'edit' } });
-      const privateHistory = await request('/api/security/canonical-driver-queue?history=true', 'GET', undefined, outsider.token);
+      const guardHistory = () => request(`/api/security/canonical-driver-queue/${turnId}/events`, 'GET', undefined, outsider.token);
+      const privateHistory = await guardHistory();
       assert.equal(privateHistory.status, 200, JSON.stringify(privateHistory.body));
       assert.equal(JSON.stringify(privateHistory.body).includes(loadingId), false,
         'clearing the live loading link must not expose private Case IDs through retained queue history');
       assert.equal(JSON.stringify(privateHistory.body).includes(JSON.stringify(expected.caseId)), false);
-      assert.equal(privateHistory.body.data.some((turn: { id: string }) => turn.id === turnId), true,
+      const activeQueue = await request('/api/security/canonical-driver-queue', 'GET', undefined, outsider.token);
+      assert.equal(activeQueue.body.data.some((turn: { id: string }) => turn.id === turnId), true,
         'the physical driver visit remains visible to Guard independently of private Case association');
       await prisma.effectiveActionGrant.update({ where: { id: `${outsiderId}-FULFILLMENT_READ` }, data: {
         revokedAt: new Date(), revokedBy: actorId, revocationReason: 'isolated Guard scope fixture',
@@ -155,7 +183,6 @@ async function main() {
         principalId: outsiderId, subjectUserId: outsiderId, domain: 'PARTNER', action: 'FULFILLMENT_READ', rootKind: 'CASE',
         purpose: 'FULFILLMENT', scope: 'PURPOSE_BOUND', boundRootId: expected.caseId, effect: 'ALLOW', grantedBy: actorId,
         reason: 'isolated Guard scope fixture', correlationId: `${outsiderId}-guard-read` } });
-      const guardHistory = () => request('/api/security/canonical-driver-queue?history=true', 'GET', undefined, outsider.token);
       assert.equal(JSON.stringify((await guardHistory()).body).includes(loadingId), true, 'current Guard and Case authority permit retained association');
       let waiting: ReturnType<typeof guardHistory> | undefined;
       try {

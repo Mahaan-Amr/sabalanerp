@@ -1,9 +1,12 @@
 import type {
   DispatchDocumentCase,
+  DispatchDocumentFilter,
   DispatchDocumentWorkspace,
   MonetaryAmount,
 } from "./dispatchDocumentsViewModel";
 import { browserScopedFetch } from '@/lib/browserScopedFetch';
+import { dispatchDocumentApiPaths } from './dispatchDocumentApiPaths';
+export { dispatchDocumentApiPaths } from './dispatchDocumentApiPaths';
 
 export type DispatchDocumentDecision = {
   action: "ACCEPT" | "REJECT";
@@ -13,7 +16,13 @@ export type DispatchDocumentDecision = {
 export type DispatchDocumentReplacement = {
   reason: string;
   idempotencyKey: string;
+  waybillId?: string;
 };
+export type DispatchDocumentReceipt =
+  | { status: 'ISSUED'; number: string }
+  | { status: 'REPLACED'; number: string }
+  | { status: 'REJECTED' }
+  | { status: 'BLOCKED' };
 export type DispatchDocumentHandoff = {
   kind:
     | "DOWNLOAD_WAYBILL"
@@ -32,15 +41,17 @@ export type DispatchDocumentHandoffResult = {
 };
 
 export interface DispatchDocumentsClient {
-  load(): Promise<DispatchDocumentWorkspace>;
+  load(filter?: DispatchDocumentFilter, page?: number): Promise<DispatchDocumentWorkspace>;
+  loadGroup(loadingId: string): Promise<DispatchDocumentWorkspace>;
+  read(candidate: DispatchDocumentCase): Promise<DispatchDocumentCase>;
   decide(
     caseId: string,
     input: DispatchDocumentDecision,
-  ): Promise<DispatchDocumentCase>;
+  ): Promise<DispatchDocumentReceipt>;
   replace(
     caseId: string,
     input: DispatchDocumentReplacement,
-  ): Promise<DispatchDocumentCase>;
+  ): Promise<DispatchDocumentReceipt>;
   handoff(
     caseId: string,
     input: DispatchDocumentHandoff,
@@ -59,6 +70,17 @@ export class DispatchDocumentsAuthorizationError extends Error {
     this.name = "DispatchDocumentsAuthorizationError";
   }
 }
+
+export class DispatchDocumentsOutcomeUnknownError extends Error {
+  constructor() {
+    super('پاسخ قطعی فرمان دریافت نشد. نتیجه را با همان شناسه بازیابی کنید.');
+    this.name = 'DispatchDocumentsOutcomeUnknownError';
+  }
+}
+
+export const dispatchDocumentsAccessDenied = (error: unknown) => error instanceof DispatchDocumentsAuthorizationError
+  || (error as { code?: unknown })?.code === 'AUTH_CONTEXT_CHANGED'
+  || (error as { message?: unknown })?.message === 'PRIVATE_FETCH_SCOPE_CONFLICT';
 
 const record = (value: unknown): JsonRecord =>
   value && typeof value === "object" && !Array.isArray(value)
@@ -298,7 +320,10 @@ export function mapDispatchDocumentReadModel(
 const parseJsonResponse = async <T>(response: Pick<Response, 'json' | 'status' | 'ok'>): Promise<T> => {
   const body = (await response
     .json()
-    .catch(() => null)) as ApiEnvelope<T> | null;
+    .catch(error => {
+      if (dispatchDocumentsAccessDenied(error)) throw error;
+      return null;
+    })) as ApiEnvelope<T> | null;
   if (response.status === 401 || response.status === 403)
     throw new DispatchDocumentsAuthorizationError(
       "این عملیات متوقف شد چون مجوز اسناد ارسال فعال نیست. مدیر حسابداری باید مجوز مرتبط را بررسی کند.",
@@ -314,32 +339,33 @@ const parseJsonResponse = async <T>(response: Pick<Response, 'json' | 'status' |
   return body.data;
 };
 
-const send = (url: string, init?: RequestInit) =>
-  browserScopedFetch(url, {
-    credentials: "include",
-    ...init,
-    headers: { "Content-Type": "application/json", ...init?.headers },
-  });
-
-export const dispatchDocumentApiPaths = (baseUrl = "/api/accounting") => ({
-  candidates: () => `${baseUrl}/dispatch-candidates`,
-  decision: (candidateId: string) =>
-    `${baseUrl}/dispatch-candidates/${encodeURIComponent(candidateId)}/decision`,
-  readModel: (candidateId: string, waybillId?: string) =>
-    `${baseUrl}/dispatch-candidates/${encodeURIComponent(candidateId)}/document-read-model${waybillId ? `?waybillId=${encodeURIComponent(waybillId)}` : ""}`,
-  replace: (waybillId: string) =>
-    `${baseUrl}/dispatch-waybills/${encodeURIComponent(waybillId)}/replace`,
-  artifact: (waybillId: string, artifactId: string) =>
-    `${baseUrl}/dispatch-waybills/${encodeURIComponent(waybillId)}/artifacts/${encodeURIComponent(artifactId)}`,
-  print: (waybillId: string) =>
-    `${baseUrl}/dispatch-waybills/${encodeURIComponent(waybillId)}/print-handoffs`,
-});
-
 /** Production adapter for the authenticated, mounted Accounting routes and their frozen DTOs. */
 export function createDispatchDocumentsHttpClient(
   baseUrl = "/api/accounting",
+  actorId?: string,
 ): DispatchDocumentsClient {
   const paths = dispatchDocumentApiPaths(baseUrl);
+  const printKeys = new Map<string, string>();
+  const send = (url: string, init?: RequestInit) => {
+    const headers = new Headers(init?.headers);
+    headers.set('Content-Type', 'application/json');
+    if (actorId) headers.set('X-Sabalan-Expected-User', actorId);
+    return browserScopedFetch(url, { ...init, headers });
+  };
+  const submit = async (url: string, input: DispatchDocumentDecision | DispatchDocumentReplacement) => {
+    const response = await send(url, {
+      method: 'POST', headers: { 'Idempotency-Key': input.idempotencyKey }, body: JSON.stringify(input),
+    }).catch(error => {
+      if (dispatchDocumentsAccessDenied(error)) throw error;
+      throw new DispatchDocumentsOutcomeUnknownError();
+    });
+    if (response.status >= 500 || response.status === 408) throw new DispatchDocumentsOutcomeUnknownError();
+    try { return record(await parseJsonResponse(response)); }
+    catch (error) {
+      if (response.ok && !dispatchDocumentsAccessDenied(error)) throw new DispatchDocumentsOutcomeUnknownError();
+      throw error;
+    }
+  };
   const cases = new Map<string, DispatchDocumentCase>();
   const readOne = async (
     candidateId: string,
@@ -353,31 +379,24 @@ export function createDispatchDocumentsHttpClient(
     ),
     canManage,
   });
-  const load = async (): Promise<DispatchDocumentWorkspace> => {
-    const response = await send(paths.candidates());
-    const candidates = await parseJsonResponse<JsonRecord[]>(response);
-    const visible = candidates.filter(
-      (candidate) =>
-        ["PENDING", "STALE_REQUIRES_SUCCESSOR", "EVIDENCE_CONFLICT"].includes(
-          text(candidate.status),
-        ) || list(candidate.waybills).length > 0,
-    );
-    const mapped = await Promise.all(
-      visible.map((candidate) => {
-        const waybills = list(candidate.waybills);
-        return readOne(
-          text(candidate.id),
-          text(waybills[waybills.length - 1]?.id) || undefined,
-          candidate.canManage === true,
-        );
-      }),
-    );
-    cases.clear();
-    mapped.forEach((item) => cases.set(item.id, item));
+  type Header = Pick<DispatchDocumentCase, 'id' | 'loadingId' | 'waybillId' | 'state' | 'canManage'
+    | 'customerName' | 'destination' | 'loadingNumber' | 'total'>;
+  const loadQueue = async (url: string): Promise<DispatchDocumentWorkspace> => {
+    const response = await send(url);
+    const data = await parseJsonResponse<{
+      rows: Header[]; relatedRows?: Header[]; counts?: Record<DispatchDocumentFilter, number>; page?: number; pageSize?: number;
+    }>(response);
+    const summary = (row: Header): DispatchDocumentCase => ({
+      ...mapDispatchDocumentReadModel({ id: row.id, status: 'PENDING' }), ...row,
+    });
     const projected = response.headers.get("X-Dispatch-Documents-Permission");
     return {
       permission: projected === "MANAGE" ? "MANAGE" : "VIEW",
-      cases: mapped,
+      cases: data.rows.map(summary),
+      relatedCases: data.relatedRows?.map(summary),
+      counts: data.counts,
+      page: data.page,
+      pageSize: data.pageSize,
       retrievedAt: new Date().toISOString(),
     };
   };
@@ -388,7 +407,7 @@ export function createDispatchDocumentsHttpClient(
     return item.bundle;
   };
   const pdf = async (url: string) => {
-    const response = await browserScopedFetch(url, { credentials: "include" });
+    const response = await send(url);
     if (response.status === 401 || response.status === 403)
       throw new DispatchDocumentsAuthorizationError(
         "دسترسی به اسناد ارسال مجاز نیست.",
@@ -398,37 +417,35 @@ export function createDispatchDocumentsHttpClient(
     return URL.createObjectURL(await response.blob());
   };
   return {
-    load,
-    async decide(caseId, input) {
-      const result = record(
-        await parseJsonResponse(
-          await send(paths.decision(caseId), {
-            method: "POST",
-            headers: { "Idempotency-Key": input.idempotencyKey },
-            body: JSON.stringify(input),
-          }),
-        ),
-      );
-      if (input.action === "REJECT" || !result.waybill?.id)
-        return cases.get(caseId)!;
-      const item = await readOne(caseId, text(result.waybill.id));
-      cases.set(caseId, item);
+    async load(filter = 'READY', page = 1) {
+      cases.clear();
+      return loadQueue(paths.queue(filter, page));
+    },
+    loadGroup: loadingId => loadQueue(paths.group(loadingId)),
+    async read(candidate) {
+      const detail = await readOne(candidate.id, candidate.waybillId, candidate.canManage);
+      if (detail.id !== candidate.id) throw new Error('جزئیات پرونده با انتخاب فعلی منطبق نیست.');
+      const item = { ...detail, loadingId: candidate.loadingId, waybillId: candidate.waybillId };
+      cases.set(item.id, item);
       return item;
     },
+    async decide(caseId, input) {
+      const result = await submit(paths.decision(caseId), input);
+      if (result.candidateId !== caseId) throw new DispatchDocumentsOutcomeUnknownError();
+      if (input.action === 'REJECT' && result.status === 'REJECTED') return { status: 'REJECTED' };
+      if (result.status === 'EVIDENCE_CONFLICT' || result.status === 'STALE_REQUIRES_SUCCESSOR') return { status: 'BLOCKED' };
+      const waybill = record(result.waybill);
+      if (input.action !== 'ACCEPT' || result.status !== 'ACCEPTED' || !waybill.id || !waybill.number)
+        throw new DispatchDocumentsOutcomeUnknownError();
+      return { status: 'ISSUED', number: text(waybill.number) };
+    },
     async replace(caseId, input) {
-      const current = requireBundle(caseId);
-      const result = record(
-        await parseJsonResponse(
-          await send(paths.replace(current.id), {
-            method: "POST",
-            headers: { "Idempotency-Key": input.idempotencyKey },
-            body: JSON.stringify(input),
-          }),
-        ),
-      );
-      const item = await readOne(caseId, text(record(result.replacement).id));
-      cases.set(caseId, item);
-      return item;
+      const waybillId = input.waybillId ?? requireBundle(caseId).id;
+      const result = await submit(paths.replace(waybillId), input);
+      const replacement = record(result.replacement);
+      if (record(result.voided).id !== waybillId || !replacement.id || !replacement.number)
+        throw new DispatchDocumentsOutcomeUnknownError();
+      return { status: 'REPLACED', number: text(replacement.number) };
     },
     async handoff(caseId, input) {
       const bundle = requireBundle(caseId);
@@ -439,9 +456,12 @@ export function createDispatchDocumentsHttpClient(
               input.kind.endsWith("WAYBILL") ? "WAYBILL" : "STATEMENT",
             ] as const);
       if (input.kind.startsWith("PRINT")) {
-        const response = await send(paths.print(bundle.id), {
+        const operation = JSON.stringify([bundle.id, input.kind]);
+        const key = printKeys.get(operation) ?? crypto.randomUUID();
+        printKeys.set(operation, key);
+        const response = await send(`${paths.print(bundle.id)}?format=form-data`, {
           method: "POST",
-          headers: { "Idempotency-Key": crypto.randomUUID() },
+          headers: { "Idempotency-Key": key },
           body: JSON.stringify({ kinds }),
         });
         if (response.status === 401 || response.status === 403)
@@ -450,7 +470,17 @@ export function createDispatchDocumentsHttpClient(
             response.status,
           );
         if (!response.ok) throw new Error("تحویل چاپ اسناد انجام نشد.");
-        await response.blob();
+        const contentType = response.headers.get('Content-Type') ?? '';
+        const form = await new Response(await response.blob(), { headers: { 'Content-Type': contentType } }).formData();
+        const held = kinds.map(kind => {
+          const files = form.getAll(kind);
+          const artifact = bundle.artifacts.find(item => item.kind === kind);
+          if (files.length !== 1 || !(files[0] instanceof Blob) || !artifact)
+            throw new Error('فایل تحویل چاپ با سند درخواستی منطبق نیست.');
+          return { kind, bytes: files[0], fileName: artifact.fileName };
+        });
+        printKeys.delete(operation);
+        return { artifacts: held.map(item => ({ kind: item.kind, fileName: item.fileName, url: URL.createObjectURL(item.bytes) })) };
       }
       return {
         artifacts: await Promise.all(

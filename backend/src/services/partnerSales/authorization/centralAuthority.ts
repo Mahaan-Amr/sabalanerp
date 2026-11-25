@@ -1,10 +1,12 @@
 import { partnerOperationFeature } from './operationFeature';
 import type { Prisma } from '@prisma/client';
 import { PartnerActionV2Schema, PermissionContextSchema, type PartnerActionV2 } from '@sabalanerp/partner-sales-contracts';
-import { readScopedActions, resolveScopedActions } from '../../effectiveAccessService';
+import { readFencedScopedActions, readScopedActions, resolveScopedActions } from '../../effectiveAccessService';
 import type { ResolvePartnerAuthority } from './prisma';
+import { readFencedScopedActionSchedule } from '../../effectiveAuthorization/scopedActions';
 import type { AuthorizationEvidence, AuthorizationRoot } from './contracts';
 import { resolvePartnerWorkspaceAuthority } from './workspaceAuthority';
+import type { PartnerPermissionReadClient } from './fencedPermissionReads';
 
 /** A vocabulary adapter to central Effective Authorization, not another grant
  * resolver. Domain restrictions and scope-to-current-root checks remain policy. */
@@ -19,13 +21,41 @@ export const readResponderScopedAuthority: ResolvePartnerAuthority<PartnerAction
 export const resolvePartnerAccountingScopedAuthority: ResolvePartnerAuthority<PartnerActionV2> = (tx, input) =>
   resolvePartnerScopedAuthorityInPurpose(tx, input, 'ACCOUNTING');
 
+/** Accounting list projections hold the shared Case, Profile and User fences.
+ * The same policy runs behind the shared central revision lock. */
+export const readPartnerAccountingScopedAuthority = (tx: Prisma.TransactionClient,
+  input: { actorId: string; root: AuthorizationRoot }, permissionClient: PartnerPermissionReadClient,
+  version: { revision: number }):
+  ReturnType<ResolvePartnerAuthority<PartnerActionV2>> =>
+  resolvePartnerScopedAuthorityInPurpose(tx, input, 'ACCOUNTING',
+    (tx, actorId, domain) => readFencedScopedActions(tx, actorId, domain, version), permissionClient);
+
 async function resolvePartnerScopedAuthorityInPurpose(tx: Prisma.TransactionClient,
-  input: { actorId: string; root: AuthorizationRoot }, purpose?: 'ACCOUNTING' | 'RESPONDER') {
-  const resolveActions = purpose === 'RESPONDER' ? readScopedActions : resolveScopedActions;
+  input: { actorId: string; root: AuthorizationRoot }, purpose?: 'ACCOUNTING' | 'RESPONDER',
+  resolveActions = purpose === 'RESPONDER' ? readScopedActions : resolveScopedActions,
+  permissionClient?: PartnerPermissionReadClient) {
   const current = await resolveActions(tx, input.actorId, 'PARTNER');
   const workspace = await resolvePartnerWorkspaceAuthority(tx, input.actorId, purpose,
-    { fencedPermissionReads: purpose === 'ACCOUNTING' });
+    { fencedPermissionReads: purpose === 'ACCOUNTING', permissionClient });
   const explicit = await readExplicitPartnerDecisions(tx, input.actorId);
+  return combinePartnerAuthority(current, workspace, explicit);
+}
+
+/** Evaluate the workspace bridge and explicit grants using each Case's decision
+ * clock, with raw permission rows loaded behind the shared revision fence. */
+export async function readPartnerAccountingAuthoritySchedule(tx: Prisma.TransactionClient, actorId: string,
+  permissionClient: PartnerPermissionReadClient, version: { revision: number }, signal?: AbortSignal) {
+  const scheduled = await readFencedScopedActionSchedule(tx, actorId, 'PARTNER', version, signal);
+  return async (at: Date) => {
+    const current = scheduled(at);
+    const workspace = await resolvePartnerWorkspaceAuthority(tx, actorId, 'ACCOUNTING',
+      { fencedPermissionReads: true, permissionClient, at });
+    return combinePartnerAuthority(current, workspace, current.explicit);
+  };
+}
+
+function combinePartnerAuthority(current: Awaited<ReturnType<typeof resolveScopedActions>>,
+  workspace: Awaited<ReturnType<typeof resolvePartnerWorkspaceAuthority>>, explicit: Set<string>) {
   const grants: AuthorizationEvidence<PartnerActionV2>['grants'] = [];
   for (const grant of current.grants) {
     const action = PartnerActionV2Schema.safeParse(grant.action);

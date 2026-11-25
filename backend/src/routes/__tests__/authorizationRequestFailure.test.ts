@@ -18,21 +18,25 @@ const run = async () => {
   const row = { id: 'notice', type: 'PARTNER_CUSTOMER_TRANSFER', createdAt: new Date(),
     event: { resourceType: 'PARTNER_CUSTOMER_TRANSFER', resourceId: 'transfer' } };
   const originals = { findMany: prisma.notification.findMany, findFirst: prisma.notification.findFirst,
-    transaction: prisma.$transaction, update: prisma.notification.update, updateMany: prisma.notification.updateMany };
+    transaction: prisma.$transaction, update: prisma.notification.update, updateMany: prisma.notification.updateMany,
+    findActor: prisma.user.findUnique, findTransfers: prisma.partnerCustomerTransfer.findMany };
   const unhandled: unknown[] = [];
   const onUnhandled = (error: unknown) => { unhandled.push(error); };
   let writes = 0;
   let transactions = 0;
   let failedLockReads = 0;
   let active = true;
+  const transfer = { id: 'transfer', customerId: 'customer',
+    fromOwnerUserId: 'another-actor', requestedBy: 'another-actor', toProfile: { userId: 'partner' } };
   const tx = {
     user: { findUnique: async () => ({ isActive: active }) },
-    partnerCustomerTransfer: { findUnique: async () => ({ customerId: 'customer',
-      fromOwnerUserId: 'another-actor', requestedBy: 'another-actor', toProfile: { userId: 'partner' } }) },
+    partnerCustomerTransfer: { findUnique: async () => transfer },
     $queryRaw: async () => { failedLockReads += 1; throw timeout; },
   };
   (prisma.notification as any).findMany = async () => [row];
   (prisma.notification as any).findFirst = async () => row;
+  (prisma.user as any).findUnique = tx.user.findUnique;
+  (prisma.partnerCustomerTransfer as any).findMany = async () => [transfer];
   (prisma as any).$transaction = async (callback: (database: unknown) => Promise<unknown>) => {
     transactions += 1;
     return callback(tx);
@@ -62,10 +66,11 @@ const run = async () => {
       let response: globalThis.Response;
       try { response = await fetch(base + url, { method: method.toUpperCase(), signal: AbortSignal.timeout(1500) }); }
       catch { assert.fail(`${method} ${url}: authorization failure escaped the HTTP boundary (${unhandled.length} unhandled rejections)`); }
-      assert.equal(response.status, 500, url);
+      assert.equal(response.status, url === '/count' ? 503 : 500, url);
       const body = await response.json() as any;
       assert.equal(body.success, false);
       assert.equal(body.data, undefined, 'failure must not grant access or expose notification data');
+      if (url === '/count') assert.equal(body.code, 'NOTIFICATION_COUNT_UNAVAILABLE');
       assert.doesNotMatch(JSON.stringify(body), /private database detail|Transaction already closed|P2028/);
       assert.equal((await fetch(base + '/ping')).status, 200, 'backend keeps serving after failure');
     }
@@ -91,6 +96,8 @@ const run = async () => {
     process.off('unhandledRejection', onUnhandled);
     Object.assign(prisma.notification, { findMany: originals.findMany, findFirst: originals.findFirst,
       update: originals.update, updateMany: originals.updateMany });
+    Object.assign(prisma.user, { findUnique: originals.findActor });
+    Object.assign(prisma.partnerCustomerTransfer, { findMany: originals.findTransfers });
     (prisma as any).$transaction = originals.transaction;
   }
 };

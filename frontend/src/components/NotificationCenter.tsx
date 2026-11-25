@@ -1,9 +1,9 @@
 'use client';
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useRouter } from 'next/navigation';
 import { FaBell, FaCheckDouble, FaList } from 'react-icons/fa';
-import { createScopedNotificationsAPI } from '@/lib/api';
+import { browserSessionContinuation, createScopedNotificationsAPI } from '@/lib/api';
 import { useSocket } from '@/hooks/useSocket';
 import { useNotificationCatchup, isNotificationScopeFailure } from '@/hooks/useNotificationCatchup';
 import { useAuth } from '@/contexts/AuthContext';
@@ -71,59 +71,108 @@ export function NotificationCenter() {
 
 function ScopedNotificationCenter({ userId }: { userId: string }) {
   const notificationsAPI = useMemo(() => createScopedNotificationsAPI(userId), [userId]);
-  const requestSequence = useRef(0);
+  const scopeGeneration = useRef(0);
+  const previewGeneration = useRef(0);
   const router = useRouter();
   const { socket } = useSocket();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [unread, setUnread] = useState<NotificationItem[]>([]);
   const [recentRead, setRecentRead] = useState<NotificationItem[]>([]);
-  const [unreadCount, setUnreadCount] = useState(0);
+  const [badgeCount, setBadgeCount] = useState<number | null>(null);
+  const [badgeUnavailable, setBadgeUnavailable] = useState(false);
   const [error, setError] = useState('');
   const [loadedOnce, setLoadedOnce] = useState(false);
-  const hasUsableData = loadedOnce;
+  const blocked = useSyncExternalStore(browserSessionContinuation.subscribe, browserSessionContinuation.snapshot, () => null) === userId;
+  const unreadCount = blocked ? null : badgeCount;
+  const hasUsableData = !blocked && loadedOnce;
 
-  const rejectChangedScope = useCallback((requestError: unknown) => {
-    if (!isNotificationScopeFailure(requestError)) return;
-    // Retire pending previews as well as the currently visible private state.
-    requestSequence.current++;
-    setUnread([]); setRecentRead([]); setUnreadCount(0); setLoadedOnce(false);
+  const clearPreview = useCallback(() => {
+    previewGeneration.current++;
+    setUnread([]);
+    setRecentRead([]);
+    setLoadedOnce(false);
     setLoading(false);
+    setError('');
   }, []);
 
-  const loadPreview = useCallback(async () => {
-    const sequence = ++requestSequence.current;
-    setLoading(true);
-    setError('');
+  const clearPrivateState = useCallback(() => {
+    scopeGeneration.current++;
+    setBadgeCount(null);
+    setBadgeUnavailable(false);
+    clearPreview();
+  }, [clearPreview]);
+
+  useEffect(() => {
+    if (blocked) clearPrivateState();
+  }, [blocked, clearPrivateState]);
+
+  const rejectChangedScope = useCallback((requestError: unknown) => {
+    if (isNotificationScopeFailure(requestError)) clearPrivateState();
+  }, [clearPrivateState]);
+
+  const loadBadge = useCallback(async () => {
+    const scope = scopeGeneration.current;
     try {
-      const [unreadResponse, readResponse, countResponse] = await Promise.all([
-        notificationsAPI.list({ limit: 5, state: 'UNREAD' }),
-        notificationsAPI.list({ limit: 3, state: 'READ' }),
-        notificationsAPI.getUnreadCount(),
-      ]);
-      if (sequence !== requestSequence.current) return;
-      setUnread(unreadResponse.data.data || []);
-      setRecentRead(readResponse.data.data || []);
-      setUnreadCount(Number(countResponse.data.data?.count || 0));
-      setLoadedOnce(true);
-    } catch (requestError: any) {
-      if (sequence !== requestSequence.current) return;
-      rejectChangedScope(requestError);
-      setError(requestError.response?.data?.error || 'تازه‌سازی اعلان‌ها انجام نشد.');
-    } finally {
-      if (sequence === requestSequence.current) setLoading(false);
+      const response = await notificationsAPI.getUnreadCount();
+      if (scope !== scopeGeneration.current) return;
+      setBadgeCount(Number(response.data.data.count));
+      setBadgeUnavailable(false);
+    } catch (requestError) {
+      if (scope !== scopeGeneration.current) return;
+      if (isNotificationScopeFailure(requestError)) {
+        rejectChangedScope(requestError);
+        return;
+      }
+      setBadgeCount(null);
+      setBadgeUnavailable(true);
     }
   }, [notificationsAPI, rejectChangedScope]);
-  useNotificationCatchup(socket, loadPreview);
+
+  const loadPreview = useCallback(async () => {
+    const generation = previewGeneration.current;
+    const scope = scopeGeneration.current;
+    setLoading(true);
+    setError('');
+    const readList = (state: 'UNREAD' | 'READ', limit: number) => notificationsAPI.list({ limit, state }).catch(error => {
+      if (scope === scopeGeneration.current) rejectChangedScope(error);
+      throw error;
+    });
+    try {
+      const [unreadResponse, readResponse] = await Promise.allSettled([readList('UNREAD', 5), readList('READ', 3)]);
+      if (generation !== previewGeneration.current) return;
+      if (unreadResponse.status === 'rejected') throw unreadResponse.reason;
+      if (readResponse.status === 'rejected') throw readResponse.reason;
+      setUnread(unreadResponse.value.data.data || []);
+      setRecentRead(readResponse.value.data.data || []);
+      setLoadedOnce(true);
+    } catch (requestError: any) {
+      if (generation !== previewGeneration.current) return;
+      setError(requestError.response?.data?.error || 'تازه‌سازی اعلان‌ها انجام نشد.');
+    } finally {
+      if (generation === previewGeneration.current) setLoading(false);
+    }
+  }, [notificationsAPI, rejectChangedScope]);
+  useNotificationCatchup(socket, loadBadge, !blocked);
+  const refreshPreview = useNotificationCatchup(socket, loadPreview, open && !blocked);
+
+  const closePreview = () => {
+    setOpen(false);
+    clearPreview();
+  };
 
   const openNotification = async (item: NotificationItem) => {
+    const scope = scopeGeneration.current;
+    const generation = previewGeneration.current;
     if (!item.readAt) {
       try {
         await notificationsAPI.markRead(item.id);
-        const readItem = { ...item, readAt: new Date().toISOString() };
-        setUnread((current) => current.filter((row) => row.id !== item.id));
-        setRecentRead((current) => [readItem, ...current.filter((row) => row.id !== item.id)].slice(0, 3));
-        setUnreadCount((current) => Math.max(0, current - 1));
+        if (scope !== scopeGeneration.current) return;
+        if (generation === previewGeneration.current) {
+          const readItem = { ...item, readAt: new Date().toISOString() };
+          setUnread((current) => current.filter((row) => row.id !== item.id));
+          setRecentRead((current) => [readItem, ...current.filter((row) => row.id !== item.id)].slice(0, 3));
+        }
       } catch (requestError: any) {
         rejectChangedScope(requestError);
         setError(requestError.response?.data?.error || 'ثبت وضعیت اعلان انجام نشد.');
@@ -132,7 +181,7 @@ function ScopedNotificationCenter({ userId }: { userId: string }) {
     }
     const destination = item.type === 'NEW_BROWSER_LOGIN' ? securityNotificationUrl(item) : item.actionUrl;
     if (destination) {
-      setOpen(false);
+      closePreview();
       router.push(destination);
     }
   };
@@ -140,27 +189,28 @@ function ScopedNotificationCenter({ userId }: { userId: string }) {
   const markAllRead = async () => {
     try {
       await notificationsAPI.markAllRead();
-      await loadPreview();
     } catch (requestError: any) {
       rejectChangedScope(requestError);
       setError(requestError.response?.data?.error || 'خواندن همه اعلان‌ها انجام نشد.');
     }
   };
 
-  const previewEmpty = useMemo(() => unread.length === 0 && recentRead.length === 0, [recentRead.length, unread.length]);
+  const previewEmpty = unread.length === 0 && recentRead.length === 0;
+  const bellLabel = unreadCount ? `اعلان‌ها، ${unreadCount.toLocaleString('fa-IR')} خوانده‌نشده`
+    : !blocked && badgeUnavailable ? 'اعلان‌ها، شمارش در دسترس نیست' : 'اعلان‌ها';
 
   return (
     <>
       <div className="relative">
         <ErpPressable
           type="button"
-          aria-label={unreadCount ? `اعلان‌ها، ${unreadCount.toLocaleString('fa-IR')} خوانده‌نشده` : 'اعلان‌ها'}
-          onClick={() => { setOpen(true); void loadPreview(); }}
+          aria-label={bellLabel}
+          onClick={() => setOpen(true)}
           className="sds-action sds-action-outline inline-flex h-11 w-11 items-center justify-center"
         >
           <FaBell className="h-5 w-5" aria-hidden="true" />
         </ErpPressable>
-        {unreadCount > 0 && (
+        {!!unreadCount && (
           <span data-dynamic="notification-count" className="sds-notification-count pointer-events-none absolute -left-1 -top-1 flex min-h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px] font-bold">
             {Math.min(unreadCount, 99).toLocaleString('fa-IR')}
           </span>
@@ -169,18 +219,20 @@ function ScopedNotificationCenter({ userId }: { userId: string }) {
 
       <ErpSheet
         open={open}
-        onClose={() => setOpen(false)}
+        onClose={closePreview}
         title="اعلان‌ها"
         footer={(
           <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2">
-            <ErpButton label="خواندن همه" icon={FaCheckDouble} variant="outline" onClick={() => void markAllRead()} disabled={!unreadCount} />
-            <ErpButton label="مشاهده همه اعلان‌ها" icon={FaList} href="/dashboard/personal/notifications" onClick={() => setOpen(false)} />
+            <ErpButton label="خواندن همه" icon={FaCheckDouble} variant="outline" onClick={() => void markAllRead()} disabled={blocked || (!unreadCount && !unread.length)} />
+            <ErpButton label="مشاهده همه اعلان‌ها" icon={FaList} href="/dashboard/personal/notifications" onClick={closePreview} />
           </div>
         )}
       >
         <div className="space-y-4" dir="rtl">
-          {error && <ErpInlineState kind={hasUsableData ? 'stale' : 'error'} title={error} action={{ label: 'تلاش دوباره', onClick: () => void loadPreview() }} />}
-          {loading && !hasUsableData ? <ErpSkeleton lines={5} /> : previewEmpty ? (
+          {!blocked && error && <ErpInlineState kind={hasUsableData ? 'stale' : 'error'} title={error} action={{ label: 'تلاش دوباره', onClick: refreshPreview }} />}
+          {blocked ? null : !hasUsableData ? (
+            (loading || !error) && <ErpSkeleton lines={5} />
+          ) : previewEmpty ? (
             <ErpEmptyState icon={FaBell} title="اعلانی ندارید" />
           ) : (
             <>

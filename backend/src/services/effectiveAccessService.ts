@@ -5,7 +5,7 @@ import { AUTHORIZABLE_HR_ACTION_PERMISSIONS } from './hrActionPermissionCatalog'
 // Explicit resource-scoped actions use the same central access entry point.
 // Domain adapters may translate reviewed effective workspace features into a
 // fixed resource scope; callers can never supply that scope themselves.
-export { grantScopedAction, readScopedActions, revokeScopedAction, resolveScopedActions } from './effectiveAuthorization/scopedActions';
+export { grantScopedAction, readFencedScopedActions, readScopedActions, revokeScopedAction, resolveScopedActions } from './effectiveAuthorization/scopedActions';
 
 export type EffectiveWorkspacePermission = 'view' | 'edit' | 'admin';
 

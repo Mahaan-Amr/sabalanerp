@@ -5,6 +5,7 @@ import {
   getCrossWorkspaceDutyDetail,
   getCrossWorkspaceDutySummary,
   listCrossWorkspaceDuties,
+  listCrossWorkspaceDutyHistoryPage,
   markCrossWorkspaceDutyHistorySeen,
 } from '../crossWorkspaceDutyInbox';
 import {
@@ -161,6 +162,8 @@ test('opening duty History clears only the current User unseen count', async () 
       assert.deepEqual(history.map(({ id, detailAvailable }) => ({ id, detailAvailable })), [
         { id: completedDuty.id, detailAvailable: false },
       ], 'a former assignee can open the same terminal record counted by the unseen badge');
+      const page = await listCrossWorkspaceDutyHistoryPage(tx, { actorUserId: actor.id, workspaceCode: 'ACCOUNTING', now });
+      assert.deepEqual(page, { duties: history, nextCursor: null });
       await markCrossWorkspaceDutyHistorySeen(tx, {
         actorUserId: actor.id, workspaceCode: 'ACCOUNTING', seenThrough: changedAt, now,
       });

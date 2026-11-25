@@ -13,7 +13,7 @@ import Link from 'next/link';
 import { workspaceBackDestination, WORKSPACE_HISTORY_KEY } from '@/lib/workspaceBackNavigation';
 import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { FaArrowRight, FaChevronDown, FaCheck, FaEllipsisV, FaExclamationTriangle, FaInfoCircle, FaRedo, FaSearch, FaTimes } from 'react-icons/fa';
+import { FaArrowRight, FaChevronDown, FaCheck, FaEllipsisV, FaExclamationTriangle, FaInfoCircle, FaRedo, FaSearch, FaSort, FaSortDown, FaSortUp, FaTimes } from 'react-icons/fa';
 import EnhancedDropdown from '@/components/EnhancedDropdown';
 import { formatNumericInputText, normalizeDigits } from '@/lib/numberFormat';
 import { useUnarchivedDraftRefGuard } from '@/lib/useUnarchivedDraftGuard';
@@ -31,6 +31,7 @@ export type ErpAction = {
   tone?: ErpTone;
   variant?: 'solid' | 'soft' | 'outline' | 'ghost';
   disabled?: boolean;
+  ariaDisabled?: boolean;
   title?: string;
   className?: string;
 };
@@ -100,7 +101,11 @@ export type ErpColumn<T> = {
   mobileLabel?: React.ReactNode;
   priority?: 'primary' | 'secondary' | 'meta' | 'hidden-mobile';
   align?: 'start' | 'center' | 'end';
+  sortValue?: (row: T) => string | number | null | undefined;
+  sortLabel?: string;
 };
+
+const listSortCollator = new Intl.Collator('fa-IR', { numeric: true, sensitivity: 'base' });
 
 type WithChildren = {
   children: React.ReactNode;
@@ -182,11 +187,12 @@ export function ErpButton({
   tone = 'primary',
   variant = 'soft',
   disabled,
+  ariaDisabled,
   title,
   className: extraClassName,
 }: ErpAction) {
   const className = cx(
-    'sds-action inline-flex items-center justify-center gap-2 px-3 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50',
+    'sds-action inline-flex items-center justify-center gap-2 px-3 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:opacity-50',
     buttonClasses(tone, variant),
     extraClassName
   );
@@ -200,22 +206,23 @@ export function ErpButton({
 
   if (href && !disabled) {
     return (
-      <Link href={href} onClick={onClick} className={className} title={title}>
+      <Link href={href} aria-disabled={ariaDisabled || undefined} onClick={ariaDisabled ? event => event.preventDefault() : onClick} className={className} title={title}>
         {content}
       </Link>
     );
   }
 
   return (
-    <button type={type} onClick={onClick} disabled={disabled} className={className} title={title}>
+    <button type={type} onClick={ariaDisabled ? event => event.preventDefault() : onClick} disabled={disabled}
+      aria-disabled={ariaDisabled || undefined} className={className} title={title}>
       {content}
     </button>
   );
 }
 
-export function ErpIconButton({ label, icon: Icon, href, onClick, tone = 'neutral', disabled, title }: ErpAction) {
+export function ErpIconButton({ label, icon: Icon, href, onClick, tone = 'neutral', disabled, ariaDisabled, title }: ErpAction) {
   const className = cx(
-    'sds-action inline-flex h-11 w-11 flex-shrink-0 items-center justify-center text-sm disabled:cursor-not-allowed disabled:opacity-50',
+    'sds-action inline-flex h-11 w-11 flex-shrink-0 items-center justify-center text-sm disabled:cursor-not-allowed disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:opacity-50',
     buttonClasses(tone, 'ghost')
   );
 
@@ -223,14 +230,16 @@ export function ErpIconButton({ label, icon: Icon, href, onClick, tone = 'neutra
 
   if (href && !disabled) {
     return (
-      <Link href={href} className={className} aria-label={label} title={title || label}>
+      <Link href={href} aria-disabled={ariaDisabled || undefined} onClick={ariaDisabled ? event => event.preventDefault() : undefined}
+        className={className} aria-label={label} title={title || label}>
         {content}
       </Link>
     );
   }
 
   return (
-    <button type="button" onClick={onClick} disabled={disabled} className={className} aria-label={label} title={title || label}>
+    <button type="button" onClick={ariaDisabled ? event => event.preventDefault() : onClick} disabled={disabled}
+      aria-disabled={ariaDisabled || undefined} className={className} aria-label={label} title={title || label}>
       {content}
     </button>
   );
@@ -969,14 +978,17 @@ function ErpListRowActions({ actions, mode }: { actions: ErpAction[]; mode: 'ico
   </>;
 }
 
-export function ErpListPage<T>({ rows, rowKey, columns, filters = [], filterLayout = 'default', showFilterLabels = false, sectionNavigation, rowActions, rowActionMode = 'icons', rowClassName, focusedRowKey, emptyState, isLoading, footer, children, mobileLayout = 'cards', ...pageProps }: {
+export function ErpListPage<T>({ rows, rowKey, columns, filters = [], filterLayout = 'default', showFilterLabels = false, sectionNavigation, rowActions, rowActionMode = 'icons', rowClassName, focusedRowKey, preserveFocusedRowPosition, suspendRowActions, emptyState, isLoading, footer, children, mobileLayout = 'cards', ...pageProps }: {
   filters?: ErpFilter[];
   filterLayout?: 'default' | 'wide-search';
   showFilterLabels?: boolean;
   sectionNavigation?: React.ReactNode;
+  preserveFocusedRowPosition?: boolean;
 } & Parameters<typeof ErpListContent<T>>[0] & Omit<Parameters<typeof ErpPage>[0], 'children'> & { children?: React.ReactNode }) {
+  const focusAvailable = Boolean(focusedRowKey && rows.some(row => rowKey(row) === focusedRowKey));
+  const rowsForFocus = preserveFocusedRowPosition ? undefined : rows;
   React.useEffect(() => {
-    if (!focusedRowKey) return;
+    if (!focusAvailable) return;
     const frame = window.requestAnimationFrame(() => {
       const target = Array.from(document.querySelectorAll<HTMLElement>('[data-erp-focused-row="true"]'))
         .find((element) => element.getClientRects().length > 0);
@@ -985,7 +997,7 @@ export function ErpListPage<T>({ rows, rowKey, columns, filters = [], filterLayo
       target.scrollIntoView({ behavior, block: 'center' });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [focusedRowKey, rows]);
+  }, [focusAvailable, focusedRowKey, rowsForFocus]);
 
   return (
     <ErpPage {...pageProps}>
@@ -993,14 +1005,14 @@ export function ErpListPage<T>({ rows, rowKey, columns, filters = [], filterLayo
       <ErpFilters filters={filters} layout={filterLayout} showLabels={showFilterLabels} />
       {children}
       <ErpListContent rows={rows} rowKey={rowKey} columns={columns} rowActions={rowActions}
-        rowActionMode={rowActionMode} rowClassName={rowClassName} focusedRowKey={focusedRowKey}
+        rowActionMode={rowActionMode} suspendRowActions={suspendRowActions} rowClassName={rowClassName} focusedRowKey={focusedRowKey}
         emptyState={emptyState} isLoading={isLoading} footer={footer} mobileLayout={mobileLayout} />
     </ErpPage>
   );
 }
 
 export function ErpListContent<T>({
-  rows, rowKey, columns, rowActions, rowActionMode = 'icons', rowClassName,
+  rows, rowKey, columns, rowActions, rowActionMode = 'icons', suspendRowActions = false, rowClassName,
   focusedRowKey, emptyState, isLoading, footer, mobileLayout = 'cards',
 }: {
   rows: T[];
@@ -1008,6 +1020,7 @@ export function ErpListContent<T>({
   columns: ErpColumn<T>[];
   rowActions?: (row: T) => ErpAction[];
   rowActionMode?: 'icons' | 'menu';
+  suspendRowActions?: boolean;
   rowClassName?: (row: T) => string;
   focusedRowKey?: string;
   emptyState?: React.ReactNode;
@@ -1015,6 +1028,19 @@ export function ErpListContent<T>({
   footer?: React.ReactNode;
   mobileLayout?: 'cards' | 'table';
 }) {
+  const actionsFor = (row: T) => (rowActions?.(row) ?? []).map(action =>
+    suspendRowActions && !action.href ? { ...action, ariaDisabled: true } : action);
+
+  const [sort, setSort] = React.useState<{ id: string; direction: 'ascending' | 'descending' }>();
+  const sortValue = columns.find(column => column.id === sort?.id)?.sortValue;
+  const orderedRows = sort && sortValue ? [...rows].sort((left, right) => {
+    const a = sortValue(left);
+    const b = sortValue(right);
+    if (a == null || a === '') return b == null || b === '' ? 0 : 1;
+    if (b == null || b === '') return -1;
+    const compared = typeof a === 'number' && typeof b === 'number' ? a - b : listSortCollator.compare(String(a), String(b));
+    return sort.direction === 'ascending' ? compared : -compared;
+  }) : rows;
   return (
     <ErpSection>
       {isLoading ? (
@@ -1024,7 +1050,7 @@ export function ErpListContent<T>({
       ) : (
         <>
           {mobileLayout === "cards" && <div className="space-y-3 lg:hidden">
-            {rows.map((row) => (
+            {orderedRows.map((row) => (
               <div key={rowKey(row)} data-erp-focused-row={focusedRowKey === rowKey(row) ? 'true' : undefined}>
               <ErpCard
                 interactive
@@ -1039,7 +1065,7 @@ export function ErpListContent<T>({
                   ))}
                   {rowActions && (
                     <div className="flex flex-wrap gap-2 border-t border-[var(--sds-border-default)] pt-3 dark:border-[var(--sds-border-strong)]">
-                      <ErpListRowActions actions={rowActions(row)} mode={rowActionMode} />
+                      <ErpListRowActions actions={actionsFor(row)} mode={rowActionMode} />
                     </div>
                   )}
                 </div>
@@ -1051,16 +1077,24 @@ export function ErpListContent<T>({
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]">
-                  {columns.map((column) => (
-                    <th key={column.id} className={cx('px-3 py-3 text-right text-xs font-semibold text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]', column.align === 'end' && 'text-left', column.align === 'center' && 'text-center')}>
-                      {column.header}
+                  {columns.map((column) => {
+                    const direction = sort?.id === column.id ? sort.direction : undefined;
+                    const label = column.sortLabel ?? (typeof column.header === 'string' ? column.header : undefined);
+                    const Icon = direction === 'ascending' ? FaSortUp : direction === 'descending' ? FaSortDown : FaSort;
+                    return <th key={column.id} scope="col" aria-sort={direction} className={cx('px-3 py-3 text-right text-xs font-semibold text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]', column.align === 'end' && 'text-left', column.align === 'center' && 'text-center')}>
+                      {column.sortValue && label ? <ErpPressable variant="ghost" tone="neutral"
+                        className="inline-flex min-h-11 min-w-11 items-center gap-1.5 px-1 text-start"
+                        aria-label={`مرتب‌سازی ${label} به‌صورت ${direction === 'ascending' ? 'نزولی' : 'صعودی'}`}
+                        onClick={() => setSort({ id: column.id, direction: direction === 'ascending' ? 'descending' : 'ascending' })}>
+                        {column.header}<Icon className="h-3 w-3 shrink-0" aria-hidden="true" />
+                      </ErpPressable> : column.header}
                     </th>
-                  ))}
+                  })}
                   {rowActions && <th className="px-3 py-3 text-left text-xs font-semibold text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">عملیات</th>}
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row) => (
+                {orderedRows.map((row) => (
                   <tr key={rowKey(row)} data-erp-focused-row={focusedRowKey === rowKey(row) ? 'true' : undefined} className={cx('border-b border-[var(--sds-border-default)] transition hover:bg-[var(--sds-surface-subtle)] dark:border-[var(--sds-border-strong)] dark:hover:bg-[var(--sds-surface-raised)]', rowClassName?.(row), focusedRowKey === rowKey(row) && 'bg-[var(--sds-accent-soft)] ring-2 ring-inset ring-[var(--sds-focus-ring)]')}>
                     {columns.map((column) => (
                       <td key={column.id} className={cx('px-3 py-4 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]', column.align === 'end' && 'text-left', column.align === 'center' && 'text-center')}>
@@ -1070,7 +1104,7 @@ export function ErpListContent<T>({
                     {rowActions && (
                       <td className="px-3 py-4">
                         <div className="flex justify-end gap-1">
-                          <ErpListRowActions actions={rowActions(row)} mode={rowActionMode} />
+                          <ErpListRowActions actions={actionsFor(row)} mode={rowActionMode} />
                         </div>
                       </td>
                     )}

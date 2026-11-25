@@ -7,6 +7,7 @@ import { createClientRequestId } from './requestIdentity';
 import { buildLoadingFinalizeRequest } from './loadingFinalizeRequest';
 import { buildAuthorizedPhysicalExitRequest } from './authorizedPhysicalExitRequest';
 import { createPrivateClient } from './privateClientScope';
+import type { RequestClient } from './actorScopedHttp';
 import { BrowserSessionContinuation, type BrowserSessionLease, type BrowserLoginAttempt } from './browserSessionContinuation';
 import { bindBrowserBuildRequestIdentity, bindBrowserBuildResourceUrl } from './browserBuildRequestIdentity';
 import { browserBuildHandoff } from './browserBuildHandoff';
@@ -377,7 +378,7 @@ export const supportTicketsAPI = {
 };
 
 export const systemRecoveryAPI = {
-  getEnvironment: () => api.get('/system-recovery/environment'),
+  getEnvironment: (request?: Pick<AxiosRequestConfig, 'signal'>) => api.get('/system-recovery/environment', request),
   getState: () => api.get('/system-recovery'),
   createBackup: (data: { packageType: 'COMPLETE' | 'SANITIZED_TEST'; adminPassword: string; passphrase: string }) =>
     api.post('/system-recovery/backups', data),
@@ -612,14 +613,17 @@ export const ordersAPI = {
 // Dashboard API
 export const dashboardAPI = {
   getStats: () => api.get('/dashboard/stats'),
-  getProfile: () => api.get('/dashboard/profile'),
-  getRouteAvailability: (path: string) => api.get('/dashboard/route-availability', { params: { path } }),
+  getProfile: (request?: Pick<AxiosRequestConfig, 'signal'>) => api.get('/dashboard/profile', request),
+  getRouteAvailability: (path: string, request?: Pick<AxiosRequestConfig, 'signal'>) =>
+    api.get('/dashboard/route-availability', { ...request, params: { path } }),
   getActionAvailability: (workspace: string) => api.get('/dashboard/action-availability', { params: { workspace } }),
 };
 
 // Workspace Permissions API
 export const workspacePermissionsAPI = {
-  getUserWorkspaces: () => api.get('/workspace-permissions/user-workspaces'),
+  getUserWorkspaces: (expectedActorId?: string) => api.get('/workspace-permissions/user-workspaces', {
+    headers: expectedActorId ? { 'x-sabalan-expected-user': expectedActorId } : undefined,
+  }),
   getUserPermissions: (params?: { page?: number; limit?: number; userId?: string; workspace?: string }) =>
     api.get('/workspace-permissions', { params }),
   getRolePermissions: (params?: { role?: string; workspace?: string }) =>
@@ -633,13 +637,14 @@ export const workspacePermissionsAPI = {
 };
 
 // Departments API
-export const departmentsAPI = {
+export const createDepartmentsAPI = (api: RequestClient) => ({
   getDepartments: () => api.get('/departments'),
   getDepartment: (id: string) => api.get(`/departments/${id}`),
   createDepartment: (data: any) => api.post('/departments', data),
   updateDepartment: (id: string, data: any) => api.put(`/departments/${id}`, data),
   deleteDepartment: (id: string) => api.delete(`/departments/${id}`),
-};
+});
+export const departmentsAPI = createDepartmentsAPI(api);
 
 // Sales Workspace API
 export const salesAPI = {
@@ -863,16 +868,34 @@ export const salesAPI = {
   deleteDiscountRange: (id: string) => api.delete(`/sales/discount-ranges/${id}`),
 };
 
+export type CrmCustomerOption = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  companyName: string | null;
+  customerType: string;
+  status: string;
+  trustCategory: 'NORMAL' | 'SPECIAL';
+  isBlacklisted: boolean;
+  isLocked: boolean;
+  ownerUserId: string | null;
+  ownerUser: { id: string; firstName: string | null; lastName: string | null; username: string } | null;
+  phone: string | null;
+};
+
 // CRM Workspace API
-export const crmAPI = {
+export const createCrmAPI = (api: RequestClient) => ({
   // Customers
-  getCustomers: (params?: { page?: number; limit?: number; search?: string; status?: string; customerType?: string; trustCategory?: string; ownership?: string; isBlacklisted?: boolean; isLocked?: boolean }) =>
-    api.get('/crm/customers', { params }),
+  getCustomers: (params?: { page?: number; limit?: number; search?: string; status?: string; customerType?: string; trustCategory?: string; ownership?: string; isBlacklisted?: boolean; isLocked?: boolean; view?: 'directory' }, signal?: AbortSignal) =>
+    api.get('/crm/customers', { params, signal }),
+
+  getCustomerOptions: (params: { search?: string; id?: string; limit?: number; customerType?: string }, signal?: AbortSignal) =>
+    api.get<{ success: boolean; data: CrmCustomerOption[] }>('/crm/customer-options', { params, signal }),
 
   getCustomerOwners: () => api.get('/crm/customer-owners'),
   getSellers: () => api.get('/crm/sellers'),
   
-  getCustomer: (id: string) => api.get(`/crm/customers/${id}`),
+  getCustomer: (id: string, signal?: AbortSignal) => api.get(`/crm/customers/${id}`, { signal }),
 
   checkDuplicateCustomer: (payload: { nationalCode?: string | null; phoneNumbers?: Array<{ number?: string | null }> }) =>
     api.post('/crm/customers/duplicate-check', payload),
@@ -998,7 +1021,8 @@ export const crmAPI = {
   createFollowUp: (data: any) => api.post('/crm/follow-ups', data),
   getNextActions: (params?: any) => api.get('/crm/next-actions', { params }),
   completeNextAction: (id: string) => api.put(`/crm/next-actions/${id}/complete`),
-};
+});
+export const crmAPI = createCrmAPI(api);
 
 export const shipmentQuantityAPI = {
   getContract: (contractId: string, params?: { cutoff?: string; mode?: 'operational' | 'audit-known-at' }) =>
@@ -1100,7 +1124,7 @@ export const inventoryAPI = {
 };
 
 // Accounting Workspace API
-export const accountingAPI = {
+export const createAccountingAPI = (api: RequestClient) => ({
   recordCustomerPaperSignature: (contractId: string, revision: number) => api.post(`/accounting/contracts/${contractId}/customer-paper-signature`, { revision }),
   getCustomerAccounts: (params?: { search?: string; asOf?: string }) => api.get('/accounting/ledger/customer-profiles', { params }),
   getCustomerWorkspaceAccounts: (params?: { search?: string; asOf?: string; page?: number }) => api.get('/accounting/ledger/customer-accounts', { params }),
@@ -1121,7 +1145,13 @@ export const accountingAPI = {
   getCustomerAccountProjection: (id: string, params?: { asOf?: string }) => api.get(`/accounting/ledger/customer-profiles/${id}/projection`, { params }),
   exportCustomerStatement: (id: string, format: 'pdf' | 'xlsx', asOf: string) => api.get(`/accounting/ledger/customer-profiles/${id}/export.${format}`, { params: { asOf }, responseType: 'blob' }),
   getTreasuryOverview: (bankLinePage = 1, checkId?: string) => api.get('/accounting/ledger/treasury/overview', { params: { bankLinePage, checkId } }),
-  getTaxOverview: () => api.get('/accounting/ledger/tax/overview'),
+  getTreasurySummary: (checkId?: string, signal?: AbortSignal) => api.get('/accounting/ledger/treasury/summary', { params: { checkId }, signal }),
+  getTreasuryBankLines: (page: number, signal?: AbortSignal) => api.get('/accounting/ledger/treasury/bank-lines', { params: { page }, signal }),
+  searchTreasuryCustomerProfiles: (search: string, signal?: AbortSignal) => api.get('/accounting/ledger/treasury/customer-profiles', { params: { search }, signal }),
+  getTreasuryCustomerBalance: (id: string, signal?: AbortSignal) => api.get(`/accounting/ledger/treasury/customer-profiles/${encodeURIComponent(id)}/balance`, { signal }),
+  getTaxOverview: (signal?: AbortSignal) => api.get('/accounting/ledger/tax/overview', { signal }),
+  getTaxInvoiceAttempts: (id: string, signal?: AbortSignal) =>
+    api.get(`/accounting/ledger/tax/invoices/${encodeURIComponent(id)}/attempts`, { signal }),
   recordCustomerReceipt: (data: any) => api.post('/accounting/ledger/treasury/receipts', data),
   allocateCustomerReceipt: (data: any) => api.post('/accounting/ledger/treasury/allocations', data),
   reverseCustomerAllocation: (id: string, data: any) => api.post(`/accounting/ledger/treasury/allocations/${id}/reverse`, data),
@@ -1142,7 +1172,7 @@ export const accountingAPI = {
   createTaxRule: (data: any) => api.post('/accounting/ledger/tax-rules', data),
   bindTaxOutboxChannel: (id: string, channelId: string) => api.post(`/accounting/ledger/tax-outbox/${id}/channel`, { channelId }),
   reconcileVatPeriod: (data: any) => api.post('/accounting/ledger/tax/vat-reconciliations', data),
-  getSupplyChainWorkspace: () => api.get('/accounting/supply-chain/workspace'),
+  getSupplyChainWorkspace: (signal?: AbortSignal) => api.get('/accounting/supply-chain/workspace', { signal }),
   getSupplierAging: (id: string, asOf?: string) => api.get(`/accounting/supply-chain/suppliers/${id}/aging`, { params: { asOf } }),
   createSupplyChainPostingRule: (data: any) => api.post('/accounting/supply-chain/posting-rules', data),
   approveSupplierRelationship: (data: any) => api.post('/accounting/supply-chain/supplier-relationships', data),
@@ -1160,16 +1190,21 @@ export const accountingAPI = {
   transitionPayableCheck: (id: string, data: any) => api.post(`/accounting/supply-chain/checks/${id}/transitions`, data),
   previewOpeningInventory: (data: any) => api.post('/accounting/supply-chain/opening-inventory/preview', data),
   commitOpeningInventory: (id: string, data: any, idempotencyKey: string) => api.post(`/accounting/supply-chain/opening-inventory/${id}/commit`, data, { headers: { 'Idempotency-Key': idempotencyKey } }),
-  getReplacementOverview: (bookId: string) => api.get('/accounting/replacement/overview', { params: { bookId } }),
-  getSepidarSourceSnapshots: (bookId: string) => api.get('/accounting/replacement/sepidar-snapshots', { params: { bookId } }),
-  getSepidarSourceRecords: (bookId: string, snapshotId: string, table: string, page: number) => api.get(`/accounting/replacement/sepidar-snapshots/${snapshotId}/records`, { params: { bookId, table, page } }),
-  getSepidarVouchers: (bookId: string, snapshotId: string, year: string, page: number) => api.get(`/accounting/replacement/sepidar-snapshots/${snapshotId}/vouchers`, { params: { bookId, year, page } }),
-  getSepidarVoucher: (bookId: string, snapshotId: string, voucherKey: string) => api.get(`/accounting/replacement/sepidar-snapshots/${snapshotId}/vouchers/${voucherKey}`, { params: { bookId } }),
-  searchLegacyAccountingArchive: (bookId: string, query: string) => api.get('/accounting/replacement/legacy-archive', { params: { bookId, query } }),
+  getReplacementOverview: (bookId: string, options?: { includeAudit: boolean; signal: AbortSignal }) =>
+    api.get('/accounting/replacement/overview', { params: { bookId, includeAudit: options?.includeAudit }, signal: options?.signal }),
+  verifyReplacementAudit: (bookId: string, signal: AbortSignal) =>
+    api.get('/accounting/replacement/audit-verification', { params: { bookId }, signal }),
+  getSepidarSourceSnapshots: (bookId: string, signal?: AbortSignal) => api.get('/accounting/replacement/sepidar-snapshots', { params: { bookId }, signal }),
+  getSepidarSourceReadiness: (bookId: string, snapshotId: string, signal: AbortSignal) =>
+    api.get(`/accounting/replacement/sepidar-snapshots/${snapshotId}/readiness`, { params: { bookId }, signal }),
+  getSepidarSourceRecords: (bookId: string, snapshotId: string, table: string, page: number, signal?: AbortSignal) => api.get(`/accounting/replacement/sepidar-snapshots/${snapshotId}/records`, { params: { bookId, table, page }, signal }),
+  getSepidarVouchers: (bookId: string, snapshotId: string, year: string, page: number, signal?: AbortSignal) => api.get(`/accounting/replacement/sepidar-snapshots/${snapshotId}/vouchers`, { params: { bookId, year, page }, signal }),
+  getSepidarVoucher: (bookId: string, snapshotId: string, voucherKey: string, signal?: AbortSignal) => api.get(`/accounting/replacement/sepidar-snapshots/${snapshotId}/vouchers/${voucherKey}`, { params: { bookId }, signal }),
+  searchLegacyAccountingArchive: (bookId: string, query: string, signal?: AbortSignal) => api.get('/accounting/replacement/legacy-archive', { params: { bookId, query }, signal }),
   previewAccountingMigration: (data: any) => api.post('/accounting/replacement/migrations/preview', data),
   commitAccountingMigration: (id: string, data: any) => api.post(`/accounting/replacement/migrations/${id}/commit`, data),
   recordAccountingParallelRun: (data: any) => api.post('/accounting/replacement/parallel-runs', data),
-  getAccountingParallelContext: (bookId: string, periodId?: string) => api.get('/accounting/replacement/parallel-comparisons/context', { params: { bookId, periodId } }),
+  getAccountingParallelContext: (bookId: string, periodId?: string, signal?: AbortSignal) => api.get('/accounting/replacement/parallel-comparisons/context', { params: { bookId, periodId }, signal }),
   compareAccountingParallelEvents: (data: { bookId: string; periodId: string; snapshotId: string; pair?: { sourceKey: string; targetId: string; reason: string } }) => api.post('/accounting/replacement/parallel-comparisons', data),
   manageAccountingParallelDifference: (data: { bookId: string; comparisonId: string; differenceIdentity: string; action: 'OPEN' | 'NOTE' | 'RESOLVE'; cause?: string; resolution?: string }) => api.post('/accounting/replacement/parallel-differences', data),
   recordAccountingRecoveryProof: (data: any) => api.post('/accounting/replacement/recovery-proofs', data),
@@ -1178,7 +1213,7 @@ export const accountingAPI = {
   acknowledgeAccountingAuthoritativeWrite: (id: string, data: any) => api.post(`/accounting/replacement/cutovers/${id}/authoritative-write`, data),
   recordAccountingCutoverFailure: (id: string, data: any) => api.post(`/accounting/replacement/cutovers/${id}/failures`, data),
   resumeAccountingFixForward: (id: string, data: any) => api.post(`/accounting/replacement/cutovers/${id}/resume`, data),
-  getLedgerContext: () => api.get('/accounting/ledger/context'),
+  getLedgerContext: (signal?: AbortSignal) => api.get('/accounting/ledger/context', { signal }),
   getCustomerPostingRules: () => api.get('/accounting/ledger/customer-sales/posting-rules'),
   createCustomerPostingRule: (data: unknown) => api.post('/accounting/ledger/customer-sales/posting-rules', data),
   setupLedger: (data: any) => api.post('/accounting/ledger/setup', data),
@@ -1191,10 +1226,10 @@ export const accountingAPI = {
   createLedgerVoucher: (data: any, idempotencyKey: string) => api.post('/accounting/ledger/vouchers', data, { headers: { 'Idempotency-Key': idempotencyKey } }),
   postLedgerVoucher: (id: string, data: { reason: string; override?: { confirmed: boolean; reason: string } }) => api.post(`/accounting/ledger/vouchers/${id}/post`, data),
   reverseLedgerVoucher: (id: string, data: { reason: string; idempotencyKey: string; targetFiscalYearId: string; targetPeriodId: string; documentDate: string; override?: { confirmed: boolean; reason: string } }) => api.post(`/accounting/ledger/vouchers/${id}/reverse`, data, { headers: { 'Idempotency-Key': data.idempotencyKey } }),
-  getLedgerJournal: (params: { bookId: string; fiscalYearId: string; periodId?: string }) => api.get('/accounting/ledger/journal', { params }),
-  getLedgerVouchers: (params: { bookId: string; fiscalYearId: string; periodId?: string; status?: 'DRAFT' | 'POSTED' | 'REVERSED' }) => api.get('/accounting/ledger/vouchers', { params }),
+  getLedgerJournal: (params: { bookId: string; fiscalYearId: string; periodId?: string }, signal?: AbortSignal) => api.get('/accounting/ledger/journal', { params, signal }),
+  getLedgerVouchers: (params: { bookId: string; fiscalYearId: string; periodId?: string; status?: 'DRAFT' | 'POSTED' | 'REVERSED' }, signal?: AbortSignal) => api.get('/accounting/ledger/vouchers', { params, signal }),
   getLedgerVoucherEvidence: (id: string, reason: string) => api.get(`/accounting/ledger/vouchers/${id}/evidence`, { params: { reason } }),
-  getLedgerTrialBalance: (params: { bookId: string; fiscalYearId: string; periodId?: string }) => api.get('/accounting/ledger/trial-balance', { params }),
+  getLedgerTrialBalance: (params: { bookId: string; fiscalYearId: string; periodId?: string }, signal?: AbortSignal) => api.get('/accounting/ledger/trial-balance', { params, signal }),
   verifyLedgerAuditChain: () => api.get('/accounting/ledger/audit/verify'),
   getPeriodEndOverview: (bookId: string) => api.get('/accounting/period-end/overview', { params: { bookId } }),
   getTAccount: (params: { accountId: string; from: string; to: string; cutoffAt: string }) => api.get('/accounting/period-end/t-accounts', { params }),
@@ -1229,8 +1264,8 @@ export const accountingAPI = {
   reopenCloseRun: (id: string, data: { confirmed: boolean; reason: string }) => api.post(`/accounting/period-end/close-runs/${id}/reopen`, data),
   createRestatementCase: (data: any) => api.post('/accounting/period-end/restatement-cases', data),
   archiveAccountingEvidence: (data: any) => api.post('/accounting/period-end/archive-evidence', data),
-    getPartnerSabalanPlanCandidates: () => api.get('/partner-accounting/sabalan-plan-candidates'),
-    setPartnerSabalanPaymentPlan: (data: any) => api.post('/partner-accounting/sabalan-payment-plan', data),
+  getPartnerSabalanPlanCandidates: (request?: AxiosRequestConfig) => api.get('/partner/accounting/sabalan-plan-candidates', request),
+  setPartnerSabalanPaymentPlan: (data: any, request?: AxiosRequestConfig) => api.post('/partner/accounting/sabalan-payment-plan', data, request),
   getWorkspace: (params?: any) => api.get('/accounting/workspace', { params }),
   getDashboard: (params: { range: '1m' | '3m' | '6m' | '1y'; due?: string; deadlineType?: string }) =>
     api.get('/accounting/dashboard', { params }),
@@ -1239,11 +1274,17 @@ export const accountingAPI = {
   getDashboardWorkspace: (params: { range: '1m' | '3m' | '6m' | '1y'; due?: string; deadlineType?: string }) =>
     api.get('/accounting/dashboard/workspace', { params }),
   getFinancialTrend: (range: '1m' | '3m' | '6m' | '1y') => api.get('/accounting/financial-trend', { params: { range } }),
-  getDispatchCandidates: () => api.get('/accounting/dispatch-candidates'),
-  registerSepidarLoadingReference: (loadingId: string, data: { value: string | null; expectedVersion: string | null; reason?: string }) =>
+  getDispatchCandidates: (loadingId?: string) => api.get('/accounting/dispatch-candidates', { params: { loadingId } }),
+  getDispatchCandidatePage: (page: number, pageSize: number, search: string, status?: string, sepidar?: string) =>
+    api.get('/accounting/dispatch-candidates', { params: { page, pageSize, search, status, sepidar } }),
+  getSepidarDispatchInvoices: (loadingId: string, signal?: AbortSignal) =>
+    api.get(`/accounting/loadings/${encodeURIComponent(loadingId)}/sepidar-reference`, { signal }),
+  saveSepidarDispatchInvoices: (loadingId: string, data: { invoices: { number: string; amountRial: string }[]; expectedVersion: string | null; reason?: string }) =>
     api.post(`/accounting/loadings/${encodeURIComponent(loadingId)}/sepidar-reference`, data),
-  issueLoadingDocuments: (loadingId: string, recovery?: { waybillId: string; invoiceId: string; reason: string }) =>
-    api.post(`/accounting/loadings/${encodeURIComponent(loadingId)}/issue-dispatch-documents`, recovery ? { recovery } : undefined),
+  issueLoadingDocuments: (loadingId: string, commandId: string, recovery?: { waybillId: string; invoiceId: string; reason: string }) =>
+    api.post(`/accounting/loadings/${encodeURIComponent(loadingId)}/issue-dispatch-documents`, { commandId, recovery }),
+  getLoadingDocumentIssueReceipt: (loadingId: string, commandId: string) =>
+    api.get(`/accounting/loadings/${encodeURIComponent(loadingId)}/issue-dispatch-documents/${encodeURIComponent(commandId)}`),
   reconstructLegacyWaybill: (waybillId: string, reason: string) => api.post(`/accounting/dispatch-waybills/${encodeURIComponent(waybillId)}/reconstruct-legacy`, { reason }),
   decideDispatchCandidate: (id: string, data: { action: 'ACCEPT' | 'REJECT'; reason: string; idempotencyKey: string }) =>
     api.post(`/accounting/dispatch-candidates/${id}/decision`, data),
@@ -1293,10 +1334,10 @@ export const accountingAPI = {
       params: { ...params, download: true },
       responseType: 'blob'
     }),
-  getFinancialRecords: (params?: any) => api.get('/accounting/financial-records', { params }),
-  getReceivables: (params?: any) => api.get('/accounting/receivables', { params }),
-  getPayments: (params?: any) => api.get('/accounting/payments', { params }),
-  getTaxRecords: (params?: any) => api.get('/accounting/tax', { params }),
+  getFinancialRecords: (params?: any, request?: AxiosRequestConfig) => api.get('/accounting/financial-records', { ...request, params }),
+  getReceivables: (params?: any, request?: AxiosRequestConfig) => api.get('/accounting/receivables', { ...request, params }),
+  getPayments: (params?: any, request?: AxiosRequestConfig) => api.get('/accounting/payments', { ...request, params }),
+  getTaxRecords: (params?: any, request?: AxiosRequestConfig) => api.get('/accounting/tax', { ...request, params }),
   getCorrectionRequests: (params?: any) => api.get('/accounting/correction-requests', { params }),
   createCorrectionRequest: (
     contractId: string,
@@ -1309,13 +1350,14 @@ export const accountingAPI = {
   getPerformanceReport: (params?: any) => api.get('/accounting/performance', { params }),
   getSettings: () => api.get('/accounting/settings'),
   updateSettings: (data: any) => api.put('/accounting/settings', data),
-  executeAction: (data: any) => api.post('/accounting/actions', data),
+  executeAction: (data: any, request?: AxiosRequestConfig) => api.post('/accounting/actions', data, request),
   getBiometricConnectorDiagnostics: () => api.get('/biometric-connector/diagnostics'),
   createBiometricDiagnosticCommand: (workstationId: string) => api.post('/biometric-connector/diagnostics/command', { workstationId }),
   completeBiometricDiagnostic: (data: any) => api.post('/biometric-connector/diagnostics/result', data),
-};
+});
+export const accountingAPI = createAccountingAPI(api);
 
-export const dispatchConfirmationAPI = {
+export const createDispatchConfirmationAPI = (api: RequestClient) => ({
   getCapabilities: () => api.get('/dispatch-confirmation/capabilities'),
   enrollInternalDriver: (personnelId: string, data: any) => api.post(`/dispatch-confirmation/${biometricDriverPath(personnelId)}/enrollment`, data),
   cancelEnrollmentSession: (personnelId: string, enrollmentSessionId: string) => api.post(`/dispatch-confirmation/${biometricDriverPath(personnelId)}/enrollment-session/cancel`, { enrollmentSessionId }),
@@ -1334,32 +1376,37 @@ export const dispatchConfirmationAPI = {
   verifyOtp: (sessionId: string, code: string) => api.post(`/dispatch-confirmation/sessions/${sessionId}/otp/verify`, { code }),
   revokeAuthorization: (authorizationId: string, reason: string) => api.post(`/dispatch-confirmation/authorizations/${authorizationId}/revoke`, { reason }),
   revokeAuthorizationAsGuard: (authorizationId: string, reason: string) => api.post(`/dispatch-confirmation/guard/authorizations/${authorizationId}/revoke`, { reason }),
-};
+});
+export const dispatchConfirmationAPI = createDispatchConfirmationAPI(api);
 
 export const hrHiringMetricsAPI = {
   getDashboardMetrics: () => api.get('/hr-hiring/dashboard-metrics'),
 };
 
-export const biAPI = {
+export const createBiAPI = (api: RequestClient) => ({
   getSalesOverview: (params?: any) => api.get('/bi/sales/overview', { params }),
   getSalesAnalysis: (view: string, params?: any) => api.get(`/bi/sales/analysis/${view}`, { params }),
   exportSalesTable: (table: string, params?: any) =>
     api.get(`/bi/sales/export/${table}`, { params, responseType: 'blob' }),
   downloadSalesSummaryPdf: (params?: any) =>
     api.get('/bi/sales/summary.pdf', { params, responseType: 'blob' }),
-};
+});
+export const biAPI = createBiAPI(api);
 
-export const salesReportsAPI = {
+export const createSalesReportsAPI = (api: RequestClient) => ({
   getOverview: (params?: any) => api.get('/sales/reports/overview', { params }),
-  getSellers: (params?: any) => api.get('/sales/reports/sellers', { params }),
-  getPresets: () => api.get('/sales/reports/presets'),
+  getSummary: (params: Record<string, string>, signal?: AbortSignal) => api.get('/sales/reports/summary', { params, signal }),
+  getDetails: (params: Record<string, string | number>, signal?: AbortSignal) => api.get('/sales/reports/details', { params, signal }),
+  getSellers: (params?: any, signal?: AbortSignal) => api.get('/sales/reports/sellers', { params, signal }),
+  getPresets: (signal?: AbortSignal) => api.get('/sales/reports/presets', { signal }),
   createPreset: (data: any) => api.post('/sales/reports/presets', data),
   deletePreset: (id: string) => api.delete(`/sales/reports/presets/${id}`),
   downloadPdf: (filters: any, configuration: any) =>
     api.post('/sales/reports/export.pdf', { filters, configuration }, { responseType: 'blob' }),
   downloadExcel: (filters: any, configuration: any) =>
     api.post('/sales/reports/export.xlsx', { filters, configuration }, { responseType: 'blob' })
-};
+});
+export const salesReportsAPI = createSalesReportsAPI(api);
 
 export const logisticsAPI = {
   getDashboard: () => api.get('/logistics/dashboard'),
@@ -1552,7 +1599,7 @@ export const contractsAPI = {
   delete: (id: string) => api.delete(`/contracts/${id}`),
 };
 
-export const securityAPI = {
+export const createSecurityAPI = (api: RequestClient) => ({
   // Shift management
   getShifts: () => api.get('/security/shifts'),
   createShift: (data: any) => api.post('/security/shifts', data),
@@ -1627,7 +1674,11 @@ export const securityAPI = {
   getVehiclePairs: (params?: any) => api.get('/security/vehicle-pairs', { params }),
   getVehiclePairPhoto: (photoId: string) => api.get(`/security/vehicle-pairs/photos/${photoId}`, { responseType: 'blob' }),
   getDriverQueue: (history = false) => api.get('/security/driver-queue', { params: { history } }),
-  getCanonicalDriverQueue: (history = false) => api.get('/security/canonical-driver-queue', { params: { history } }),
+  getCanonicalDriverQueue: () => api.get('/security/canonical-driver-queue'),
+  getCanonicalDriverQueueHistory: (page: number, signal?: AbortSignal) =>
+    api.get('/security/canonical-driver-queue', { params: { history: true, page }, signal }),
+  getCanonicalDriverQueueEvents: (id: string, signal?: AbortSignal) =>
+    api.get(`/security/canonical-driver-queue/${encodeURIComponent(id)}/events`, { signal }),
   getCanonicalQueueAdmissionOptions: () => api.get('/security/canonical-driver-queue/admission-options'),
   admitCanonicalQueueTurn: (data: { source: 'INTERNAL' | 'EXTERNAL'; driverId: string; vehicleId?: string } |
     { source: 'CUSTOMER_PICKUP'; vehicleType: string; plate: string; phone: string }) => api.post('/security/canonical-driver-queue', data),
@@ -1693,7 +1744,8 @@ export const securityAPI = {
   getAttendanceSignature: (id: string) => api.get(`/security/attendance/${id}/signature`),
   validateSignature: (signatureData: string, employeeId: string) => 
     api.post('/security/signature/validate', { signatureData, employeeId }),
-};
+});
+export const securityAPI = createSecurityAPI(api);
 
 export const personalAPI = {
   getLeaveRequests: (params?: any) => api.get('/personal/leave-requests', { params }),

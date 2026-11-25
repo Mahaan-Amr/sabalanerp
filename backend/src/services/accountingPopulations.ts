@@ -61,12 +61,14 @@ type ReviewableContractRow = {
   };
 };
 
+export const REVIEWABLE_ATTENTION_WEIGHT = { correction: 4, flag: 3, overdue: 3, tax: 2, unbilled: 1 } as const;
+
 export const reviewableContractAttentionScore = (item: ReviewableContractRow) => (
-  (item.accounting.openCorrections * 4)
-  + (item.accounting.openFlags * 3)
-  + (item.accounting.receivableStatus === 'OVERDUE' ? 3 : 0)
-  + (item.accounting.taxStatus === 'NOT_READY' ? 2 : 0)
-  + (item.accounting.eligibleForFinancialRecords && item.accounting.invoiceStatus === 'NONE' ? 1 : 0)
+  (item.accounting.openCorrections * REVIEWABLE_ATTENTION_WEIGHT.correction)
+  + (item.accounting.openFlags * REVIEWABLE_ATTENTION_WEIGHT.flag)
+  + (item.accounting.receivableStatus === 'OVERDUE' ? REVIEWABLE_ATTENTION_WEIGHT.overdue : 0)
+  + (item.accounting.taxStatus === 'NOT_READY' ? REVIEWABLE_ATTENTION_WEIGHT.tax : 0)
+  + (item.accounting.eligibleForFinancialRecords && item.accounting.invoiceStatus === 'NONE' ? REVIEWABLE_ATTENTION_WEIGHT.unbilled : 0)
 );
 
 export const orderReviewableContracts = <T extends ReviewableContractRow>(items: T[]) => (
@@ -141,6 +143,17 @@ export const resolveTehranDayRange = (value: unknown): DateRange | null => {
   return {
     gte: zonedMidnightToUtc(parsed.year, parsed.month, parsed.day),
     lt: zonedMidnightToUtc(nextDay.getUTCFullYear(), nextDay.getUTCMonth() + 1, nextDay.getUTCDate()),
+  };
+};
+
+export const tehranGregorianMonth = (instant: Date) => {
+  const { year, month } = dateTimeParts(instant, TEHRAN_TIME_ZONE);
+  const nextMonth = new Date(Date.UTC(year, month, 1));
+  const nextStart = zonedMidnightToUtc(nextMonth.getUTCFullYear(), nextMonth.getUTCMonth() + 1, 1);
+  return {
+    code: `${year}-${String(month).padStart(2, '0')}`,
+    startsAt: zonedMidnightToUtc(year, month, 1),
+    endsAt: new Date(nextStart.getTime() - 1),
   };
 };
 

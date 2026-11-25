@@ -31,7 +31,9 @@ async function run() {
     const captured: { listQuery: any } = { listQuery: undefined };
     const readCapturedQuery = (): any => captured.listQuery;
     prisma.$use(async (params, next) => {
-      if (params.model === 'SalesContract' && params.action === 'findMany') captured.listQuery = params.args;
+      if (params.model === 'SalesContract' && params.action === 'findMany' && params.args.select?.contractNumber) {
+        captured.listQuery = params.args;
+      }
       return next(params);
     });
     const start = performance.now();
@@ -80,14 +82,15 @@ async function run() {
       { userId: reviewer.id });
     assert(reviewablePartner.items.every(row => row.partnerContext?.caseState === 'COMMITTED'),
       'Financial review excludes numbered Partner cases that were never committed');
-    const fullPartner = await listAccountingContracts({ sourceKind: 'PARTNER_INTERNAL_RECORD', pageSize: 100 },
-      { userId: reviewer.id });
-    const fullById = new Map(fullPartner.items.map(row => [row.contractId, row]));
-    for (const row of reviewablePartner.items) {
-      assert.deepEqual(row, fullById.get(row.contractId),
-        'Bounded review preparation preserves the complete committed row and source-specific actions');
-    }
+    const exactPartner = await listAccountingContracts({ view: 'reviewable', sourceKind: 'PARTNER_INTERNAL_RECORD',
+      pageSize: 100, dateFrom: 'unfiltered' }, { userId: reviewer.id });
+    assert.deepEqual(reviewablePartner, exactPartner,
+      'SQL paging preserves the complete reviewable Partner projection, including dates, actions and totals');
+    captured.listQuery = undefined;
     const combined50 = await listAccountingContracts({ view: 'reviewable', pageSize: 50 }, { userId: reviewer.id });
+    const visibleOrdinaryIds = combined50.items.filter(row => row.sourceKind !== 'PARTNER_INTERNAL_RECORD').map(row => row.contractId);
+    assert.deepEqual(readCapturedQuery() ? readCapturedQuery().where.id?.in : [], visibleOrdinaryIds,
+      'the reviewable list hydrates only the ordinary Contracts on the page');
     const combined100 = await listAccountingContracts({ view: 'reviewable', pageSize: 100 }, { userId: reviewer.id });
     assert.equal(combined50.total, combined100.total, 'The mixed authorized total is independent of page size');
     assert.deepEqual(combined50.totals, combined100.totals, 'The mixed financial totals are independent of page size');
@@ -120,7 +123,7 @@ async function run() {
     assert.deepEqual(persian.items.map(row => row.contractId), english.items.map(row => row.contractId),
       'REGRESSION: Persian digits cannot find the same accounting contract');
     const existingInvoice = await prisma.accountingFinancialRecord.findFirst({
-      where: { kind: 'INVOICE_CANDIDATE' }, select: { id: true },
+      where: { kind: 'INVOICE_CANDIDATE', sourceKind: 'SALES_CONTRACT', contractId: { not: null } }, select: { id: true },
     });
     assert(existingInvoice, 'Local financial-record fixture required');
     const focusedInvoice = await listFinancialRecords({ kind: 'INVOICE_CANDIDATE', recordId: existingInvoice.id, pageSize: 1 });

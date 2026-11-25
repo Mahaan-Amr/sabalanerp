@@ -27,7 +27,17 @@ const runtimeDispatchPermissionsName = '20261120124000_runtime_dispatch_permissi
 const runtimeDriverAssignmentName = '20261120125000_runtime_driver_assignment_permissions';
 const runtimePartnerReceiptName = '20261120126000_runtime_partner_receipt_permissions';
 const runtimePartnerInquiryEvidenceName = '20261120127000_runtime_partner_inquiry_evidence_locks';
+const stoneReceiptName = '20261123110000_stone_return_receipts';
+const stoneDraftName = '20261123111000_stone_return_allocation_drafts';
+const sepidarInvoiceName = '20261123130000_sepidar_dispatch_invoices';
+const excessShipmentName = '20261123130000_stone_excess_shipment_return';
+const stoneFinalizationName = '20261123140000_stone_return_finalizations';
 const nextReleaseCatalog = {
+  [stoneReceiptName]: { tables: ['stone_return_receipts'], functions: ['accounting_guard_supply_chain_append_only'] },
+  [stoneDraftName]: { tables: ['stone_return_allocation_drafts', 'stone_return_allocation_draft_rows'], functions: [] },
+  [sepidarInvoiceName]: { tables: ['sepidar_dispatch_invoices', 'logistics_loadings'], functions: [] },
+  [excessShipmentName]: { tables: ['shipment_quantity_evidence', 'shipment_quantity_projections'], functions: [] },
+  [stoneFinalizationName]: { tables: ['stone_return_finalizations'], functions: [] },
   '20261116120000_customer_allocation_intents': {
     tables: ['accounting_customer_allocation_intents'],
     functions: ['protect_allocation_intent_evidence'],
@@ -165,10 +175,15 @@ const currentRelease = {
   [runtimeDriverAssignmentName]: ['3a1329ef8fb845b5ac18f03224e4b0d596a414918f29a0dfaa62c00fe443eb6b', 1],
   [runtimePartnerReceiptName]: ['7983529ea9ea7995598e300bb99f35dbfd6959a278488bc4b230898ea04d1257', 3],
   [runtimePartnerInquiryEvidenceName]: ['c31b8cc6d35b468d0165fb4ab676213ba0b1c3d1aa32f94dfe51ec25e776e2e4', 1],
+  [stoneReceiptName]: ['ebc500523992eb9dfc7e67e03e48fcebbf72b862ac0bdad848fc60b4917fdb34', 13],
+  [stoneDraftName]: ['84da00b73be0ae7451de1c4341895dfa2d3422bfdb2e024dd01b22d573fdad4b', 8],
+  [sepidarInvoiceName]: ['25baa74bd56d1eb91ca61762f3bc1adb3b80c777227c11274cbfe48ad55770b7', 4],
+  [excessShipmentName]: ['7ecdf5832b9fff8ebfbf75efc50d99e2c8f09bccb56a0d6d472d902318d8c7d1', 3],
+  [stoneFinalizationName]: ['bbfc6766644d09496ba4c7d3863678bd3b25099f152add64e777ef9458467749', 5],
 } as const;
 export const protectedCurrentReleaseNames: readonly string[] = Object.freeze(Object.keys(currentRelease));
 // Each release extends the ledger while preserving the prior release-set hashes.
-const protectedReleaseEpochEnds = Object.freeze([12, 22, 24, 25, 35, 36, 37, 38, 41, 42, 43, 44, 45, 46, 47, 48, 49]);
+const protectedReleaseEpochEnds = Object.freeze([12, 22, 24, 25, 35, 36, 37, 38, 41, 42, 43, 44, 45, 46, 47, 48, 49, 54]);
 const releaseSetSha256 = (files: CurrentFile[], index: number) => sha(files.slice(0,
   protectedReleaseEpochEnds.find(end => index < end)!).map(file => file.sha256).join('\n'));
 
@@ -208,7 +223,7 @@ export function compileProtectedCurrentRelease(files: ReadonlyArray<readonly [st
     const sql = bytes.toString('utf8');
     let statements = splitCurrentReleaseSql(sql);
     if (name === '20261108000100_start_new_waybill_numbers_at_one'
-      || name === retireAttachmentScanStatusName || name === protectPartnerNumberReservationName) {
+      || name === retireAttachmentScanStatusName || name === protectPartnerNumberReservationName || name === sepidarInvoiceName) {
       const opening = statements[0]?.replace(/^(?:--[^\r\n]*\r?\n\s*)+/, '');
       if (statements.length !== expectedCount + 2 || opening !== 'BEGIN;' || statements.at(-1) !== 'COMMIT;') {
         failure('PROTECTED_CURRENT_RELEASE_TRANSACTION_WRAPPER_UNPROVEN');
@@ -354,7 +369,9 @@ async function catalog(tx: Prisma.TransactionClient, input: {
   const partnerReadinessProjection = input.partnerReadinessProjection
     ? { partnerReadinessProjection: await partnerReadinessProjectionProof(tx) } : {};
   const runtimeAcl = input.appliedNames ? await protectedCurrentReleaseRuntimeAclProof(tx, input.appliedNames) : undefined;
-  return sha(JSON.stringify(canonical({ tables, functions, ...pickupSource, ...partnerReadinessProjection, ...runtimeAcl })));
+  const shipmentEvidence = input.appliedNames?.has(excessShipmentName)
+    ? { shipmentEvidenceKinds: await shipmentEvidenceKinds(tx) } : {};
+  return sha(JSON.stringify(canonical({ tables, functions, ...pickupSource, ...partnerReadinessProjection, ...runtimeAcl, ...shipmentEvidence })));
 }
 
 /** Also required when discovery finds no pending work. A successful no-op
@@ -503,6 +520,14 @@ export async function protectedCurrentReleaseRuntimeAclProof(tx: RuntimeAclCatal
     routineDefiners.protect_runtime_reference_row = false;
   }
 
+  // The stone migrations grant these privileges even when the verified role is dormant.
+  const stoneTables = [
+    ...(appliedNames.has(stoneReceiptName) ? ['stone_return_receipts'] : []),
+    ...(appliedNames.has(stoneDraftName) ? ['stone_return_allocation_drafts', 'stone_return_allocation_draft_rows'] : []),
+    ...(appliedNames.has(stoneFinalizationName) ? ['stone_return_finalizations'] : []),
+  ];
+  for (const table of stoneTables) tableGrants[table] = ['INSERT', 'SELECT'];
+  if (appliedNames.has(sepidarInvoiceName)) tableGrants.sepidar_dispatch_invoices = ['DELETE', 'INSERT', 'SELECT'];
   const split = configuredProtectedDatabaseRoleRecovery(env);
   const runtime = split?.roles.runtime ?? 'sabalan_application_runtime';
   const [identity] = await tx.$queryRaw<Array<{ admitted: boolean; owner: string; database: string; login: boolean }>>`
@@ -552,7 +577,7 @@ export async function protectedCurrentReleaseRuntimeAclProof(tx: RuntimeAclCatal
   for (const object of objects) {
     const expected: CatalogGrant[] = object.ownerPrivileges.map(privilege =>
       ({ grantee: identity.owner, privilege, grantable: false, grantor: identity.owner }));
-    if (object.kind === 'table' && split) {
+    if (object.kind === 'table' && (split || stoneTables.includes(object.name))) {
       expected.push(...tableGrants[object.name].map(privilege =>
         ({ grantee: runtime, privilege, grantable: false, grantor: identity.owner })));
     }
@@ -566,6 +591,29 @@ export async function protectedCurrentReleaseRuntimeAclProof(tx: RuntimeAclCatal
     }
   }
   return { runtimeAcl: { tableGrants, routineDefiners } };
+}
+
+async function shipmentEvidenceKinds(tx: Prisma.TransactionClient) {
+  const rows = await tx.$queryRaw<Array<{ label: string }>>`
+    SELECT enumlabel::text AS label FROM pg_enum
+    WHERE enumtypid = 'public."ShipmentQuantityEvidenceKind"'::regtype ORDER BY enumsortorder`;
+  const labels = rows.map(row => row.label);
+  const expected = ['CONTRACTED_SET', 'ALLOCATION_FINALIZED', 'ALLOCATION_RELEASED', 'PHYSICAL_EXIT', 'MANUAL_OUTAGE_EXIT',
+    'DISPATCH_CORRECTION_DRAFT', 'DISPATCH_CORRECTION_POSTED', 'LEGACY_UNRECONCILED_RESERVED', 'LEGACY_DISPATCHED',
+    'LEGACY_RELEASED', 'LEGACY_STILL_RESERVED', 'PROJECTION_STALE', 'EVIDENCE_CONFLICT', 'GUARD_RETURN_VERIFIED', 'EXCESS_RETURN_FINALIZED'];
+  if (JSON.stringify(labels) !== JSON.stringify(expected)) failure('PROTECTED_CURRENT_RELEASE_SHIPMENT_ENUM_DRIFT');
+  return labels;
+}
+
+async function sepidarSeedProof(tx: Prisma.TransactionClient, source: 'legacy' | 'invoices') {
+  const rows = source === 'legacy'
+    ? Prisma.sql`SELECT id, "sepidarLoadingReference" AS number, NULL::numeric AS amount FROM public.logistics_loadings
+        WHERE "sepidarLoadingReference" IS NOT NULL`
+    : Prisma.sql`SELECT "loadingId" AS id, number, "amountRial" AS amount FROM public.sepidar_dispatch_invoices`;
+  const [result] = await tx.$queryRaw<Array<{ digest: string }>>(Prisma.sql`
+    SELECT encode(sha256(convert_to(coalesce(jsonb_agg(jsonb_build_array(id, number, amount)
+      ORDER BY id COLLATE "C", number COLLATE "C")::text, '[]'), 'UTF8')), 'hex') AS digest FROM (${rows}) seed`);
+  return result.digest;
 }
 
 async function partnerReadinessProjectionProof(tx: Prisma.TransactionClient) {
@@ -672,12 +720,12 @@ async function sequenceProof(tx: Prisma.TransactionClient, after: boolean) {
 }
 
 type RetryProof = { quantityProofSha256: string | null; dutyRows: string | null; sequenceProofSha256: string | null;
-  pickupDispatchRows?: string; personalPickupDispatchRows?: string };
+  pickupDispatchRows?: string; personalPickupDispatchRows?: string; sepidarSeedSha256?: string };
 export function assertProtectedCurrentReleaseRetryEvidence(receipt: any, owner: Owner, observed: RetryProof) {
   if (typeof receipt?.deploymentId !== 'string' || !receipt.deploymentId
     || typeof receipt.releaseId !== 'string' || !receipt.releaseId) failure('PROTECTED_CURRENT_RELEASE_HISTORY_UNPROVEN');
   if (receipt.deploymentId !== owner.deploymentId || receipt.releaseId !== owner.releaseId) return;
-  for (const key of ['quantityProofSha256', 'dutyRows', 'sequenceProofSha256', 'pickupDispatchRows', 'personalPickupDispatchRows'] as const) {
+  for (const key of ['quantityProofSha256', 'dutyRows', 'sequenceProofSha256', 'pickupDispatchRows', 'personalPickupDispatchRows', 'sepidarSeedSha256'] as const) {
     if (receipt[key] !== observed[key]) failure('PROTECTED_CURRENT_RELEASE_RETRY_DATA_DRIFT');
   }
 }
@@ -708,6 +756,7 @@ export async function applyProtectedCurrentRelease(database: PrismaClient, input
       let receipt: any; try { receipt = JSON.parse(history[0].logs!); } catch { failure('PROTECTED_CURRENT_RELEASE_HISTORY_UNPROVEN'); }
       if (receipt?.format !== 'sabalan-protected-current-release/v1' || receipt.sqlSha256 !== file.sha256
         || receipt.order !== files.indexOf(file) || receipt.releaseSetSha256 !== releaseSetSha256(files, files.indexOf(file))
+        || (file.name === sepidarInvoiceName && !/^[0-9a-f]{64}$/.test(receipt.sepidarSeedSha256 ?? ''))
         || (file.name === pickupDispatchName && (typeof receipt.pickupDispatchRows !== 'string'
           || !/^\d+:\d+$/.test(receipt.pickupDispatchRows)))
         || (file.name === personalPickupDispatchName && (typeof receipt.personalPickupDispatchRows !== 'string'
@@ -716,6 +765,7 @@ export async function applyProtectedCurrentRelease(database: PrismaClient, input
       }
       const sameOperation = receipt.deploymentId === owner.deploymentId && receipt.releaseId === owner.releaseId;
       const observed: RetryProof = {
+        ...(sameOperation && file.name === sepidarInvoiceName && { sepidarSeedSha256: await sepidarSeedProof(tx, 'invoices') }),
         quantityProofSha256: sameOperation && quantityNames.has(file.name) ? await quantityProof(tx, file, false) : null,
         dutyRows: sameOperation && file.name === dutyName ? await dutyProof(tx, true) : null,
         sequenceProofSha256: sameOperation && file.name === waybillName ? await sequenceProof(tx, true) : null,
@@ -756,7 +806,11 @@ export async function applyProtectedCurrentRelease(database: PrismaClient, input
       const pickupDispatch = file.name === pickupDispatchName;
       const personalPickupDispatch = file.name === personalPickupDispatchName;
       const beforePickup = pickupDispatch || personalPickupDispatch ? await pickupDispatchRows(tx) : null;
+      const sepidarSeedSha256 = file.name === sepidarInvoiceName ? await sepidarSeedProof(tx, 'legacy') : undefined;
       for (const statement of file.statements) { assertBoundary(); await tx.$executeRawUnsafe(statement); }
+      if (sepidarSeedSha256 && await sepidarSeedProof(tx, 'invoices') !== sepidarSeedSha256) {
+        failure('PROTECTED_CURRENT_RELEASE_SEPIDAR_BACKFILL_CHANGED');
+      }
       if (beforeQuantity && beforeQuantity !== await quantityProof(tx, file, false)) failure('PROTECTED_CURRENT_RELEASE_QUANTITY_CHANGED');
       if (beforeDuty !== null && beforeDuty !== await dutyProof(tx, true)) failure('PROTECTED_CURRENT_RELEASE_DUTY_ROWS_CHANGED');
       if (beforePickup !== null) {
@@ -771,7 +825,7 @@ export async function applyProtectedCurrentRelease(database: PrismaClient, input
         deploymentId: owner.deploymentId, releaseId: owner.releaseId,
         quantityProofSha256: beforeQuantity, dutyRows: beforeDuty, sequenceProofSha256,
         ...(pickupDispatch && { pickupDispatchRows: beforePickup }),
-        ...(personalPickupDispatch && { personalPickupDispatchRows: beforePickup }) });
+        ...(personalPickupDispatch && { personalPickupDispatchRows: beforePickup }), sepidarSeedSha256 });
       await tx.$executeRaw`INSERT INTO public._prisma_migrations (id,checksum,finished_at,migration_name,logs,started_at,applied_steps_count)
         VALUES (${randomUUID()},${file.sha256},clock_timestamp(),${file.name},${receipt},clock_timestamp(),1)`;
       assertBoundary();

@@ -53,12 +53,32 @@ test('commands fail closed for view-only, blocked, stale, or incomplete state', 
   assert.equal(canRunDispatchDocumentCommand('REPLACE', workspace('MANAGE'), incomplete, false), false);
 });
 
-test('missing selected case falls back to first visible case without crossing filters', () => {
+test('missing selected case does not open another case or cross filters', () => {
   const view = buildDispatchDocumentView(workspace('MANAGE'), 'ISSUED', 'ready');
-  assert.equal(view.selectedCase?.id, 'issued');
+  assert.equal(view.selectedCase, null);
 });
 
 test('display money rounds the authoritative decimal without binary floating-point loss', () => {
   assert.equal(formatDisplayedMoney({ amount: '9007199254740993.500000000000', currency: 'IRR' }), '۹٬۰۰۷٬۱۹۹٬۲۵۴٬۷۴۰٬۹۹۴ ریال');
   assert.equal(formatDisplayedMoney({ amount: '-84000000.499999999999', currency: 'IRR' }), '‎−۸۴٬۰۰۰٬۰۰۰ ریال');
+});
+
+test('a short queue page after group confirmation has an explicit read to recover its boundary row', () => {
+  const ready = Array.from({ length: 51 }, (_, index) => ({ ...cases[0], id: String(index + 1) }));
+  const snapshot = { ...workspace('MANAGE'), page: 1, pageSize: 50,
+    counts: { READY: 51, BLOCKED: 0, ISSUED: 0 }, cases: ready.slice(0, 50) };
+  assert.equal(buildDispatchDocumentView(snapshot, 'READY', null).pageNeedsReload, false);
+
+  const afterGroupRead = { ...snapshot, counts: { ...snapshot.counts, READY: 50, ISSUED: 1 },
+    cases: snapshot.cases.slice(1) };
+  const shortPage = buildDispatchDocumentView(afterGroupRead, 'READY', null);
+  assert.equal(shortPage.counts.READY, 50);
+  assert.equal(shortPage.visibleCases.length, 49);
+  assert.equal(shortPage.pageNeedsReload, true);
+
+  const reloaded = buildDispatchDocumentView({ ...afterGroupRead, cases: ready.slice(1) }, 'READY', null);
+  assert.equal(reloaded.pageNeedsReload, false);
+  assert.equal(reloaded.visibleCases.at(-1)?.id, '51');
+  assert.equal(buildDispatchDocumentView({ ...afterGroupRead, page: 2, cases: [] }, 'READY', null).pageNeedsReload, true);
+  assert.equal(buildDispatchDocumentView({ ...afterGroupRead, permission: 'UNAUTHORIZED' }, 'READY', null).pageNeedsReload, false);
 });

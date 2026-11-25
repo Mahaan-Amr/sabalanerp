@@ -12,6 +12,7 @@ import {
   PartnerCommandSchema,
   SabalanInternalRecordViewSchema,
   canonicalHash,
+  canonicalJson,
   checkExpectedRevision,
   partnerError,
   type PartnerCommandPort,
@@ -112,21 +113,23 @@ async function clock(tx: Transaction) {
   return { date: instant.slice(0, 10), instant };
 }
 
+const caseViewSelect = {
+  id: true, caseNumber: true, trackingCode: { select: { number: true } },
+  profileId: true, headRevision: true, integrityHash: true, state: true,
+  pricingState: true, commercialFlowVersion: true, customerConfirmationState: true,
+  stateRevision: true, internalRecordId: true, customerContractId: true, commitmentEventId: true,
+  profile: { select: { userId: true } },
+  internalRecord: { select: { recordNumber: true, commercialAccountId: true, pricingState: true,
+    expectedRevision: true, integrityHash: true } },
+  head: { select: { predecessorRevision: true, integrityHash: true, pricingState: true, graphHash: true, graph: true,
+    partySnapshots: true, wholesaleEnvelope: true, retailEnvelope: true, paymentEvidence: true,
+    customerContent: true, internalProjection: true, customerProjection: true } },
+  customerContract: { select: { contractNumber: true, partnerRevision: true, partnerIntegrityHash: true,
+    status: true, signedAt: true, printedAt: true, firstFinancialRecordAt: true } },
+} satisfies Prisma.PartnerSaleCaseSelect;
+
 async function readCase(tx: Transaction, caseId: string) {
-  return tx.partnerSaleCase.findUnique({ where: { id: caseId }, select: {
-    id: true, caseNumber: true, trackingCode: { select: { number: true } },
-    profileId: true, headRevision: true, integrityHash: true, state: true,
-    pricingState: true, commercialFlowVersion: true, customerConfirmationState: true,
-    stateRevision: true, internalRecordId: true, customerContractId: true, commitmentEventId: true,
-    profile: { select: { userId: true } },
-    internalRecord: { select: { recordNumber: true, commercialAccountId: true, pricingState: true,
-      expectedRevision: true, integrityHash: true } },
-    head: { select: { predecessorRevision: true, integrityHash: true, pricingState: true, graphHash: true, graph: true,
-      partySnapshots: true, wholesaleEnvelope: true, retailEnvelope: true, paymentEvidence: true,
-      customerContent: true, internalProjection: true, customerProjection: true } },
-    customerContract: { select: { contractNumber: true, partnerRevision: true, partnerIntegrityHash: true,
-      status: true, signedAt: true, printedAt: true, firstFinancialRecordAt: true } },
-  } });
+  return tx.partnerSaleCase.findUnique({ where: { id: caseId }, select: caseViewSelect });
 }
 
 async function lockCase(tx: Transaction, caseId: string) {
@@ -136,7 +139,7 @@ async function lockCase(tx: Transaction, caseId: string) {
 
 type LockedCase = NonNullable<Awaited<ReturnType<typeof lockCase>>>;
 
-async function parseViews(tx: Transaction, row: LockedCase) {
+async function parseViews(tx: Transaction, row: LockedCase, loadedPredecessor?: { integrityHash: string } | null) {
   if (!row.internalRecordId || !row.customerContractId || !row.internalRecord || !row.customerContract) return undefined;
   const internal = row.head.internalProjection;
   if (!internal || typeof internal !== 'object' || Array.isArray(internal)) return undefined;
@@ -145,7 +148,8 @@ async function parseViews(tx: Transaction, row: LockedCase) {
   const accounting = SabalanInternalRecordViewSchema.safeParse(source.accounting);
   const fulfillment = FulfillmentViewSchema.safeParse(source.fulfillment);
   const customer = CustomerContractOutputSchema.safeParse(row.head.customerProjection);
-  const predecessor = row.head.predecessorRevision === null ? null : await tx.partnerCaseRevision.findUnique({
+  const predecessor = loadedPredecessor !== undefined ? loadedPredecessor :
+    row.head.predecessorRevision === null ? null : await tx.partnerCaseRevision.findUnique({
     where: { caseId_revision: { caseId: row.id, revision: row.head.predecessorRevision } },
     select: { integrityHash: true },
   });
@@ -181,10 +185,12 @@ async function parseViews(tx: Transaction, row: LockedCase) {
   if (!rebuilt.ok) return undefined;
   const { customerContractNumber: _rebuiltContractNumber, ...rebuiltPartnerWithoutContract } = rebuilt.value.partner;
   const expectedPartner = partner.data.customerContractNumber ? rebuilt.value.partner : rebuiltPartnerWithoutContract;
-  if (await canonicalHash(partner.data) !== await canonicalHash(expectedPartner) ||
-      await canonicalHash(customer.data) !== await canonicalHash(rebuilt.value.customer)) return undefined;
-  if (pricingReady && (await canonicalHash(accounting.data) !== await canonicalHash(rebuilt.value.accounting) ||
-      await canonicalHash(fulfillment.data) !== await canonicalHash(rebuilt.value.fulfillment))) return undefined;
+  // Compare complete canonical content when both values are in memory. The
+  // stored revision and public output digests still bind their original evidence.
+  if (canonicalJson(partner.data) !== canonicalJson(expectedPartner) ||
+      canonicalJson(customer.data) !== canonicalJson(rebuilt.value.customer)) return undefined;
+  if (pricingReady && (canonicalJson(accounting.data) !== canonicalJson(rebuilt.value.accounting) ||
+      canonicalJson(fulfillment.data) !== canonicalJson(rebuilt.value.fulfillment))) return undefined;
   const owner = expectedOwner(row);
   const owns = (candidate: RevisionRef) => candidate.caseId === owner.caseId && candidate.revision === owner.revision &&
     candidate.integrityHash === owner.integrityHash;
@@ -209,6 +215,31 @@ export async function readCurrentPartnerCaseViews(tx: Transaction, caseId: strin
   if (!row) return undefined;
   const views = await parseViews(tx, row);
   return views ? { row, ...views } : undefined;
+}
+
+const accountingCaseViewSelect = {
+  ...caseViewSelect, head: { select: { ...caseViewSelect.head.select, predecessor: { select: { integrityHash: true } } } },
+  customerContract: { select: { ...caseViewSelect.customerContract.select,
+    id: true, partnerKind: true, commercialFlowVersion: true, salesApprovalRevision: true,
+    customerAcceptanceRevision: true, commercialRevision: true, commercialExpiresAt: true, dispatchExpiryExempt: true } },
+} satisfies Prisma.PartnerSaleCaseSelect;
+type AccountingCaseView = NonNullable<Awaited<ReturnType<typeof parseViews>>> & {
+  row: Prisma.PartnerSaleCaseGetPayload<{ select: typeof accountingCaseViewSelect }>;
+};
+
+/** The caller authorizes and fences every supplied Case in the same read snapshot. */
+export async function readCurrentPartnerCaseViewsBatch(tx: Transaction, caseIds: string[], signal?: AbortSignal) {
+  signal?.throwIfAborted();
+  const viewsByCase = new Map<string, AccountingCaseView>();
+  if (!caseIds.length) return viewsByCase;
+  const rows = await tx.partnerSaleCase.findMany({ where: { id: { in: caseIds } }, select: accountingCaseViewSelect });
+  for (const row of rows) {
+    signal?.throwIfAborted();
+    const views = await parseViews(tx, row, row.head.predecessor);
+    if (views) viewsByCase.set(row.id, { row, ...views });
+  }
+  signal?.throwIfAborted();
+  return viewsByCase;
 }
 
 /** Immutable revision projection read for staged Accounting work. It validates
@@ -284,19 +315,22 @@ async function nextSequence(tx: Transaction, caseId: string) {
   return (maximum._max.sequence ?? 0) + 1;
 }
 
-export async function currentPricingEvidenceIsValid(tx: Transaction, owner: RevisionRef) {
+export async function currentPricingEvidenceIsValid(tx: Transaction, owner: RevisionRef, lock: 'UPDATE' | 'SHARE' = 'UPDATE') {
+  // Accounting projections already fence the owning Case. Share the evidence
+  // rows with other snapshots while still excluding row updates and deletes.
+  const evidenceLock = Prisma.raw(lock === 'SHARE' ? 'FOR SHARE OF a, r' : 'FOR UPDATE OF a, r');
   await tx.$queryRaw`SELECT a.id
     FROM partner_inquiry_usages u
     JOIN partner_inquiry_approvals a ON a.id = u."approvalId"
     JOIN partner_inquiry_rows r ON r.id = a."rowId"
     WHERE u."caseId" = ${owner.caseId} AND u."caseRevision" = ${owner.revision}
-    ORDER BY a.id FOR UPDATE OF a, r`;
+    ORDER BY a.id ${evidenceLock}`;
   await tx.$queryRaw`SELECT a.id
     FROM partner_material_inquiry_usages u
     JOIN partner_inquiry_approvals a ON a.id = u."approvalId"
     JOIN partner_inquiry_rows r ON r.id = a."rowId"
     WHERE u."caseId" = ${owner.caseId} AND u."caseRevision" = ${owner.revision}
-    ORDER BY a.id FOR UPDATE OF a, r`;
+    ORDER BY a.id ${evidenceLock}`;
   const [bindings, usages, materialUsages, now] = await Promise.all([
     tx.partnerCaseRowBinding.count({ where: { caseId: owner.caseId, revision: owner.revision } }),
     tx.partnerInquiryUsage.findMany({ where: { caseId: owner.caseId, caseRevision: owner.revision },

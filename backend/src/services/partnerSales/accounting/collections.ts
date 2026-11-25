@@ -20,11 +20,10 @@ export async function readPartnerCollections(tx: Prisma.TransactionClient, input
   return sumPartnerCollections(payments, input);
 }
 
-/** Replay already selected rows from the same authorized read snapshot. */
-export function sumPartnerCollections(payments: readonly AccountingPaymentStatus[], input: {
-  currency: string; cutoff: Date; asOf: Date; preparation: PartnerFinancialPreparation;
-}): string | null {
-  const amounts: string[] = [];
+type CollectionSnapshot = { currency: string; asOf: Date; preparation: PartnerFinancialPreparation };
+
+function validatedCollectionMovements(payments: readonly AccountingPaymentStatus[], input: CollectionSnapshot) {
+  const dated: Array<{ effectiveAt: number; amount: string }> = [];
   for (const payment of payments) {
     if (payment.createdAt > input.asOf) continue;
     if (payment.contractId || payment.currency !== input.currency) throw new PartnerCollectionIntegrityError('Partner collection currency/owner integrity conflict');
@@ -54,7 +53,7 @@ export function sumPartnerCollections(payments: readonly AccountingPaymentStatus
       if (current.startsWith('-') || (excess !== '0' && !excess.startsWith('-'))) {
         throw new PartnerCollectionIntegrityError('Partner collection balance integrity conflict');
       }
-      if (Date.parse(String(movement.effectiveAt)) <= input.cutoff.getTime()) amounts.push(amount);
+      dated.push({ effectiveAt: Date.parse(String(movement.effectiveAt)), amount });
     }
     // A mutable status contradicting its dated ledger cannot be silently repaired.
     if (payment.status === 'REVERSED' && current !== '0') return null;
@@ -64,7 +63,35 @@ export function sumPartnerCollections(payments: readonly AccountingPaymentStatus
     if (payment.method !== 'CHECK' && ['RECEIVED', 'RECONCILED'].includes(payment.status) &&
         subtract(current, payment.amount.toString()) !== '0') return null;
   }
-  const received = sum(amounts);
+  return dated;
+}
+
+function checkedCollectionBalance(received: string) {
   if (received.startsWith('-')) throw new PartnerCollectionIntegrityError('Partner historical collection balance integrity conflict');
   return received;
+}
+
+/** Replay already selected rows from the same authorized read snapshot. */
+export function sumPartnerCollections(payments: readonly AccountingPaymentStatus[], input: CollectionSnapshot & { cutoff: Date }): string | null {
+  const movements = validatedCollectionMovements(payments, input);
+  return movements && checkedCollectionBalance(sum(movements
+    .filter(movement => movement.effectiveAt <= input.cutoff.getTime()).map(movement => movement.amount)));
+}
+
+/** Validate the ledger once, including its opening history, for all chart cutoffs. */
+export function partnerCollectionBalancesAt(payments: readonly AccountingPaymentStatus[], input: CollectionSnapshot,
+  cutoffs: readonly number[]) {
+  const movements = validatedCollectionMovements(payments, input);
+  if (!movements) return null;
+  movements.sort((a, b) => a.effectiveAt - b.effectiveAt);
+  const balances = new Map<number, string>();
+  let index = 0;
+  let balance = '0';
+  for (const cutoff of [...new Set(cutoffs)].sort((a, b) => a - b)) {
+    const amounts: string[] = [];
+    while (index < movements.length && movements[index].effectiveAt <= cutoff) amounts.push(movements[index++].amount);
+    if (amounts.length) balance = sum([balance, ...amounts]);
+    balances.set(cutoff, checkedCollectionBalance(balance));
+  }
+  return balances;
 }

@@ -1,16 +1,15 @@
-import type { Prisma } from '@prisma/client';
+import type { PartnerPermissionReadClient } from './fencedPermissionReads';
 import { getEffectiveUserAccess } from '../../effectiveAccessService';
 import { evaluateNarrowFeatureAccess } from '../../narrowFeatureAccess';
 
 /** Shared operations use the same live workspace and narrow feature decisions
  * as ordinary contracts. This is not a replacement for Case authority or for
  * the command's commercial/integrity gates. */
-export async function readSharedOperationAuthority(tx: Prisma.TransactionClient, actorId: string,
-  accessClient: Prisma.TransactionClient = tx) {
+export async function readSharedOperationAuthority(tx: PartnerPermissionReadClient, actorId: string, at?: Date) {
   const actor = await tx.user.findUnique({ where: { id: actorId },
     select: { role: true, isActive: true, partnerProfile: { select: { id: true } } } });
   if (!actor?.isActive || actor.partnerProfile) return async () => false;
-  const effective = await getEffectiveUserAccess(accessClient, { userId: actorId, userRole: actor.role });
+  const effective = await getEffectiveUserAccess(tx, { userId: actorId, userRole: actor.role, at });
   if (!effective.workspaces.some(row => ['accounting', 'logistics', 'security'].includes(row.workspace))) return async () => false;
   const [userFeatures, roleFeatures, userWorkspaces, roleWorkspaces] = await Promise.all([
     tx.featurePermission.findMany({ where: { userId: actorId } }),
@@ -18,7 +17,7 @@ export async function readSharedOperationAuthority(tx: Prisma.TransactionClient,
     tx.workspacePermission.findMany({ where: { userId: actorId } }),
     tx.roleWorkspacePermission.findMany({ where: { role: actor.role } }),
   ]);
-  const now = new Date();
+  const now = at ?? new Date();
   return async (workspace: string, feature: string | null, required: 'view' | 'edit' | 'admin' = 'edit') => {
     if (feature && effective.disabledFeatures?.includes(feature)) return false;
     const level = effective.workspaces.find(row => row.workspace === workspace)?.permission;
@@ -32,7 +31,7 @@ export async function readSharedOperationAuthority(tx: Prisma.TransactionClient,
   };
 }
 
-export async function hasSharedOperationAuthority(tx: Prisma.TransactionClient, actorId: string,
+export async function hasSharedOperationAuthority(tx: PartnerPermissionReadClient, actorId: string,
   workspace: string, feature: string | null, required: 'view' | 'edit' = 'edit') {
   return (await readSharedOperationAuthority(tx, actorId))(workspace, feature, required);
 }

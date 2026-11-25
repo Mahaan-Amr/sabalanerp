@@ -53,6 +53,19 @@ test('status HTTP boundary requires treasury authority and the exact original no
     const send = (path: string, token?: string, data: unknown = body) => fetch(`${base}${path}`, { method: 'POST', headers: {
       'content-type': 'application/json', ...(token ? { cookie: `sabalan_session=${token}` } : {}),
     }, body: JSON.stringify(data) });
+    const readTreasury = (path: string, token?: string) =>
+      fetch(new URL(`/treasury${path}`, base), { headers: token ? { cookie: `sabalan_session=${token}` } : {} });
+    const balancePath = `/customer-profiles/${account.profile!.id}/balance`;
+    for (const endpoint of ['/summary', '/bank-lines?page=1', '/customer-profiles', balancePath]) {
+      assert.equal((await readTreasury(endpoint)).status, 401);
+    }
+    const overview = await readTreasury('/summary', viewer.token);
+    assert.equal(overview.status, 200);
+    assert.deepEqual((await overview.json() as any).data.capabilities, { canManage: false, canConfigure: false });
+    const balance = await readTreasury(balancePath, viewer.token);
+    assert.equal(balance.status, 200);
+    assert.match(balance.headers.get('cache-control') || '', /no-store/);
+    assert.equal((await balance.json() as any).data.netBalanceRials, '100');
     const before = await Promise.all([f.db.accountingCustomerCommand.count(), f.db.accountingLedgerVoucher.count(), f.db.accountingSettlementAllocation.count()]);
     const response = await send('/status', owner.token); assert.equal(response.status, 200); assert.match(response.headers.get('cache-control') || '', /no-store/);
     assert.deepEqual((await response.json() as any).data, { status: 'COMMITTED', result });

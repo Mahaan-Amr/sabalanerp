@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { mock } from 'node:test';
 import { prisma } from '../../lib/prisma';
 import { AccountingVoidBlockedError, executeAccountingAction } from '../accountingService';
 import { createPartnerAccountingAdapter } from '../partnerSales/accounting/adapter';
@@ -8,6 +9,7 @@ import type { AddressInfo } from 'node:net';
 import accountingRouter from '../../routes/accounting';
 import partnerAccountingRouter from '../../routes/partner-accounting';
 import { createAuthoritativeSession, SESSION_COOKIE } from '../identitySessionService';
+import { readPartnerOutstandingHistory } from '../partnerSales/accounting/history';
 import { PartnerAccountingCommandError } from '../partnerSales/accounting/errors';
 import { executeContractLifecycleAction, createContractLifecycleRequest, decideContractLifecycleRequest,
   ContractLifecycleBlockedError } from '../contractLifecycleService';
@@ -18,6 +20,10 @@ async function main() {
   const url = new URL(process.env.DATABASE_URL || '');
   if (url.hostname !== '127.0.0.1' || url.port !== '55432' ||
       !/^\/sabalanerp_concurrency_[a-f0-9]{16}$/.test(url.pathname)) throw new Error('Isolated local test DB required');
+  const databaseInstant = async () => {
+    const [clock] = await prisma.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
+    return clock.now.toISOString();
+  };
   const recordId = process.env.PARTNER_TEST_INVOICE_ID!;
   const actor = { userId: process.env.PARTNER_TEST_ACTOR_ID!, role: 'ADMIN' };
   try {
@@ -44,7 +50,7 @@ async function main() {
       }
     };
     const receipt = { kind: 'REGISTER_RECEIPT', receivableId: receivable.id, method: 'CHECK' as const,
-      amount: '200', receivedAt: new Date().toISOString(), note: 'دریافت چک آزمایشی حساب همکار',
+      amount: '200', receivedAt: await databaseInstant(), note: 'دریافت چک آزمایشی حساب همکار',
       idempotencyKey: `${recordId}-receipt`, correlationId: `${recordId}-receipt`,
       check: { checkNumber: 'isolated-334', ownerName: 'آزمایش همکار', dueDate: '2026-09-03T00:00:00.000Z' } };
     const caseId = (record.metadata as { partnerCaseId: string }).partnerCaseId;
@@ -111,7 +117,7 @@ async function main() {
       ['CLEARED', '200', '1400'], ['BOUNCED', '0', '1600'], ['RETURNED', '0', '1600'],
     ]) {
       const change = { kind: 'UPDATE_CHECK_STATUS', paymentEventId, status,
-        occurredAt: new Date().toISOString(), note: 'آزمون گردش چک',
+        occurredAt: await databaseInstant(), note: 'آزمون گردش چک',
         idempotencyKey: `${recordId}-${status}`, correlationId: `${recordId}-${status}` };
       await executeAccountingAction(change, actor);
       await executeAccountingAction(change, actor);
@@ -140,6 +146,17 @@ async function main() {
       const cash = await action({ kind: 'REGISTER_RECEIPT', receivableId: receivable.id, method: 'CASH', amount: '50.25',
         note: 'آزمون دریافت نقدی' }, `${recordId}-cash`);
       assert.equal(cash.status, 200, JSON.stringify(cash.body));
+      const cashRow = await prisma.accountingPaymentStatus.findUniqueOrThrow({
+        where: { id: cash.body.data.affected.paymentEventIds[0] },
+      });
+      const cashLedger = cashRow.metadata as { collectionMovements: Array<{ recordedAt: string }> };
+      const cashRegistration = Date.parse(cashLedger.collectionMovements[0].recordedAt);
+      for (const [asOf, expected] of [[cashRegistration - 1, '0'], [cashRegistration, '50.25']] as const) {
+        const [historical] = await prisma.$transaction(tx => readPartnerOutstandingHistory(tx, {
+          invoiceIds: [recordId], asOf: new Date(asOf), cutoff: new Date(asOf + 1),
+        }));
+        assert.equal(historical?.paidAmount, expected, 'the receipt enters history at its database registration instant');
+      }
       await assertBalance('50.25', '1549.75');
       const reverse = { kind: 'REVERSE_RECEIPT', paymentEventId: cash.body.data.affected.paymentEventIds[0], reason: 'استرداد وجه آزمایشی' };
       const reversed = await action(reverse, `${recordId}-cash-reverse`);
@@ -147,7 +164,7 @@ async function main() {
       assert.equal((await action(reverse, `${recordId}-cash-reverse`)).status, 200);
       await assertBalance('0', '1600');
       const grant = await prisma.effectiveActionGrant.findFirstOrThrow({ where: { principalId: actor.userId,
-        domain: 'PARTNER', action: 'ACCOUNTING_WRITE', revokedAt: null } });
+        domain: 'PARTNER', action: 'ACCOUNTING_WRITE', scope: 'PURPOSE_BOUND', boundRootId: caseId, revokedAt: null } });
       await prisma.effectiveActionGrant.update({ where: { id: grant.id }, data: { revokedAt: new Date(),
         revokedBy: actor.userId, revocationReason: 'آزمون لغو دسترسی', revocationCorrelationId: `${recordId}-revoke` } });
       const denied = await prisma.effectiveActionGrant.create({ data: { ...grant, id: `${grant.id}-deny`,
@@ -192,7 +209,7 @@ async function main() {
         trackingCode: `${recordId}-ambiguous-time`, submittedAt: '2026-09-02' }, `${recordId}-ambiguous-tax-time`);
       assert.equal(ambiguousTaxTime.status, 400, 'a fiscal instant must not silently interpret a date-only value as UTC midnight');
       assert.equal((await action({ kind: 'TRACK_TAX_SUBMISSION', invoiceId: recordId, status: 'SUBMITTED',
-        trackingCode: `${recordId}-fiscal-reference`, submittedAt: new Date().toISOString() }, `${recordId}-tax-submit`)).status, 200);
+        trackingCode: `${recordId}-fiscal-reference`, submittedAt: await databaseInstant() }, `${recordId}-tax-submit`)).status, 200);
       let acceptingTax: ReturnType<typeof action> | undefined;
       let submissionRecordedAt: Date | undefined;
       await prisma.effectiveActionGrant.create({ data: { ...grant, id: `${grant.id}-tax-clock-read`, action: 'ACCOUNTING_READ',
@@ -353,10 +370,16 @@ async function main() {
         await prisma.workspacePermission.update({ where: { userId_workspace: { userId: actor.userId, workspace: 'accounting' } },
           data: { permissionLevel: 'edit' } });
       }
-      await prisma.effectiveActionGrant.create({ data: { id: `${recordId}-explicit-read-denial`,
+      // Production immediate grants start at PostgreSQL's clock. Prisma-generated defaults can be ahead on this test host.
+      await prisma.effectiveActionGrant.create({ data: { id: `${recordId}-explicit-read-denial`, effectiveFrom: new Date(await databaseInstant()),
         principalKind: 'USER', principalId: actor.userId, subjectUserId: actor.userId, domain: 'PARTNER',
         action: 'ACCOUNTING_READ', rootKind: 'CASE', purpose: 'ACCOUNTING', scope: 'COMPANY', effect: 'DENY',
         grantedBy: actor.userId, reason: 'آزمون منع صریح خواندن پرونده همکار', correlationId: `${recordId}-read-denial` } });
+      const [denyWindow] = await prisma.$queryRaw<Array<{ active: boolean; deltaMs: number }>>`
+        SELECT "effectiveFrom" <= clock_timestamp() AS active,
+          EXTRACT(EPOCH FROM ("effectiveFrom" - clock_timestamp()))::float8 * 1000 AS "deltaMs"
+        FROM effective_action_grants WHERE id = ${`${recordId}-explicit-read-denial`}`;
+      assert.ok(denyWindow.active, `the denial fixture must be effective at the DB read instant (offset ${denyWindow.deltaMs} ms)`);
       for (const path of ['/financial-records', '/receivables', `/receivables?recordId=${receivable.id}`,
         '/payments', `/payments?recordId=${paymentEventId}`, '/tax', '/audit', '/workspace']) {
         const response = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/accounting${path}`,
@@ -409,9 +432,25 @@ async function main() {
       const actionCash = await action({ kind: 'REGISTER_RECEIPT', receivableId: receivable.id, method: 'CASH', amount: '1',
         note: 'آزمون دسترسی اقدام' }, `${recordId}-action-cash`);
       assert.equal(actionCash.status, 200);
-      const beforeReversal = new Date().toISOString();
       const actionPaymentId = actionCash.body.data.affected.paymentEventIds[0];
-      assert.equal((await readPayment(actionPaymentId)).partnerActions.reverseReceipt, true);
+      // An acknowledged receipt is visible even when the application clock lags PostgreSQL.
+      mock.timers.enable({ apis: ['Date'], now: Date.now() - 5_000 });
+      let beforeReversal: string;
+      try {
+        const postedCash = await readPayment(actionPaymentId);
+        assert.equal(postedCash.partnerActions.reverseReceipt, true);
+        beforeReversal = new Date(Date.parse(postedCash.occurredAt) + 1).toISOString();
+        for (const endpoint of ['financial-trend', 'dashboard']) {
+          const response = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/accounting/${endpoint}?range=1m`,
+            { headers: { cookie: `${SESSION_COOKIE}=${session.token}` } });
+          const body = await response.json() as any;
+          assert.equal(response.status, 200, JSON.stringify(body));
+          const chart = endpoint === 'dashboard' ? body.data.trend : body.data;
+          const point = chart.partnerSeries.find((series: any) => series.currency === 'IRR').points.at(-1);
+          assert.equal(point.received, '1', `${endpoint} includes the acknowledged receipt with a slow application clock`);
+          assert.equal(point.outstanding, '1599');
+        }
+      } finally { mock.timers.reset(); }
       const paymentGrantKey = { userId_workspace_feature: { userId: actor.userId, workspace: 'accounting', feature: 'accounting_payments_manage' } };
       await prisma.featurePermission.update({ where: paymentGrantKey, data: { permissionLevel: 'view' } });
       assert.equal((await readPayment(actionPaymentId)).partnerActions.reverseReceipt, false, 'current narrow permission controls the projected action');
@@ -424,7 +463,7 @@ async function main() {
       assert.equal((await readPayment(actionPaymentId)).partnerActions.reverseReceipt, false);
       const periodParts = new Intl.DateTimeFormat('en-US-u-ca-persian', { timeZone: 'Asia/Tehran', year: 'numeric', month: '2-digit' }).formatToParts(new Date());
       const period = `${periodParts.find(part => part.type === 'year')!.value}-${periodParts.find(part => part.type === 'month')!.value}`;
-      const historical = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/accounting/receivables?view=outstanding&period=${period}&cutoff=${encodeURIComponent(new Date().toISOString())}&search=${encodeURIComponent(displayed.partnerContext.caseNumber)}`,
+      const historical = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/accounting/receivables?view=outstanding&period=${period}&cutoff=${encodeURIComponent(await databaseInstant())}&search=${encodeURIComponent(displayed.partnerContext.caseNumber)}`,
         { headers: { cookie: `${SESSION_COOKIE}=${session.token}` } });
       const historicalBody = await historical.json() as any;
       assert.equal(historical.status, 200, JSON.stringify(historicalBody));
@@ -438,6 +477,16 @@ async function main() {
       assert.equal(earlier.status, 200);
       assert.equal((await earlier.json() as any).data.items.find((item: any) => item.sourceKind === 'PARTNER_INTERNAL_RECORD').remainingAmount,
         '1599', 'historical balance retains the receipt before its later reversal');
+      const debtReads: string[] = [];
+      let observingTrend = true;
+      prisma.$use(async (params, next) => {
+        if (observingTrend && ((params.model === 'AccountingReceivable' && params.action === 'findUnique' &&
+            params.args.where.id === receivable.id) || (params.model === 'AccountingPaymentStatus' &&
+            params.action === 'findMany' && params.args.where?.receivableId === receivable.id))) {
+          debtReads.push(`${params.model}.${params.action}`);
+        }
+        return next(params);
+      });
       const trend = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/accounting/financial-trend?range=1m`,
         { headers: { cookie: `${SESSION_COOKIE}=${session.token}` } });
       assert.equal(trend.status, 200);
@@ -448,6 +497,21 @@ async function main() {
       const currentPartnerPoint = partnerPoints.at(-1);
       assert.equal(currentPartnerPoint.received, '0');
       assert.equal(currentPartnerPoint.outstanding, '1600');
+      observingTrend = false;
+      assert.deepEqual(debtReads, [], 'periods replay published debt from complete rows in the authorized snapshot');
+      const originalMetadata = (await prisma.accountingFinancialRecord.findUniqueOrThrow({ where: { id: recordId } })).metadata as any;
+      try {
+        await prisma.accountingFinancialRecord.update({ where: { id: recordId }, data: { metadata: { ...originalMetadata,
+          partnerApproval: { ...originalMetadata.partnerApproval, financialApprovalEvidenceId: 'mismatched-published-approval' } } } });
+        const damaged = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/accounting/financial-trend?range=1m`,
+          { headers: { cookie: `${SESSION_COOKIE}=${session.token}` } });
+        assert.ok(damaged.status >= 400, 'a published approval with mismatched evidence cannot contribute to the financial trend');
+        await assert.rejects(prisma.$transaction(tx => readPartnerOutstandingHistory(tx, {
+          invoiceIds: [recordId], cutoff: new Date(), asOf: new Date(),
+        })), /integrity conflict|سازگار نیست/);
+      } finally {
+        await prisma.accountingFinancialRecord.update({ where: { id: recordId }, data: { metadata: originalMetadata } });
+      }
       const workspace = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/accounting/workspace`,
         { headers: { cookie: `${SESSION_COOKIE}=${session.token}` } });
       const workspaceBody = await workspace.json() as any;

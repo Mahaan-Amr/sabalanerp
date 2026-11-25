@@ -3116,6 +3116,7 @@ model LogisticsLoading {
   canonicalAllocationDrafts    LogisticsAllocationDraft[]
   canonicalAllocationRevisions LogisticsAllocationRevision[]
   salesDispatchInvoices        SalesDispatchInvoice[]
+  sepidarInvoices              SepidarDispatchInvoice[]
 
   @@index([customerId])
   @@index([projectId])
@@ -3125,6 +3126,16 @@ model LogisticsLoading {
   @@index([loadingDate])
   @@index([partnerCaseId, partnerCaseRevision, partnerDeliveryId], map: "partner_loading_delivery_index")
   @@map("logistics_loadings")
+}
+
+model SepidarDispatchInvoice {
+  number     String           @id
+  loadingId  String
+  amountRial Decimal?        @db.Decimal(50, 12)
+  loading    LogisticsLoading @relation(fields: [loadingId], references: [id], onDelete: Restrict)
+
+  @@index([loadingId])
+  @@map("sepidar_dispatch_invoices")
 }
 
 // Whole-loading document only; issuance never posts a financial transaction.

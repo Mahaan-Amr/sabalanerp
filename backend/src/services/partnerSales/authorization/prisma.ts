@@ -1,4 +1,5 @@
 import { partnerContractWasDeleted } from '../cases/operationalDeletion';
+import { lockPartnerProfileAndInquiry } from '../inquiries/locks';
 import type { Prisma } from '@prisma/client';
 import { partnerError, type PartnerAction, type PartnerActionV2, type PartnerAuthorizationV2Port,
   type PermissionContext, type Result } from '@sabalanerp/partner-sales-contracts';
@@ -53,8 +54,8 @@ export function prismaAuthorizationSource<Action extends PartnerActionV2>(tx: Pr
       profileId = null;
     }
     if (root.kind === 'INQUIRY') {
-      if (lockResources) await tx.$queryRaw`SELECT id FROM partner_inquiries WHERE id = ${root.id} FOR UPDATE`;
-      profileId = (await tx.partnerInquiry.findUnique({ where: { id: root.id }, select: { profileId: true } }))?.profileId ?? null;
+      profileId = lockResources ? await lockPartnerProfileAndInquiry(tx, root.id)
+        : (await tx.partnerInquiry.findUnique({ where: { id: root.id }, select: { profileId: true } }))?.profileId ?? null;
     }
     if (root.kind === 'CASE') {
       await tx.$queryRaw`SELECT id FROM partner_sale_cases WHERE id = ${root.id} FOR UPDATE`;
@@ -96,7 +97,7 @@ export function prismaAuthorizationSource<Action extends PartnerActionV2>(tx: Pr
       }
     }
     if (profileId) {
-      if (lockResources) await tx.$queryRaw`SELECT id FROM partner_profiles WHERE id = ${profileId} FOR UPDATE`;
+      if (lockResources && root.kind !== 'INQUIRY') await tx.$queryRaw`SELECT id FROM partner_profiles WHERE id = ${profileId} FOR UPDATE`;
       const profile = await tx.partnerProfile.findUnique({ where: { id: profileId }, select: { userId: true, state: true, revision: true } });
       if (profile) {
         if (lockResources) {

@@ -35,8 +35,44 @@ test('abort and rollback execute preservation branch without scanner creation or
  const source=fs.readFileSync(new URL('../../deploy/scripts/deploy.sh',import.meta.url),'utf8').replaceAll('\r\n','\n');const start=source.indexOf('start_release_services() {'),end=source.indexOf('\nrun_backend()',start);assert.ok(start>0&&end>start);
  const shell=process.platform==='win32'?'C:/Program Files/Git/bin/bash.exe':'/bin/sh';
  for(const mutation of [0,1]){
-  const code=`set -eu\nCAPTURE_ONLY=0\nMUTATION_STARTED=${mutation}\nDEPLOYMENT_CLAMAV_OPERATION=repair\nDEPLOYMENT_CLAMAV_REPAIR=false\nDEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX=bound\npreserved_clamav_guard(){ [ "$1" = health ]; }\ncompose(){ printf '%s\\n' "$*"; }\n`+source.slice(start,end)+'\nstart_release_services 300\n';
-  const result=spawnSync(shell,['-c',code],{encoding:'utf8'});assert.equal(result.status,0,result.stderr);const lines=result.stdout.trim().split('\n');assert.equal(lines.length,2);for(const line of lines){assert.ok(line.includes('--no-deps'));assert.ok(!line.split(' ').includes('clamav'));}
+  const code=`set -eu
+CAPTURE_ONLY=0
+MUTATION_STARTED=${mutation}
+DEPLOYMENT_CLAMAV_OPERATION=repair
+DEPLOYMENT_CLAMAV_REPAIR=false
+DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX=bound
+verify_database_role_pin(){
+  if [ "$#" -eq 0 ]; then
+    echo pre-start-pin
+    [ "$FAIL_PIN" != pre ]
+  else
+    echo "running-pin $*"
+    [ "$FAIL_PIN" != running ]
+  fi
+}
+preserved_clamav_guard(){ echo "scanner $*"; [ "$1" = health ]; }
+compose(){
+  case "$*" in
+    "ps -q backend") echo backend-id ;;
+    "ps -q postgres") echo postgres-id ;;
+    *) echo "$*" ;;
+  esac
+}
+${source.slice(start,end)}
+start_release_services 300
+`;
+  const expected=[
+   'pre-start-pin',
+   'scanner health',
+   'up -d --no-deps --no-build --wait --wait-timeout 300 postgres backend frontend inquiry nginx',
+   'up -d --no-deps --force-recreate --wait --wait-timeout 300 nginx',
+   'running-pin backend-id postgres-id',
+  ];
+  for(const [failure,status,events] of [['',0,expected],['pre',1,expected.slice(0,1)],['running',1,expected]]){
+   const result=spawnSync(shell,['-c',code],{encoding:'utf8',env:{...process.env,FAIL_PIN:failure}});
+   assert.equal(result.status,status,result.stderr);
+   assert.deepEqual(result.stdout.trim().split(/\r?\n/),events);
+  }
  }
 });
 test('host pack carries all canonical inspector imports and preservation policy without dropping original ports',()=>{
@@ -92,7 +128,7 @@ test('actual Docker builder COPY projection resolves the new TypeScript policy d
  const missing=new Map(files);missing.delete('/fixture/app/scripts/preserved-clamav-policy.mjs');missing.delete('/fixture/app/scripts/preserved-clamav-policy.d.mts');assert.equal(resolve(missing),undefined,'negative control reproduces the previous missing-module failure');
 });
 
-test('successful stdout-valued guard stays exact while real owned heartbeat JSON goes to stderr',()=>{
+test('successful stdout-valued guard isolates heartbeat diagnostics and suppresses lease responses',()=>{
  const source=fs.readFileSync(new URL('../../deploy/scripts/deploy.sh',import.meta.url),'utf8').replaceAll('\r\n','\n');
  const extract=(from,to)=>{const start=source.indexOf(from),end=source.indexOf(to,start);assert.ok(start>=0&&end>start);return source.slice(start,end);};
  const guarded=extract('preserved_clamav_guard() {','\ncompose() {'),heartbeat=extract('run_original_owned_with_heartbeat() {','\nwait_for_cutover_approval() {'),control=extract('control() {','\nenter_maintenance() {');
@@ -101,13 +137,51 @@ test('successful stdout-valued guard stays exact while real owned heartbeat JSON
   const helper=new URL('../../deploy/scripts/preserved-clamav.mjs',import.meta.url),childSource=`setTimeout(()=>process.stdout.write(${JSON.stringify(payload)}),1200);`;
   fs.writeFileSync(fixtureFile,`import {observeOriginalCommand} from ${JSON.stringify(helper.href)};\nprocess.stdout.write(await observeOriginalCommand(process.execPath,['-e',${JSON.stringify(childSource)}],10000));\n`);
   const shell=process.platform==='win32'?'C:/Program Files/Git/bin/bash.exe':'/bin/sh';
-  const code=`set -eu\nDB_LEASE_ACQUIRED=1\nDEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX=bound\nDEPLOYMENT_CLAMAV_REPAIR=false\nOPERATIONS_ROOT=/fixed/pack\nnode(){ "$PRESERVATION_REAL_NODE" "$PRESERVATION_FIXTURE"; }\nsleep(){ command sleep 0.005; }\nrun_backend(){ printf '{"ok":true,"phase":"heartbeat"}\\n'; printf 'HEARTBEAT\\n' >> "$PRESERVATION_EVENTS"; }\n${guarded}\n${heartbeat}\n${control}\nvalue="$(preserved_clamav_guard infrastructure desiredHash)"\nprintf '%s' "$value"\n`;
-  const result=spawnSync(shell,['-c',code],{encoding:'utf8',env:{...process.env,PRESERVATION_REAL_NODE:process.execPath.replaceAll('\\','/'),PRESERVATION_FIXTURE:fixtureFile.replaceAll('\\','/'),PRESERVATION_EVENTS:events.replaceAll('\\','/')}});
-  assert.equal(result.status,0,result.stderr);assert.equal(result.stdout,payload,'heartbeat JSON cannot contaminate captured infrastructure digest or Compose YAML');assert.match(result.stderr,/\{"ok":true,"phase":"heartbeat"\}/);assert.ok(fs.readFileSync(events,'utf8').trim().split('\n').length>=1);
-  // Negative control runs only mocked backend/helper services and reproduces the old capture bug.
-  const unsafeHeartbeat=heartbeat.replace('control heartbeat >&2','control heartbeat');assert.notEqual(unsafeHeartbeat,heartbeat);
-  const negative=spawnSync(shell,['-c',code.replace(heartbeat,unsafeHeartbeat)],{encoding:'utf8',env:{...process.env,PRESERVATION_REAL_NODE:process.execPath.replaceAll('\\','/'),PRESERVATION_FIXTURE:fixtureFile.replaceAll('\\','/'),PRESERVATION_EVENTS:events.replaceAll('\\','/')}});
-  assert.equal(negative.status,0,negative.stderr);assert.notEqual(negative.stdout,payload);assert.match(negative.stdout,/\{"ok":true,"phase":"heartbeat"\}/);assert.ok(negative.stdout.includes(payload));
+  const code=`set -eu
+DB_LEASE_ACQUIRED=1
+DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX=bound
+DEPLOYMENT_CLAMAV_REPAIR=false
+OPERATIONS_ROOT=/fixed/pack
+node(){ "$PRESERVATION_REAL_NODE" "$PRESERVATION_FIXTURE"; }
+sleep(){ command sleep 0.005; }
+run_backend(){
+  echo "$*" >> "$PRESERVATION_EVENTS"
+  echo '{"leaseToken":"fixture-only"}'
+  echo 'heartbeat diagnostic' >&2
+}
+${guarded}
+${heartbeat}
+${control}
+value="$(preserved_clamav_guard infrastructure desiredHash)"
+printf '%s' "$value"
+`;
+  const env={...process.env,PRESERVATION_REAL_NODE:process.execPath.replaceAll('\\','/'),PRESERVATION_FIXTURE:fixtureFile.replaceAll('\\','/'),PRESERVATION_EVENTS:events.replaceAll('\\','/')};
+  const run=script=>spawnSync(shell,['-c',script],{encoding:'utf8',env});
+  const result=run(code);
+  assert.equal(result.status,0,result.stderr);
+  assert.equal(result.stdout,payload,'guard stdout must contain only the digest');
+  assert.match(result.stderr,/heartbeat diagnostic/);
+  assert.doesNotMatch(result.stderr,/fixture-only/);
+  const calls=fs.readFileSync(events,'utf8').trim().split(/\r?\n/);
+  assert.ok(calls.length>0 && calls.every(call=>call==='node dist/scripts/deployment-control.js heartbeat'));
+
+  // A controller that forwards backend stdout still protects the digest via the
+  // outer redirect, but exposes the synthetic lease response on stderr.
+  const oldControl=control.replace(' "$@" >/dev/null',' "$@"');
+  assert.notEqual(oldControl,control);
+  const oldCode=code.replace(control,()=>oldControl);
+  const forwarded=run(oldCode);
+  assert.equal(forwarded.status,0,forwarded.stderr);
+  assert.equal(forwarded.stdout,payload);
+  assert.match(forwarded.stderr,/fixture-only/);
+
+  // Without either redirect the synthetic response also contaminates stdout.
+  const oldHeartbeat=heartbeat.replace('control heartbeat >&2','control heartbeat');
+  assert.notEqual(oldHeartbeat,heartbeat);
+  const mixed=run(oldCode.replace(heartbeat,()=>oldHeartbeat));
+  assert.equal(mixed.status,0,mixed.stderr);
+  assert.match(mixed.stdout,/fixture-only/);
+  assert.ok(mixed.stdout.includes(payload));
 
  }finally{assert.equal(path.dirname(directory),path.resolve(os.tmpdir()));assert.ok(path.basename(directory).startsWith('sabalan-preserved-stdout-'));fs.rmSync(directory,{recursive:true,force:true});}
 });

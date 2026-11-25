@@ -93,6 +93,7 @@
     "design-system:check": "node scripts/design-system-adoption.mjs check --changed",
     "test:design-system-adoption": "node --test tests/design-system-adoption/design-system-adoption.spec.mjs",
     "test:design-system-foundation": "node --test tests/design-system-foundation/semantic-foundation.spec.mjs",
+    "test:workspace-navigation": "node --test tests/workspace-navigation/partner-availability.test.mjs",
     "test:design-system:e2e": "node scripts/run-design-system-e2e.mjs",
     "test:design-system:e2e:infrastructure": "node --test tests/design-system-e2e-infrastructure/infrastructure.spec.mjs",
     "test:accounting-dispatch-documents:e2e:real": "npx tsx --test tests/accounting-dispatch-documents-real/qa-identities.test.ts && playwright test --config=playwright.accounting-dispatch-documents.config.ts",

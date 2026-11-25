@@ -17,6 +17,7 @@ import { renderDispatchDocumentHtml } from "../../documents/dispatch/dispatchDoc
 import { renderSalesInvoice } from "../salesDispatchInvoice/render";
 import { freezeSalesInvoiceCorrection } from "../salesDispatchInvoice/correction";
 import { issueLoadingDocuments } from "../loadingDocumentIssuance";
+import { readDispatchDocumentQueueSummary } from "../dispatchDocuments/queueSummary";
 import { assertDispatchDocumentsMigrationTarget } from "./dispatchDocumentsTemporaryDatabase";
 import {
   approvedPricingRowIntegrityHash,
@@ -24,12 +25,15 @@ import {
   canonicalApprovedPricingHash,
 } from "../approvedPricing/domain";
 import { pricedAllocationIntegrityHash } from "../pricedAllocationLedger";
+import { parseSepidarInvoices, readSepidarLoadingTotal, sumSepidarInvoiceAmounts } from "../sepidarDispatchInvoices";
 
 // Explicit local URL only; the harness rolls back every business row and never consumes the real invoice sequence.
 const url = process.env.DATABASE_URL;
 const target = url && new URL(url);
 const candidateDatabaseName = process.env.SABALAN_CANDIDATE_QA_DATABASE_NAME;
-if (!target || target.hostname !== "127.0.0.1" || target.port !== "55432")
+const composeLocal = target && process.env.COMPOSE_PROJECT_NAME === "sabalanerp-local"
+  && target.hostname === "postgres" && target.port === "5432" && target.pathname === "/sabalanerp";
+if (!target || (!composeLocal && (target.hostname !== "127.0.0.1" || target.port !== "55432")))
   throw new Error(
     "Use the existing sabalanerp-local database at 127.0.0.1:55432.",
   );
@@ -58,7 +62,7 @@ async function run() {
         const historicalTool = await tx.subService.create({ data: {
           code: `HIST-${randomUUID()}`, namePersian: "نیم لول", pricePerMeter: 70000,
         } });
-        const customer = await tx.crmCustomer.findFirstOrThrow();
+        const customer = await tx.crmCustomer.create({ data: { firstName: "مشتری", lastName: "آزمون فاکتور" } });
         const template = await tx.salesContract.findFirstOrThrow({
           include: { items: { take: 1 } },
         });
@@ -430,6 +434,27 @@ async function run() {
         assert.equal(source.drivers.length, 2);
         assert.equal(source.grossAmount, "25.000000000000");
         assert.equal(source.netAmount, "20.000000000000");
+        const queueCandidates = await tx.accountingDispatchCandidate.findMany({
+          where: { id: { in: candidates } },
+          select: {
+            id: true, status: true, allocationRevisionId: true, waybills: { select: { id: true } },
+            allocationRevision: { select: { loadingId: true, snapshot: true } },
+          },
+        });
+        const queue = await readDispatchDocumentQueueSummary(tx, queueCandidates.map(row => ({
+          ...row, loadingId: row.allocationRevision.loadingId, canManage: true,
+        })), new Map(queueCandidates.map(row => [row.id, row.allocationRevision.snapshot])),
+        { state: 'ISSUED', page: 1, pageSize: 50 });
+        assert.equal(queue.rows.length, 2);
+        assert.ok(queue.rows.every(row => row.total.amount === '10.000000000000' && row.total.currency === 'TOMAN'),
+          'each driver summary preserves the exact priced allocation and original currency');
+        const sepidarTotal = await readSepidarLoadingTotal(tx, loading.id);
+        assert.equal(sepidarTotal, "200", "both drivers' bound net totals are converted from tomans to rials");
+        const split = parseSepidarInvoices([{ number: "۰۰۱۲۳", amountRial: "۱۲۰.۵" }, { number: "00456", amountRial: "79.5" }]);
+        assert.ok(split);
+        assert.equal(split[0].number, "00123");
+        assert.equal(sumSepidarInvoiceAmounts(split), sepidarTotal);
+        assert.equal(parseSepidarInvoices([...split, { number: "۰۰۱۲۳", amountRial: "0" }]), null);
         assert.equal(source.lines[0].width, "0.4");
         assert.match(source.lines[0].label, /سنگ مصوب/);
         const waybillSource = await new PrismaDispatchDocumentSourceReader(client, "dispatch-test", "chromium-pdf-v1")
@@ -485,16 +510,22 @@ async function run() {
         assert.doesNotMatch(Buffer.from(reprinted).toString(), /نرخ - ریال|مبلغ کل - ریال/);
         assert.equal(await reprintReader.reprintWaybill({ ...oldArtifact, templateVersion: 'dispatch-test-contract-table-v2' }), undefined);
         const financialCount = await tx.accountingFinancialRecord.count();
+        const command = { id: randomUUID(), fingerprint: 'test-command' };
         const issuedParts = await tx.accountingDispatchCandidate.findMany({
           where: { id: { in: candidates } }, select: { id: true, allocationRevisionId: true },
         });
         const group = { loadingId: loading.id, invoicePredecessorId: null,
           parts: issuedParts.map(part => ({ candidateId: part.id, revisionId: part.allocationRevisionId, state: 'COMPLETE' as const })),
           issueWaybill: async () => { throw new Error('A completed waybill must not be reissued.'); },
-          issueInvoice: async (key: string) => { await service.issue(ctx, loading.id, key); },
+          issueInvoice: (key: string) => service.issue({ ...ctx, expectedRevisionIds: issuedParts.map(part => part.allocationRevisionId) },
+            loading.id, key, command),
         };
-        await issueLoadingDocuments(group);
-        await issueLoadingDocuments(group);
+        assert.equal(await service.loadingIssueReceipt(ctx, loading.id, command.id), undefined);
+        const commandReceipt = await issueLoadingDocuments(group);
+        assert.deepEqual(await issueLoadingDocuments(group), commandReceipt);
+        assert.deepEqual(await service.loadingIssueReceipt(ctx, loading.id, command.id), commandReceipt);
+        await assert.rejects(() => service.loadingIssueReceipt(ctx, loading.id, command.id, 'different-input'),
+          (error) => error instanceof SalesInvoiceError && error.status === 409);
         const issued = await service.issue(ctx, loading.id, "same-key");
         assert.deepEqual(
           await service.issue(ctx, loading.id, "same-key"),
@@ -618,6 +649,8 @@ async function run() {
           () => service.list(ctx, loading.id),
           (error) => error instanceof SalesInvoiceError && error.status === 403,
         );
+        await assert.rejects(() => service.loadingIssueReceipt(ctx, loading.id, command.id),
+          (error) => error instanceof SalesInvoiceError && error.status === 403);
         await tx.$executeRawUnsafe("ROLLBACK TO SAVEPOINT invoice_partner");
         await assert.rejects(
           () =>
@@ -651,6 +684,7 @@ async function run() {
         );
         const replacement = await service.issue(ctx, loading.id, "replacement");
         assert.notEqual(replacement.number, issued.number);
+        assert.deepEqual(await service.loadingIssueReceipt(ctx, loading.id, command.id), issued);
         assert.equal(
           (
             await tx.salesDispatchInvoice.findUniqueOrThrow({

@@ -31,6 +31,72 @@ const reply = (route: Route, data: unknown) =>
     contentType: "application/json",
     body: JSON.stringify({ success: true, data }),
   });
+const candidateList = /\/api\/accounting\/dispatch-candidates(?:\?.*)?$/;
+
+for (const denial of ["command", "refresh"] as const) {
+  test(`dispatch closes private void information when access is denied during the ${denial}`, async ({ page }) => {
+    await loginAsAdmin(page);
+    let groupReads = 0;
+    await page.route(candidateList, route => {
+      if (new URL(route.request().url()).searchParams.has("loadingId")) {
+        groupReads++;
+        return route.fulfill({ status: 403, json: { success: false, error: "محتوای خصوصی ۹۱۷۲۱۳" } });
+      }
+      return route.fulfill({ json: { success: true, capabilities: {
+        canManageAccountingCandidates: true, canManageAccountingConfirmation: false,
+      }, data: [{
+        id: "private-candidate", loadingId: "private-loading", status: "ACCEPTED", canManage: true,
+        summary: { driverName: "راننده خصوصی آزمون", loadingNumber: "91" },
+        currentSalesInvoice: { id: "private-invoice", number: "917213" },
+        waybills: [{ id: "private-waybill", number: "42", status: "ISSUED", hasWaybillArtifact: true }],
+      }] } });
+    });
+    await page.route("**/api/accounting/dispatch-waybills/private-waybill/void", route =>
+      route.fulfill({ status: denial === "command" ? 403 : 409, json: { success: false, error: "محتوای خصوصی ۹۱۷۲۱۳" } }));
+    await page.goto("/dashboard/accounting/dispatch");
+    const row = page.getByRole("row").filter({ hasText: "راننده خصوصی آزمون" });
+    await row.getByRole("button", { name: "ابطال بارنامه و فاکتور فروش", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "ابطال بارنامه و فاکتور فروش", exact: true });
+    await expect(dialog).toContainText("917213");
+    await dialog.getByRole("textbox", { name: "دلیل تصمیم" }).fill("دلیل خصوصی آزمون");
+    await dialog.getByRole("button", { name: "تأیید و ثبت" }).click();
+    await expect(page.getByText("دسترسی به اطلاعات ارسال مجاز نیست.", { exact: true })).toBeVisible();
+    await expect(dialog).toHaveCount(0);
+    await expect(row).toHaveCount(0);
+    await expect(page.getByText(/917213|۹۱۷۲۱۳|دلیل خصوصی آزمون/)).toHaveCount(0);
+    expect(groupReads).toBe(denial === "command" ? 0 : 1);
+  });
+}
+
+test("dispatch preserves the permitted confirmation when the candidate group is denied", async ({ page }) => {
+  await loginAsAdmin(page);
+  await page.route(candidateList, route => {
+    if (new URL(route.request().url()).searchParams.has("loadingId")) {
+      return route.fulfill({ status: 403, json: { success: false } });
+    }
+    return route.fulfill({ json: { success: true, capabilities: {
+      canManageAccountingCandidates: false, canManageAccountingConfirmation: true,
+    }, data: [{
+      id: "confirmation-candidate", loadingId: "confirmation-loading", status: "ACCEPTED", canManage: false,
+      summary: { driverName: "راننده مجاز آزمون", loadingNumber: "29", driverSource: "CUSTOMER_PICKUP" },
+      waybills: [{ id: "confirmation-waybill", number: "43", status: "ISSUED", hasWaybillArtifact: true }],
+    }] } });
+  });
+  await page.route("**/api/dispatch-confirmation/waybills/confirmation-waybill/sessions", route => reply(route, {
+    id: "confirmation-session", waybillId: "confirmation-waybill", method: "PERSONAL_PICKUP_ACCOUNTING",
+    status: "CONFIRMED", authorization: { id: "confirmation-authorization" },
+  }));
+  await page.goto("/dashboard/accounting/dispatch");
+  await page.getByRole("row").filter({ hasText: "راننده مجاز آزمون" })
+    .getByRole("button", { name: "صدور مجوز خروج", exact: true }).click();
+  await expect(page.getByText("مجوز خروج صادر شد.", { exact: true })).toBeVisible();
+  await expect(page.getByText("مجوز خروج برای گارد صادر شده است.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "لغو مجوز خروج", exact: true })).toBeEnabled();
+  await expect(page.getByText("راننده مجاز آزمون", { exact: true })).toHaveCount(0);
+});
+
+const replyWithIssueReceipt = (route: Route, invoice: { id: string; number: string }) =>
+  reply(route, { status: "ISSUED", commandId: route.request().postDataJSON().commandId, invoice });
 
 test("Accounting reissues a paired cancellation on the same loading", async ({ page }) => {
   await loginAsAdmin(page);
@@ -38,7 +104,7 @@ test("Accounting reissues a paired cancellation on the same loading", async ({ p
   const loadingId = "qa-recover-loading-12";
   const recovery = { waybillId: "waybill-11", waybillNumber: "11", invoiceId: "invoice-9", invoiceNumber: "9" };
   let requests = 0;
-  await page.route("**/api/accounting/dispatch-candidates", route => reply(route, [{
+  await page.route(candidateList, route => reply(route, [{
     id: "recovery-candidate", loadingId, status: "ACCEPTED", canManage: true,
     summary: { loadingNumber: "12", driverName: "راننده آزمون" },
     waybills: [
@@ -60,10 +126,11 @@ test("Accounting reissues a paired cancellation on the same loading", async ({ p
   await page.route(`**/api/accounting/loadings/${loadingId}/issue-dispatch-documents`, async route => {
     expect(route.request().method()).toBe("POST");
     expect(route.request().postDataJSON()).toEqual({
+      commandId: expect.stringMatching(/^[0-9a-f-]{36}$/),
       recovery: { waybillId: "waybill-11", invoiceId: "invoice-9", reason: "صدور مجدد برای همان بارگیری" },
     });
     requests++;
-    await reply(route, { status: "ISSUED" });
+    await replyWithIssueReceipt(route, { id: "invoice-12", number: "12" });
   });
   await page.goto("/dashboard/accounting/dispatch");
   await page.getByRole("table").getByRole("button", { name: "جزئیات اقلام و اسناد بارگیری" }).click();
@@ -90,7 +157,7 @@ test("Accounting repairs an invalid invoice while its replacement waybill remain
   const oldInvoice = { id: "invoice-10", number: "10" };
   let status = "INVALIDATED";
   let replacementIssued = false;
-  await page.route("**/api/accounting/dispatch-candidates", route => reply(route, [{
+  await page.route(candidateList, route => reply(route, [{
     id: "repair-candidate", loadingId, status: "ACCEPTED", canManage: true,
     summary: { loadingNumber: "13", driverName: "راننده آزمون" },
     currentSalesInvoice: status === "INVALIDATED" ? oldInvoice : null,
@@ -113,7 +180,7 @@ test("Accounting repairs an invalid invoice while its replacement waybill remain
   await page.route(`**/api/accounting/loadings/${loadingId}/issue-dispatch-documents`, route => {
     expect(status).toBe("VOIDED");
     replacementIssued = true;
-    return reply(route, { status: "ISSUED" });
+    return replyWithIssueReceipt(route, { id: "invoice-replacement", number: "22" });
   });
   await page.goto("/dashboard/accounting/dispatch");
   const row = page.getByRole("table").getByRole("row", { name: /راننده آزمون/ });
@@ -162,7 +229,7 @@ for (const width of [1280, 390]) {
     let currentInvoice: { id: string; number: string } | null = null;
     let initialVoidKey: string;
 
-    await page.route("**/api/accounting/dispatch-candidates", (route) =>
+    await page.route(candidateList, (route) =>
       reply(
         route,
         [0, 1].map((i) => ({
@@ -171,7 +238,7 @@ for (const width of [1280, 390]) {
           status: "ACCEPTED",
           canManage: true,
           summary: {
-            driverName: `راننده ${i}`,
+            driverName: i === 0 ? "راننده امید" : "راننده نوید",
             loadingNumber: "27",
             plate: "۱۲ ب ۳۴۵",
           },
@@ -216,7 +283,7 @@ for (const width of [1280, 390]) {
           status: "ISSUED",
           voidReason: null,
         });
-        await reply(route, { status: "ISSUED" });
+        await replyWithIssueReceipt(route, currentInvoice);
       },
     );
     await page.route(
@@ -255,10 +322,10 @@ for (const width of [1280, 390]) {
       return range.getClientRects().length;
     })).toBe(1);
     await expect(table.getByRole("button", { name: /ابطال.*فاکتور فروش/ })).toHaveCount(0);
-    const search = page.getByPlaceholder("شماره بارگیری، مشتری، پروژه، قرارداد، راننده، پلاک یا شماره بارنامه");
-    await search.fill("راننده ۱");
+    const search = page.getByRole("searchbox", { name: "جست‌وجو در ردیف‌ها", exact: true });
+    await search.fill("راننده نوید");
     await expect(table.getByRole("row")).toHaveCount(2);
-    await expect(table.getByText("راننده 1", { exact: true })).toBeVisible();
+    await expect(table.getByText("راننده نوید", { exact: true })).toBeVisible();
     await search.fill("۲۷");
     await expect(table.getByRole("row")).toHaveCount(3);
     await assertNoHorizontalOverflow(page);
@@ -404,7 +471,7 @@ test("Accounting verifies a customer pickup before issuing its waybill and sales
   let sent = false;
   let verified = false;
   let issued = false;
-  await page.route("**/api/accounting/dispatch-candidates", route => reply(route, [{
+  await page.route(candidateList, route => reply(route, [{
     id: candidateId, loadingId, status: issued ? "ACCEPTED" : "PENDING", canManage: true,
     summary: { loadingNumber: "14", driverName: "راننده متفرقه", driverSource: "CUSTOMER_PICKUP", plate: "۱۲ ب ۳۴۵ ایران ۶۷" },
     pickupVerification: verified ? { verifiedAt: new Date().toISOString() } : null,
@@ -430,7 +497,7 @@ test("Accounting verifies a customer pickup before issuing its waybill and sales
   await page.route(`**/api/accounting/loadings/${loadingId}/issue-dispatch-documents`, route => {
     expect(verified).toBe(true);
     issued = true;
-    return reply(route, { status: "ISSUED" });
+    return replyWithIssueReceipt(route, { id: "pickup-invoice", number: "22" });
   });
   await page.goto("/dashboard/accounting/dispatch");
   await page.getByRole("table").getByRole("button", { name: "جزئیات اقلام و اسناد بارگیری" }).click();
@@ -452,7 +519,7 @@ test("Accounting shows confirmation and exit permit issuance after verifying the
   await loginAsAdmin(page);
   const waybillId = "qa-fallback-waybill";
   const sessionId = "qa-fallback-session";
-  await page.route("**/api/accounting/dispatch-candidates", route => reply(route, [{
+  await page.route(candidateList, route => reply(route, [{
     id: "qa-fallback-candidate", loadingId: "qa-fallback-loading", status: "ACCEPTED", canManage: true,
     summary: { loadingNumber: "15", driverName: "راننده نمونه", driverSource: "INTERNAL" },
     waybills: [{ id: waybillId, number: "23", status: "ISSUED" }],
@@ -489,4 +556,53 @@ test("Accounting shows confirmation and exit permit issuance after verifying the
   await code.press("Enter");
   await expect(page.getByText("رمز راننده تأیید شد و مجوز خروج صادر شد.", { exact: true })).toBeVisible();
   await expect(code).toHaveCount(0);
+});
+
+test("Accounting shows how to recover from an unregistered biometric workstation", async ({ page }) => {
+  await loginAsAdmin(page);
+  const waybillId = "qa-workstation-waybill";
+  const sessionId = "qa-workstation-session";
+  await page.route(candidateList, route => reply(route, [{
+    id: "qa-workstation-candidate", loadingId: "qa-workstation-loading", status: "ACCEPTED", canManage: true,
+    summary: { loadingNumber: "15", driverName: "راننده نمونه", driverSource: "INTERNAL" },
+    waybills: [{ id: waybillId, number: "23", status: "ISSUED" }],
+  }]));
+  await page.route("**/api/dispatch-confirmation/capabilities", route => reply(route, {
+    canManageAccountingCandidates: true, canManageAccountingConfirmation: true,
+  }));
+  await page.route(`**/api/dispatch-confirmation/waybills/${waybillId}/sessions`, route => reply(route, {
+    id: sessionId, waybillId, driverSource: "INTERNAL", method: "INTERNAL_BIOMETRIC", status: "ACTIVE",
+  }));
+  await page.route(`**/api/dispatch-confirmation/sessions/${sessionId}/biometric-command`, route => route.fulfill({
+    status: 409,
+    json: {
+      success: false,
+      code: "BIOMETRIC_WORKSTATION_NOT_REGISTERED",
+      error: "این ایستگاه اثر انگشت ثبت نشده است. از پشتیبانی بخواهید همین ایستگاه را ثبت کند و سپس دوباره تلاش کنید.",
+    },
+  }));
+  await page.route(`**/api/dispatch-confirmation/sessions/${sessionId}/fallback`, route => route.fulfill({
+    status: 409,
+    json: { success: false, error: "روش جایگزین فقط پس از خطای معتبر حسگر یا دو عدم تطبیق معتبر پیاپی در همین نوبت مجاز است." },
+  }));
+  await page.route("http://127.0.0.1:47631/v1/status", route => route.fulfill({
+    headers: { "Access-Control-Allow-Origin": "*" },
+    json: { workstationId: "UNREGISTERED-TEST" },
+  }));
+  const captures: string[] = [];
+  await page.route("http://127.0.0.1:47631/v1/commands", route => {
+    captures.push(route.request().url());
+    return route.abort();
+  });
+  await page.goto("/dashboard/accounting/dispatch");
+  await page.getByRole("table").getByRole("button", { name: "تأیید هویت راننده" }).click();
+
+  const scan = page.getByRole("button", { name: "بررسی انگشت اشاره راست" });
+  await scan.click();
+  await expect(page.getByText("این ایستگاه اثر انگشت ثبت نشده است. از پشتیبانی بخواهید همین ایستگاه را ثبت کند و سپس دوباره تلاش کنید.", { exact: true })).toBeVisible();
+  expect(captures).toEqual([]);
+  await expect(scan).toBeEnabled();
+  await page.getByRole("button", { name: "استفاده از روش جایگزین" }).click();
+  await expect(page.getByText(/روش جایگزین فقط پس از خطای معتبر حسگر/)).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "رمز یک‌بارمصرف راننده" })).toHaveCount(0);
 });

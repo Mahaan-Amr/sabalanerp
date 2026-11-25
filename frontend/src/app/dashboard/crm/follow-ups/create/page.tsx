@@ -7,11 +7,11 @@ import { ErpButton, ErpEmptyState, ErpLoading, ErpPage, ErpSection, useErpPresen
 import EnhancedDropdown from '@/components/EnhancedDropdown';
 import PersianCalendarComponent from '@/components/PersianCalendar';
 import { crmAPI } from '@/lib/api';
+import { CrmCustomerPicker } from '@/features/crm/customer-workflow/CrmCustomerPicker';
 import {useModelDraftRecovery} from '@/lib/useModelDraftRecovery';
 import {ModelDraftRecovery} from '@/components/ModelDraftRecovery';
 import {parseFollowUpDraft} from '@/features/crm/followUpDraft';
 import {
-  crmPersonName,
   CRM_COMMUNICATION_TYPES,
   CRM_WORK_TYPES,
   persianDateTimeToApiDate,
@@ -25,9 +25,9 @@ export default function CreateFollowUpPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const presentationScope = useErpPresentationScope();
-  const [customers, setCustomers] = useState<any[]>([]);
   const [projects, setProjects] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [optionsError, setOptionsError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [submissionUncertain,setSubmissionUncertain]=useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -58,15 +58,12 @@ export default function CreateFollowUpPage() {
 
   const loadOptions = async () => {
     setLoading(true);
+    setOptionsError(null);
     try {
-      const [customersResponse, projectsResponse] = await Promise.all([
-        crmAPI.getCustomers({ limit: 100 }),
-        crmAPI.getPotentialProjects({ limit: 100 }),
-      ]);
-      if (customersResponse.data.success) setCustomers(customersResponse.data.data);
-      if (projectsResponse.data.success) setProjects(projectsResponse.data.data);
+      const response = await crmAPI.getPotentialProjects({ limit: 100 });
+      if (response.data.success) setProjects(response.data.data);
     } catch (err: any) {
-      setError(err.response?.data?.error || 'بارگذاری فرم ناموفق بود.');
+      setOptionsError(err.response?.data?.error || 'بارگذاری گزینه‌های فرم ناموفق بود.');
     } finally {
       setLoading(false);
     }
@@ -113,7 +110,7 @@ export default function CreateFollowUpPage() {
   const visibleProjects = form.customerId ? projects.filter((project) => project.customerId === form.customerId) : projects;
 
   if (loading) return <ErpLoading />;
-  if (error && !customers.length) return <ErpEmptyState title="خطا در بارگذاری فرم" description={error} action={{ label: 'تلاش دوباره', onClick: loadOptions, tone: 'primary' }} />;
+  if (optionsError) return <ErpEmptyState title="خطا در بارگذاری فرم" description={optionsError} action={{ label: 'تلاش دوباره', onClick: loadOptions, tone: 'primary' }} />;
 
   return (
     <ErpPage
@@ -130,18 +127,7 @@ export default function CreateFollowUpPage() {
       <form id="followup-form" onSubmit={submit} className={presentationScope === 'workspace' ? "mx-auto max-w-[850px] space-y-5" : "space-y-5"}>
         <ErpSection title="گزارش پیگیری" description="ثبت کنید چه ارتباطی برقرار شد و نتیجه چه بود.">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <label className={labelClass}>مخاطب CRM
-              <EnhancedDropdown
-                className="mt-2"
-                value={form.customerId}
-                onChange={(value) => { update('customerId', value); update('potentialProjectId', ''); }}
-                placeholder="انتخاب مخاطب"
-                options={customers.map((customer) => ({ value: customer.id, label: crmPersonName(customer) }))}
-                searchable
-                required
-                noOptionsText="مخاطبی پیدا نشد"
-              />
-            </label>
+            <CrmCustomerPicker value={form.customerId} onChange={(value) => { update('customerId', value); update('potentialProjectId', ''); }} />
             <label className={labelClass}>پروژه احتمالی
               <EnhancedDropdown
                 className="mt-2"

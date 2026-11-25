@@ -1,13 +1,14 @@
 import { prisma } from '../lib/prisma';
 import express from 'express';
 import { PrismaClient } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
 import { body, validationResult } from 'express-validator';
 import { authorize, protect, type AuthRequest } from '../middleware/auth';
 import { enforceMutationIdempotency } from '../middleware/idempotency';
 import { asyncRoute } from '../middleware/asyncRoute';
 import {
   filterCurrentlyAuthorizedNotifications,
-  type NotificationWithAuthorizationEvent,
+  readCurrentlyAuthorizedUnreadCount,
 } from '../services/notificationAuthorization';
 import {
   notificationEventDefinition,
@@ -23,6 +24,7 @@ import {
   type NotificationCategory,
 } from '../services/notificationInboxQuery';
 import { revokeSessions } from '../services/identitySessionService';
+import { notificationReadErrorCode, notificationReadObservation } from '../services/notificationReadObservation';
 
 const router = express.Router();
 const priorities: NotificationPriority[] = ['LOW', 'NORMAL', 'HIGH', 'URGENT'];
@@ -84,6 +86,7 @@ router.get('/', asyncRoute(async (req: AuthRequest, res) => {
       ...(scanCursor ? { cursor: { id: scanCursor }, skip: 1 } : {}),
       select: {
         id: true,
+        userId: true,
         type: true,
         title: true,
         message: true,
@@ -100,7 +103,8 @@ router.get('/', asyncRoute(async (req: AuthRequest, res) => {
     const authorizedRows = await filterCurrentlyAuthorizedNotifications(
       prisma,
       req.user!,
-      candidates as NotificationWithAuthorizationEvent[] & typeof candidates,
+      candidates,
+      { inbox: true },
     );
     const authorizedIds = new Set(authorizedRows.map((row) => row.id));
 
@@ -110,7 +114,7 @@ router.get('/', asyncRoute(async (req: AuthRequest, res) => {
       const safeCategory = notificationCategory(row.type);
       if (category && safeCategory !== category) continue;
       if (!notificationMatchesSearch(row, search)) continue;
-      const { event: _event, ...notification } = row;
+      const { event: _event, userId: _userId, ...notification } = row;
       data.push({
         ...notification,
         workspace: row.event?.workspace || null,
@@ -138,15 +142,30 @@ router.get('/', asyncRoute(async (req: AuthRequest, res) => {
 }));
 
 router.get('/unread-count', asyncRoute(async (req: AuthRequest, res) => {
-  const rows = await prisma.notification.findMany({
-    where: { userId: req.user!.id, readAt: null },
-    select: {
-      id: true,
-      event: { select: { workspace: true, feature: true, resourceType: true, resourceId: true } },
-    },
-  });
-  const authorizedRows = await filterCurrentlyAuthorizedNotifications(prisma, req.user!, rows);
-  res.json({ success: true, data: { count: authorizedRows.length } });
+  const requestId = randomUUID();
+  const started = performance.now();
+  const providers: NonNullable<ReturnType<typeof notificationReadObservation.getStore>> = {};
+  res.setHeader('X-Notification-Request-Id', requestId);
+  res.setHeader('Cache-Control', 'no-store');
+  let errorCode;
+  try {
+    const count = await notificationReadObservation.run(providers, () => readCurrentlyAuthorizedUnreadCount(prisma, req.user!));
+    res.json({ success: true, data: { count } });
+  } catch (error) {
+    errorCode = notificationReadErrorCode(error);
+    res.status(503).json({
+      success: false, code: 'NOTIFICATION_COUNT_UNAVAILABLE', error: 'شمارش اعلان‌های خوانده‌نشده در دسترس نیست.',
+    });
+  } finally {
+    const durationMs = Math.round(performance.now() - started);
+    if (errorCode || durationMs >= 500 || process.env.NOTIFICATION_READ_OBSERVATION === '1') {
+      console.info(JSON.stringify({
+        kind: 'notification_unread_count', requestId, status: res.statusCode, durationMs, errorCode,
+        providers: Object.fromEntries(Object.entries(providers).map(([provider, sample]) =>
+          [provider, { ...sample, durationMs: Math.round(sample.durationMs) }])),
+      }));
+    }
+  }
 }));
 
 router.get('/metadata', asyncRoute(async (req: AuthRequest, res) => {
@@ -155,10 +174,11 @@ router.get('/metadata', asyncRoute(async (req: AuthRequest, res) => {
     select: {
       id: true,
       type: true,
+      userId: true,
       event: { select: { workspace: true, feature: true, resourceType: true, resourceId: true } },
     },
   });
-  const authorizedRows = await filterCurrentlyAuthorizedNotifications(prisma, req.user!, rows);
+  const authorizedRows = await filterCurrentlyAuthorizedNotifications(prisma, req.user!, rows, { inbox: true });
   res.json({
     success: true,
     data: {
@@ -171,7 +191,7 @@ router.get('/metadata', asyncRoute(async (req: AuthRequest, res) => {
 router.put('/read-all', asyncRoute(async (req: AuthRequest, res) => {
   const rows = await prisma.notification.findMany({
     where: { userId: req.user!.id, readAt: null },
-    select: { id: true, event: { select: { workspace: true, feature: true, resourceType: true, resourceId: true } } },
+    select: { id: true, type: true, userId: true, event: { select: { workspace: true, feature: true, resourceType: true, resourceId: true } } },
   });
   const authorizedRows = await filterCurrentlyAuthorizedNotifications(prisma, req.user!, rows);
   const result = await prisma.notification.updateMany({
@@ -184,7 +204,7 @@ router.put('/read-all', asyncRoute(async (req: AuthRequest, res) => {
 router.put('/:id/read', asyncRoute(async (req: AuthRequest, res) => {
   const notification = await prisma.notification.findFirst({
     where: { id: req.params.id, userId: req.user!.id },
-    select: { id: true, type: true, event: { select: { workspace: true, feature: true, resourceType: true, resourceId: true } } },
+    select: { id: true, type: true, userId: true, event: { select: { workspace: true, feature: true, resourceType: true, resourceId: true } } },
   });
   if (!notification) return res.status(404).json({ success: false, error: 'اعلان پیدا نشد.' });
   const [authorized] = await filterCurrentlyAuthorizedNotifications(prisma, req.user!, [notification]);
@@ -199,7 +219,7 @@ router.put('/:id/read', asyncRoute(async (req: AuthRequest, res) => {
 router.delete('/:id/read', asyncRoute(async (req: AuthRequest, res) => {
   const notification = await prisma.notification.findFirst({
     where: { id: req.params.id, userId: req.user!.id },
-    select: { id: true, type: true, event: { select: { workspace: true, feature: true, resourceType: true, resourceId: true } } },
+    select: { id: true, type: true, userId: true, event: { select: { workspace: true, feature: true, resourceType: true, resourceId: true } } },
   });
   if (!notification) return res.status(404).json({ success: false, error: 'اعلان پیدا نشد.' });
   const [authorized] = await filterCurrentlyAuthorizedNotifications(prisma, req.user!, [notification]);

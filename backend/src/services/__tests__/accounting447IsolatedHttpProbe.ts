@@ -1,8 +1,16 @@
 import assert from 'node:assert/strict';
 import express from 'express';
+import { Prisma } from '@prisma/client';
 import accountingRouter from '../../routes/accounting';
 import { prisma } from '../../lib/prisma';
 import { createAuthoritativeSession, SESSION_COOKIE } from '../identitySessionService';
+import { createAccountingRequestObserver } from '../../middleware/accountingRequestObserver';
+import type { AccountingReadTimings, AccountingReadWork } from '../accountingReadTiming';
+import { resetPartnerCommercialApprovals } from '../partnerSales/cases/commercialLifecycle';
+
+const measuredStages = ['lockWait', 'authorization', 'authorizationAudit', 'scopeSetup', 'provenance',
+  'partnerEvidence', 'population', 'ordinaryPopulation', 'partnerPopulation', 'registerRanking', 'rowHydration'] as const;
+const p95 = (samples: number[]) => samples.sort((a, b) => a - b)[Math.ceil(0.95 * samples.length) - 1];
 
 async function main() {
   const actorId = process.env.ACCOUNTING_447_ACTOR_ID;
@@ -15,6 +23,12 @@ async function main() {
   assert.equal(partnerRows.length, 30);
   const { token, session } = await createAuthoritativeSession(prisma, actorId, { ipAddress: '127.0.0.1' });
   const app = express();
+  const stagesByRequest = new Map<string, AccountingReadTimings>();
+  const workByRequest = new Map<string, AccountingReadWork>();
+  app.use(createAccountingRequestObserver(process.env.APP_COMMIT, record => {
+    if (record.stagesMs) stagesByRequest.set(record.requestId, record.stagesMs);
+    if (record.readWork) workByRequest.set(record.requestId, record.readWork);
+  }));
   app.use('/api/accounting', accountingRouter);
   const server = app.listen(0, '127.0.0.1');
   await new Promise<void>(resolve => server.once('listening', resolve));
@@ -24,16 +38,18 @@ async function main() {
     const base = `http://127.0.0.1:${address.port}/api/accounting`;
     const headers = { Cookie: `${SESSION_COOKIE}=${token}`, 'x-sabalan-expected-user': actorId,
       'x-sabalan-expected-session': session.id };
-    const get = async (route: string) => {
-      const response = await fetch(`${base}${route}`, { headers });
+    const get = async (route: string, signal?: AbortSignal) => {
+      const response = await fetch(`${base}${route}`, { headers, signal });
       const body = await response.json() as { success?: boolean; data?: any; error?: string };
       assert.equal(response.status, 200, `${route}: ${JSON.stringify(body).slice(0, 500)}`);
       assert.equal(body.success, true, route);
       return body.data;
     };
-    for (const [name, path] of [['dashboard', '/dashboard?range=3m'],
-      ['reviewable', '/contracts?view=reviewable&page=1&pageSize=12']] as const) {
+    for (const [name, path] of [['dashboard', '/dashboard?range=6m'],
+      ['reviewable', '/contracts?view=reviewable&page=1&pageSize=50']] as const) {
       const samples: number[] = [];
+      const stages = name === 'dashboard' ? [...measuredStages, 'workspace', 'trend'] as const : measuredStages;
+      const stageSamples = stages.map(stage => ({ stage, samples: [] as number[] }));
       for (let index = 0; index < 20; index++) {
         const started = performance.now();
         const response = await fetch(`${base}${path}`, { headers });
@@ -41,11 +57,31 @@ async function main() {
         samples.push(Math.round(performance.now() - started));
         assert.equal(response.status, 200, `${name}: ${JSON.stringify(body).slice(0, 300)}`);
         assert.equal(body.success, true);
-        if (name === 'reviewable') assert.equal(body.data?.total, 965);
-        else assert.equal(body.data?.workspace?.commandCenter?.reviewableContracts?.count, 965);
+        const requestId = response.headers.get('x-accounting-request-id');
+        assert.ok(requestId, `${name}: request correlation`);
+        const observedStages = stagesByRequest.get(requestId);
+        for (const sample of stageSamples) {
+          const duration = observedStages?.[sample.stage];
+          assert.ok(typeof duration === 'number' && Number.isFinite(duration) && duration >= 0, `${name}: ${sample.stage}`);
+          sample.samples.push(duration);
+        }
+        stagesByRequest.delete(requestId);
+        const work = workByRequest.get(requestId);
+        assert.equal(work?.reviewableSqlPages, 1, `${name}: uses the PostgreSQL population`);
+        assert.equal(work?.reviewableExactnessFallbacks, undefined, `${name}: fixture is within the exact projection bounds`);
+        assert.ok((work?.reviewableOrdinaryRows ?? Infinity) <= (name === 'reviewable' ? 50 : 12), `${name}: page-only hydration`);
+        workByRequest.delete(requestId);
+        if (name === 'reviewable') {
+          assert.equal(body.data?.total, 965);
+          assert.equal(body.data?.items.length, 50);
+        } else {
+          assert.equal(body.data?.workspace?.commandCenter?.reviewableContracts?.count, 965);
+          assert.equal(body.data?.trend?.range, '6m');
+        }
       }
-      samples.sort((a, b) => a - b);
-      console.log(JSON.stringify({ name, samples, p95: samples[Math.ceil(.95 * samples.length) - 1] }));
+      const durationP95 = p95(samples);
+      const stageP95Ms = Object.fromEntries(stageSamples.map(sample => [sample.stage, p95(sample.samples)]));
+      console.log(JSON.stringify({ name, samples, p95: durationP95, stageP95Ms }));
     }
     for (const [sourceKind, expected] of [['SALES_CONTRACT', 935], ['PARTNER_INTERNAL_RECORD', 30]] as const) {
       const response = await fetch(`${base}/contracts?view=reviewable&sourceKind=${sourceKind}&page=1&pageSize=100`, {
@@ -70,6 +106,17 @@ async function main() {
     assert.equal(new Set(allIds).size, 965, 'pages do not duplicate or omit records');
     assert.deepEqual(new Set(allIds), new Set([...expectedOrdinary, ...expectedPartner]),
       'complete authorized population is exactly the fixture population');
+    for (const page of [1, 5, 10, 11]) {
+      const route = `/contracts?view=reviewable&page=${page}&pageSize=100`;
+      assert.deepEqual(await get(route), await get(`${route}&dateFrom=unfiltered`),
+        'ordered rows, visible actions, exact totals and pagination agree through authenticated HTTP');
+    }
+    const workQueue = await get('/contracts?view=reviewable&sort=work_queue&pageSize=12&dateFrom=unfiltered');
+    const dashboard = await get('/dashboard?range=6m');
+    assert.equal(dashboard.workspace.commandCenter.reviewableContracts.count, workQueue.total);
+    assert.deepEqual(dashboard.workspace.queues.contracts.map((row: { contractId: string }) => row.contractId),
+      workQueue.items.map((row: { contractId: string }) => row.contractId),
+      'dashboard attention order and reviewable membership agree with the authoritative work queue');
     const ordinaryFirst = await get('/contracts?view=reviewable&sourceKind=SALES_CONTRACT&page=1&pageSize=100');
     const ordinaryAgain = await get('/contracts?view=reviewable&sourceKind=SALES_CONTRACT&page=1&pageSize=100');
     assert.deepEqual(ordinaryAgain.items.map((item: { contractId: string }) => item.contractId),
@@ -123,6 +170,65 @@ async function main() {
     await Promise.all(concurrentReads);
     const afterMutation = await get('/contracts?view=reviewable&page=1&pageSize=100');
     assert.equal(afterMutation.total, 966);
+
+    // A reopened committed Case still has accepted pricing, so the list must
+    // consult its approval and inquiry row instead of short-circuiting on SIGNED.
+    const pricedCase = await prisma.partnerSaleCase.findUniqueOrThrow({ where: { id: partnerRows[0].caseId },
+      select: { id: true, headRevision: true, pricingState: true } });
+    assert.equal(pricedCase.pricingState, 'READY_TO_FINALIZE');
+    const { approval } = await prisma.partnerInquiryUsage.findFirstOrThrow({ where: {
+      caseId: pricedCase.id, caseRevision: pricedCase.headRevision,
+    }, select: { approval: { select: { id: true, rowId: true } } } });
+    await prisma.$transaction(tx => resetPartnerCommercialApprovals(tx, pricedCase.id, actorId, 'آزمون بازبینی قیمت'));
+    const isLocked = (error: unknown) => error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === 'P2010' && error.meta?.code === '55P03';
+    const preparationRoute = '/contracts?view=all&sourceKind=PARTNER_INTERNAL_RECORD&page=1&pageSize=100';
+    const paperDecisions = () => prisma.effectiveAuthorizationAudit.count({ where: {
+      actorId, action: 'ACCOUNTING_WRITE', purpose: 'ACCOUNTING', channel: 'API', allowed: true,
+      reason: 'بررسی امکان ثبت امضای کاغذی مشتری قرارداد همکار',
+    } });
+    const beforePaperDecisions = await paperDecisions();
+    let markHeld!: () => void, release!: () => void;
+    const held = new Promise<void>(resolve => { markHeld = resolve; });
+    const hold = new Promise<void>(resolve => { release = resolve; });
+    const transaction = prisma.$transaction.bind(prisma);
+    let captureFirst = true;
+    // Hold the actual HTTP request's fully evaluated Partner transaction just
+    // before commit. Its concurrent peer must finish preparation and signature
+    // authorization without waiting on any of those held resource fences.
+    prisma.$transaction = ((work: (tx: Prisma.TransactionClient) => Promise<unknown>,
+      options?: { isolationLevel?: Prisma.TransactionIsolationLevel }) => {
+      if (!captureFirst || typeof work !== 'function' || options?.isolationLevel !== 'RepeatableRead') {
+        return transaction(work, options);
+      }
+      captureFirst = false;
+      return transaction(async tx => {
+        const result = await work(tx);
+        markHeld();
+        await hold;
+        return result;
+      }, options);
+    }) as typeof prisma.$transaction;
+    const first = get(preparationRoute);
+    try {
+      await Promise.race([held, first.then(() => { throw new Error('First preparation request did not hold its snapshot'); })]);
+      await assert.rejects(prisma.$queryRaw`SELECT id FROM partner_inquiry_approvals WHERE id = ${approval.id} FOR UPDATE NOWAIT`, isLocked);
+      await assert.rejects(prisma.$queryRaw`SELECT id FROM partner_inquiry_rows WHERE id = ${approval.rowId} FOR UPDATE NOWAIT`, isLocked);
+      const second = await get(preparationRoute, AbortSignal.timeout(10_000));
+      const reopened = second.items.find((row: { partnerContext?: { caseId: string } }) => row.partnerContext?.caseId === pricedCase.id);
+      assert.ok(reopened?.preparationOnly);
+      assert.notEqual(reopened.partnerCommercialStatus, 'FINAL');
+      assert.ok(second.items.some((row: { preparationOnly?: boolean }) => row.preparationOnly));
+      release();
+      const firstResult = await first;
+      assert.deepEqual(firstResult.items.map((row: { contractId: string }) => row.contractId),
+        second.items.map((row: { contractId: string }) => row.contractId), 'overlapping preparation results agree');
+    } finally {
+      release();
+      try { await first; } finally { prisma.$transaction = transaction; }
+    }
+    assert.ok(await paperDecisions() >= beforePaperDecisions + 2, 'each preparation read records its paper-signature authority');
+
     const simultaneous = [fetch(`${base}/contracts?view=reviewable&page=1&pageSize=12`, { headers }),
       fetch(`${base}/dashboard?range=3m`, { headers })];
     await prisma.user.update({ where: { id: actorId }, data: { isActive: false } });

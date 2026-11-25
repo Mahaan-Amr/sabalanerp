@@ -1,9 +1,12 @@
 'use client';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { FaExclamationTriangle, FaReceipt, FaSync } from 'react-icons/fa';
 import { ErpCard, ErpEmptyState, ErpInlineState, ErpListPage, ErpPagination, type ErpAction, type ErpColumn } from '@/components/erp';
 import { accountingAPI } from '@/lib/api';
+import { useAccountingRegister, type AccountingRegisterRequest } from '@/features/accounting/useAccountingRegister';
+import { AccountingRegisterFeedback } from '@/features/accounting/AccountingRegisterFeedback';
+import { isCurrentAccountingRegisterRow } from '@/features/accounting/accountingRegisterLoader';
 import { partnerTrackingCode } from '@sabalanerp/partner-sales-contracts';
 import { emptyAccountingPagination, readAccountingListResponse, StatusBadge, dateFa, money, PartnerAccountingIdentity, accountingFailureMessage, receivableStatusLabels } from '@/features/accounting/accountingUi';
 import AccountingActionModal from '@/features/accounting/AccountingActionModal';
@@ -47,17 +50,11 @@ export default function AccountingReceivablesPage() {
     [searchParams],
   );
   const query = canonicalQuery.state;
-  const [rows, setRows] = useState<any[]>([]);
-  const [pagination, setPagination] = useState(emptyAccountingPagination);
-  const [loading, setLoading] = useState(true);
   const [searchInput, setSearchInput] = useState(query.search);
-  const [focus, setFocus] = useState<any | null>(null);
-  const [receiptTarget, setReceiptTarget] = useState<any | null>(null);
-  const [voidTarget, setVoidTarget] = useState<any | null>(null);
+  const [savedReceiptTarget, setReceiptTarget] = useState<any | null>(null);
+  const [savedVoidTarget, setVoidTarget] = useState<any | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const requestVersion = useRef(0);
 
   const replaceQuery = useCallback((next: ReturnType<typeof canonicalizeReceivablesQuery>) => {
     const serialized = next.params.toString();
@@ -80,44 +77,38 @@ export default function AccountingReceivablesPage() {
     return () => window.clearTimeout(timeout);
   }, [query.search, searchInput, updateQuery]);
 
-  const loadRows = useCallback(async () => {
-    const version = ++requestVersion.current;
-    setRows([]); setFocus(null); setReceiptTarget(null); setLoadError(null);
-    try {
-      setLoading(true);
-      const response = await accountingAPI.getReceivables({
-        view: query.view || undefined,
-        due: query.due || undefined,
-        period: query.period || undefined,
-        date: query.date || undefined,
-        cutoff: query.cutoff || undefined,
-        recordId: query.recordId || undefined,
-        search: query.search || undefined,
-        status: query.status,
-        page: query.page,
-        pageSize: pagination.pageSize,
-      });
-      if (version !== requestVersion.current) return;
-      if (!response.data.success) throw new Error('Accounting read failed');
-      if (response.data.success) {
-        const data = readAccountingListResponse<any>(response.data.data);
-        setRows(data.items);
-        setPagination({ page: data.page, pageSize: data.pageSize, total: data.total });
-        setFocus(response.data.data?.focus || null);
-      }
-    } catch (error) {
-      if (version !== requestVersion.current) return;
-      setPagination(current => ({ ...current, total: 0 }));
-      setLoadError(accountingFailureMessage(error, 'دریافتنی‌ها بارگیری نشد؛ دسترسی و اتصال را بررسی کنید و دوباره به‌روزرسانی کنید.'));
-    } finally {
-      if (version === requestVersion.current) setLoading(false);
-    }
-  }, [pagination.pageSize, query.cutoff, query.date, query.due, query.page, query.period, query.recordId, query.search, query.status, query.view]);
+  const readRows = useCallback(async (request: AccountingRegisterRequest) => {
+    const response = await accountingAPI.getReceivables({
+      cutoff: query.cutoff || undefined,
+      date: query.date || undefined,
+      due: query.due || undefined,
+      page: query.page,
+      period: query.period || undefined,
+      recordId: query.recordId || undefined,
+      search: query.search || undefined,
+      status: query.status,
+      view: query.view || undefined,
+      pageSize: emptyAccountingPagination.pageSize,
+    }, request);
+    if (!response.data.success) throw new Error('Accounting read failed');
+    return { ...readAccountingListResponse<any>(response.data.data), focus: response.data.data?.focus || null };
+  }, [query.cutoff, query.date, query.due, query.page, query.period, query.recordId, query.search, query.status, query.view]);
+  const register = useAccountingRegister(readRows, 'دریافتنی‌ها بارگیری نشد؛ دوباره تلاش کنید.');
+  const { state, load: loadRows } = register;
+  const rows = state.data?.items ?? [];
+  const pagination = state.data ?? emptyAccountingPagination;
+  const focus = state.data?.focus;
 
+  const receiptTarget = savedReceiptTarget && isCurrentAccountingRegisterRow(state.data?.items, savedReceiptTarget,
+    row => row.id) ? savedReceiptTarget : null;
+  const voidTarget = savedVoidTarget && isCurrentAccountingRegisterRow(state.data?.items, savedVoidTarget,
+    row => row.id) ? savedVoidTarget : null;
   useEffect(() => {
-    loadRows();
-    return () => { requestVersion.current += 1; };
-  }, [loadRows]);
+    if (!receiptTarget) setReceiptTarget(null);
+    if (!voidTarget) setVoidTarget(null);
+    if (state.data === null) setActionError(null);
+  }, [state.data, receiptTarget, voidTarget]);
+  const actionsBlocked = state.status !== 'ready';
 
   const columns: ErpColumn<any>[] = [
     { id: 'receivable', header: 'دریافتنی', priority: 'primary', cell: (row) => row.sourceKind === 'PARTNER_INTERNAL_RECORD'
@@ -131,7 +122,7 @@ export default function AccountingReceivablesPage() {
   ];
 
   const registerReceipt = async (values: Record<string, string | number>) => {
-    if (!receiptTarget) return;
+    if (!receiptTarget || actionLoading || !register.canAct()) return;
     setActionError(null);
     setActionLoading(receiptTarget.id);
     try {
@@ -154,10 +145,11 @@ export default function AccountingReceivablesPage() {
             nationalCode: String(values.checkNationalCode || '').trim(),
           },
         } : {}),
-      });
+      }, register.mutationRequest);
       setReceiptTarget(null);
       await loadRows();
     } catch (error) {
+      if (!register.isActive() || register.clearOnDenial(error)) return;
       console.error('Register receipt failed:', error);
       setActionError(accountingFailureMessage(error, error instanceof Error && /[\u0600-\u06ff]/.test(error.message)
         ? error.message : 'ثبت دریافت انجام نشد؛ اطلاعات و مجوز خود را بررسی کنید.'));
@@ -167,16 +159,17 @@ export default function AccountingReceivablesPage() {
   };
 
   const voidReceivable = async (values: Record<string, string | number>) => {
-    if (!voidTarget) return;
+    if (!voidTarget || actionLoading || !register.canAct()) return;
     setActionError(null); setActionLoading(voidTarget.id);
     try {
       await accountingAPI.executeAction({
         kind: 'VOID_ACCOUNTING_RECEIVABLE', receivableId: voidTarget.id,
         reason: String(values.reason || '').trim(),
         effectiveAt: PersianCalendar.toGregorian(String(values.effectiveAt)).toISOString(),
-      });
+      }, register.mutationRequest);
       setVoidTarget(null); await loadRows();
     } catch (error) {
+      if (!register.isActive() || register.clearOnDenial(error)) return;
       setActionError(accountingFailureMessage(error, 'ابطال دریافتنی انجام نشد؛ راهنمای مانع را بررسی کنید.'));
     } finally { setActionLoading(null); }
   };
@@ -214,14 +207,16 @@ export default function AccountingReceivablesPage() {
       ]}
       rows={rows}
       rowKey={(row) => row.id}
+      preserveFocusedRowPosition
       focusedRowKey={focus?.state === 'focused' && focus.inPage ? query.recordId : undefined}
       columns={columns}
       rowActions={rowActions}
-      isLoading={loading}
+      isLoading={state.status === 'loading'}
+      suspendRowActions={actionsBlocked || Boolean(actionLoading)}
       footer={<ErpPagination currentPage={pagination.page} totalPages={Math.max(Math.ceil(pagination.total / pagination.pageSize), 1)} totalItems={pagination.total} itemsPerPage={pagination.pageSize} onPageChange={(page) => updateQuery({ page })} itemLabel="دریافتنی" />}
-      emptyState={<ErpEmptyState icon={FaReceipt} title="دریافتنی ثبت نشده است" description="برای قراردادهای مجاز، دریافتنی برنامه‌ریزی شده ایجاد کنید." />}
+      emptyState={state.data !== null ? <ErpEmptyState icon={FaReceipt} title="دریافتنی ثبت نشده است" description="برای قراردادهای مجاز، دریافتنی برنامه‌ریزی شده ایجاد کنید." /> : null}
     >
-      {loadError && <ErpInlineState kind="error" title={loadError} action={{ label: 'تلاش دوباره', onClick: loadRows }} />}
+      <AccountingRegisterFeedback state={state} retry={loadRows} />
       {focus?.state === 'missing' && <ErpInlineState kind="stale" title="این دریافتنی دیگر در دسترس نیست؛ فهرست، وضعیت فعلی را نشان می‌دهد." />}
       {focus?.state === 'current-truth' && <ErpInlineState kind="stale" title="وضعیت دریافتنی تغییر کرده است؛ رکورد فعلی بدون تغییر جمعیت فیلترشده بازیابی شد." />}
       {(focus?.state === 'current-truth' || (focus?.state === 'focused' && !focus.inPage)) && focus.record && (
@@ -234,8 +229,8 @@ export default function AccountingReceivablesPage() {
         </ErpCard>
       )}
       {focus?.state === 'focused' && <ErpInlineState kind="success" title="دریافتنی پیوندشده در جمعیت فعلی پیدا شد." />}
-      <AccountingActionModal
-        open={Boolean(receiptTarget)}
+      {receiptTarget && <AccountingActionModal
+        open
         title="ثبت دریافت"
         description={receiptTarget ? `${receiptTarget.partnerContext?.caseNumber ? partnerTrackingCode(receiptTarget.partnerContext.caseNumber, receiptTarget.partnerContext.trackingNumber) : receiptTarget.contract?.contractNumber || 'قرارداد'} - مانده ${money(receiptTarget.remainingAmount, receiptTarget.currency)}` : undefined}
         fields={[
@@ -257,12 +252,14 @@ export default function AccountingReceivablesPage() {
         ]}
         submitLabel="ثبت دریافت"
         busy={Boolean(actionLoading)}
+        blocked={actionsBlocked}
+        onRetry={state.status === 'error' ? loadRows : undefined}
         error={actionError}
         onClose={() => setReceiptTarget(null)}
         onSubmit={registerReceipt}
-      />
-      <AccountingActionModal
-        open={Boolean(voidTarget)}
+      />}
+      {voidTarget && <AccountingActionModal
+        open
         title="ابطال دریافتنی مستقل"
         description="این دریافتنی به فاکتور متصل نیست و هیچ مبلغ پرداخت‌شده‌ای ندارد. سابقه پس از ابطال باقی می‌ماند."
         fields={[
@@ -272,10 +269,12 @@ export default function AccountingReceivablesPage() {
         submitLabel="ابطال دریافتنی"
         destructive
         busy={Boolean(actionLoading)}
+        blocked={actionsBlocked}
+        onRetry={state.status === 'error' ? loadRows : undefined}
         error={actionError}
         onClose={() => setVoidTarget(null)}
         onSubmit={voidReceivable}
-      />
+      />}
     </ErpListPage>
   );
 }

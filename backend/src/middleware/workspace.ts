@@ -1,6 +1,6 @@
 import { prisma } from '../lib/prisma';
 import { Request, Response, NextFunction } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, type Prisma } from '@prisma/client';
 import { AuthRequest } from './auth';
 import { getEffectiveUserAccess } from '../services/effectiveAccessService';
 
@@ -170,16 +170,17 @@ export const extractWorkspace = (req: WorkspaceRequest, res: Response, next: Nex
 /**
  * Get user's accessible workspaces
  */
-export const getUserWorkspaces = async (userId: string, userRole: string): Promise<{ workspace: Workspace; permission: WorkspacePermission }[]> => {
+export const getUserWorkspaces = async (userId: string, userRole: string, { database = prisma, propagateErrors = false }: { database?: PrismaClient | Prisma.TransactionClient; propagateErrors?: boolean } = {}): Promise<{ workspace: Workspace; permission: WorkspacePermission }[]> => {
   try {
-    const access = await getEffectiveUserAccess(prisma, { userId, userRole });
+    const access = await getEffectiveUserAccess(database, { userId, userRole });
     const workspaces = access.workspaces as Array<{workspace: Workspace;permission: WorkspacePermission}>;
     if (!workspaces.some(w => w.workspace === 'purchasing') && workspaces.some(w => ['sales','inventory'].includes(w.workspace))) {
-      const partner = await prisma.partnerProfile.findUnique({where:{userId},select:{id:true}});
+      const partner = await database.partnerProfile.findUnique({where:{userId},select:{id:true}});
       if (!partner) workspaces.push({workspace:WORKSPACES.PURCHASING,permission:'view'});
     }
     return workspaces;
   } catch (error) {
+    if (propagateErrors) throw error;
     console.error('Get user workspaces error:', error);
     return [];
   }

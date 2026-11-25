@@ -2752,9 +2752,9 @@ _Avoid_: showing only one piece area when multiple source pieces are consumed, a
 A logistics-owned execution document that records what was actually loaded for shipment from one customer project, including the selected contract rows, loaded amounts, driver or vehicle details, and resulting remaining amounts.
 _Avoid_: treating بارگیری as the customer-facing برنامه تحویل, or editing the sales delivery promise when logistics is recording actual shipment
 
-**شماره بارگیری سپیدار**:
-The external Sepidar reference for one whole بارگیری, shared across its Accounting dispatch rows. It is distinct from the Sabalan loading number, waybill number, numbered sales dispatch invoice, and financial record's system invoice number.
-_Avoid_: assigning a different reference to each dispatch row, or treating an internal document number as the Sepidar loading reference
+**شماره فاکتور سپیدار**:
+The external Sepidar invoice number recorded by Accounting for a whole بارگیری, with its invoice amount in rials. A loading can have multiple Sepidar invoice numbers shared by all its drivers, and each invoice can be recorded without assigning it to an individual contract.
+_Avoid_: شماره بارگیری سپیدار, assigning invoices to individual drivers, or using the Sabalan loading number, waybill number, numbered sales dispatch invoice, or financial record's system invoice number as a Sepidar invoice number
 
 **محدوده بارگیری**:
 Each بارگیری belongs to exactly one customer project and may include deliverable rows from multiple sales contracts for that same project.

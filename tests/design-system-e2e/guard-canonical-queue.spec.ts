@@ -7,6 +7,7 @@ test('Guard admits a canonical visit and advances it while legacy history remain
   let voids = 0;
   let exits = 0;
   let failedExits = 0;
+  const legacyQueueQueries: string[] = [];
   let authorizedExits: any[] = [{ id: 'authorization-1', waybillId: 'waybill-1', dispatchNumber: '1000000001',
     validUntil: '2026-08-08T08:00:00.000Z', admissionSnapshot: { driver: { firstName: 'راننده', lastName: 'مجاز' }, plate: { plate: '44ه444ایران44' } } }];
   await page.route('**/api/security/exit-desk/authorizations**', async (route) => {
@@ -75,10 +76,14 @@ test('Guard admits a canonical visit and advances it while legacy history remain
     }
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: canonicalTurns }) });
   });
-  await page.route('**/api/security/driver-queue**', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: [{
-    id: 'legacy-turn-1', status: 'OUT_OF_QUEUE', enteredAt: '2025-01-01T08:00:00.000Z', historicalOnly: true,
-    vehiclePair: { firstName: 'راننده', lastName: 'قدیمی', vehiclePlate: '33د333ایران33' },
-  }] }) }));
+  await page.route('**/api/security/driver-queue**', (route) => {
+    expect(route.request().method()).toBe('GET');
+    legacyQueueQueries.push(new URL(route.request().url()).searchParams.get('history') ?? '');
+    return route.fulfill({ json: { success: true, data: [{
+      id: 'legacy-turn-1', status: 'OUT_OF_QUEUE', enteredAt: '2025-01-01T08:00:00.000Z', historicalOnly: true,
+      vehiclePair: { firstName: 'راننده', lastName: 'قدیمی', vehiclePlate: '33د333ایران33' },
+    }] } });
+  });
   await page.route('**/api/security/vehicle-pairs**', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: [] }) }));
   await page.route('**/api/security/vehicle-movements**', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: [] }) }));
 
@@ -139,7 +144,9 @@ test('Guard admits a canonical visit and advances it while legacy history remain
   await workspace.getByRole('button', { name: 'خروج مجاز', exact: true }).click();
   await expect(workspace.getByRole('heading', { name: 'خروج مجاز گیت', exact: true })).toBeVisible();
   await expect(workspace.getByText('بارنامه 1000000001', { exact: true })).toBeVisible();
-  await expect(workspace.getByText('نسخه چاپی به‌تنهایی اجازه خروج نمی‌دهد', { exact: false })).toBeVisible();
+  await expect(workspace.getByText('راننده مجاز · 44ه444ایران44', { exact: true })).toBeVisible();
+  await expect(workspace.getByText('مجوز معتبر', { exact: true })).toBeVisible();
+  await expect(workspace.getByRole('button', { name: 'ثبت خروج', exact: true })).toBeEnabled();
   await workspace.getByRole('button', { name: 'ثبت خروج', exact: true }).click();
   const exitConfirmation = page.getByRole('dialog', { name: 'تأیید خروج فیزیکی' });
   await expect(exitConfirmation).toBeVisible();
@@ -157,9 +164,15 @@ test('Guard admits a canonical visit and advances it while legacy history remain
   await page.getByRole('dialog', { name: 'تأیید خروج فیزیکی' }).getByRole('button', { name: 'ثبت خروج فیزیکی', exact: true }).click();
   await expect.poll(() => failedExits).toBe(1);
   await expect(workspace.getByText(/عملیات انجام نشد\. اطلاعات را بررسی و دوباره تلاش کنید/)).toBeVisible();
+  expect(exits).toBe(1);
+  await expect(workspace.getByRole('button', { name: 'ثبت خروج', exact: true })).toHaveCount(0);
+  expect(legacyQueueQueries).toEqual([]);
   await workspace.getByRole('button', { name: 'سوابق قدیمی', exact: true }).click();
   await expect(workspace.getByRole('heading', { name: 'سوابق صف قدیمی', exact: true })).toBeVisible();
   await expect(workspace.getByText('فقط سابقه', { exact: true })).toBeVisible();
+  await expect(workspace.getByText('راننده قدیمی · 33د333ایران33', { exact: true })).toBeVisible();
+  await expect.poll(() => [...new Set(legacyQueueQueries)].sort()).toEqual(['false', 'true']);
+  await expect(workspace.getByRole('button', { name: 'ابطال پذیرش', exact: true })).toHaveCount(0);
   expect(await workspace.evaluate((element) => {
     const rect = element.getBoundingClientRect();
     return rect.left >= 0 && rect.right <= document.documentElement.clientWidth + 1;
@@ -200,4 +213,71 @@ test('view-only Guard sees redacted queue state without mutation controls', asyn
   expect(mutations).toBe(0);
   expect(admissionOptionRequests).toBe(0);
   await expect(workspace.getByText('بخشی از اطلاعات خودرویی دریافت نشد')).toHaveCount(0);
+});
+
+test('Guard reads historical pages and visit evidence only on demand and restores the selected row', async ({ page }) => {
+  const historyPages: string[] = [];
+  const eventTurns: string[] = [];
+  const secondaryReads: string[] = [];
+  const visit = (id: string, lastName: string, status: string) => ({
+    id, status, driverSource: 'INTERNAL', admittedAt: '2026-08-07T08:00:00.000Z',
+    admissionSnapshot: { driver: { firstName: 'راننده', lastName }, plate: { plate: 'QA' } },
+  });
+
+  await page.route('**/api/security/canonical-driver-queue**', route => {
+    const url = new URL(route.request().url());
+    if (url.pathname.endsWith('/admission-options')) {
+      return route.fulfill({ json: { success: true, data: { internalAssignments: [], externalDrivers: [], externalVehicles: [] } } });
+    }
+    if (url.pathname.endsWith('/events')) {
+      eventTurns.push(url.pathname.split('/').at(-2)!);
+      return route.fulfill({ json: { success: true, data: [{ id: 'event-1', eventType: 'VOIDED',
+        toStatus: 'VOIDED', recordedAt: '2026-08-07T10:00:00.000Z', reason: 'اصلاح پذیرش آزمایشی' }] } });
+    }
+    if (url.searchParams.get('history') === 'true') {
+      const currentPage = url.searchParams.get('page') || '';
+      historyPages.push(currentPage);
+      return route.fulfill({ json: { success: true,
+        data: [currentPage === '2' ? visit('old-visit', 'سابقه دوم', 'VOIDED') : visit('recent-visit', 'سابقه اول', 'EXIT_RECORDED')],
+        pagination: { page: Number(currentPage), pageSize: 10, total: 11 },
+      } });
+    }
+    return route.fulfill({ json: { success: true, data: [visit('active-visit', 'حاضر', 'WAITING_AT_GATE')] } });
+  });
+  await page.route('**/api/security/{driver-queue,vehicle-pairs,vehicle-movements}**', route => {
+    secondaryReads.push(new URL(route.request().url()).pathname);
+    return route.fulfill({ json: { success: true, data: [] } });
+  });
+  await page.route('**/api/security/exit-desk/authorizations**', route =>
+    route.fulfill({ json: { success: true, data: [] } }));
+
+  await login(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/dashboard/security/vehicles');
+  const workspace = page.locator('main.sds-workspace');
+  await expect(workspace.getByText('راننده حاضر · QA', { exact: true })).toBeVisible();
+  await expect(workspace.getByRole('button', { name: 'ورود برای بارگیری', exact: true })).toBeEnabled();
+  expect(historyPages).toEqual([]);
+  expect(eventTurns).toEqual([]);
+  expect(secondaryReads).toEqual([]);
+
+  await workspace.getByRole('button', { name: 'سوابق تردد', exact: true }).click();
+  await expect(workspace.getByText(/راننده سابقه اول/)).toBeVisible();
+  expect(historyPages).toEqual(['1']);
+  expect(eventTurns).toEqual([]);
+
+  await workspace.getByRole('button', { name: 'بعدی', exact: true }).click();
+  await expect(workspace.getByText(/راننده سابقه دوم/)).toBeVisible();
+  const openEvents = workspace.getByRole('button', { name: 'رویدادهای نوبت', exact: true });
+  await openEvents.click();
+  const dialog = page.getByRole('dialog', { name: 'رویدادهای نوبت' });
+  await expect(dialog.getByText('اصلاح پذیرش آزمایشی')).toBeVisible();
+  expect(eventTurns).toEqual(['old-visit']);
+
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await expect(openEvents).toBeFocused();
+  await expect(workspace.getByText(/راننده سابقه دوم/)).toBeVisible();
+  expect(historyPages).toEqual(['1', '2']);
+  await expect(workspace.getByRole('button', { name: 'قبلی', exact: true })).toBeEnabled();
 });

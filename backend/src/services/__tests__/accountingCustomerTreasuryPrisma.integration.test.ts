@@ -31,6 +31,9 @@ import {
   importBankStatementLinePrisma,
   proposeBankMatchesPrisma,
   confirmBankMatchPrisma,
+  listCustomerAccountsPrisma,
+  searchTreasuryCustomerProfilesPrisma,
+  listTreasuryBankLinesPrisma,
   listTreasuryOverviewPrisma,
   recognizeCustomerReturnPrisma,
   recognizeCustomerReturnWithin,
@@ -266,7 +269,8 @@ test('customer revenue and treasury tracer bullet persists once and projects onl
     await importBankStatementFilePrisma(database, { financialAccountId: financial.id, adapterType: 'CSV',
       mappingVersion: 1, actorId: actor.id, fileBase64: pageFile });
     const firstPage = await listTreasuryOverviewPrisma(database);
-    const secondPage = await listTreasuryOverviewPrisma(database, { bankLinePage: 2 });
+    const secondPage = await listTreasuryBankLinesPrisma(database, 2);
+    assert.deepEqual(secondPage.bankLines, (await listTreasuryOverviewPrisma(database, { bankLinePage: 2 })).bankLines);
     assert.equal(firstPage.bankLines.length, 100);
     assert.equal(firstPage.bankLinesHasMore, true);
     assert.equal(secondPage.bankLinesHasMore, false);
@@ -298,6 +302,29 @@ test('customer revenue and treasury tracer bullet persists once and projects onl
     const afterReversal = await projectCustomerAccountPrisma(database, { profileId: profile.id, asOf: new Date(reversedAt.getTime() + 1_000) });
     assert.equal(historical.receivableRials, 0n);
     assert.equal(afterReversal.receivableRials, 1_100n);
+    await database.accountingCustomerProfile.createMany({ data: Array.from({ length: 199 }, (_, index) => ({
+      legalEntityId: entity.id, accountingPartyId: profile.accountingPartyId, partySourceKind: 'CUSTOMER',
+      partySourceId: `quiet-${index}`, displayName: `حساب آزمون ${String(index).padStart(3, '0')}`,
+      activeFrom: year.startsAt, createdBy: actor.id,
+    })) });
+    for (const [asOf, expected] of [
+      [new Date(reversedAt.getTime() - 1), { receivableRials: 0n, unallocatedCreditRials: 100n, openItemCount: 0 }],
+      [new Date(reversedAt.getTime() + 1_000), { receivableRials: 1_100n, unallocatedCreditRials: 1_200n, openItemCount: 1 }],
+    ] as const) {
+      const summaries = await listCustomerAccountsPrisma(database, { asOf });
+      assert.equal(summaries.length, 200);
+      const summary = summaries.find(row => row.id === profile.id);
+      assert.ok(summary);
+      assert.deepEqual({ receivableRials: summary.receivableRials, unallocatedCreditRials: summary.unallocatedCreditRials,
+        openItemCount: summary.openItemCount }, expected);
+      assert.equal(summary.oldestDueAt?.getTime() ?? null, expected.openItemCount ? afterReversal.openItems[0].dueAt.getTime() : null);
+      assert.ok(summaries.filter(row => row.id !== profile.id).every(row => row.receivableRials === 0n && row.unallocatedCreditRials === 0n));
+    }
+    assert.equal((await searchTreasuryCustomerProfilesPrisma(database, 'حساب آزمون')).length, 25);
+    assert.deepEqual(await searchTreasuryCustomerProfilesPrisma(database, 'حساب آزمون 198'), [
+      { id: (await database.accountingCustomerProfile.findFirstOrThrow({ where: { partySourceId: 'quiet-198' } })).id,
+        displayName: 'حساب آزمون 198' },
+    ]);
     const exported = await exportCustomerStatementPrisma(database, { profileId: profile.id,
       asOf: new Date(reversedAt.getTime() + 1_000), format: 'xlsx', actorId: actor.id });
     const exportedRetry = await exportCustomerStatementPrisma(database, { profileId: profile.id,
@@ -681,6 +708,8 @@ test('customer revenue and treasury tracer bullet persists once and projects onl
         ]);
         assert.equal(outcomes.filter(outcome => outcome.replayed).length, 1);
         assert.equal(outcomes[0].data.id, outcomes[1].data.id);
+        await assert.rejects(finalizeStoneReturn(database, accepted.id, { ...accountant, id: 'another-accountant' },
+          returnCommand), /فرمان دیگری/);
         const reviewed = await readStoneReturnAllocationReview(database, accepted.id);
         assert.equal(reviewed.allocationStatus, 'FINALIZED');
         assert.equal(reviewed.finalization?.draftVersion, complete.draft.version);

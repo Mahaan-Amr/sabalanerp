@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import {
   FaCarSide,
@@ -30,7 +30,8 @@ import {
   ErpWorkspacePage,
   erpFieldLabelClassName,
 } from "@/components/erp";
-import { crmAPI, dispatchConfirmationAPI, securityAPI } from "@/lib/api";
+import { createCrmAPI, createDispatchConfirmationAPI, createSecurityAPI, type CrmCustomerOption } from "@/lib/api";
+import { useActorScopedHttp } from "@/hooks/useActorScopedHttp";
 import RoleAwareDispatchCases from "@/features/dispatch-case/RoleAwareDispatchCases";
 import { dispatchCaseReference } from "@/features/dispatch-case/dispatchCasePresentation";
 import {
@@ -39,6 +40,8 @@ import {
   useWorkspace,
 } from "@/contexts/WorkspaceContext";
 import { operationalStatusLabel } from "@/features/dispatch/operationalStatusPresentation";
+import { useAuth } from "@/contexts/AuthContext";
+import CanonicalQueueHistory, { canonicalQueueStatusLabel } from "./CanonicalQueueHistory";
 import { userFacingError } from "@/features/dispatch/userFacingError";
 import CompanyPlateFields from "@/features/dispatch-master-data/CompanyPlateFields";
 import {
@@ -48,6 +51,7 @@ import {
 } from "@/features/dispatch-master-data/companyVehicleEntry";
 
 const labelClass = erpFieldLabelClassName;
+const emptyAdmissionOptions = { internalAssignments: [], externalDrivers: [], externalVehicles: [] };
 
 const emptyPair = {
   firstName: "",
@@ -104,16 +108,6 @@ const queueStatusLabel: Record<string, string> = {
   DISPATCHED: "اعزام شده",
   OUT_OF_QUEUE: "خارج از صف",
 };
-const canonicalQueueStatusLabel: Record<string, string> = {
-  WAITING_AT_GATE: "در انتظار گیت",
-  AVAILABLE_FOR_LOADING: "آماده بارگیری",
-  RESERVED_FOR_LOADING: "رزرو بارگیری",
-  LOADING_FINALIZED: "بارگیری نهایی‌شده",
-  EXIT_RECORDED: "خروج ثبت‌شده",
-  CLOSED_WITHOUT_LOADING: "بسته‌شده بدون بارگیری",
-  VOIDED: "باطل‌شده",
-};
-
 const statusTone = (status: string) => {
   if (status === "EXITED" || status === "INFO_COMPLETED")
     return "success" as const;
@@ -133,12 +127,35 @@ type VehicleSection =
   | "cases";
 
 export default function SecurityVehiclesPage() {
-  const mutationLock = useRef(false);
+  const { user } = useAuth();
   const { hasPermission, loading: permissionsLoading } = useWorkspace();
-  const canEditQueue = hasPermission(
-    WORKSPACES.SECURITY,
-    WORKSPACE_PERMISSIONS.EDIT,
+  const canViewQueue = hasPermission(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.VIEW);
+  const canEditQueue = hasPermission(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.EDIT);
+  if (!user) return null;
+  return (
+    <SecurityVehicleWorkspace
+      key={JSON.stringify([user.id, user.role, canViewQueue, canEditQueue])}
+      actorId={user.id}
+      canViewQueue={canViewQueue}
+      canEditQueue={canEditQueue}
+      permissionsLoading={permissionsLoading}
+    />
   );
+}
+
+function SecurityVehicleWorkspace({ actorId, canViewQueue, canEditQueue, permissionsLoading }: {
+  actorId: string;
+  canViewQueue: boolean;
+  canEditQueue: boolean;
+  permissionsLoading: boolean;
+}) {
+  const api = useActorScopedHttp(actorId);
+  const crmAPI = useMemo(() => createCrmAPI(api), [api]);
+  const securityAPI = useMemo(() => createSecurityAPI(api), [api]);
+  const dispatchConfirmationAPI = useMemo(() => createDispatchConfirmationAPI(api), [api]);
+  const mutationLock = useRef(false);
+  const readSequence = useRef(0);
+  const currentSection = useRef<VehicleSection>("queue");
   const router = useRouter();
   const pathname = usePathname();
   const [pairs, setPairs] = useState<any[]>([]);
@@ -146,13 +163,9 @@ export default function SecurityVehiclesPage() {
   const [queueTurns, setQueueTurns] = useState<any[]>([]);
   const [queueHistory, setQueueHistory] = useState<any[]>([]);
   const [canonicalQueue, setCanonicalQueue] = useState<any[]>([]);
-  const [canonicalQueueHistory, setCanonicalQueueHistory] = useState<any[]>([]);
+  const [historyRefresh, setHistoryRefresh] = useState(0);
   const [authorizedExits, setAuthorizedExits] = useState<any[]>([]);
-  const [admissionOptions, setAdmissionOptions] = useState<any>({
-    internalAssignments: [],
-    externalDrivers: [],
-    externalVehicles: [],
-  });
+  const [admissionOptions, setAdmissionOptions] = useState<any>(emptyAdmissionOptions);
   const [admissionSource, setAdmissionSource] = useState<
     "INTERNAL" | "EXTERNAL" | "CUSTOMER_PICKUP"
   >("INTERNAL");
@@ -173,7 +186,8 @@ export default function SecurityVehiclesPage() {
   } | null>(null);
   const [admissionOpen, setAdmissionOpen] = useState(false);
   const [exitTarget, setExitTarget] = useState<any>(null);
-  const [customers, setCustomers] = useState<any[]>([]);
+  const [customers, setCustomers] = useState<CrmCustomerOption[]>([]);
+  const customerSearchRequest = useRef<AbortController>();
   const [customerSearch, setCustomerSearch] = useState("");
   const [previewUrl, setPreviewUrl] = useState("");
   const [inboundForm, setInboundForm] = useState<any>(emptyInbound);
@@ -188,59 +202,74 @@ export default function SecurityVehiclesPage() {
   const [activeSection, setActiveSection] = useState<VehicleSection>("queue");
   const [queryReady, setQueryReady] = useState(false);
 
-  const loadData = async (silent = false) => {
-    if (!silent) setLoading(true);
-    if (!silent) setError("");
-    try {
-      const results = await Promise.allSettled([
-        securityAPI.getVehiclePairs({ includeInactive: true }),
-        securityAPI.getVehicleMovements({ limit: 50 }),
-        securityAPI.getDriverQueue(),
-        securityAPI.getDriverQueue(true),
-        securityAPI.getCanonicalDriverQueue(),
-        securityAPI.getCanonicalDriverQueue(true),
-        securityAPI.getAuthorizedPhysicalExits(),
-        canEditQueue
-          ? securityAPI.getCanonicalQueueAdmissionOptions()
-          : Promise.resolve({
-              data: {
-                success: true,
-                data: {
-                  internalAssignments: [],
-                  externalDrivers: [],
-                  externalVehicles: [],
-                },
-              },
-            }),
-      ]);
-      const setters = [
-        setPairs,
-        setMovements,
-        setQueueTurns,
-        setQueueHistory,
-        setCanonicalQueue,
-        setCanonicalQueueHistory,
-        setAuthorizedExits,
-        setAdmissionOptions,
-      ];
-      results.forEach((result, index) => {
-        if (result.status === "fulfilled" && result.value.data.success)
-          setters[index](result.value.data.data);
-      });
-      if (results.some((result) => result.status === "rejected"))
-        setError(
-          "بخشی از اطلاعات خودرویی دریافت نشد؛ اطلاعات موفق نمایش داده می‌شود.",
-        );
-    } catch (err: any) {
-      setError(userFacingError(err, "دریافت اطلاعات خودرویی ناموفق بود."));
-    } finally {
-      if (!silent) setLoading(false);
+  const selectSection = (section: VehicleSection) => {
+    if (section === currentSection.current) return;
+    currentSection.current = section;
+    readSequence.current += 1;
+    setLoading(false);
+    setActiveSection(section);
+  };
+
+  const loadData = useCallback(async (silent = false) => {
+    if (!canViewQueue) return;
+    const request = ++readSequence.current;
+    if (!silent) {
+      setLoading(true);
+      setError("");
     }
+    const applyRead = async (
+      pending: Promise<{ data: { success: boolean; data: any } }>,
+      update: (data: any) => void,
+      empty: unknown = [],
+    ) => {
+      try {
+        const { data } = await pending;
+        if (request !== readSequence.current) return;
+        if (!data.success) throw new Error("Guard vehicle read failed");
+        update(data.data);
+      } catch (error: any) {
+        if (request !== readSequence.current) return;
+        if ([401, 403].includes(error?.response?.status)) update(empty);
+        setError("بخشی از اطلاعات خودرویی دریافت نشد؛ اطلاعات موفق نمایش داده می‌شود.");
+      }
+    };
+
+    switch (currentSection.current) {
+      case "queue": {
+        const options = canEditQueue
+          ? applyRead(securityAPI.getCanonicalQueueAdmissionOptions(), setAdmissionOptions, emptyAdmissionOptions)
+          : undefined;
+        await applyRead(securityAPI.getCanonicalDriverQueue(), setCanonicalQueue);
+        if (request === readSequence.current) setLoading(false);
+        await options;
+        break;
+      }
+      case "sales-exit":
+        await applyRead(securityAPI.getAuthorizedPhysicalExits(), setAuthorizedExits);
+        break;
+      case "movements":
+        await applyRead(securityAPI.getVehicleMovements({ limit: 50 }), setMovements);
+        break;
+      case "registry":
+        await Promise.all([
+          applyRead(securityAPI.getVehiclePairs({ includeInactive: true }), setPairs),
+          applyRead(securityAPI.getDriverQueue(), setQueueTurns),
+          applyRead(securityAPI.getDriverQueue(true), setQueueHistory),
+        ]);
+        break;
+    }
+    if (request === readSequence.current) setLoading(false);
+  }, [canEditQueue, canViewQueue, securityAPI]);
+
+  const refreshSection = () => {
+    if (currentSection.current === "movements") setHistoryRefresh(refresh => refresh + 1);
+    void loadData();
   };
 
   useEffect(() => {
-    if (!permissionsLoading) void loadData();
-  }, [permissionsLoading, canEditQueue]);
+    if (!permissionsLoading && canViewQueue && queryReady) void loadData();
+    return () => { readSequence.current += 1; };
+  }, [permissionsLoading, canViewQueue, queryReady, activeSection, loadData]);
 
   useEffect(() => {
     dispatchConfirmationAPI
@@ -251,15 +280,15 @@ export default function SecurityVehiclesPage() {
         ),
       )
       .catch(() => setCanApproveDispatchConfirmation(false));
-  }, []);
+  }, [dispatchConfirmationAPI]);
 
   useEffect(() => {
-    if (activeSection !== "queue") return undefined;
+    if (activeSection !== "queue" || permissionsLoading || !canViewQueue || !queryReady) return;
     const timer = window.setInterval(() => {
       void loadData(true);
     }, 30_000);
     return () => window.clearInterval(timer);
-  }, [activeSection]);
+  }, [activeSection, canViewQueue, permissionsLoading, queryReady, loadData]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -276,8 +305,8 @@ export default function SecurityVehiclesPage() {
         "cases",
       ].includes(operation)
     )
-      setActiveSection(operation);
-    else if (params.get("view") === "history") setActiveSection("movements");
+      selectSection(operation);
+    else if (params.get("view") === "history") selectSection("movements");
     setQueryReady(true);
   }, []);
 
@@ -292,13 +321,23 @@ export default function SecurityVehiclesPage() {
     });
   }, [activeSection, pathname, queryReady, router]);
 
+  useEffect(() => () => customerSearchRequest.current?.abort(), []);
+
   const searchCustomers = async () => {
-    if (!customerSearch.trim()) return;
-    const response = await crmAPI.getCustomers({
-      search: customerSearch,
-      limit: 10,
-    });
-    if (response.data.success) setCustomers(response.data.data || []);
+    const search = customerSearch.trim();
+    if (!search) return;
+    customerSearchRequest.current?.abort();
+    const controller = new AbortController();
+    customerSearchRequest.current = controller;
+    try {
+      const { data } = await crmAPI.getCustomerOptions({ search, limit: 10 }, controller.signal);
+      if (!controller.signal.aborted && data.success) setCustomers(data.data);
+    } catch {
+      if (!controller.signal.aborted) {
+        setCustomers([]);
+        setError('جست‌وجوی مشتری انجام نشد.');
+      }
+    }
   };
 
   const recordInbound = async () => {
@@ -450,28 +489,25 @@ export default function SecurityVehiclesPage() {
           : undefined
       }
       secondaryActions={[
-        { label: "به‌روزرسانی", icon: FaRedo, onClick: loadData },
+        { label: "به‌روزرسانی", icon: FaRedo, onClick: refreshSection },
       ]}
     >
-      {loading && !pairs.length && !movements.length ? (
+      {(!queryReady || permissionsLoading || (loading && activeSection === "queue" && !canonicalQueue.length)) ? (
         <ErpSkeleton lines={6} />
       ) : (
         <>
           {message && <ErpInlineState kind="success" title={message} />}
           {error && (
             <ErpInlineState
-              kind={pairs.length || movements.length ? "stale" : "error"}
+              kind={canonicalQueue.length || pairs.length || movements.length ? "stale" : "error"}
               title={error}
-              action={{ label: "تلاش مجدد", onClick: loadData }}
+              action={{ label: "تلاش مجدد", onClick: refreshSection }}
             />
           )}
 
           <ErpSegmentedControl<VehicleSection>
             value={activeSection}
-            onChange={(section) => {
-              setActiveSection(section);
-              if (section === "sales-exit") void loadData(true);
-            }}
+            onChange={selectSection}
             options={[
               { value: "queue", label: "پذیرش راننده", icon: FaClock },
               { value: "sales-exit", label: "خروج مجاز", icon: FaCheck },
@@ -1031,9 +1067,10 @@ export default function SecurityVehiclesPage() {
                     <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
                       <ErpInput
                         value={customerSearch}
-                        onChange={(event) =>
-                          setCustomerSearch(event.target.value)
-                        }
+                        onChange={(event) => {
+                          customerSearchRequest.current?.abort();
+                          setCustomerSearch(event.target.value);
+                        }}
                       />
                       <ErpButton
                         label="جستجو"
@@ -1229,32 +1266,8 @@ export default function SecurityVehiclesPage() {
           {activeSection === "movements" && (
             <ErpSection title="سوابق تردد">
               <div className="space-y-3">
-                {canonicalQueueHistory
-                  .filter((turn: any) =>
-                    [
-                      "CLOSED_WITHOUT_LOADING",
-                      "VOIDED",
-                      "EXIT_RECORDED",
-                    ].includes(turn.status),
-                  )
-                  .slice(0, 10)
-                  .map((turn: any) => (
-                    <ErpCard key={turn.id} className="p-4">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <span className="text-sm sds-text-primary">
-                          {turn.admissionSnapshot?.driver?.firstName}{" "}
-                          {turn.admissionSnapshot?.driver?.lastName} ·{" "}
-                          {turn.admissionSnapshot?.plate?.plate || "بدون پلاک"}
-                        </span>
-                        <ErpBadge
-                          tone={turn.status === "VOIDED" ? "danger" : "neutral"}
-                        >
-                          {canonicalQueueStatusLabel[turn.status] ||
-                            operationalStatusLabel(turn.status)}
-                        </ErpBadge>
-                      </div>
-                    </ErpCard>
-                  ))}
+                {canViewQueue && <CanonicalQueueHistory refresh={historyRefresh} securityAPI={securityAPI} />}
+                {loading && !movements.length && <ErpSkeleton lines={3} />}
                 {movements.map((movement) => (
                   <ErpCard key={movement.id} className="p-4">
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">

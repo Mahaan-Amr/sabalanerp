@@ -10,6 +10,8 @@ import { PartnerEventSchema, canonicalHash, partnerError, type PartnerCommand, t
 import { createPartnerFixtures } from '@sabalanerp/partner-sales-contracts/testing';
 import { createPartnerCaseLifecycleService, createPrismaPartnerCaseLifecycleService,
   readPartnerRevisionProjections, type PartnerCaseLifecycleDependencies } from '../partnerSales/cases/lifecycle';
+import { withAccountingReadScope } from '../partnerSales/accounting/readScope';
+import { preparePartnerFinancialSource } from '../partnerSales/accounting/source';
 import { createPartnerAccountingAdapter } from '../partnerSales/accounting/adapter';
 import { createPrismaPartnerAccountingRepository } from '../partnerSales/accounting/prismaRepository';
 import { PARTNER_INTERNAL_ACCOUNTING_SOURCE, approvePartnerFinancialSourceWithinTransaction } from '../partnerSales/accounting/financialApproval';
@@ -48,6 +50,107 @@ function databaseUrl(schemaOnly = true) {
   if (url.hostname !== '127.0.0.1' || url.port !== '55432' || !localDatabase.test(url.pathname)) throw new Error('Existing local DB required');
   url.searchParams.set('connection_limit', '2'); url.searchParams.set('pool_timeout', '10'); return url.toString();
 }
+
+test('Accounting reads authorized Case heads together and rejects damaged evidence outside the first page', async () => {
+  const temporary = await createPartnerLifecycleDatabase({ repositoryRoot: process.cwd(), sourceDatabaseUrl: databaseUrl() });
+  const database = new PrismaClient({ datasources: { db: { url: temporary.databaseUrl } }, log: [{ level: 'query', emit: 'event' }] });
+  let headReads = 0, planReads = 0, commercialReads = 0, freezeReads = 0;
+  database.$on('query', ({ query }) => {
+    if (query.includes('FROM "public"."partner_correction_opportunities"')) freezeReads++;
+    if (/FROM (?:"public"\.)?"?partner_payment_plans"?\b/.test(query)) planReads++;
+    if (query.includes('"sales_contracts"."dispatchExpiryExempt"')) commercialReads++;
+    if (query.includes('"partner_case_revisions"."internalProjection"') && query.includes('"partner_case_revisions"."graph"')) headReads++;
+  });
+  const first = idsFor('page-a'), second = idsFor('page-b');
+  const actorId = 'page-accountant';
+  try {
+    await database.$transaction(async tx => {
+      await tx.effectiveAuthorizationState.create({ data: { id: 1, revision: 1 } });
+      await tx.user.create({ data: { id: actorId, username: actorId, email: 'page@example.invalid', password: 'fixture',
+        firstName: 'Page', lastName: 'Accountant', role: 'ADMIN' } });
+      for (const ids of [first, second]) {
+        const owner = await seedCase(tx, ids);
+        const revision = await tx.partnerCaseRevision.findUniqueOrThrow({ where: { caseId_revision: { caseId: ids.caseId, revision: 1 } } });
+        const view = partnerContracts.SabalanInternalRecordViewSchema.parse((revision.internalProjection as Prisma.JsonObject).accounting);
+        const prepared = await preparePartnerFinancialSource({ view: { ...view, state: 'COMMITTED' }, partnerSellerId: ids.partnerId }, owner);
+        assert.ok(prepared.ok);
+        const lifecycle = createPartnerCaseLifecycleService(dependencies(tx, ids));
+        assert.ok((await lifecycle.markAwaitingCustomerConfirmation({ expected: owner, commandId: ids.caseId + '-send',
+          correlationId: ids.caseId + '-send', snapshotId: ids.caseId + '-snapshot' })).ok);
+        assert.ok((await lifecycle.markCustomerApproved({ expected: owner, commandId: ids.caseId + '-approve',
+          correlationId: ids.caseId + '-approve', snapshotId: ids.caseId + '-snapshot', verifiedAt: '2026-08-30T08:00:00.000Z' })).ok);
+        assert.ok((await lifecycle.execute(await commitCommand(ids, owner, 'SIGNED'))).ok);
+        await tx.accountingFinancialRecord.create({ data: { id: ids.caseId, sourceId: ids.internalId, sourceKind: PARTNER_INTERNAL_ACCOUNTING_SOURCE,
+          kind: 'INVOICE_CANDIDATE', status: 'ISSUED', amount: prepared.value.amount.amount, currency: prepared.value.amount.currency, createdBy: actorId,
+          sourceSnapshot: { partnerPreparation: prepared.value }, metadata: { partnerCaseId: ids.caseId } } });
+        const receivableId = ids.caseId + '-receivable';
+        await tx.accountingReceivable.create({ data: { id: receivableId, invoiceRecordId: ids.caseId,
+          originalAmount: prepared.value.amount.amount, remainingAmount: prepared.value.amount.amount,
+          currency: prepared.value.amount.currency, dueDate: new Date(prepared.value.paymentPlan.effectiveDate),
+          createdBy: actorId, metadata: { partnerReceivable: {
+            id: receivableId, invoiceRecordId: ids.caseId, internalRecordId: ids.internalId, owner,
+            partnerSellerId: ids.partnerId, commercialAccountId: ids.accountId,
+            originalAmount: prepared.value.amount, paymentPlan: prepared.value.paymentPlan } } } });
+      }
+    });
+    assert.equal(await database.accountingFinancialRecord.count(), 2, 'both committed fixture invoices exist');
+    const firstPage = () => withAccountingReadScope(database, { userId: actorId }, async scope => {
+      const rows = await scope.database.accountingFinancialRecord.findMany({ where: scope.financial(), orderBy: { id: 'asc' }, take: 1 });
+      return scope.contextualize('FINANCIAL', rows);
+    });
+    headReads = 0; planReads = 0; commercialReads = 0; freezeReads = 0;
+    const page = await firstPage();
+    assert.deepEqual(page.map(row => [row.id, row.partnerContext?.caseId]), [[first.caseId, first.caseId]]);
+    const validPageHeadReads = headReads, validPagePlanReads = planReads, validCommercialReads = commercialReads;
+    const validFreezeReads = freezeReads;
+    const receiptActions = () => withAccountingReadScope(database, { userId: actorId }, async scope => {
+      const receivables = await scope.database.accountingReceivable.findMany({ where: scope.receivable(), orderBy: { id: 'asc' } });
+      return (await scope.contextualize('RECEIVABLE', receivables)).map(row => row.partnerActions?.registerReceipt);
+    });
+    assert.deepEqual(await receiptActions(), [true, true]);
+    await database.$transaction(async tx => {
+      for (const ids of [first, second]) {
+        const correctionId = ids.caseId + '-correction';
+        await tx.partnerCorrectionOpportunity.create({ data: { id: correctionId, caseId: ids.caseId,
+          predecessorRevision: 1, scope: 'SHARED', scopeHash: hash, requesterId: ids.partnerId,
+          approvedBy: 'sales-manager', approvedAt: new Date('2020-01-01'), expiresAt: new Date(ids === first ? '2099-01-01' : '2020-01-04'),
+          calendarVersion: 'TEHRAN_WORKING_DAYS_V1', evidence: {} } });
+        await tx.partnerCorrectionGate.create({ data: { id: correctionId + '-sales', opportunityId: correctionId,
+          kind: 'SALES_SCOPE', outcome: 'APPROVE', actorId: 'sales-manager', commandId: correctionId + '-sales', evidence: {} } });
+      }
+    });
+    assert.deepEqual(await receiptActions(), [false, true], 'an active approved predecessor freezes receipts until expiry');
+    await database.$transaction(async tx => {
+      // Represent the saved successor without moving the effective head in this isolated fixture.
+      await tx.$executeRawUnsafe('SET LOCAL session_replication_role = replica');
+      const revision = await tx.partnerCaseRevision.findUniqueOrThrow({ where: { caseId_revision: { caseId: second.caseId, revision: 1 } } });
+      await tx.partnerCaseRevision.create({ data: { ...revision, revision: 2, predecessorRevision: 1,
+        commandId: 'page-successor', graph: revision.graph as Prisma.InputJsonValue, partySnapshots: revision.partySnapshots as Prisma.InputJsonValue,
+        wholesaleEnvelope: revision.wholesaleEnvelope as Prisma.InputJsonValue, retailEnvelope: revision.retailEnvelope as Prisma.InputJsonValue,
+        paymentEvidence: revision.paymentEvidence as Prisma.InputJsonValue, customerContent: revision.customerContent as Prisma.InputJsonValue,
+        internalProjection: revision.internalProjection as Prisma.InputJsonValue, customerProjection: revision.customerProjection as Prisma.InputJsonValue } });
+      await tx.partnerCorrectionSave.create({ data: { opportunityId: second.caseId + '-correction', caseId: second.caseId,
+        successorRevision: 2, actorId: second.partnerId, savedAt: new Date('2020-01-02'), commandId: 'page-save' } });
+      await tx.partnerCorrectionGate.create({ data: { id: 'page-reject', opportunityId: first.caseId + '-correction',
+        kind: 'ACCOUNTING_PROCESS', outcome: 'REJECT', actorId: actorId, commandId: 'page-reject', evidence: {} } });
+    });
+    assert.deepEqual(await receiptActions(), [true, false], 'a rejection releases the predecessor and a saved successor keeps it frozen after expiry');
+
+    await database.$transaction(async tx => {
+      await tx.$executeRawUnsafe('SET LOCAL session_replication_role = replica');
+      await tx.partnerCaseRevision.update({ where: { caseId_revision: { caseId: second.caseId, revision: 1 } },
+        data: { graphHash: `sha256-v1:${'e'.repeat(64)}` } });
+    });
+    await assert.rejects(firstPage, { code: 'INTEGRITY_CONFLICT' });
+    assert.equal(validFreezeReads, 1, 'the authorized invoice population checks correction freezes in one query');
+    assert.equal(validCommercialReads, 1, 'commercial contract state is fetched once for the authorized population');
+    assert.equal(validPageHeadReads, 1, 'the whole authorized page population needs one canonical head fetch');
+    assert.equal(validPagePlanReads, 1, 'two Cases using their embedded terms need one current-plan lookup');
+  } finally {
+    await database.$disconnect();
+    await temporary.cleanup();
+  }
+});
 
 test('multi-Case Accounting list does not deadlock with the Partner writer lock sequence', async () => {
   const temporary = await createPartnerLifecycleDatabase({ repositoryRoot: path.resolve(process.cwd()), sourceDatabaseUrl: databaseUrl() });
@@ -117,7 +220,7 @@ test('Partner dispatch statements require current internal Accounting authority 
     const batch = await database.logisticsAllocationBatch.create({ data: { loadingId: loading.id,
       idempotencyKey: 'policy-fixture', finalizedBy: managerId } });
     const partnerCase = await database.partnerSaleCase.findUniqueOrThrow({ where: { id: ids.caseId }, select: {
-      id: true, headRevision: true, integrityHash: true, internalRecordId: true,
+      id: true, headRevision: true, integrityHash: true, internalRecordId: true, caseNumber: true,
     } });
     const partnerDelivery = await database.partnerCaseDelivery.findFirstOrThrow({ where: {
       caseId: ids.caseId, revision: partnerCase.headRevision,
@@ -191,6 +294,7 @@ test('Partner dispatch statements require current internal Accounting authority 
         DATABASE_URL: temporary.databaseUrl, PARTNER_TEST_ACTOR_ID: managerId,
         PARTNER_TEST_ORDINARY_CANDIDATE_ID: candidates.SALES_CONTRACT,
         PARTNER_TEST_ALLOWED_CANDIDATE_ID: candidates.PARTNER_CASE,
+        PARTNER_TEST_ALLOWED_CASE_NUMBER: partnerCase.caseNumber,
         PARTNER_TEST_HIDDEN_CANDIDATE_ID: candidates.HIDDEN_PARTNER_CASE,
         PARTNER_TEST_LOADING_ID: loading.id, PARTNER_TEST_OTHER_LOADING_ID: otherLoading.id,
         PARTNER_TEST_HIDDEN_LOADING_ID: hiddenLoading.id } });
@@ -333,9 +437,10 @@ async function seedCase(tx: Prisma.TransactionClient, ids: Ids, tamperAccounting
   const assignmentId = `${ids.caseId}-assignment`, approvalId = `${ids.caseId}-approval`;
   await tx.$executeRawUnsafe("SET LOCAL session_replication_role = 'replica'");
   const pricingReadyAt = new Date(Date.now() - 60_000);
+  const pricingExpiresAt = new Date(pricingReadyAt.getTime() + 48 * 60 * 60 * 1000);
   await tx.partnerInquiry.create({ data: { id: inquiryId, profileId: ids.profileId,
     caseId: ids.caseId, caseRevision: 1, submittedAt: pricingReadyAt,
-    pricingReadyAt, pricingExpiresAt: new Date(pricingReadyAt.getTime() + 48 * 60 * 60 * 1000) } });
+    pricingReadyAt, pricingExpiresAt } });
   await tx.partnerInquiryAssignment.create({ data: { id: assignmentId, inquiryId, revision: 1,
     responderId: ids.partnerId, actorId: ids.partnerId, reason: 'آزمون چرخه پرونده', eligibilityEvidence: {} } });
   await tx.partnerInquiryRow.create({ data: { id: inquiryRowId, inquiryId, version: 1, outcome: 'APPROVED',
@@ -343,8 +448,7 @@ async function seedCase(tx: Prisma.TransactionClient, ids: Ids, tamperAccounting
   await tx.partnerInquiryApproval.create({ data: { id: approvalId, rowId: inquiryRowId, assignmentId,
     actorId: ids.partnerId, commandId: `${ids.caseId}-approval-command`, authorizationEvidenceId: `${ids.caseId}-approval-auth`,
     wholesaleUnitPrice: product.wholesaleUnitPrice!, currency: base.accounting.totals.currency,
-    evidenceHash: hash, approvedAt: new Date(Date.now() - 60_000),
-    expiresAt: new Date(Date.now() - 60_000 + 48 * 60 * 60 * 1000) } });
+    evidenceHash: hash, approvedAt: pricingReadyAt, expiresAt: pricingExpiresAt } });
   await tx.partnerInquiryUsage.create({ data: { id: `${ids.caseId}-usage`, caseId: ids.caseId, caseRevision: 1,
     productRowId: ids.rowId, approvalId, approvalSnapshot: {}, evidenceHash: hash } });
   await tx.$executeRawUnsafe("SET LOCAL session_replication_role = 'origin'");
@@ -424,13 +528,13 @@ test('explicit customer rejection blocks finalization of that revision', () => f
 }));
 
 test('finalization rechecks inquiry package expiry inside the locked transaction', () => fixture(async (tx, ids, owner) => {
+  const expiresAt = new Date(Date.now() - 1_000);
+  const approvedAt = new Date(expiresAt.getTime() - 48 * 60 * 60 * 1000);
   await tx.$executeRawUnsafe("SET LOCAL session_replication_role = 'replica'");
   await tx.partnerInquiry.update({ where: { id: `${ids.caseId}-inquiry` },
-    data: { pricingReadyAt: new Date(Date.now() - 48 * 60 * 60 * 1000 - 1_000),
-      pricingExpiresAt: new Date(Date.now() - 1_000) } });
+    data: { pricingReadyAt: approvedAt, pricingExpiresAt: expiresAt } });
   await tx.partnerInquiryApproval.update({ where: { id: `${ids.caseId}-approval` },
-    data: { approvedAt: new Date(Date.now() - 48 * 60 * 60 * 1000 - 1_000),
-      expiresAt: new Date(Date.now() - 1_000) } });
+    data: { approvedAt, expiresAt } });
   await tx.$executeRawUnsafe("SET LOCAL session_replication_role = 'origin'");
   const service = createPartnerCaseLifecycleService(dependencies(tx, ids));
   const blocked = await service.execute(await commitCommand(ids, owner, 'SIGNED', 'expired-inquiry', 'DRAFT'));
@@ -684,13 +788,13 @@ test('durable Accounting queue replay returns the original Partner record withou
     await database.$transaction(async tx => {
       await tx.user.create({ data: { id: accountantId, username: accountantId,
         email: `${accountantId}@example.invalid`, password: 'not-a-login', firstName: 'Accounting', lastName: 'Replay' } });
-      await tx.effectiveActionGrant.create({ data: { id: `${ids.caseId}-accounting-grant`, principalKind: 'USER',
-        principalId: accountantId, subjectUserId: accountantId, domain: 'PARTNER', action: 'ACCOUNTING_WRITE',
-        rootKind: 'CASE', purpose: 'ACCOUNTING', scope: 'COMPANY', effect: 'ALLOW', grantedBy: accountantId,
-        reason: 'isolated durable Accounting replay fixture', correlationId: `${ids.caseId}-grant` } });
-      await tx.workspacePermission.create({ data: { userId: accountantId, workspace: 'accounting', permissionLevel: 'admin' } });
+      await tx.workspacePermission.create({ data: { userId: accountantId, workspace: 'accounting', permissionLevel: 'edit' } });
       await tx.featurePermission.create({ data: { userId: accountantId, workspace: 'accounting',
         feature: 'accounting_invoice_candidates_manage', permissionLevel: 'edit' } });
+      await tx.effectiveActionGrant.create({ data: { id: `${ids.caseId}-accounting-grant`, principalKind: 'USER',
+        principalId: accountantId, subjectUserId: accountantId, domain: 'PARTNER', action: 'ACCOUNTING_WRITE',
+        rootKind: 'CASE', purpose: 'ACCOUNTING', scope: 'PURPOSE_BOUND', boundRootId: ids.caseId, effect: 'ALLOW', grantedBy: accountantId,
+        reason: 'isolated durable Accounting replay fixture', correlationId: `${ids.caseId}-grant` } });
     });
     const adapter = createPartnerAccountingAdapter(createPrismaPartnerAccountingRepository({ database,
       actorId: accountantId, correlationId: `${ids.caseId}-accounting` }));
@@ -733,6 +837,13 @@ test('durable Accounting queue replay returns the original Partner record withou
     } catch (error) { if (error !== frozenQueueRollback) throw error; }
     const first = await adapter.enqueueCommitted(view, commitment);
     assert.equal(first.ok, true);
+    const queuePermission = { userId_workspace_feature: { userId: accountantId, workspace: 'accounting',
+      feature: 'accounting_invoice_candidates_manage' } };
+    await database.featurePermission.update({ where: queuePermission, data: { permissionLevel: 'view' } });
+    const deniedReplay = await adapter.enqueueCommitted(view, commitment);
+    assert.equal(deniedReplay.ok ? null : deniedReplay.error.code, 'FORBIDDEN',
+      'a previously successful queue command requires current invoice-candidate edit authority on replay');
+    await database.featurePermission.update({ where: queuePermission, data: { permissionLevel: 'edit' } });
     assert.deepEqual(await adapter.enqueueCommitted(view, commitment), first);
     assert.equal(await database.accountingFinancialRecord.count({ where: {
       sourceKind: PARTNER_INTERNAL_ACCOUNTING_SOURCE, sourceId: ids.internalId,
@@ -873,17 +984,17 @@ test('durable Accounting queue replay returns the original Partner record withou
         assert.equal((await tx.partnerSaleCase.findUniqueOrThrow({ where: { id: ids.caseId } })).headRevision, 2);
         assert.equal((await stagePartnerAccountingReplacement(tx, { caseId: ids.caseId, correctionId, actorId: ids.partnerId }))?.id,
           stagedInvoice.id, 'staging retries return one immutable source-bound invoice draft');
-        await tx.effectiveActionGrant.create({ data: { id: `${ids.caseId}-replacement-approval-grant`, principalKind: 'USER',
+        const replacementApproval = await tx.effectiveActionGrant.create({ data: { id: `${ids.caseId}-replacement-approval-grant`, principalKind: 'USER',
           principalId: accountantId, subjectUserId: accountantId, domain: 'PARTNER', action: 'FINANCIAL_APPROVE',
-          rootKind: 'CASE', purpose: 'ACCOUNTING', scope: 'COMPANY', effect: 'ALLOW', grantedBy: accountantId,
+          rootKind: 'CASE', purpose: 'ACCOUNTING', scope: 'PURPOSE_BOUND', boundRootId: ids.caseId, effect: 'ALLOW', grantedBy: accountantId,
           reason: 'isolated replacement Accounting approval', correlationId: `${ids.caseId}-replacement-grant` } });
         await tx.partnerCorrectionGate.create({ data: { id: `${correctionId}-process`, opportunityId: correctionId,
           kind: 'ACCOUNTING_PROCESS', outcome: 'APPROVE', actorId: 'separate-accounting-processor',
           commandId: `${correctionId}-process`, evidence: { evidenceId: `${correctionId}-processing-evidence` } } });
         const approvedAt = new Date();
         const earlierInvoiceDate = new Date(approvedAt.getTime() - 86_400_000);
-        const history = async (cutoff = new Date()) => readPartnerOutstandingHistory(tx, {
-          invoiceIds: [existingInvoice.id, stagedInvoice.id], cutoff, asOf: new Date(),
+        const history = async (cutoff = new Date(), asOf = new Date()) => readPartnerOutstandingHistory(tx, {
+          invoiceIds: [existingInvoice.id, stagedInvoice.id], cutoff, asOf,
         });
         assert.deepEqual((await history()).map(row => row.remainingAmount), ['1600']);
         const approvedReplacement = await tx.accountingFinancialRecord.update({ where: { id: stagedInvoice.id }, data: {
@@ -1012,6 +1123,8 @@ test('durable Accounting queue replay returns the original Partner record withou
           await tx.$executeRaw`RELEASE SAVEPOINT contradictory_predecessor_balance`;
         }
         await tx.$executeRaw`SAVEPOINT revoked_replacement_approver`;
+        await tx.effectiveActionGrant.create({ data: { ...replacementApproval, id: `${correctionId}-other-case-approval`,
+          boundRootId: `${ids.caseId}-other`, correlationId: `${correctionId}-other-case-approval` } });
         await tx.effectiveActionGrant.update({ where: { id: `${ids.caseId}-replacement-approval-grant` }, data: {
           revokedAt: new Date(), revokedBy: accountantId, revocationReason: 'isolated revocation regression',
           revocationCorrelationId: `${correctionId}-revoke` } });
@@ -1050,7 +1163,6 @@ test('durable Accounting queue replay returns the original Partner record withou
         assert.equal((await tx.partnerSaleCase.findUniqueOrThrow({ where: { id: ids.caseId } })).headRevision, 2);
         await tx.$executeRaw`ROLLBACK TO SAVEPOINT reservation_floor_without_baseline`;
         await tx.$executeRaw`RELEASE SAVEPOINT reservation_floor_without_baseline`;
-        const beforeActivation = new Date();
         for (const administrativeDate of [earlierInvoiceDate, new Date(approvedAt.getTime() + 86_400_000)]) {
           await tx.$executeRaw`SAVEPOINT replacement_date_boundary`;
           const dated = await tx.accountingFinancialRecord.update({ where: { id: stagedInvoice.id }, data: {
@@ -1062,13 +1174,18 @@ test('durable Accounting queue replay returns the original Partner record withou
             downstreamNote: 'تسویه مستند پیش از جایگزینی صورتحساب' });
           const effective = await service.execute(command);
           assert.equal(effective.ok, true, JSON.stringify(effective));
-          assert.deepEqual((await history(beforeActivation)).map(row => row.remainingAmount), ['1600'],
+          const retired = await tx.accountingFinancialRecord.findUniqueOrThrow({ where: { id: existingInvoice.id },
+            select: { voidedAt: true } });
+          assert.ok(retired.voidedAt);
+          const activation = retired.voidedAt, afterActivation = new Date(activation.getTime() + 1);
+          const [knowledge] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
+          assert.deepEqual((await history(activation, knowledge.now)).map(row => row.remainingAmount), ['1600'],
             'administrative invoice dating cannot move replacement debt before activation');
-          assert.deepEqual((await history()).map(row => row.remainingAmount), ['1700'],
+          assert.deepEqual((await history(afterActivation, knowledge.now)).map(row => row.remainingAmount), ['1700'],
             'an activated future-dated invoice must not leave a gap in current debt');
           const trend = await readPartnerAccountingTrend(tx, { invoiceIds: [existingInvoice.id, stagedInvoice.id],
-            asOf: new Date(), periods: [{ key: 'activation', monthKey: 'activation', label: 'activation', marker: true,
-              startsAt: beforeActivation, endsAt: new Date() }] });
+            asOf: knowledge.now, periods: [{ key: 'activation', monthKey: 'activation', label: 'activation', marker: true,
+              startsAt: activation, endsAt: afterActivation }] });
           assert.equal(trend[0].points[0].invoiced, '100', 'the replacement adjustment belongs to the activation period');
           await tx.$executeRaw`ROLLBACK TO SAVEPOINT replacement_date_boundary`;
           await tx.$executeRaw`RELEASE SAVEPOINT replacement_date_boundary`;
@@ -1360,9 +1477,19 @@ test('real-schema loading source selects canonical delivery evidence without cha
       assert.equal(concurrent.ok ? null : concurrent.error.code, 'FORBIDDEN',
         'a workspace downgrade committed while loading waits must invalidate its earlier authorization snapshot');
     } finally { await waiting; }
-    if (process.env.PERSONAL_PICKUP_ACCEPTANCE !== '1') await promisify(execFile)(process.execPath, ['backend/node_modules/tsx/dist/cli.mjs',
-      'backend/src/services/__tests__/partnerLoadingHttpProbe.ts'], { timeout: 120_000, env: { ...process.env,
-        DATABASE_URL: temporary.databaseUrl, PARTNER_TEST_ACTOR_ID: actorId, PARTNER_TEST_OWNER: JSON.stringify(expected) } });
+    const lockOrderOnly = process.env.PARTNER_LOADING_LOCK_ORDER_ONLY === '1';
+    if (lockOrderOnly && process.env.PERSONAL_PICKUP_ACCEPTANCE === '1') {
+      throw new Error('Select either the Partner loading lock-order probe or the personal pickup acceptance flow');
+    }
+    if (process.env.PERSONAL_PICKUP_ACCEPTANCE !== '1') {
+      const loadingProbe = await promisify(execFile)(process.execPath, ['backend/node_modules/tsx/dist/cli.mjs',
+        'backend/src/services/__tests__/partnerLoadingHttpProbe.ts'], { timeout: 120_000, env: { ...process.env,
+          DATABASE_URL: temporary.databaseUrl, PARTNER_TEST_ACTOR_ID: actorId, PARTNER_TEST_OWNER: JSON.stringify(expected) } });
+      if (lockOrderOnly) {
+        console.log(loadingProbe.stdout.trim());
+        return;
+      }
+    }
     for (const [feature, permissionLevel] of [['accounting_dispatch_candidates_view', 'view'],
       ['accounting_dispatch_candidates_manage', 'edit']] as const) {
       await database.featurePermission.create({ data: { userId: accountantId, workspace: 'accounting', feature,
@@ -1860,7 +1987,8 @@ async function prepareDraftFixtureInvoice(databaseUrl: string, invoiceId: string
     PARTNER_TEST_DRAFT_FIXTURE: action } });
 }
 
-async function seedDraftInvoice(database: PrismaClient, ids: Ids, accountantId: string) {
+async function seedDraftInvoice(database: PrismaClient, ids: Ids, accountantId: string,
+  scope: 'COMPANY' | 'PURPOSE_BOUND' = 'COMPANY') {
   const revision = await database.partnerCaseRevision.findUniqueOrThrow({ where: {
     caseId_revision: { caseId: ids.caseId, revision: 1 },
   }, select: { internalProjection: true } });
@@ -1875,7 +2003,7 @@ async function seedDraftInvoice(database: PrismaClient, ids: Ids, accountantId: 
       email: `${accountantId}@example.invalid`, password: 'not-a-login', firstName: 'Accounting', lastName: 'Replay' } });
     await tx.effectiveActionGrant.create({ data: { id: `${ids.caseId}-accounting-grant`, principalKind: 'USER',
       principalId: accountantId, subjectUserId: accountantId, domain: 'PARTNER', action: 'ACCOUNTING_WRITE',
-      rootKind: 'CASE', purpose: 'ACCOUNTING', scope: 'COMPANY', effect: 'ALLOW', grantedBy: accountantId,
+      rootKind: 'CASE', purpose: 'ACCOUNTING', scope, boundRootId: scope === 'PURPOSE_BOUND' ? ids.caseId : null, effect: 'ALLOW', grantedBy: accountantId,
       reason: 'isolated financial void fixture', correlationId: `${ids.caseId}-grant` } });
   });
   await database.featurePermission.create({ data: { userId: accountantId, workspace: 'accounting',
@@ -1890,6 +2018,25 @@ async function seedDraftInvoice(database: PrismaClient, ids: Ids, accountantId: 
   const invoice = await database.accountingFinancialRecord.findFirstOrThrow({ where: { sourceId: ids.internalId } });
   return invoice;
 }
+
+test('Partner financial approval preserves Case authority, exact replay and historical outstanding amounts', async () => {
+  const temporary = await createPartnerLifecycleDatabase({ repositoryRoot: process.cwd(), sourceDatabaseUrl: databaseUrl() });
+  const database = temporary.client();
+  const ids = idsFor(`partner-financial-approval-${temporary.runId}`);
+  const accountantId = `${ids.caseId}-accountant`;
+  try {
+    await database.effectiveAuthorizationState.create({ data: { id: 1, revision: 1 } });
+    await seedCommittedDraftCase(database, ids);
+    const invoice = await seedDraftInvoice(database, ids, accountantId, 'PURPOSE_BOUND');
+    await database.effectiveActionGrant.create({ data: { id: `${ids.caseId}-accounting-read`, principalKind: 'USER',
+      principalId: accountantId, subjectUserId: accountantId, domain: 'PARTNER', action: 'ACCOUNTING_READ', rootKind: 'CASE',
+      purpose: 'ACCOUNTING', scope: 'PURPOSE_BOUND', boundRootId: ids.caseId, effect: 'ALLOW', grantedBy: accountantId,
+      reason: 'isolated invoice read authority', correlationId: `${ids.caseId}-accounting-read` } });
+    await promisify(execFile)(process.execPath, ['backend/node_modules/tsx/dist/cli.mjs',
+      'backend/src/services/__tests__/partnerFinancialApprovalProbe.ts'], { timeout: 120_000, env: { ...process.env,
+        DATABASE_URL: temporary.databaseUrl, PARTNER_TEST_INVOICE_ID: invoice.id, PARTNER_TEST_ACTOR_ID: accountantId } });
+  } finally { await database.$disconnect(); await temporary.cleanup(); }
+});
 
 test('current Partner manager approval opens Logistics selection and draft creation', async () => {
   const temporary = await createPartnerLifecycleDatabase({ repositoryRoot: path.resolve(process.cwd()), sourceDatabaseUrl: databaseUrl() });

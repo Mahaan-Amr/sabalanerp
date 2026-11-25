@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import express, { type RequestHandler, type Response } from 'express';
+import { reportAccountingRequestFailure } from '../../middleware/accountingRequestObserver';
 import type { AuthRequest } from '../../middleware/auth';
 import type { DispatchDocumentKind } from './contracts';
 import { PilotSafetyPauseError } from '../dispatchCutover';
@@ -28,7 +29,7 @@ export const dispatchDocumentHttpStatus = (error: unknown): 400 | 403 | 404 | 40
 const sendError = (res: Response, error: unknown) => {
   const status = dispatchDocumentHttpStatus(error);
   if (status) return res.status(status).json({ success: false, error: (error as Error).message });
-  console.error('Accounting dispatch document error:', error);
+  reportAccountingRequestFailure(res, error);
   return res.status(500).json({ success: false, error: 'Accounting dispatch document operation failed.' });
 };
 export const parseDispatchDocumentKinds = (value: unknown): DispatchDocumentKind[] => {
@@ -40,10 +41,11 @@ export const parseDispatchDocumentKinds = (value: unknown): DispatchDocumentKind
   return parsed as DispatchDocumentKind[];
 };
 
-const multipart = (documents: Array<{ artifact: { id: string; kind: DispatchDocumentKind }; bytes: Uint8Array }>, boundary: string) => {
+const multipart = (documents: Array<{ artifact: { id: string; kind: DispatchDocumentKind }; bytes: Uint8Array }>, boundary: string, form: boolean) => {
   const chunks: Buffer[] = [];
   for (const document of documents) {
-    chunks.push(Buffer.from(`--${boundary}\r\nContent-Type: application/pdf\r\nContent-Disposition: inline; filename="${document.artifact.kind.toLowerCase()}-${document.artifact.id}.pdf"\r\n\r\n`));
+    const disposition = form ? `form-data; name="${document.artifact.kind}"` : 'inline';
+    chunks.push(Buffer.from(`--${boundary}\r\nContent-Type: application/pdf\r\nContent-Disposition: ${disposition}; filename="${document.artifact.kind.toLowerCase()}-${document.artifact.id}.pdf"\r\n\r\n`));
     chunks.push(Buffer.from(document.bytes));
     chunks.push(Buffer.from('\r\n'));
   }
@@ -87,9 +89,10 @@ export const createAccountingDispatchDocumentRouter = (input: {
       const result = await input.service.printHandoff({ waybillId: req.params.waybillId, kinds: parseDispatchDocumentKinds(req.body.kinds),
         idempotencyKey: idempotencyKey(req), actorId: req.user!.id, correlationId: correlationId(req) });
       const boundary = `dispatch-${randomUUID()}`;
-      const body = multipart(result.documents, boundary);
+      const form = req.query.format === 'form-data';
+      const body = multipart(result.documents, boundary, form);
       bindPrintHandoffCompletion(res, result.complete);
-      res.setHeader('Content-Type', `multipart/mixed; boundary=${boundary}`);
+      res.setHeader('Content-Type', `multipart/${form ? 'form-data' : 'mixed'}; boundary=${boundary}`);
       res.setHeader('Content-Length', String(body.byteLength));
       res.setHeader('Cache-Control', 'private, no-store');
       return res.send(body);

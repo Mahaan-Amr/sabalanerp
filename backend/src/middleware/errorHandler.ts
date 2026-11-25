@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import { accountingOperationalRoute, reportAccountingRequestFailure } from './accountingRequestObserver';
 
 export interface AppError extends Error {
   statusCode?: number;
@@ -14,8 +15,8 @@ export const errorHandler = (
   let error = { ...err };
   error.message = err.message;
 
-  // Log error
-  console.error(err);
+  if (accountingOperationalRoute(req.originalUrl, req.method)) reportAccountingRequestFailure(res, err);
+  else console.error(err);
 
   // Mongoose bad ObjectId
   if (err.name === 'CastError') {

@@ -122,7 +122,7 @@ export type StoneReturnPostingContext = {
 export type StoneReturnOption = { id: string; label: string; description?: string | null };
 type Envelope<T> = { success: true; data: T };
 type ReceiptPage = { items: StoneReturnReceipt[]; nextCursor: string | null; canRecord?: boolean };
-type StoneReturnIntake = {
+export type StoneReturnIntakeCommand = {
   requestId: string; customerId: string; productId: string; unit: string;
   receivedQuantity: string; acceptedQuantity: string; rejectionReason: string;
   guardReturnMovementId: string | null;
@@ -156,8 +156,10 @@ export const stoneReturnApi = {
       id: row.id, label: row.movementNumber, description: new Date(row.occurredAt).toLocaleDateString('fa-IR'),
     }));
   },
-  record: async (command: StoneReturnIntake) =>
-    (await api.post<Envelope<{ data: StoneReturnReceipt; replayed: boolean }>>(logistics, command)).data.data,
+  record: async (command: StoneReturnIntakeCommand, actorId: string) =>
+    (await api.post<Envelope<{ data: StoneReturnReceipt; replayed: boolean }>>(logistics, command, {
+      headers: { 'x-sabalan-expected-user': actorId },
+    })).data.data,
 };
 
 /** Keeps all persisted decimal digits when displaying exact quantity. */

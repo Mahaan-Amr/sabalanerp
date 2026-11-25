@@ -11,7 +11,7 @@ import { finalizeStoneReturn, readStoneReturnPostingContext } from '../services/
 import { SupplyChainAccountingError } from '../services/accountingSupplyChain';
 import {
   listStoneReturnReceipts, recordStoneReturnReceipt, searchStoneReturnCustomers,
-  searchStoneReturnProducts, searchStoneReturnGuardMovements, StoneReturnReceiptError,
+  searchStoneReturnProducts, searchStoneReturnGuardMovements, StoneReturnIntakeRejected, StoneReturnReceiptError,
 } from '../services/stoneReturnReceipts';
 
 import { listStoneReturnAllocationReviews, readStoneReturnAllocationReview, saveStoneReturnAllocationDraft } from '../services/stoneReturnAllocationDraft';
@@ -30,7 +30,8 @@ export function stoneReturnEndpoint(action: (req: AuthRequest & FeatureRequest &
       }
       if (error instanceof StoneReturnReceiptError || error instanceof StoneReturnAllocationError || error instanceof SupplyChainAccountingError
         || error instanceof AccountingCustomerTreasuryError || error instanceof AccountingLedgerError) {
-        res.status(error.status).json({ success: false, error: error.message });
+        res.status(error.status).json({ success: false, error: error.message, ...(error instanceof StoneReturnIntakeRejected
+          ? { code: 'STONE_RETURN_INTAKE_REJECTED', requestId: error.requestId } : {}) });
         return;
       }
       console.error('Stone return request failed:', error);

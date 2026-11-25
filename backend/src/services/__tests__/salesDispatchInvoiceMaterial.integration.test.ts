@@ -56,7 +56,7 @@ async function run() {
             isActive: true,
           },
         });
-        const customer = await tx.crmCustomer.findFirstOrThrow();
+        const customer = await tx.crmCustomer.create({ data: { firstName: "مشتری", lastName: "آزمون فاکتور" } });
         const template = await tx.salesContract.findFirstOrThrow({
           include: { items: { take: 1 } },
         });

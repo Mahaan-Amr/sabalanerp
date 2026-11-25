@@ -207,27 +207,24 @@ export const deliverPendingNotificationOutbox = async (
   publishRealtime: RealtimeNotificationPublisher,
   now = new Date(),
 ): Promise<{ delivered: number; failed: number; businessCode: string }> => {
-  await prisma.notificationOutbox.updateMany({
-    where: {
-      status: 'PROCESSING',
-      claimedAt: { lt: new Date(now.getTime() - 5 * 60 * 1_000) },
-    },
-    data: {
-      status: 'PENDING',
-      claimedAt: null,
-      availableAt: now,
-      lastError: 'Recovered an expired delivery lease',
-    },
-  });
+  const pending = { status: 'PENDING', availableAt: { lte: now } };
+  const expired = { status: 'PROCESSING', claimedAt: { lt: new Date(now.getTime() - 5 * 60 * 1_000) } };
+  // Use one read even when the queue is idle. An expired lease is work that
+  // can be claimed directly, with the same compare-and-set as a pending row.
   const candidate = await prisma.notificationOutbox.findFirst({
-    where: { status: 'PENDING', availableAt: { lte: now } },
+    where: { OR: [pending, expired] },
     orderBy: { createdAt: 'asc' },
+    select: { id: true, eventId: true, status: true, attempts: true },
   });
   if (!candidate) return { delivered: 0, failed: 0, businessCode: 'PERFORMANCE_NOTIFICATION_OUTBOX_EMPTY' };
 
+  const recovering = candidate.status === 'PROCESSING';
   const claimed = await prisma.notificationOutbox.updateMany({
-    where: { id: candidate.id, status: 'PENDING', availableAt: { lte: now } },
-    data: { status: 'PROCESSING', claimedAt: now, attempts: { increment: 1 } },
+    where: { id: candidate.id, ...(recovering ? expired : pending) },
+    data: {
+      status: 'PROCESSING', claimedAt: now, attempts: { increment: 1 },
+      ...(recovering ? { availableAt: now, lastError: 'Recovered an expired delivery lease' } : {}),
+    },
   });
   if (!claimed.count) return { delivered: 0, failed: 0, businessCode: 'PERFORMANCE_NOTIFICATION_OUTBOX_ALREADY_CLAIMED' };
 

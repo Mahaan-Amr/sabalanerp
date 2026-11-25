@@ -12,7 +12,7 @@ export interface AuthorityMutation { actorId: string; reason: string; correlatio
 interface GrantRow {
   id: string; principalKind: 'USER' | 'ROLE'; principalId: string; domain: string;
   action: string; rootKind: string; purpose: string; scope: ScopedActionGrant['scope'];
-  effect: 'ALLOW' | 'DENY'; boundRootId: string | null; expiresAt: Date | null;
+  effect: 'ALLOW' | 'DENY'; boundRootId: string | null; effectiveFrom: Date; expiresAt: Date | null;
 }
 
 /** Call only inside the owning command transaction. User locks precede the
@@ -22,6 +22,22 @@ export async function resolveScopedActions(tx: Prisma.TransactionClient, actorId
   await tx.$queryRaw`SELECT id FROM users WHERE id = ${actorId} FOR UPDATE`;
   const [version] = await tx.$queryRaw<Array<{ revision: number }>>`
     SELECT revision FROM effective_authorization_state WHERE id = 1 FOR UPDATE`;
+  return scopedActionSnapshot(tx, actorId, domain, version);
+}
+
+/** Fenced projection. The caller already holds the actor's shared User lock.
+ * The central row excludes grant and Accounting workspace permission writers
+ * until the read and its audit commit together. */
+export async function lockScopedActionRevisionForRead(tx: Prisma.TransactionClient) {
+  const [version] = await tx.$queryRaw<Array<{ revision: number }>>`
+    SELECT revision FROM effective_authorization_state WHERE id = 1 FOR SHARE`;
+  if (!version) throw new Error('Scoped authority state unavailable');
+  return version;
+}
+
+export async function readFencedScopedActions(tx: Prisma.TransactionClient, actorId: string, domain: string,
+  fencedVersion?: { revision: number }) {
+  const version = fencedVersion ?? await lockScopedActionRevisionForRead(tx);
   return scopedActionSnapshot(tx, actorId, domain, version);
 }
 
@@ -37,13 +53,36 @@ export async function readScopedActions(tx: Prisma.TransactionClient, actorId: s
 async function scopedActionSnapshot(tx: Prisma.TransactionClient, actorId: string, domain: string,
   version: { revision: number } | undefined) {
   if (!version) throw new Error('Scoped authority state unavailable');
+  const rows = await readScopedActionRows(tx, actorId, domain, false);
+  return selectScopedActions(rows, version);
+}
+
+/** Load scheduled grants behind the same central read fence. The caller
+ * supplies each decision time so expiry and activation stay independent. */
+export async function readFencedScopedActionSchedule(tx: Prisma.TransactionClient, actorId: string, domain: string,
+  version: { revision: number }, signal?: AbortSignal) {
+  const rows = await readScopedActionRows(tx, actorId, domain, true, signal);
+  return (at: Date) => {
+    const current = rows.filter(row => row.effectiveFrom <= at && (!row.expiresAt || row.expiresAt > at));
+    return { ...selectScopedActions(current, version), explicit: new Set(current.map(key)) };
+  };
+}
+
+async function readScopedActionRows(tx: Prisma.TransactionClient, actorId: string, domain: string,
+  includeSchedule: boolean, signal?: AbortSignal) {
   const actor = await tx.user.findUnique({ where: { id: actorId }, select: { role: true, isActive: true } });
-  const rows = !actor?.isActive ? [] : await tx.$queryRaw<GrantRow[]>`
-    SELECT id, "principalKind", "principalId", domain, action, "rootKind", purpose, scope, effect, "boundRootId", "expiresAt"
+  signal?.throwIfAborted();
+  if (!actor?.isActive) return [];
+  return tx.$queryRaw<GrantRow[]>`
+    SELECT id, "principalKind", "principalId", domain, action, "rootKind", purpose, scope, effect, "boundRootId",
+      "effectiveFrom", "expiresAt"
     FROM effective_action_grants WHERE domain = ${domain} AND "revokedAt" IS NULL
-      AND "effectiveFrom" <= clock_timestamp() AND ("expiresAt" IS NULL OR "expiresAt" > clock_timestamp())
+      AND (${includeSchedule} OR ("effectiveFrom" <= clock_timestamp() AND ("expiresAt" IS NULL OR "expiresAt" > clock_timestamp())))
       AND (("principalKind" = 'USER' AND "principalId" = ${actorId})
         OR ("principalKind" = 'ROLE' AND "principalId" = ${actor.role})) ORDER BY id`;
+}
+
+function selectScopedActions(rows: GrantRow[], version: { revision: number }) {
   const direct = new Set(rows.filter(row => row.principalKind === 'USER').map(key));
   const selected = rows.filter(row => row.principalKind === 'USER' || !direct.has(key(row)));
   const denied = new Set(selected.filter(row => row.effect === 'DENY').map(key));

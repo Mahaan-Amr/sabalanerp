@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
-import express, { Response } from 'express';
+import express, { type RequestHandler, Response } from 'express';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { protect } from '../middleware/auth';
 import { FEATURES, FEATURE_PERMISSIONS, requireFeatureAccess, requireNarrowFeatureAccess } from '../middleware/feature';
@@ -31,7 +32,11 @@ import {
   issuePettyCashAdvancePrisma,
   listCustomerAccountsPrisma,
   listTaxOverviewPrisma,
+  readTaxInvoiceAttemptsPrisma,
   listTreasuryOverviewPrisma,
+  listTreasuryBankLinesPrisma,
+  listTreasurySummaryPrisma,
+  searchTreasuryCustomerProfilesPrisma,
   projectCustomerAccountPrisma,
   publishDestinationAcceptanceEvidencePrisma,
   publishVatInputEvidencePrisma,
@@ -76,6 +81,11 @@ const editAccess = accountingAccess(WORKSPACE_PERMISSIONS.EDIT);
 const managerAccess = accountingAccess(WORKSPACE_PERMISSIONS.ADMIN);
 const customerPostingAccess = [...editAccess, requireFeatureAccess(FEATURES.ACCOUNTING_CUSTOMER_POSTING_MANAGE, FEATURE_PERMISSIONS.EDIT)];
 const treasuryCommandAccess = [...editAccess, requireFeatureAccess(FEATURES.ACCOUNTING_TREASURY_MANAGE, FEATURE_PERMISSIONS.EDIT)];
+const preventPrivateReadCaching: RequestHandler = (_req, res, next) => {
+  res.set('Cache-Control', 'private, no-store');
+  next();
+};
+const treasuryReadAccess = [preventPrivateReadCaching, ...viewAccess];
 const taxCommandAccess = [...viewAccess, requireNarrowFeatureAccess(FEATURES.ACCOUNTING_TAX_SUBMISSIONS_MANAGE, FEATURE_PERMISSIONS.EDIT)];
 const taxManagerAccess = [...managerAccess, requireNarrowFeatureAccess(FEATURES.ACCOUNTING_TAX_SUBMISSIONS_MANAGE, FEATURE_PERMISSIONS.EDIT)];
 const exportAccess = [...viewAccess, requireNarrowFeatureAccess(FEATURES.ACCOUNTING_CUSTOMER_STATEMENTS_EXPORT, FEATURE_PERMISSIONS.VIEW)];
@@ -347,15 +357,34 @@ router.get('/customer-profiles/:id/export.:format', ...exportAccess, async (req:
 router.get('/customer-profiles', ...viewAccess, run((req) => listCustomerAccountsPrisma(prisma, {
   asOf: validDate(req.query.asOf || new Date().toISOString(), 'زمان گزارش'), search: String(req.query.search || ''),
 })));
-router.get('/treasury/overview', ...viewAccess, run(async (req) => {
+const treasuryCapabilities = async (req: WorkspaceRequest) => {
   const feature = await resolveNarrowFeatureAccess(prisma, { userId: req.user!.id, role: req.user!.role,
     workspace: WORKSPACES.ACCOUNTING, feature: FEATURES.ACCOUNTING_TREASURY_MANAGE,
     requiredPermission: FEATURE_PERMISSIONS.EDIT });
+  return { canManage: feature.allowed && ['edit', 'admin'].includes(req.workspacePermission || ''),
+    canConfigure: feature.allowed && req.workspacePermission === WORKSPACE_PERMISSIONS.ADMIN };
+};
+router.get('/treasury/overview', ...viewAccess, run(async (req) => {
+  const capabilities = await treasuryCapabilities(req);
   return { ...await listTreasuryOverviewPrisma(prisma, { bankLinePage: Number(req.query.bankLinePage ?? 1), checkId: req.query.checkId ? String(req.query.checkId) : undefined }),
-    capabilities: { canManage: feature.allowed && ['edit', 'admin'].includes(req.workspacePermission || ''),
-      canConfigure: feature.allowed && req.workspacePermission === WORKSPACE_PERMISSIONS.ADMIN } };
+    capabilities };
 }));
-router.get('/tax/overview', ...viewAccess, run(async (req) => {
+router.get('/treasury/summary', ...treasuryReadAccess, run(async (req) => {
+  const capabilities = await treasuryCapabilities(req);
+  return { ...await listTreasurySummaryPrisma(prisma, req.query.checkId ? String(req.query.checkId) : undefined), capabilities };
+}));
+router.get('/treasury/bank-lines', ...treasuryReadAccess, run(req => listTreasuryBankLinesPrisma(prisma, Number(req.query.page ?? 1))));
+router.get('/treasury/customer-profiles', ...treasuryReadAccess, run(req => searchTreasuryCustomerProfilesPrisma(prisma, String(req.query.search || ''))));
+router.get('/treasury/customer-profiles/:id/balance', ...treasuryReadAccess, run(async req => {
+  const asOf = validDate(req.query.asOf || new Date().toISOString(), 'زمان گزارش');
+  const { receivableRials, unallocatedCreditRials, openItems } = await prisma.$transaction(
+    tx => projectCustomerAccountPrisma(tx, { profileId: req.params.id, asOf }),
+    { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: 30_000 },
+  );
+  return { asOf, receivableRials, unallocatedCreditRials, netBalanceRials: receivableRials - unallocatedCreditRials,
+    openItems: openItems.filter(item => item.kind === 'RECEIVABLE').map(({ id, invoiceNumber, remainingRials }) => ({ id, invoiceNumber, remainingRials })) };
+}));
+router.get('/tax/overview', preventPrivateReadCaching, ...viewAccess, run(async (req) => {
   const feature = await resolveNarrowFeatureAccess(prisma, { userId: req.user!.id, role: req.user!.role,
     workspace: WORKSPACES.ACCOUNTING, feature: FEATURES.ACCOUNTING_TAX_SUBMISSIONS_MANAGE,
     requiredPermission: FEATURE_PERMISSIONS.EDIT });
@@ -364,6 +393,8 @@ router.get('/tax/overview', ...viewAccess, run(async (req) => {
     canConfigure: feature.allowed && req.workspacePermission === WORKSPACE_PERMISSIONS.ADMIN,
   } };
 }));
+router.get('/tax/invoices/:id/attempts', preventPrivateReadCaching, ...viewAccess,
+  run(req => readTaxInvoiceAttemptsPrisma(prisma, req.params.id)));
 
 router.post('/treasury/receipts', ...treasuryCommandAccess, run((req) => recordCustomerReceiptPrisma(prisma, {
   ...req.body, amountRials: wholeRials(req.body.amountRials), occurredAt: validDate(req.body.occurredAt, 'زمان دریافت'),

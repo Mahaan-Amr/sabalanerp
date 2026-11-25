@@ -513,7 +513,7 @@ export class PrismaDispatchDocumentRepository implements DispatchDocumentReposit
     const candidate = await this.prisma.accountingDispatchCandidate.findFirst({ where: input.authorizedWaybillId
       ? { id: input.candidateId, waybills: { some: { id: input.authorizedWaybillId } } }
       : { id: input.candidateId, waybills: { none: {} }, status: { in: ['PENDING', 'STALE_REQUIRES_SUCCESSOR', 'EVIDENCE_CONFLICT'] } }, include: {
-      workItem: true, allocationRevision: { include: { lines: true, pricingReferences: { include: { pricingVersion: true } }, pricedAllocationEvents: true } },
+      workItem: true, allocationRevision: { include: { lines: true, pricingReferences: { orderBy: { id: 'asc' }, include: { pricingVersion: true } }, pricedAllocationEvents: true } },
       waybills: { include: { documentArtifacts: { include: { statementAdjustment: { select: { sequence: true } } } }, printHandoffs: { include: { items: true } }, statementAdjustments: true }, orderBy: { issuedAt: 'asc' } },
     } });
     return candidate ? stable(candidate) : null;

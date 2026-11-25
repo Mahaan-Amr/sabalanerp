@@ -1,12 +1,15 @@
 import { startBackgroundJob } from '../../backgroundJobLifecycle';
-import type { Prisma, PrismaClient } from '@prisma/client';
+import { Prisma, type PrismaClient } from '@prisma/client';
 import * as PartnerContracts from '@sabalanerp/partner-sales-contracts';
 import { createPrismaPartnerAuthorizationV2 } from '../authorization/prisma';
-import { resolvePartnerScopedAuthority } from '../authorization/centralAuthority';
+import { readResponderScopedAuthority, resolvePartnerScopedAuthority } from '../authorization/centralAuthority';
+import { createPartnerAuthorizationV2 } from '../authorization/service';
+import type { AuthorizationEvidence } from '../authorization/contracts';
+import { measureNotificationRead, withNotificationReadSlot } from '../../notificationReadObservation';
 import { createPartnerInAppGateway } from './gateway';
 import { planInquiryNotifications, type InquiryNotificationCause } from './inquiries';
 import type { ContractRuntime, NotificationGateway, SafeNotification } from './contracts';
-import type { PartnerNotificationAccess, PartnerNotificationEvidence } from './access';
+import { PARTNER_NOTIFICATION_RESOURCE, type PartnerNotificationAccess, type PartnerNotificationEvidence } from './access';
 
 type Evidence = Record<string, unknown>;
 
@@ -18,20 +21,18 @@ function text(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
 
-async function readEvent(database: Prisma.TransactionClient | PrismaClient, eventId: string) {
-  return database.partnerInquiryEvent.findUnique({ where: { id: eventId }, select: {
-    id: true, inquiryId: true, correlationId: true, type: true, evidence: true, recordedAt: true,
-    inquiry: { select: { profile: { select: { id: true, userId: true } } } },
-  } });
-}
+const eventSelect = {
+  id: true, inquiryId: true, correlationId: true, type: true, evidence: true, recordedAt: true,
+  inquiry: { select: { profile: { select: { id: true, userId: true } } } },
+} satisfies Prisma.PartnerInquiryEventSelect;
+type InquiryEvent = Prisma.PartnerInquiryEventGetPayload<{ select: typeof eventSelect }>;
+const assignmentSelect = { id: true, inquiryId: true, responderId: true } as const;
+type InquiryAssignment = Prisma.PartnerInquiryAssignmentGetPayload<{ select: typeof assignmentSelect }>;
 
-async function causeFor(database: Prisma.TransactionClient | PrismaClient, eventId: string): Promise<InquiryNotificationCause | undefined> {
-  const event = await readEvent(database, eventId);
-  if (!event) return undefined;
+const assignmentIdFor = (event: InquiryEvent) => text(object(event.evidence)?.assignmentId);
+
+function causeFromEvidence(event: InquiryEvent, assignment?: InquiryAssignment | null): InquiryNotificationCause | undefined {
   const evidence = object(event.evidence);
-  const assignmentId = text(evidence?.assignmentId);
-  const assignment = assignmentId ? await database.partnerInquiryAssignment.findUnique({ where: { id: assignmentId },
-    select: { id: true, inquiryId: true, responderId: true } }) : null;
   if (assignment && assignment.inquiryId !== event.inquiryId) return undefined;
   const partner = { audience: 'PARTNER' as const, recipientEvidenceId: event.inquiry.profile.id,
     projectionEvidenceId: event.id };
@@ -49,43 +50,157 @@ async function causeFor(database: Prisma.TransactionClient | PrismaClient, event
   return undefined;
 }
 
+async function readCause(database: Prisma.TransactionClient | PrismaClient, eventId: string) {
+  const event = await database.partnerInquiryEvent.findUnique({ where: { id: eventId }, select: eventSelect });
+  if (!event) return;
+  const assignmentId = assignmentIdFor(event);
+  const assignment = assignmentId ? await database.partnerInquiryAssignment.findUnique({
+    where: { id: assignmentId }, select: assignmentSelect,
+  }) : null;
+  const cause = causeFromEvidence(event, assignment);
+  if (cause) return { event, assignment, cause };
+}
+
+function verifyNotice(contract: ContractRuntime, notification: SafeNotification, evidence: {
+  event: InquiryEvent;
+  assignment?: InquiryAssignment | null;
+  cause: InquiryNotificationCause;
+  projected: SafeNotification[];
+}) {
+  const expected = evidence.projected.find(item => item.notificationId === notification.notificationId);
+  if (!expected || contract.canonicalJson(expected) !== contract.canonicalJson(notification)) return null;
+  const recipient = evidence.cause.recipients.find(item => item.recipientEvidenceId === notification.recipientEvidenceId);
+  if (!recipient) return null;
+  const recipientUserId = recipient.audience === 'PARTNER'
+    ? evidence.event.inquiry.profile.userId : evidence.assignment?.responderId;
+  return recipientUserId ? { expected, recipientUserId, audience: recipient.audience } : null;
+}
+
 async function planned(database: Prisma.TransactionClient | PrismaClient, contract: ContractRuntime, eventId: string) {
-  const cause = await causeFor(database, eventId);
-  if (!cause) return [];
+  const evidence = await readCause(database, eventId);
+  if (!evidence) return [];
   const [clock] = await database.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
-  return planInquiryNotifications(contract, { now: async () => clock.now.toISOString() }, cause);
+  return planInquiryNotifications(contract, { now: async () => clock.now.toISOString() }, evidence.cause);
 }
 
 async function inTransaction<T>(database: PrismaClient | Prisma.TransactionClient,
-  run: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+  run: (tx: Prisma.TransactionClient) => Promise<T>, isolationLevel?: Prisma.TransactionIsolationLevel): Promise<T> {
   const client = database as PrismaClient;
-  return typeof client.$transaction === 'function' ? client.$transaction(run) : run(database as Prisma.TransactionClient);
+  return typeof client.$transaction === 'function'
+    ? client.$transaction(run, { isolationLevel })
+    : run(database as Prisma.TransactionClient);
+}
+
+async function readableInquiryNoticeIds(tx: Prisma.TransactionClient, contract: ContractRuntime, userId: string, ids: string[]) {
+  const rows = await measureNotificationRead('partnerInquiry', 'evidence', () => tx.notification.findMany({
+    where: { id: { in: ids }, userId, user: { isActive: true }, event: { resourceType: PARTNER_NOTIFICATION_RESOURCE } },
+    select: { id: true, event: { select: { payload: true } } },
+  }));
+  const notices = rows.flatMap(row => {
+    const parsed = contract.SafeNotificationSchema.safeParse(row.event?.payload);
+    return parsed.success ? [{ id: row.id, notice: parsed.data }] : [];
+  });
+  const allowed = new Set<string>();
+  if (!notices.length) return allowed;
+  const eventIds = [...new Set(notices.map(row => row.notice.projectionEvidenceId))];
+  const events = await measureNotificationRead('partnerInquiry', 'evidence', () =>
+    tx.partnerInquiryEvent.findMany({ where: { id: { in: eventIds } }, select: eventSelect }));
+  const assignmentIds = [...new Set(events.flatMap(event => assignmentIdFor(event) ?? []))];
+  const assignments = assignmentIds.length ? await measureNotificationRead('partnerInquiry', 'evidence', () =>
+    tx.partnerInquiryAssignment.findMany({ where: { id: { in: assignmentIds } }, select: assignmentSelect })) : [];
+  const assignmentById = new Map(assignments.map(assignment => [assignment.id, assignment]));
+  const [clock] = await measureNotificationRead('partnerInquiry', 'evidence', () => tx.$queryRaw<Array<{ now: Date }>>`
+    SELECT clock_timestamp() AS now`);
+  const evaluatedAt = clock.now.toISOString();
+  const evidenceByEventId = new Map<string, {
+    event: InquiryEvent;
+    assignment: InquiryAssignment | undefined;
+    cause: InquiryNotificationCause;
+    projected: SafeNotification[];
+  }>();
+  for (const event of events) {
+    const assignment = assignmentById.get(assignmentIdFor(event) ?? '');
+    const cause = causeFromEvidence(event, assignment);
+    if (!cause) continue;
+    const projected = await planInquiryNotifications(contract, { now: async () => evaluatedAt }, cause);
+    evidenceByEventId.set(event.id, { event, assignment, cause, projected });
+  }
+  const verified = notices.flatMap(({ id, notice }) => {
+    const evidence = evidenceByEventId.get(notice.projectionEvidenceId);
+    if (!evidence) return [];
+    const verified = verifyNotice(contract, notice, evidence);
+    if (!verified || verified.recipientUserId !== userId) return [];
+    return [{ id, inquiryId: evidence.event.inquiryId, audience: verified.audience }];
+  });
+  if (!verified.length) return allowed;
+
+  // The inbox only presents visibility. One consistent MVCC snapshot can read
+  // current grants and assignments without entering the command lock graph.
+  const inquiryIds = [...new Set(verified.map(row => row.inquiryId))];
+  const inquiries = await measureNotificationRead('partnerInquiry', 'authority', () => tx.partnerInquiry.findMany({
+    where: { id: { in: inquiryIds } },
+    select: { id: true, profile: { select: { userId: true, state: true, revision: true, user: { select: { departmentId: true } } } },
+      assignments: { orderBy: { revision: 'desc' }, take: 1, select: { id: true, revision: true, responderId: true } } },
+  }));
+  const actor = await measureNotificationRead('partnerInquiry', 'authority', () => tx.user.findUnique({
+    where: { id: userId }, select: { id: true, isActive: true, role: true, departmentId: true,
+      partnerProfile: { select: { state: true, revision: true } } },
+  }));
+  if (!actor?.isActive) return allowed;
+  const authority = await measureNotificationRead('partnerInquiry', 'authority', () =>
+    readResponderScopedAuthority(tx, { actorId: userId, root: { kind: 'INQUIRY', id: inquiryIds[0] } }));
+  const disabled = await measureNotificationRead('partnerInquiry', 'authority', () => tx.featurePermission.findMany({
+    where: { userId, isActive: true, permissionLevel: 'none', OR: [{ expiresAt: null }, { expiresAt: { gt: clock.now } }] },
+    select: { feature: true },
+  }));
+  const resources = new Map(inquiries.map(inquiry => [inquiry.id, inquiry]));
+  const decisions = new Map<string, boolean>();
+  for (const row of verified) {
+    const key = `${row.audience}:${row.inquiryId}`;
+    let visible = decisions.get(key);
+    if (visible === undefined) {
+      const inquiry = resources.get(row.inquiryId);
+      if (!inquiry) continue;
+      const { profile, assignments: [assignment] } = inquiry;
+      const root = { kind: 'INQUIRY', id: row.inquiryId } as const;
+      const evidence: AuthorizationEvidence<PartnerContracts.PartnerActionV2> = {
+        ...authority, evaluatedAt, actor: {
+          id: userId, active: actor.isActive, role: actor.role, departmentId: actor.departmentId ?? undefined,
+          partnerProfile: actor.partnerProfile ?? undefined, disabledFeatures: disabled.map(item => item.feature),
+        },
+        resource: {
+          root, partnerSellerId: profile.userId, partnerStatus: profile.state, lifecycleRevision: profile.revision,
+          departmentId: profile.user.departmentId ?? undefined,
+          assignment: assignment ? { actorId: assignment.responderId, assignmentId: assignment.id,
+            revision: assignment.revision, eligible: assignment.responderId === userId && !actor.partnerProfile } : undefined,
+        },
+      };
+      visible = (await createPartnerAuthorizationV2({ read: async () => evidence },
+        { actorId: userId, purpose: row.audience, channel: 'API' }).authorize('INQUIRY_READ', root)).ok;
+      decisions.set(key, visible);
+    }
+    if (visible) allowed.add(row.id);
+  }
+  return allowed;
 }
 
 /** Rebuilds a safe notification from its immutable inquiry event and then
  * reauthorizes the current owner/assignment. Persisted notices never convey a grant. */
 export function createInquiryNotificationAccess(contract: ContractRuntime): PartnerNotificationAccess {
   const verify = async (tx: Prisma.TransactionClient, notification: SafeNotification): Promise<PartnerNotificationEvidence | null> => {
-    await tx.$queryRaw`SELECT id FROM partner_inquiries WHERE id =
-      (SELECT "inquiryId" FROM partner_inquiry_events WHERE id = ${notification.projectionEvidenceId}) FOR UPDATE`;
-    const cause = await causeFor(tx, notification.projectionEvidenceId);
-    if (!cause) return null;
+    // Cause and assignment evidence are immutable. The authorization step
+    // takes the Profile and Inquiry locks before reading current authority.
+    const evidence = await readCause(tx, notification.projectionEvidenceId);
+    if (!evidence) return null;
     const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
-    const notices = await planInquiryNotifications(contract, { now: async () => clock.now.toISOString() }, cause);
-    const expected = notices.find(item => item.notificationId === notification.notificationId);
-    if (!expected || contract.canonicalJson(expected) !== contract.canonicalJson(notification)) return null;
-    const recipient = cause.recipients.find(item => item.recipientEvidenceId === notification.recipientEvidenceId);
-    if (!recipient) return null;
-    const event = await readEvent(tx, cause.eventId);
-    if (!event) return null;
-    const recipientUserId = recipient.audience === 'PARTNER' ? event.inquiry.profile.userId
-      : (await tx.partnerInquiryAssignment.findUnique({ where: { id: recipient.recipientEvidenceId },
-        select: { responderId: true } }))?.responderId;
-    if (!recipientUserId) return null;
+    const projected = await planInquiryNotifications(contract, { now: async () => clock.now.toISOString() }, evidence.cause);
+    const verified = verifyNotice(contract, notification, { ...evidence, projected });
+    if (!verified) return null;
+    const { expected, recipientUserId, audience } = verified;
     const authorization = createPrismaPartnerAuthorizationV2(tx, { actorId: recipientUserId,
-      purpose: recipient.audience, channel: 'API' }, resolvePartnerScopedAuthority);
-    const result = await authorization.authorize('INQUIRY_READ', { kind: 'INQUIRY', id: event.inquiryId });
-    return result.ok ? { notification: expected, type: cause.type, recipientUserId } : null;
+      purpose: audience, channel: 'API' }, resolvePartnerScopedAuthority);
+    const result = await authorization.authorize('INQUIRY_READ', { kind: 'INQUIRY', id: evidence.event.inquiryId });
+    return result.ok ? { notification: expected, type: evidence.cause.type, recipientUserId } : null;
   };
   const notificationFor = async (tx: Prisma.TransactionClient, notificationId: string) => {
     const row = await tx.notification.findUnique({ where: { id: notificationId },
@@ -95,6 +210,17 @@ export function createInquiryNotificationAccess(contract: ContractRuntime): Part
   };
   return {
     lockAndAuthorize: verify,
+    async readableIds(database, { userId, notificationIds }) {
+      const allowed = new Set<string>();
+      for (let start = 0; start < notificationIds.length; start += 100) {
+        const ids = notificationIds.slice(start, start + 100);
+        const readable = await withNotificationReadSlot('partnerInquiry', () =>
+          measureNotificationRead('partnerInquiry', 'transaction', () =>
+            inTransaction(database, tx => readableInquiryNoticeIds(tx, contract, userId, ids), Prisma.TransactionIsolationLevel.RepeatableRead)));
+        for (const id of readable) allowed.add(id);
+      }
+      return allowed;
+    },
     canRead: (database, input) => inTransaction(database, async tx => {
       const notification = await notificationFor(tx, input.notificationId);
       return notification ? (await verify(tx, notification))?.recipientUserId === input.userId : false;

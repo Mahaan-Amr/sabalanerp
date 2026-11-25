@@ -1,7 +1,7 @@
 'use client';
 import { ErpPersianDateField } from '@/components/erp';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ErpBadge,
   ErpButton,
@@ -17,9 +17,13 @@ import {
   ErpSearchableSelect,
   ErpSheet,
 } from '@/components/erp';
-import { accountingAPI } from '@/lib/api';
+import { createAccountingAPI } from '@/lib/api';
+import { isPrivateClientScopeFailure } from '@/lib/privateClientScope';
+import { useAuth } from '@/contexts/AuthContext';
+import { useActorScopedHttp } from '@/hooks/useActorScopedHttp';
 import AccountingLedgerEvidence from '@/features/accounting/AccountingLedgerEvidence';
 import AccountingIdentityList from '@/features/accounting/AccountingIdentityList';
+import { useAccountingPanelRead } from '@/features/accounting/useAccountingPanelRead';
 
 type Context = any;
 type Tab = 'journal' | 'balance' | 'identities' | 'chart' | 'settings';
@@ -78,17 +82,29 @@ const twelvePeriodTemplate = (startsAt: string, endsAt: string) => {
   }), { titlePersian: 'دوره تعدیلات پایان سال', startsAt: endsAt, endsAt, isAdjustment: true }];
 };
 
+function LedgerReportStatus({ read }: { read: { data?: unknown[]; loading: boolean; error?: string; refresh: () => Promise<void> } }) {
+  if (read.error) return <ErpInlineState kind="error" title={read.data ? <>{read.error} آخرین نتیجهٔ دریافت‌شده نمایش داده می‌شود.</> : read.error} action={{ label: "تلاش دوباره", onClick: read.refresh }} />;
+  if (read.loading) return read.data ? <ErpInlineState kind="stale" title="در حال به‌روزرسانی؛ آخرین نتیجهٔ دریافت‌شده نمایش داده می‌شود." /> : <ErpLoading />;
+  return null;
+}
+
 export default function AccountingLedgerPage() {
+  const { user } = useAuth();
+  return user ? <AccountingLedgerWorkspace key={user.id} actorId={user.id} /> : null;
+}
+
+function AccountingLedgerWorkspace({ actorId }: { actorId: string }) {
+  const api = useActorScopedHttp(actorId);
+  const accountingAPI = useMemo(() => createAccountingAPI(api), [api]);
   const [context, setContext] = useState<Context>(null);
+  const [contextDenied, setContextDenied] = useState(false);
+  const contextRead = useRef(0);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<Tab>('journal');
   const [identityTab, setIdentityTab] = useState<'financial' | 'party'>('financial');
   const [financialMessage, setFinancialMessage] = useState<Message>();
   const [message, setMessage] = useState<Message>();
   const [commandFeedback, setCommandFeedback] = useState<(Message & { scope: string })>();
-  const [journal, setJournal] = useState<any[]>([]);
-  const [balance, setBalance] = useState<any[]>([]);
-  const [drafts, setDrafts] = useState<any[]>([]);
   const [fiscalYearId, setFiscalYearId] = useState('');
   const [periodId, setPeriodId] = useState('');
   const [setup, setSetup] = useState({ code: '1', namePersian: '', nationalId: '', economicCode: '', activeFrom: '', bookCode: '1', bookName: 'دفتر اصلی', groupLength: '1', kolLength: '2', moinLength: '3' });
@@ -98,7 +114,7 @@ export default function AccountingLedgerPage() {
   const [financialAccount, setFinancialAccount] = useState({ kind: 'BANK', titlePersian: '', institutionName: '', branchName: '', accountNumber: '', iban: '', currency: 'IRR', activeFrom: '' });
   const [fiscal, setFiscal] = useState({ code: '', titlePersian: '', startsAt: '', endsAt: '', periods: [{ titlePersian: 'دوره یک', startsAt: '', endsAt: '', isAdjustment: false }] });
   const [voucher, setVoucher] = useState({ description: '', documentDate: '', occurredAt: '', discoveredAt: '', lines: [emptyVoucherLine(), emptyVoucherLine()] });
-  const [createdVoucher, setCreatedVoucher] = useState<any>();
+  const [created, setCreated] = useState<{ scope: string; voucher: any }>();
   const [saving, setSaving] = useState(false);
   const [postTarget, setPostTarget] = useState<any>();
   const [postReason, setPostReason] = useState('');
@@ -115,21 +131,31 @@ export default function AccountingLedgerPage() {
   const [evidenceLoading, setEvidenceLoading] = useState(false);
 
   const loadContext = useCallback(async (background = false) => {
+    const request = ++contextRead.current;
     if (!background) setLoading(true);
     try {
       const response = await accountingAPI.getLedgerContext();
+      if (request !== contextRead.current) return;
       const next = response.data.data;
       setContext(next);
+      setContextDenied(false);
       const year = next?.books?.[0]?.fiscalYears?.[0];
       setFiscalYearId((current) => current || year?.id || '');
       setPeriodId((current) => current || year?.periods?.find((item: any) => item.status === 'OPEN')?.id || '');
     } catch (error: any) {
+      if (request !== contextRead.current) return;
+      if (isPrivateClientScopeFailure(error)) setContextDenied(true);
       setMessage({ kind: 'error', title: error.response?.data?.error || 'خواندن دفترکل ناموفق بود.' });
-    } finally { setLoading(false); }
-  }, []);
+    } finally {
+      if (request === contextRead.current) setLoading(false);
+    }
+  }, [accountingAPI]);
 
   useEffect(() => { void loadContext(); }, [loadContext]);
-  useEffect(() => { const initial = new URLSearchParams(window.location.search).get('tab'); if (initial === 'settings' || initial === 'chart') setTab(initial); }, []);
+  useEffect(() => {
+    const initial = new URLSearchParams(window.location.search).get('tab');
+    if (initial === 'balance' || initial === 'settings' || initial === 'chart') setTab(initial);
+  }, []);
 
   const book = context?.books?.[0];
   const year = book?.fiscalYears?.find((item: any) => item.id === fiscalYearId) || book?.fiscalYears?.[0];
@@ -138,31 +164,59 @@ export default function AccountingLedgerPage() {
   const scheme = book?.codeSchemes?.[0];
   const dimensionTypes = book?.dimensionTypes || [];
 
-  const refreshReports = useCallback(async () => {
-    if (!book?.id || !year?.id) return;
-    try {
-      const params = { bookId: book.id, fiscalYearId: year.id, periodId: periodId || undefined };
-      const [journalResponse, balanceResponse, draftResponse] = await Promise.all([
-        accountingAPI.getLedgerJournal(params), accountingAPI.getLedgerTrialBalance(params),
-        accountingAPI.getLedgerVouchers({ ...params, status: 'DRAFT' }),
-      ]);
-      setJournal(journalResponse.data.data || []);
-      setBalance(balanceResponse.data.data || []);
-      setDrafts(draftResponse.data.data || []);
-    } catch (error: any) {
-      setMessage({ kind: 'error', title: error.response?.data?.error || 'به‌روزرسانی گزارش دفترکل ناموفق بود.' });
-    }
-  }, [book?.id, year?.id, periodId]);
+  const params = useMemo(() => ({ bookId: book?.id, fiscalYearId: year?.id, periodId: periodId || undefined }), [book?.id, year?.id, periodId]);
+  const scope = params.bookId && params.fiscalYearId ? JSON.stringify(params) : undefined;
+  const loadJournal = useCallback(async (signal: AbortSignal): Promise<any[]> => (await accountingAPI.getLedgerJournal(params, signal)).data.data || [], [accountingAPI, params]);
+  const loadDrafts = useCallback(async (signal: AbortSignal): Promise<any[]> => (await accountingAPI.getLedgerVouchers({ ...params, status: 'DRAFT' }, signal)).data.data || [], [accountingAPI, params]);
+  const loadBalance = useCallback(async (signal: AbortSignal): Promise<any[]> => (await accountingAPI.getLedgerTrialBalance(params, signal)).data.data || [], [accountingAPI, params]);
+  const journalRead = useAccountingPanelRead(tab === 'journal' ? scope : undefined, loadJournal, 'خواندن دفتر روزنامه ناموفق بود.');
+  const draftRead = useAccountingPanelRead(tab === 'journal' ? scope : undefined, loadDrafts, 'خواندن پیش‌نویس‌های روزنامه ناموفق بود.');
+  const balanceRead = useAccountingPanelRead(tab === 'balance' ? scope : undefined, loadBalance, 'خواندن تراز آزمایشی ناموفق بود.');
+  const refreshReports = async () => {
+    if (tab === 'journal') await Promise.all([journalRead.refresh(), draftRead.refresh()]);
+    if (tab === 'balance') await balanceRead.refresh();
+  };
 
-  useEffect(() => { void refreshReports(); }, [refreshReports]);
-
-  const totals = useMemo(() => balance.reduce((result, item) => ({
+  const createdVoucher = created?.scope === scope ? created?.voucher : undefined;
+  const journal = journalRead.data || [];
+  const drafts = draftRead.data || [];
+  const balance = balanceRead.data || [];
+  const totals = balance.reduce((result, item) => ({
     debit: result.debit + integer(item.debitRials),
     credit: result.credit + integer(item.creditRials),
-  }), { debit: BigInt(0), credit: BigInt(0) }), [balance]);
-  const canWrite = ['ACCOUNTANT', 'ACCOUNTING_MANAGER'].includes(context?.accessProfile);
-  const canManage = context?.accessProfile === 'ACCOUNTING_MANAGER';
+  }), { debit: BigInt(0), credit: BigInt(0) });
+  const deniedRead = [journalRead, draftRead, balanceRead].find((read) => read.denied);
+  const freshDrafts = !draftRead.loading && !draftRead.error;
+  const ledgerAccessDenied = contextDenied || Boolean(deniedRead);
+  const freshJournal = !journalRead.loading && !journalRead.error;
+
+  const canWrite = !ledgerAccessDenied && ['ACCOUNTANT', 'ACCOUNTING_MANAGER'].includes(context?.accessProfile);
+  const canManage = !ledgerAccessDenied && context?.accessProfile === 'ACCOUNTING_MANAGER';
   const canOverride = canWrite && (canManage || context?.isGlobalAdmin === true);
+  const canPostCreated = createdVoucher?.status === 'DRAFT' && !createdVoucher.postingBlockedReason;
+  const canPostTarget = canWrite && postTarget && !postTarget.postingBlockedReason
+    && (freshDrafts || (canPostCreated && createdVoucher.id === postTarget.id));
+
+  const { discard: discardJournal } = journalRead;
+  const { discard: discardDrafts } = draftRead;
+  const { discard: discardBalance } = balanceRead;
+  useEffect(() => {
+    if (!ledgerAccessDenied) return;
+    contextRead.current++;
+    setContextDenied(true);
+    setContext(null);
+    setLoading(false);
+    setFiscalYearId('');
+    setPeriodId('');
+    discardJournal();
+    discardDrafts();
+    discardBalance();
+    setCreated(undefined);
+    setPostTarget(undefined);
+    setReverseTarget(undefined);
+    setEvidenceDetail(undefined);
+    setAuditHealth(undefined);
+  }, [discardBalance, discardDrafts, discardJournal, ledgerAccessDenied]);
   const voucherTotals = useMemo(() => voucher.lines.reduce((sum, line) => ({
     debit: sum.debit + integer(line.debitRials), credit: sum.credit + integer(line.creditRials),
   }), { debit: BigInt(0), credit: BigInt(0) }), [voucher.lines]);
@@ -180,7 +234,7 @@ export default function AccountingLedgerPage() {
   };
 
   const submitPost = async () => {
-    if (!postTarget || postTarget.postingBlockedReason) return;
+    if (!canPostTarget) return;
     setSaving(true);
     setPostError('');
     try {
@@ -188,30 +242,38 @@ export default function AccountingLedgerPage() {
         reason: postReason.trim(),
         override: postOverride ? { confirmed: true, reason: overrideReason.trim() } : undefined,
       });
-      if (createdVoucher?.id === postTarget.id) setCreatedVoucher(response.data.data);
+      if (scope && createdVoucher?.id === postTarget.id) setCreated({ scope, voucher: response.data.data });
+      draftRead.update((current) => (current || []).filter((item) => item.id !== postTarget.id));
       setPostTarget(undefined);
       setPostReason('');
       setPostOverride(false);
       setOverrideReason('');
       setCommandFeedback({ scope: 'ledger-7', kind: 'success', title: 'سند قطعی و شماره قانونی تخصیص داده شد.' });
       await refreshReports();
-      await loadContext();
+      await loadContext(true);
     } catch (error: any) {
       setPostError(error.response?.data?.error || 'قطعی‌سازی سند انجام نشد.');
     } finally { setSaving(false); }
   };
 
   const openEvidence = async (voucherId: string) => {
+    const generation = contextRead.current;
     setEvidenceLoading(true); setMessage(undefined);
     try {
       const response = await accountingAPI.getLedgerVoucherEvidence(voucherId, 'بازبینی شواهد قطعی سند در دفتر روزنامه');
-      setEvidenceDetail(response.data.data);
+      if (generation === contextRead.current) setEvidenceDetail(response.data.data);
     } catch (error: any) {
       setMessage({ kind: 'error', title: error.response?.data?.error || 'خواندن شواهد سند ناموفق بود.' });
     } finally { setEvidenceLoading(false); }
   };
 
   if (loading) return <ErpLoading />;
+
+  if (ledgerAccessDenied) return (
+    <ErpPage eyebrow="حسابداری" title="دفترکل و کدینگ" backHref="/dashboard/accounting">
+      <ErpInlineState kind="permission" title={deniedRead?.error || "دسترسی به گزارش دفترکل نیاز به بررسی دارد."} action={{ label: "تلاش دوباره", onClick: () => loadContext() }} />
+    </ErpPage>
+  );
 
   if (!context?.configured) return (
     <ErpPage eyebrow="حسابداری" title="راه‌اندازی دفترکل" description="واحد گزارشگر، دفتر اصلی و نسخه نخست کدینگ را ثبت کنید." backHref="/dashboard/accounting">
@@ -234,7 +296,7 @@ export default function AccountingLedgerPage() {
   );
 
   return (
-    <ErpPage eyebrow="حسابداری" title="دفترکل و کدینگ" description={`${context.namePersian} · ارز قانونی: ریال`} backHref="/dashboard/accounting" actions={[{ label: 'به‌روزرسانی', onClick: refreshReports, tone: 'neutral' }]}>
+    <ErpPage eyebrow="حسابداری" title="دفترکل و کدینگ" description={`${context.namePersian} · ارز قانونی: ریال`} backHref="/dashboard/accounting" actions={[{ label: 'به‌روزرسانی', onClick: tab === 'journal' || tab === 'balance' ? refreshReports : () => loadContext(true), tone: 'neutral' }]}>
       {message && <ErpInlineState kind={message.kind} title={message.title} />}
       {year?.code === '1404' && <ErpInlineState kind="stale" title="گزارش این سال تنها اسناد موجود در پشتیبان سپیدار را پوشش می‌دهد؛ ریزگردش ۱۴۰۴ پیش از ۲۰۲۵/۱۲/۲۲ موجود نیست." />}
       {year?.code === '1405' && <ErpInlineState kind="stale" title="بهای خروج و موجودی منفی انبار ۱۴۰۵ هنوز تطبیق نشده است؛ گردش دفترکل به‌تنهایی وضعیت انبار را تأیید نمی‌کند." />}
@@ -305,22 +367,27 @@ export default function AccountingLedgerPage() {
                 }));
                 const sourcePayload = { kind: 'MANUAL_LEDGER_VOUCHER', id: key, version: 1, header, lineEvidence: lines.map((line) => ({ id: line.evidence.id, hash: line.evidence.hash })) };
                 const response = await accountingAPI.createLedgerVoucher({ ...header, discoveredAt: voucher.discoveredAt || undefined, source: { type: 'سند دستی', id: key, version: 1, payload: sourcePayload, hash: await sha256(sourcePayload) }, lines }, key);
-                setCreatedVoucher(response.data.data); setDrafts((current) => [response.data.data, ...current]); setMessage({ kind: 'success', title: 'پیش‌نویس متوازن ثبت شد.' });
+                if (scope) setCreated({ scope, voucher: response.data.data });
+                draftRead.update((current) => [response.data.data, ...(current || []).filter((item) => item.id !== response.data.data.id)]);
+                setMessage({ kind: 'success', title: 'پیش‌نویس متوازن ثبت شد.' });
               } catch (error: any) { setMessage({ kind: 'error', title: error.response?.data?.error || 'ثبت پیش‌نویس ناموفق بود.' }); }
               finally { setSaving(false); }
-            }} />{createdVoucher?.status === 'DRAFT' && <ErpButton label="قطعی‌سازی سند" tone="success" onClick={() => { setPostError(''); setPostTarget(createdVoucher); }} />}</div>
+            }} />{canPostCreated && <ErpButton label="قطعی‌سازی سند" disabled={saving} tone="success" onClick={() => { setPostError(''); setPostTarget(createdVoucher); }} />}</div>
           </>}
         </ErpSection>}
         <ErpSection title="پیش‌نمایش پیش‌نویس‌ها" description="این ارقام رسمی نیستند و در مانده‌ها و دفاتر قانونی محاسبه نمی‌شوند.">
-          {drafts.length === 0 ? <ErpEmptyState title="پیش‌نویس تعیین‌تکلیف‌نشده‌ای وجود ندارد." /> : <div className="grid gap-2 md:grid-cols-2">{drafts.map((item) => <ErpCard key={item.id} className="p-3"><div className="flex flex-wrap items-center justify-between gap-3"><div><strong>{item.description}</strong><span className="mt-1 block text-sm text-[var(--sds-text-muted)]">{dateFa(item.documentDate)} · {digits(item.debitTotalRials)} ریال</span></div>{item.postingBlockedReason ? <ErpBadge tone="warning">در انتظار انتقال مرجعیت</ErpBadge> : canWrite && <ErpButton label="قطعی‌سازی" tone="success" variant="outline" onClick={() => { setPostError(''); setPostTarget(item); }} />}</div>{item.postingBlockedReason && <p className="mt-2 text-sm text-[var(--sds-text-muted)]">{item.postingBlockedReason}</p>}</ErpCard>)}</div>}
+          <LedgerReportStatus read={draftRead} />
+          {drafts.length === 0 ? (draftRead.loading || draftRead.error ? null : <ErpEmptyState title="پیش‌نویس تعیین‌تکلیف‌نشده‌ای وجود ندارد." />) : <div className="grid gap-2 md:grid-cols-2">{drafts.map((item) => <ErpCard key={item.id} className="p-3"><div className="flex flex-wrap items-center justify-between gap-3"><div><strong>{item.description}</strong><span className="mt-1 block text-sm text-[var(--sds-text-muted)]">{dateFa(item.documentDate)} · {digits(item.debitTotalRials)} ریال</span></div>{item.postingBlockedReason ? <ErpBadge tone="warning">در انتظار انتقال مرجعیت</ErpBadge> : canWrite && <ErpButton label="قطعی‌سازی" disabled={saving || !freshDrafts} tone="success" variant="outline" onClick={() => { setPostError(''); setPostTarget(item); }} />}</div>{item.postingBlockedReason && <p className="mt-2 text-sm text-[var(--sds-text-muted)]">{item.postingBlockedReason}</p>}</ErpCard>)}</div>}
         </ErpSection>
         <ErpSection title="دفتر روزنامه قطعی">
-          {journal.length === 0 ? <ErpEmptyState title="سند قطعی در این محدوده وجود ندارد." /> : <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="border-b border-[var(--sds-border-default)]"><th className="p-3 text-right">شماره سند</th><th className="p-3 text-right">تاریخ</th><th className="p-3 text-right">شرح و آرتیکل‌ها</th><th className="p-3 text-right">وضعیت</th><th className="p-3 text-left">بدهکار</th><th className="p-3 text-left">بستانکار</th>{(canManage || canOverride) && <th className="p-3 text-right">عملیات</th>}</tr></thead><tbody>{journal.map((item) => <tr key={item.id} className="border-b border-[var(--sds-border-default)] align-top"><td className="p-3">{Number(item.statutoryNumber).toLocaleString('fa-IR')}</td><td className="p-3">{dateFa(item.documentDate)}</td><td className="p-3"><strong>{item.description}</strong><div className="mt-2 space-y-1 text-xs text-[var(--sds-text-muted)]">{item.lines?.map((line: any) => <div key={line.id}>{line.account?.code} · {line.account?.titlePersian} · بدهکار {digits(line.debitRials)} · بستانکار {digits(line.creditRials)}{line.description ? ` · ${line.description}` : ''}</div>)}</div></td><td className="p-3"><ErpBadge tone={item.status === 'POSTED' ? 'success' : 'warning'}>{statusFa[item.status]}</ErpBadge></td><td className="p-3 text-left">{digits(item.debitTotalRials)}</td><td className="p-3 text-left">{digits(item.creditTotalRials)}</td>{(canManage || canOverride) && <td className="p-3"><div className="flex flex-wrap gap-2">{canManage && <ErpButton label="مشاهده شواهد" variant="outline" disabled={evidenceLoading} onClick={() => void openEvidence(item.id)} />}{canOverride && item.status === 'POSTED' && <ErpButton label="برگشت سند" tone="danger" variant="outline" onClick={() => setReverseTarget(item)} />}</div></td>}</tr>)}</tbody></table></div>}
+          <LedgerReportStatus read={journalRead} />
+          {journal.length === 0 ? (journalRead.loading || journalRead.error ? null : <ErpEmptyState title="سند قطعی در این محدوده وجود ندارد." />) : <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="border-b border-[var(--sds-border-default)]"><th className="p-3 text-right">شماره سند</th><th className="p-3 text-right">تاریخ</th><th className="p-3 text-right">شرح و آرتیکل‌ها</th><th className="p-3 text-right">وضعیت</th><th className="p-3 text-left">بدهکار</th><th className="p-3 text-left">بستانکار</th>{(canManage || canOverride) && <th className="p-3 text-right">عملیات</th>}</tr></thead><tbody>{journal.map((item) => <tr key={item.id} className="border-b border-[var(--sds-border-default)] align-top"><td className="p-3">{Number(item.statutoryNumber).toLocaleString('fa-IR')}</td><td className="p-3">{dateFa(item.documentDate)}</td><td className="p-3"><strong>{item.description}</strong><div className="mt-2 space-y-1 text-xs text-[var(--sds-text-muted)]">{item.lines?.map((line: any) => <div key={line.id}>{line.account?.code} · {line.account?.titlePersian} · بدهکار {digits(line.debitRials)} · بستانکار {digits(line.creditRials)}{line.description ? ` · ${line.description}` : ''}</div>)}</div></td><td className="p-3"><ErpBadge tone={item.status === 'POSTED' ? 'success' : 'warning'}>{statusFa[item.status]}</ErpBadge></td><td className="p-3 text-left">{digits(item.debitTotalRials)}</td><td className="p-3 text-left">{digits(item.creditTotalRials)}</td>{(canManage || canOverride) && <td className="p-3"><div className="flex flex-wrap gap-2">{canManage && <ErpButton label="مشاهده شواهد" variant="outline" disabled={evidenceLoading || !freshJournal} onClick={() => void openEvidence(item.id)} />}{canOverride && item.status === 'POSTED' && <ErpButton label="برگشت سند" tone="danger" variant="outline" disabled={!freshJournal} onClick={() => setReverseTarget(item)} />}</div></td>}</tr>)}</tbody></table></div>}
         </ErpSection>
       </>}
 
       {tab === 'balance' && <ErpSection title="تراز آزمایشی قطعی" description="این گزارش فقط از آرتیکل‌های قطعی ساخته می‌شود.">
-        {balance.length === 0 ? <ErpEmptyState title="گردش قطعی برای نمایش وجود ندارد." /> : <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="border-b border-[var(--sds-border-default)]"><th className="p-3 text-right">کد</th><th className="p-3 text-right">عنوان حساب</th><th className="p-3 text-left">گردش بدهکار</th><th className="p-3 text-left">گردش بستانکار</th><th className="p-3 text-left">مانده</th></tr></thead><tbody>{balance.map((item) => <tr key={item.accountId} className="border-b border-[var(--sds-border-default)]"><td className="p-3">{item.code}</td><td className="p-3">{item.titlePersian}</td><td className="p-3 text-left">{digits(item.debitRials)}</td><td className="p-3 text-left">{digits(item.creditRials)}</td><td className="p-3 text-left">{digits(integer(item.debitRials) - integer(item.creditRials))}</td></tr>)}</tbody><tfoot><tr className="font-bold"><td className="p-3" colSpan={2}>جمع</td><td className="p-3 text-left">{digits(totals.debit)}</td><td className="p-3 text-left">{digits(totals.credit)}</td><td className="p-3 text-left">{digits(totals.debit - totals.credit)}</td></tr></tfoot></table></div>}
+        <LedgerReportStatus read={balanceRead} />
+        {balance.length === 0 ? (balanceRead.loading || balanceRead.error ? null : <ErpEmptyState title="گردش قطعی برای نمایش وجود ندارد." />) : <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="border-b border-[var(--sds-border-default)]"><th className="p-3 text-right">کد</th><th className="p-3 text-right">عنوان حساب</th><th className="p-3 text-left">گردش بدهکار</th><th className="p-3 text-left">گردش بستانکار</th><th className="p-3 text-left">مانده</th></tr></thead><tbody>{balance.map((item) => <tr key={item.accountId} className="border-b border-[var(--sds-border-default)]"><td className="p-3">{item.code}</td><td className="p-3">{item.titlePersian}</td><td className="p-3 text-left">{digits(item.debitRials)}</td><td className="p-3 text-left">{digits(item.creditRials)}</td><td className="p-3 text-left">{digits(integer(item.debitRials) - integer(item.creditRials))}</td></tr>)}</tbody><tfoot><tr className="font-bold"><td className="p-3" colSpan={2}>جمع</td><td className="p-3 text-left">{digits(totals.debit)}</td><td className="p-3 text-left">{digits(totals.credit)}</td><td className="p-3 text-left">{digits(totals.debit - totals.credit)}</td></tr></tfoot></table></div>}
       </ErpSection>}
 
       {tab === 'identities' && canWrite && <>
@@ -388,10 +455,10 @@ export default function AccountingLedgerPage() {
         </ErpSection>}
         <ErpSection title="مدیریت دسترسی حسابداری" description="اعطا، انقضا و لغو سه سطح حسابداری فقط از مرجع واحد مدیریت دسترسی‌ها انجام می‌شود."><div className="flex justify-end"><ErpButton label="رفتن به مدیریت دسترسی‌ها" variant="outline" onClick={() => { window.location.href = '/dashboard/hr/permissions'; }} /></div></ErpSection>
       </>}
-      <ErpSheet open={Boolean(evidenceDetail)} onClose={() => setEvidenceDetail(undefined)} title="شواهد و منشأ سند" presentation="modal" footer={<div className="flex justify-end"><ErpButton label="بستن" variant="outline" onClick={() => setEvidenceDetail(undefined)} /></div>}>
-        {evidenceDetail && <AccountingLedgerEvidence evidence={evidenceDetail} />}
+      <ErpSheet open={canManage && Boolean(evidenceDetail)} onClose={() => setEvidenceDetail(undefined)} title="شواهد و منشأ سند" presentation="modal" footer={<div className="flex justify-end"><ErpButton label="بستن" variant="outline" onClick={() => setEvidenceDetail(undefined)} /></div>}>
+        {canManage && evidenceDetail && <AccountingLedgerEvidence evidence={evidenceDetail} />}
       </ErpSheet>
-      <ErpSheet open={Boolean(postTarget)} onClose={() => { if (!saving) { setPostTarget(undefined); setPostReason(''); setPostOverride(false); setOverrideReason(''); setPostError(''); } }} title="تأیید قطعی‌سازی سند" presentation="modal" pending={saving} footer={<div className="flex justify-end gap-2"><ErpButton label="انصراف" variant="ghost" disabled={saving} onClick={() => { setPostTarget(undefined); setPostError(''); }} /><ErpButton label="قطعی‌سازی" tone="success" disabled={saving || Boolean(postTarget?.postingBlockedReason) || postReason.trim().length < 3 || (postOverride && overrideReason.trim().length < 8)} onClick={submitPost} /></div>}>
+      <ErpSheet open={canWrite && Boolean(postTarget)} onClose={() => { if (!saving) { setPostTarget(undefined); setPostReason(''); setPostOverride(false); setOverrideReason(''); setPostError(''); } }} title="تأیید قطعی‌سازی سند" presentation="modal" pending={saving} footer={<div className="flex justify-end gap-2"><ErpButton label="انصراف" variant="ghost" disabled={saving} onClick={() => { setPostTarget(undefined); setPostError(''); }} /><ErpButton label="قطعی‌سازی" tone="success" disabled={saving || !canPostTarget || postReason.trim().length < 3 || (postOverride && overrideReason.trim().length < 8)} onClick={submitPost} /></div>}>
         {postError && <ErpInlineState kind="error" title={postError} />}
         {postTarget?.postingBlockedReason && <ErpInlineState kind="permission" title={postTarget.postingBlockedReason} />}
         <p className="text-sm text-[var(--sds-text-secondary)]">پس از قطعی‌سازی، سند قابل ویرایش یا حذف نیست و اصلاح فقط با سند برگشت انجام می‌شود.</p>
@@ -399,7 +466,7 @@ export default function AccountingLedgerPage() {
         {canOverride && <div className="mt-4"><ErpCheckbox label="ثبت استثنایی در دوره بسته موقت" checked={postOverride} onChange={(event) => setPostOverride(event.target.checked)} />{postOverride && <label className="mt-3 block"><span className="mb-2 block text-sm">دلیل استثنا و تأیید دوباره</span><ErpInput value={overrideReason} onChange={(event) => setOverrideReason(event.target.value)} /></label>}</div>}
       {commandFeedback?.scope === "ledger-7" && <ErpInlineState kind={commandFeedback.kind} title={commandFeedback.title} />}
 </ErpSheet>
-      <ErpSheet open={Boolean(reverseTarget)} onClose={() => { if (!saving) { setReverseTarget(undefined); setReverseReason(''); setReverseDate(''); setEmergencyReverseConfirmed(false); } }} title="برگشت سند قطعی" presentation="modal" pending={saving} footer={<div className="flex justify-end gap-2"><ErpButton label="انصراف" variant="ghost" disabled={saving} onClick={() => setReverseTarget(undefined)} /><ErpButton label="ایجاد سند برگشت" tone="danger" disabled={saving || reverseReason.trim().length < 8 || !reverseDate || !year?.id || !periodId || (context?.isGlobalAdmin === true && !canManage && !emergencyReverseConfirmed)} onClick={() => run(async () => { const emergency = context?.isGlobalAdmin === true && !canManage; await accountingAPI.reverseLedgerVoucher(reverseTarget.id, { reason: reverseReason.trim(), idempotencyKey: crypto.randomUUID(), targetFiscalYearId: year.id, targetPeriodId: periodId, documentDate: reverseDate, ...(emergency ? { override: { confirmed: emergencyReverseConfirmed, reason: reverseReason.trim() } } : {}) }); setReverseTarget(undefined); setReverseReason(''); setReverseDate(''); setEmergencyReverseConfirmed(false); await refreshReports(); }, 'سند برگشت مستقل و قطعی در دوره انتخاب‌شده ایجاد شد.', undefined, "ledger-8")} /></div>}>
+      <ErpSheet open={canOverride && Boolean(reverseTarget)} onClose={() => { if (!saving) { setReverseTarget(undefined); setReverseReason(''); setReverseDate(''); setEmergencyReverseConfirmed(false); } }} title="برگشت سند قطعی" presentation="modal" pending={saving} footer={<div className="flex justify-end gap-2"><ErpButton label="انصراف" variant="ghost" disabled={saving} onClick={() => setReverseTarget(undefined)} /><ErpButton label="ایجاد سند برگشت" tone="danger" disabled={saving || !freshJournal || reverseReason.trim().length < 8 || !reverseDate || !year?.id || !periodId || (context?.isGlobalAdmin === true && !canManage && !emergencyReverseConfirmed)} onClick={() => run(async () => { const emergency = context?.isGlobalAdmin === true && !canManage; await accountingAPI.reverseLedgerVoucher(reverseTarget.id, { reason: reverseReason.trim(), idempotencyKey: crypto.randomUUID(), targetFiscalYearId: year.id, targetPeriodId: periodId, documentDate: reverseDate, ...(emergency ? { override: { confirmed: emergencyReverseConfirmed, reason: reverseReason.trim() } } : {}) }); setReverseTarget(undefined); setReverseReason(''); setReverseDate(''); setEmergencyReverseConfirmed(false); await refreshReports(); }, 'سند برگشت مستقل و قطعی در دوره انتخاب‌شده ایجاد شد.', undefined, "ledger-8")} /></div>}>
         <p className="text-sm text-[var(--sds-text-secondary)]">سند اصلی دست‌نخورده می‌ماند و سند معکوس در سال و دوره انتخاب‌شده بالای صفحه ثبت می‌شود؛ بنابراین اصلاح دوره بسته قطعی نیز وارد یک دوره باز می‌شود.</p>
         <label className="mt-4 block"><span className="mb-2 block text-sm">دلیل برگشت</span><ErpInput value={reverseReason} onChange={(event) => setReverseReason(event.target.value)} /></label>
         <label className="mt-4 block"><span className="mb-2 block text-sm">تاریخ سند برگشت</span><ErpPersianDateField valueFormat="iso-date" value={reverseDate} onChange={(value) => setReverseDate(value)} /></label>

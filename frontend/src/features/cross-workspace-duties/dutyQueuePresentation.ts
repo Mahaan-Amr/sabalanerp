@@ -1,19 +1,19 @@
 import { FaHistory, FaInbox, FaUserCheck, FaUserShield } from 'react-icons/fa';
 import type { CrossWorkspaceDutyView } from './crossWorkspaceDutyApi';
 
-export const buildDutyQueueTabs = (summary: {
+export const buildDutyQueueTabs = (summary?: {
   open: number;
   available: number;
   triage: number;
   historyUnseen: number;
   canManageTriage: boolean;
 }) => [
-  { value: 'assigned' as const, label: 'وظایف من', icon: FaInbox, count: summary.open, countTone: 'danger' as const },
-  { value: 'available' as const, label: 'قابل دریافت', icon: FaUserCheck, count: summary.available, countTone: 'danger' as const },
-  ...(summary.canManageTriage
+  { value: 'assigned' as const, label: 'وظایف من', icon: FaInbox, count: summary?.open, countTone: 'danger' as const },
+  { value: 'available' as const, label: 'قابل دریافت', icon: FaUserCheck, count: summary?.available, countTone: 'danger' as const },
+  ...(summary?.canManageTriage
     ? [{ value: 'triage' as const, label: 'بدون مسئول', icon: FaUserShield, count: summary.triage, countTone: 'danger' as const }]
     : []),
-  { value: 'history' as const, label: 'تاریخچه', icon: FaHistory, count: summary.historyUnseen, countTone: 'danger' as const },
+  { value: 'history' as const, label: 'تاریخچه', icon: FaHistory, count: summary?.historyUnseen, countTone: 'danger' as const },
 ];
 
 export const dutyQueueEmptyTitle = (view: CrossWorkspaceDutyView) => ({

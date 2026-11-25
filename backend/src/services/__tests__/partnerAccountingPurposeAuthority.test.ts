@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { Prisma } from '@prisma/client';
 import { resolvePartnerWorkspaceAuthority } from '../partnerSales/authorization/workspaceAuthority';
+import { createFencedPartnerPermissionReader } from '../partnerSales/authorization/fencedPermissionReads';
+import { readPartnerCommercialAccountingCapabilities } from '../partnerSales/accounting/capabilities';
 import { FEATURES } from '../../middleware/feature';
 
 for (const scenario of [
@@ -76,4 +78,40 @@ test('a permission expiring during one fenced Accounting resolution is re-evalua
   } as unknown as Prisma.TransactionClient;
   const authority = await resolvePartnerWorkspaceAuthority(tx, 'actor', 'ACCOUNTING', { fencedPermissionReads: true });
   assert.equal(authority.grants.some(grant => grant.action === 'ACCOUNTING_READ'), false);
+});
+
+test('fenced Accounting decisions re-evaluate a narrow denial after expiry while reusing its permission rows', async t => {
+  const start = Date.UTC(2026, 0, 1);
+  t.mock.timers.enable({ apis: ['Date'], now: start });
+  const workspace = { id: 'workspace', workspace: 'accounting', permissionLevel: 'admin',
+    isActive: true, expiresAt: null };
+  const denial = { id: 'denial', workspace: 'accounting', feature: FEATURES.ACCOUNTING_ACTIONS_MANAGE,
+    permissionLevel: 'none', isActive: true, expiresAt: new Date(start + 10) };
+  let effectiveFeatureReads = 0;
+  const tx = {
+    user: { findUnique: async () => ({ role: 'USER', isActive: true, partnerProfile: null }) },
+    workspacePermission: { findMany: async () => [workspace], findUnique: async () => workspace },
+    roleWorkspacePermission: { findMany: async () => [], findUnique: async () => null },
+    featurePermission: {
+      findMany: async ({ where }: { where: { isActive?: boolean } }) => {
+        if (where.isActive) effectiveFeatureReads++;
+        return [denial];
+      },
+      findUnique: async ({ where }: { where: { userId_workspace_feature: { feature: string } } }) =>
+        where.userId_workspace_feature.feature === denial.feature ? denial : null,
+    },
+    roleFeaturePermission: { findMany: async () => [], findUnique: async () => null },
+    hrWorkspaceAccessGrant: { findMany: async () => [] }, hrFeatureAccessGrant: { findMany: async () => [] },
+  } as unknown as Prisma.TransactionClient;
+
+  const options = { fencedPermissionReads: true, permissionClient: createFencedPartnerPermissionReader(tx) };
+  const before = await resolvePartnerWorkspaceAuthority(tx, 'actor', 'ACCOUNTING', options);
+  assert.deepEqual(before.disabledFeatures, [FEATURES.ACCOUNTING_ACTIONS_MANAGE]);
+  assert.equal((await readPartnerCommercialAccountingCapabilities(options.permissionClient, 'actor')).paper, false);
+
+  t.mock.timers.tick(20);
+  const after = await resolvePartnerWorkspaceAuthority(tx, 'actor', 'ACCOUNTING', options);
+  assert.deepEqual(after.disabledFeatures, []);
+  assert.equal((await readPartnerCommercialAccountingCapabilities(options.permissionClient, 'actor')).paper, true);
+  assert.equal(effectiveFeatureReads, 1);
 });

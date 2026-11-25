@@ -20,6 +20,8 @@ import {
 } from '@/components/erp';
 import { hrDutyApi, type DestinationDuty, type DestinationDutySummary, type DestinationDutyView } from './hrDutyApi';
 import { initialDestinationDutyState, reduceDestinationDutyState } from './destinationDutyState';
+import { useAuth } from '@/contexts/AuthContext';
+import { announceCrossWorkspaceDutyChanged, CROSS_WORKSPACE_DUTY_CHANGED_EVENT, requestCrossWorkspaceDutySummary } from '@/features/cross-workspace-duties/crossWorkspaceDutyApi';
 import { buildDutyQueueTabs, dutyQueueEmptyTitle } from '@/features/cross-workspace-duties/dutyQueuePresentation';
 import { DestinationDutyClaimAction } from './DestinationDutyClaimAction';
 import { destinationDutyHref } from '@/features/cross-workspace-duties/dutyDestination';
@@ -38,102 +40,133 @@ const actionLabel: Record<string, string> = {
   PAYROLL_APPROVAL: 'تأیید حقوق',
 };
 
-type QueueData = { summary: DestinationDutySummary; duties: DestinationDuty[]; view: DestinationDutyView };
+type QueueData = { duties: DestinationDuty[]; view: DestinationDutyView; search: string; nextCursor?: string | null };
+type QueueProps = { workspace: string; metricPresentation?: 'default' | 'neumorphic' };
 
-export function DestinationDutyQueue({ workspace, metricPresentation = 'default' }: { workspace: string; metricPresentation?: 'default' | 'neumorphic' }) {
+export function DestinationDutyQueue(props: QueueProps) {
+  const { user } = useAuth();
+  return user && <WorkspaceDutyQueue key={`${user.id}:${props.workspace}`} {...props} />;
+}
+
+function WorkspaceDutyQueue({ workspace, metricPresentation = 'default' }: QueueProps) {
+  const { user } = useAuth();
   const [view, setView] = useState<DestinationDutyView>('assigned');
   const [search, setSearch] = useState('');
   const [historySearch, setHistorySearch] = useState('');
-  const requestSequence = useRef(0);
+  const queueSequence = useRef({ value: 0 });
+  const summarySequence = useRef({ value: 0 });
   useEffect(() => {
     const timer = window.setTimeout(() => setHistorySearch(search.trim()), 300);
     return () => window.clearTimeout(timer);
   }, [search]);
-  const [state, dispatch] = useReducer(
-    reduceDestinationDutyState<QueueData>,
-    initialDestinationDutyState as typeof initialDestinationDutyState & { data: QueueData | null },
+
+  const [state, dispatch] = useReducer(reduceDestinationDutyState<QueueData>, initialDestinationDutyState);
+  const [summaryState, dispatchSummary] = useReducer(
+    reduceDestinationDutyState<DestinationDutySummary>, initialDestinationDutyState,
   );
 
-  const load = useCallback(async () => {
-    const sequence = ++requestSequence.current;
+  const loadSummary = useCallback(async (change?: Event) => {
+    if (!user) return;
+    const sequence = ++summarySequence.current.value;
+    dispatchSummary({ type: 'start' });
+    try {
+      const summary = await requestCrossWorkspaceDutySummary(user, workspace, change);
+      if (sequence === summarySequence.current.value) dispatchSummary({ type: 'success', data: summary });
+    } catch {
+      if (sequence === summarySequence.current.value) {
+        dispatchSummary({ type: 'failure', message: 'شمارش وظایف در دسترس نیست.' });
+      }
+    }
+  }, [user, workspace]);
+
+  const query = view === 'history' ? historySearch : '';
+  const load = useCallback(async (previous?: QueueData) => {
+    const sequence = ++queueSequence.current.value;
     dispatch({ type: 'start' });
     try {
-      const [summary, duties] = await Promise.all([
-        hrDutyApi.summary(workspace),
-        hrDutyApi.list(workspace, view, historySearch),
-      ]);
-      let resolvedSummary = summary.data.data;
-      if (view === 'history' && !historySearch && duties.data.data.length > 0) {
-        const seenThrough = duties.data.data.reduce((latest, duty) => (
-          duty.updatedAt > latest ? duty.updatedAt : latest
-        ), duties.data.data[0].updatedAt);
-        try {
-          await hrDutyApi.markHistorySeen(workspace, seenThrough);
-          resolvedSummary = (await hrDutyApi.summary(workspace)).data.data;
-        } catch {
-          // History remains readable; the badge stays until the acknowledgement succeeds.
-        }
+      const result: { data: DestinationDuty[]; nextCursor?: string | null } = view === 'history'
+        ? (await hrDutyApi.historyPage(workspace, query, previous?.nextCursor ?? undefined)).data
+        : (await hrDutyApi.list(workspace, view)).data;
+      if (sequence !== queueSequence.current.value) return;
+      const duties = result.data;
+      dispatch({
+        type: 'success',
+        data: {
+          duties: previous ? [...previous.duties, ...duties] : duties,
+          view,
+          search: query,
+          nextCursor: result.nextCursor ?? null,
+        },
+      });
+
+      const acknowledge = view === 'available' ? hrDutyApi.markAvailableSeen
+        : view === 'history' && !query ? hrDutyApi.markHistorySeen : null;
+      if (!acknowledge || !duties.length) return;
+      const seenThrough = duties.reduce((latest, duty) => duty.updatedAt > latest ? duty.updatedAt : latest, duties[0].updatedAt);
+      try {
+        await acknowledge(workspace, seenThrough);
+        announceCrossWorkspaceDutyChanged();
+      } catch {
+        // Keep the current count until the receipt can be confirmed.
       }
-      if (view === 'available' && duties.data.data.length > 0) {
-        const seenThrough = duties.data.data.reduce((latest, duty) => (
-          duty.updatedAt > latest ? duty.updatedAt : latest
-        ), duties.data.data[0].updatedAt);
-        try {
-          await hrDutyApi.markAvailableSeen(workspace, seenThrough);
-          resolvedSummary = (await hrDutyApi.summary(workspace)).data.data;
-        } catch {
-          // Available work remains readable; the badge stays until acknowledgement succeeds.
-        }
-      }
-      if (sequence === requestSequence.current) dispatch({ type: 'success', data: { summary: resolvedSummary, duties: duties.data.data, view } });
     } catch (error) {
-      if (sequence !== requestSequence.current) return;
+      if (sequence !== queueSequence.current.value) return;
       dispatch({ type: 'failure', message: getSalesOperationalErrorMessage(error, {
         failedAction: 'به‌روزرسانی وظایف',
         nextStep: 'صفحه را تازه‌سازی و دوباره تلاش کنید.',
       }) });
     }
-  }, [view, workspace, historySearch]);
+  }, [view, workspace, query]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    const sequence = queueSequence.current;
+    void load();
+    return () => { sequence.value++; };
+  }, [load]);
+  useEffect(() => {
+    const sequence = summarySequence.current;
+    const onChange = (event: Event) => void loadSummary(event);
+    void loadSummary();
+    window.addEventListener(CROSS_WORKSPACE_DUTY_CHANGED_EVENT, onChange);
+    return () => {
+      sequence.value++;
+      window.removeEventListener(CROSS_WORKSPACE_DUTY_CHANGED_EVENT, onChange);
+    };
+  }, [loadSummary]);
 
-  if (!state.data && state.loading) {
-    return (
-      <ErpPage eyebrow="وظایف بین‌واحدی" title="وظایف بین‌واحدی" backHref={`/dashboard/${workspace}`}>
-        <ErpSkeleton lines={5} label="در حال بارگذاری وظایف" />
-      </ErpPage>
-    );
-  }
-  if (!state.data) {
-    return (
-      <ErpPage eyebrow="وظایف بین‌واحدی" title="وظایف بین‌واحدی" backHref={`/dashboard/${workspace}`}>
-        <ErpInlineState kind="error" title={state.error || 'وظایف در دسترس نیست.'} action={{ label: 'تلاش دوباره', icon: FaSync, onClick: load }} />
-      </ErpPage>
-    );
-  }
-
-  const { summary, duties } = state.data;
-  const displayedView = state.loading || state.stale ? state.data.view : view;
-  const options = buildDutyQueueTabs(summary);
-  const metrics: ErpNeumorphicMetric[] = [
+  const refresh = () => {
+    void load();
+    void loadSummary();
+  };
+  const summary = summaryState.data;
+  const duties = state.data?.duties ?? [];
+  const displayedView = state.data?.view ?? view;
+  const options = buildDutyQueueTabs(summary ?? undefined);
+  const metrics: ErpNeumorphicMetric[] = summary ? [
     { id: 'open', label: 'باز', value: summary.open.toLocaleString('fa-IR'), icon: FaInbox, tone: 'info' },
     { id: 'due-soon', label: 'تا ۲۴ ساعت', value: summary.dueSoon.toLocaleString('fa-IR'), icon: FaClock, tone: 'warning' },
     { id: 'overdue', label: 'گذشته از موعد', value: summary.overdue.toLocaleString('fa-IR'), icon: FaExclamationTriangle, tone: summary.overdue ? 'danger' : 'neutral' },
     { id: 'available', label: 'قابل دریافت', value: summary.available.toLocaleString('fa-IR'), icon: FaUserCheck, tone: 'success' },
     ...(summary.canManageTriage ? [{ id: 'triage', label: 'بدون مسئول', value: summary.triage.toLocaleString('fa-IR'), icon: FaUserShield, tone: 'purple' as const }] : []),
-  ];
+  ] : [];
   return (
     <ErpPage
       eyebrow="وظایف بین‌واحدی"
       title="وظایف بین‌واحدی"
       description="فقط اطلاعات لازم برای همین وظیفه نمایش داده می‌شود."
       backHref={`/dashboard/${workspace}`}
-      actions={[{ label: 'به‌روزرسانی', icon: FaSync, onClick: load, disabled: state.loading }]}
+      actions={[{ label: 'به‌روزرسانی', icon: FaSync, onClick: refresh, disabled: state.loading }]}
     >
-      {state.stale && <ErpInlineState kind="stale" title={`${state.error} آخرین نمایش موفق حفظ شده است.`} action={{ label: 'تلاش دوباره', onClick: load }} />}
-      {metricPresentation === 'neumorphic'
+      {state.stale && <ErpInlineState kind="stale" title={`${state.error} آخرین نمایش موفق حفظ شده است.`} action={{ label: 'تلاش دوباره', onClick: () => void load() }} />}
+      {summaryState.error && <ErpInlineState
+        kind={summaryState.stale ? 'stale' : 'error'}
+        title={summaryState.error}
+        action={{ label: 'تلاش دوباره', onClick: () => void loadSummary() }}
+      />}
+      {!summary && summaryState.loading && <ErpSkeleton lines={1} label="در حال بارگذاری شمارش وظایف" />}
+      {summary && (metricPresentation === 'neumorphic'
         ? <ErpNeumorphicMetricGrid items={metrics} />
-        : <ErpMetricGrid items={metrics} />}
+        : <ErpMetricGrid items={metrics} />)}
       <ErpSection>
         <ErpSegmentedControl options={options} value={displayedView} onChange={setView} />
         {view === 'history' && <ErpField label="جست‌وجوی سوابق" className="mt-4">
@@ -141,11 +174,13 @@ export function DestinationDutyQueue({ workspace, metricPresentation = 'default'
             placeholder="شماره قرارداد، نام مشتری یا عنوان وظیفه" maxLength={200} />
         </ErpField>}
       </ErpSection>
-      {state.loading && <ErpInlineState kind="empty" title="در حال به‌روزرسانی" />}
-      {!duties.length ? (
+      {state.loading && <ErpSkeleton lines={state.data ? 1 : 5} label="در حال بارگذاری وظایف" />}
+      {!state.data && state.error && <ErpInlineState
+        kind="error" title={state.error} action={{ label: 'تلاش دوباره', icon: FaSync, onClick: () => void load() }}
+      />}
+      {state.data && (duties.length === 0 ? (
         <ErpEmptyState
-          title={displayedView === 'history' && historySearch ? 'سابقه‌ای با این عبارت پیدا نشد.' : dutyQueueEmptyTitle(displayedView)}
-          description="این شمارش واقعی است و با به‌روزرسانی تغییر می‌کند."
+          title={displayedView === 'history' && state.data.search ? 'سابقه‌ای با این عبارت پیدا نشد.' : dutyQueueEmptyTitle(displayedView)}
           icon={FaInbox}
         />
       ) : (
@@ -170,7 +205,12 @@ export function DestinationDutyQueue({ workspace, metricPresentation = 'default'
             </ErpCard>
           ))}
         </div>
-      )}
+      ))}
+      {state.data?.nextCursor && displayedView === view && state.data.search === query && <ErpButton
+        label="نمایش سوابق بیشتر"
+        disabled={state.loading}
+        onClick={() => { if (state.data) void load(state.data); }}
+      />}
     </ErpPage>
   );
 }

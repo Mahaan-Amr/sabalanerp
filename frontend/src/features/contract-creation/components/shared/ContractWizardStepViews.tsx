@@ -8,6 +8,7 @@ import {
   ErpNeumorphicCard,
   ErpNeumorphicInteractiveCard,
   ErpNeumorphicSelectedSummary,
+  ErpSkeleton,
   ErpTextarea,
 } from '@/components/erp';
 import PersianCalendarComponent from '@/components/PersianCalendar';
@@ -97,13 +98,15 @@ export type ContractCustomerOption = {
 };
 
 export function ContractCustomerStepView({ customers, selectedCustomer, selectedCustomerId, searchTerm, totalCount, error,
-  searchPlaceholder = 'جستجو با نام، شرکت، کد ملی یا شماره تلفن', onSearchChange, onSelect, onCreate }: {
+  loading = false, showResults = true, searchPlaceholder = 'جستجو با نام، شرکت، کد ملی یا شماره تلفن', onSearchChange, onSelect, onCreate }: {
   customers: ContractCustomerOption[];
   selectedCustomer?: ContractCustomerOption;
   selectedCustomerId?: string;
   searchTerm: string;
-  totalCount: number;
+  totalCount?: number;
   error?: string;
+  loading?: boolean;
+  showResults?: boolean;
   searchPlaceholder?: string;
   onSearchChange: (value: string) => void;
   onSelect: (id: string) => void;
@@ -130,13 +133,13 @@ export function ContractCustomerStepView({ customers, selectedCustomer, selected
         <ErpInput type="search" aria-label="جستجوی مشتری" placeholder={searchPlaceholder}
           value={searchTerm} onChange={event => onSearchChange(event.target.value)} className="min-h-12 w-full py-3 pl-4 pr-10" />
       </div>
-      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-[var(--sds-text-secondary)]">
+      {showResults && !loading && <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-[var(--sds-text-secondary)]">
         <span>{hasSearch ? `${customers.length.toLocaleString('fa-IR')} نتیجه پیدا شد` : `نمایش ${customers.length.toLocaleString('fa-IR')} مشتری اخیر`}</span>
-        <span>{`${totalCount.toLocaleString('fa-IR')} مشتری در CRM`}</span>
-      </div>
+        {totalCount !== undefined && <span>{`${totalCount.toLocaleString('fa-IR')} مشتری در CRM`}</span>}
+      </div>}
     </div>
-    <div role="group" aria-label="انتخاب مشتری" aria-describedby={error ? errorId : undefined}>
-    {customers.length === 0 ? <div className="rounded-xl border border-dashed border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] p-8 text-center">
+    {showResults && <div role="group" aria-label="انتخاب مشتری" aria-busy={loading || undefined} aria-describedby={error ? errorId : undefined}>
+    {loading ? <ErpSkeleton lines={2} /> : customers.length === 0 ? <div className="rounded-xl border border-dashed border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] p-8 text-center">
       <p className="text-base font-medium text-[var(--sds-text-secondary)]">{hasSearch ? 'مشتری‌ای با این عبارت پیدا نشد' : 'هیچ مشتری‌ای موجود نیست'}</p>
       <ErpButton label="ایجاد مشتری" icon={FaPlus} onClick={onCreate} tone="primary" variant="outline" className="mt-5" />
     </div> : <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">{customers.map(customer => {
@@ -162,7 +165,7 @@ export function ContractCustomerStepView({ customers, selectedCustomer, selected
         </div>}
       </ErpNeumorphicInteractiveCard>;
     })}</div>}
-    </div>
+    </div>}
   </div>;
 }
 

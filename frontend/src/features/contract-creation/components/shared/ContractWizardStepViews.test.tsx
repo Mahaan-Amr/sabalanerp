@@ -58,3 +58,20 @@ test('shared delivery details expose the ordinary contract fields to every contr
   assert.match(html, /نام تحویل‌گیرنده/);
   assert.match(html, /توضیحات \(اختیاری\)/);
 });
+
+test('customer search is available while results load and keeps a restored customer outside the result list', () => {
+  const html = renderToStaticMarkup(<ContractCustomerStepView
+    customers={[]}
+    selectedCustomer={{ id: 'old-customer', title: 'مشتری قدیمی' }}
+    selectedCustomerId="old-customer"
+    searchTerm="مشتری"
+    loading
+    onSearchChange={() => undefined}
+    onSelect={() => undefined}
+    onCreate={() => undefined}
+  />);
+  assert.match(html, /<input[^>]+type="search"[^>]+aria-label="جستجوی مشتری"/);
+  assert.match(html, /aria-busy="true"/);
+  assert.match(html, /مشتری قدیمی/);
+  assert.doesNotMatch(html, /با این عبارت پیدا نشد|مشتری در CRM/);
+});

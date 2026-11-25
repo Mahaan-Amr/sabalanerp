@@ -19,6 +19,11 @@ import {
 } from "@/components/erp";
 import { accountingAPI } from "@/lib/api";
 import { treasuryLedgerAccounts } from '@/features/accounting/treasuryLedgerAccounts';
+import { TreasuryCustomerPicker } from "@/features/accounting/TreasuryCustomerPicker";
+import {
+  readTreasuryBankPage, readTreasuryCustomerBalance, readTreasuryLedger, readTreasurySummary,
+  useTreasuryRead, type TreasuryCustomerOption,
+} from "@/features/accounting/treasuryReads";
 import { parseBankApiRecord } from '@/features/accounting/bankStatementInput';
 import {
   accountingFailureMessage,
@@ -62,10 +67,6 @@ export default function TreasuryControlPage() {
   const [bankTab, setBankTab] = useState("import");
   const [bankLinePage, setBankLinePage] = useState(1);
   const [cashTab, setCashTab] = useState("checks");
-  const [data, setData] = useState<any>();
-  const [loading, setLoading] = useState(true);
-  const loadSequence = useRef(0);
-  const [error, setError] = useState<string | null>(null);
   const [actionFeedback, setActionFeedback] = useState<{ scope: string; kind: "success" | "error"; title: string }>();
   const [actionPending, setActionPending] = useState(false);
   const [matchReason, setMatchReason] = useState(
@@ -132,8 +133,8 @@ export default function TreasuryControlPage() {
     documentDate: "",
     reason: "",
   });
-  const [customerAccounts, setCustomerAccounts] = useState<any[]>([]);
-  const [openItems, setOpenItems] = useState<any[]>([]);
+  const [receiptCustomer, setReceiptCustomer] = useState<TreasuryCustomerOption>();
+  const [checkCustomer, setCheckCustomer] = useState<TreasuryCustomerOption>();
   const [transfer, setTransfer] = useState({
     fromFinancialAccountId: "",
     toFinancialAccountId: "",
@@ -188,120 +189,131 @@ export default function TreasuryControlPage() {
     ledgerVoucherId: "",
     settledAt: "",
   });
+  const summary = useTreasuryRead(focusedCheckId ?? "", readTreasurySummary, "نمای کنترل خزانه‌داری بارگیری نشد.");
+  const ledger = useTreasuryRead("", readTreasuryLedger, "اطلاعات دفترکل بارگیری نشد.");
+  const bank = useTreasuryRead(bankLinePage, readTreasuryBankPage, "ردیف‌های بانکی بارگیری نشد.");
+  const allocationCustomerId = summary.data?.transactions.find((row: any) => row.id === allocation.treasuryTransactionId)?.profileId;
+  const selectedCustomerId = workspaceTab === "receipts"
+    ? receiptTab === "allocation" ? allocationCustomerId : receiptTab === "receipt" ? receipt.profileId : ""
+    : workspaceTab === "cash" && cashTab === "checks" ? check.profileId : "";
+  const [lookupDenied, setLookupDenied] = useState(false);
+  const denyLookup = useCallback(() => setLookupDenied(true), []);
+  const customer = useTreasuryRead<string, Awaited<ReturnType<typeof readTreasuryCustomerBalance>>>(
+    selectedCustomerId || undefined, readTreasuryCustomerBalance, "مانده حساب مشتری بارگیری نشد.",
+  );
+  const denied = lookupDenied || summary.denied || ledger.denied || bank.denied || customer.denied;
+  const data = !denied && (summary.data || bank.data)
+    ? { ...summary.data, ledger: ledger.data }
+    : undefined;
+  const commandsDisabled = actionPending || summary.pending || Boolean(summary.error);
+  const ledgerReady = data?.ledger?.configured && !ledger.pending && !ledger.error;
+  const ledgerActionsDisabled = commandsDisabled || !ledgerReady;
+  const bankActionsDisabled = commandsDisabled || bank.pending || Boolean(bank.error);
+  const bankPagination = bank.data ?? bank.cachedData;
+  const openItems = customer.data?.openItems ?? [];
+  const selectReceiptCustomer = (next?: TreasuryCustomerOption) => {
+    setReceiptCustomer(next);
+    setReceipt(previous => ({ ...previous, profileId: next?.id ?? "" }));
+  };
+  const selectCheckCustomer = (next?: TreasuryCustomerOption) => {
+    setCheckCustomer(next);
+    setCheck(previous => ({ ...previous, profileId: next?.id ?? "" }));
+  };
+  const refresh = () => {
+    if (denied) {
+      summary.discard();
+      ledger.discard();
+      bank.discard();
+      customer.discard();
+      selectReceiptCustomer();
+      selectCheckCustomer();
+      setAllocation(previous => ({ ...previous, treasuryTransactionId: "", openItemId: "" }));
+      setLookupDenied(false);
+    }
+    summary.retry();
+    ledger.retry();
+    bank.retry();
+    customer.retry();
+  };
+  const customerState = selectedCustomerId && (
+    <div className="md:col-span-3">
+      {customer.pending && <ErpInlineState kind="empty" title="در حال دریافت مانده حساب مشتری" />}
+      {customer.error && <ErpInlineState kind="error" title={customer.error}
+        action={{ label: "تلاش دوباره برای مانده حساب", onClick: customer.retry }} />}
+      {!customer.pending && !customer.error && customer.data && (
+        <p className="text-sm">مانده خالص {money(customer.data.netBalanceRials, "IRR")} · تاریخ مبنا {dateFa(customer.data.asOf)}</p>
+      )}
+    </div>
+  );
   const run = async (operation: () => Promise<unknown>, success: string, scope: string) => {
-    if (actionPending) return;
+    if (commandsDisabled || denied || !data?.capabilities?.canManage) return;
     setActionPending(true); setActionFeedback(undefined);
-    try { await operation(); setActionFeedback({ scope, kind: "success", title: success }); await load(true); }
+    try { await operation(); setActionFeedback({ scope, kind: "success", title: success }); refresh(); }
     catch (reason) { const local = reason instanceof Error && /[\u0600-\u06ff]/.test(reason.message) ? reason.message : "عملیات خزانه‌داری انجام نشد."; setActionFeedback({ scope, kind: "error", title: accountingFailureMessage(reason, local) }); }
     finally { setActionPending(false); }
   };
-  const load = useCallback(async (background = false) => {
-    const sequence = ++loadSequence.current;
-    if (!background) setLoading(true);
-    setError(null);
-    try {
-      const [overview, context, customers] = await Promise.all([
-        accountingAPI.getTreasuryOverview(bankLinePage, focusedCheckId),
-        accountingAPI.getLedgerContext(),
-        accountingAPI.getCustomerAccounts(),
-      ]);
-      if (sequence !== loadSequence.current) return;
-      setData({ ...overview.data.data, ledger: context.data.data });
-      setCustomerAccounts(customers.data.data);
-    } catch (reason) {
-      if (sequence !== loadSequence.current) return;
-      setError(
-        accountingFailureMessage(reason, "نمای کنترل خزانه‌داری بارگیری نشد."),
-      );
-    } finally {
-      if (sequence === loadSequence.current) setLoading(false);
-    }
-  }, [bankLinePage, focusedCheckId]);
-  useEffect(() => {
-    load();
-  }, [load]);
   return (
     <ErpPage
       eyebrow="خزانه‌داری"
       title="کنترل خزانه‌داری"
       description="دریافت، ردیف بانکی، تطبیق، چک، شمارش صندوق و تنخواه با هویت و سابقه مستقل نمایش داده می‌شوند."
-      actions={[{ label: "به‌روزرسانی", icon: FaSync, onClick: () => load() }]}
+      actions={[{ label: "به‌روزرسانی", icon: FaSync, onClick: refresh }]}
       metrics={
         data
           ? [
               {
                 label: "تراکنش خزانه",
-                value: Number(data.transactions.length).toLocaleString("fa-IR"),
+                value: data.transactions ? Number(data.transactions.length).toLocaleString("fa-IR") : "—",
               },
               {
                 label: "ردیف بانکی",
-                value: Number(data.bankLines.length).toLocaleString("fa-IR"),
+                value: bank.data ? Number(bank.data.bankLines.length).toLocaleString("fa-IR") : "—",
               },
               {
                 label: "چک در گردش",
-                value: Number(
+                value: data.checks ? Number(
                   data.checks.filter(
                     (row: any) =>
                       !["CLEARED", "RETURNED", "CANCELLED"].includes(
                         row.status,
                       ),
                   ).length,
-                ).toLocaleString("fa-IR"),
+                ).toLocaleString("fa-IR") : "—",
               },
             ]
           : []
       }
     >
-      {loading && (
+      {!summary.data && (!bank.data || workspaceTab !== "bank") && summary.pending && !denied && (
         <ErpInlineState
           kind="empty"
           title="در حال بازسازی نمای خزانه از رویدادهای قطعی..."
         />
       )}
-      {error && (
+      {(denied || summary.error) && (
         <ErpInlineState
           kind="error"
-          title={error}
-          action={{ label: "تلاش دوباره", onClick: load }}
+          title={denied ? "دسترسی به خزانه‌داری تأیید نشد." : summary.error!}
+          action={{ label: "تلاش دوباره", onClick: denied ? refresh : summary.retry }}
         />
       )}
 
       {data && (
         <>
           <ErpSegmentedControl value={workspaceTab} onChange={setWorkspaceTab} options={[{ value: "bank", label: "صورتحساب و تطبیق بانک" }, { value: "receipts", label: "دریافت و تخصیص" }, { value: "cash", label: "چک، صندوق و تنخواه" }]} />
-          <ErpSection className={workspaceTab === "receipts" ? "" : "hidden"} title="دریافت‌ها و تخصیص‌ها"
+          {ledger.error && <ErpInlineState kind="error" title={ledger.error}
+            action={{ label: "تلاش دوباره برای دفترکل", onClick: ledger.retry }} />}
+          {summary.data && <ErpSection className={workspaceTab === "receipts" ? "" : "hidden"} title="دریافت‌ها و تخصیص‌ها"
             description="وجه تا زمان تخصیص قطعی، بستانکاری تخصیص‌نیافته همان مشتری باقی می‌ماند."
           ><ErpSegmentedControl value={receiptTab} onChange={setReceiptTab} options={[{"value":"receipt","label":"ثبت دریافت"},{"value":"allocation","label":"تخصیص دریافت"},{"value":"transfer","label":"انتقال داخلی"}]} />
             {data.capabilities?.canManage && (
               <ErpCard className={receiptTab === "receipt" ? "mb-4 p-4" : "hidden"}>
                 <strong>ثبت دریافت مشتری</strong>
                 <div className="mt-3 grid gap-3 md:grid-cols-3">
-                  <ErpField label="مشتری" required>
-                    <ErpSearchableSelect
-                      value={receipt.profileId}
-                      onChange={async (event) => {
-                        const profileId = event.target.value;
-                        setReceipt({ ...receipt, profileId });
-                        setOpenItems(
-                          profileId
-                            ? (
-                                await accountingAPI.getCustomerAccountProjection(
-                                  profileId,
-                                  { asOf: new Date().toISOString() },
-                                )
-                              ).data.data.openItems
-                            : [],
-                        );
-                      }}
-                    >
-                      <option value="">انتخاب مشتری</option>
-                      {customerAccounts.map((item) => (
-                        <option key={item.id} value={item.id}>
-                          {item.displayName}
-                        </option>
-                      ))}
-                    </ErpSearchableSelect>
-                  </ErpField>
+                  {workspaceTab === "receipts" && receiptTab === "receipt" && <>
+                    <TreasuryCustomerPicker selected={receiptCustomer} onChange={selectReceiptCustomer} onDenied={denyLookup} />
+                    {customerState}
+                  </>}
                   <ErpField label="شناسه قرارداد">
                     <ErpInput
                       value={receipt.contractId}
@@ -492,7 +504,7 @@ export default function TreasuryControlPage() {
                 <div className="mt-3 flex justify-end">
                   <ErpButton
                     label="ثبت دریافت قطعی"
-                    disabled={actionPending || ([
+                    disabled={ledgerActionsDisabled || ([
                       "profileId",
                       "bookId",
                       "fiscalYearId",
@@ -541,10 +553,7 @@ export default function TreasuryControlPage() {
                     <ErpSearchableSelect
                       value={allocation.treasuryTransactionId}
                       onChange={(event) =>
-                        setAllocation({
-                          ...allocation,
-                          treasuryTransactionId: event.target.value,
-                        })
+                        setAllocation(previous => ({ ...previous, treasuryTransactionId: event.target.value, openItemId: "" }))
                       }
                     >
                       <option value="">انتخاب دریافت</option>
@@ -558,9 +567,11 @@ export default function TreasuryControlPage() {
                         ))}
                     </ErpSearchableSelect>
                   </ErpField>
+                  {workspaceTab === "receipts" && receiptTab === "allocation" && customerState}
                   <ErpField label="قلم باز" required>
                     <ErpSearchableSelect
                       value={allocation.openItemId}
+                      disabled={customer.pending || Boolean(customer.error)}
                       onChange={(event) =>
                         setAllocation({
                           ...allocation,
@@ -570,7 +581,6 @@ export default function TreasuryControlPage() {
                     >
                       <option value="">انتخاب قلم باز</option>
                       {openItems
-                        .filter((item) => item.kind === "RECEIVABLE")
                         .map((item) => (
                           <option key={item.id} value={item.id}>
                             {item.invoiceNumber} ·{" "}
@@ -735,7 +745,8 @@ export default function TreasuryControlPage() {
                 <div className="mt-3 flex justify-end">
                   <ErpButton
                     label="ثبت تخصیص"
-                    disabled={actionPending || ([
+                    disabled={ledgerActionsDisabled || customer.pending || Boolean(customer.error) ||
+                      !openItems.some(item => item.id === allocation.openItemId) || ([
                       "treasuryTransactionId",
                       "openItemId",
                       "amountRials",
@@ -955,7 +966,7 @@ export default function TreasuryControlPage() {
                 <div className="mt-3 flex justify-end">
                   <ErpButton
                     label="ثبت انتقال داخلی"
-                    disabled={actionPending || (Object.values(transfer).some((value) => !value))}
+                    disabled={ledgerActionsDisabled || (Object.values(transfer).some((value) => !value))}
                     onClick={() =>
                       void run(
                         () =>
@@ -1012,7 +1023,7 @@ export default function TreasuryControlPage() {
                             tone="danger"
                             variant="outline"
                             disabled={
-                              actionPending || (!allocation.reason ||
+                              ledgerActionsDisabled || (!allocation.reason ||
                               !allocation.documentDate ||
                               !allocation.bookId ||
                               !allocation.fiscalYearId ||
@@ -1057,7 +1068,7 @@ export default function TreasuryControlPage() {
                 title="تراکنش خزانه‌داری ثبت نشده است"
               />
             )}
-          </ErpSection>
+          </ErpSection>}
           <ErpSection className={workspaceTab === "bank" ? "" : "hidden"} title="صورتحساب بانکی و تطبیق"
             description="پیشنهاد خودکار تا تأیید صریح اثر قطعی ندارد و برگشت تطبیق در تاریخچه حفظ می‌شود."
           ><ErpSegmentedControl value={bankTab} onChange={setBankTab} options={[{"value":"import","label":"ورود و تطبیق صورتحساب"},{"value":"mapping","label":"نگاشت منبع بانک"}]} />
@@ -1204,7 +1215,7 @@ export default function TreasuryControlPage() {
                   <ErpButton
                     label="ثبت نگاشت"
                     disabled={
-                      actionPending || (!bankMapping.financialAccountId ||
+                      ledgerActionsDisabled || (!bankMapping.financialAccountId ||
                       !bankMapping.effectiveFrom)
                     }
                     onClick={() =>
@@ -1394,7 +1405,7 @@ export default function TreasuryControlPage() {
                   <ErpButton
                     label={bankLine.adapterType === "CSV" || bankLine.adapterType === "XLSX" ? "ورود فایل بانکی" : "ثبت ردیف بانکی"}
                     disabled={
-                      actionPending || (!bankLine.financialAccountId ||
+                      ledgerActionsDisabled || (!bankLine.financialAccountId ||
                       !bankLine.mappingVersion ||
                       (bankLine.adapterType === "MANUAL"
                         ? !bankLine.sourceIdentity ||
@@ -1514,7 +1525,7 @@ export default function TreasuryControlPage() {
                           </ErpField>
                         )}
                         <div className="flex items-end">
-                          <ErpButton label="ثبت رفع استثنا" disabled={actionPending || (!correction.runId || !correction.rowNumber || correction.reason.trim().length < (correction.attestUnlinkedCorrection ? 20 : 8))}
+                          <ErpButton label="ثبت رفع استثنا" disabled={commandsDisabled || (!correction.runId || !correction.rowNumber || correction.reason.trim().length < (correction.attestUnlinkedCorrection ? 20 : 8))}
                             onClick={() => void run(() => accountingAPI.resolveBankFileException(item.id, {
                               correctedRunId: correction.runId, correctedRowNumber: Number(correction.rowNumber),
                               reason: correction.reason, attestUnlinkedCorrection: correction.attestUnlinkedCorrection,
@@ -1528,17 +1539,21 @@ export default function TreasuryControlPage() {
 </ErpCard>
             )}
             {actionFeedback?.scope === "treasury-7" && <ErpInlineState kind={actionFeedback.kind} title={actionFeedback.title} />}
-            <ErpPagination currentPage={bankLinePage} totalPages={Math.max(1, Math.ceil(data.bankLineCount / 100))}
-              totalItems={data.bankLineCount} itemsPerPage={100} itemLabel="ردیف بانکی"
-              onPageChange={(page) => { if (!actionPending && !loading) setBankLinePage(page); }} />
-            {data.bankLines.length ? (
+            {bank.pending && <ErpInlineState kind="empty" title="در حال دریافت ردیف‌های بانکی" />}
+            {bank.error && <ErpInlineState kind="error" title={bank.error}
+              action={{ label: "تلاش دوباره برای ردیف‌های بانکی", onClick: bank.retry }} />}
+            {bank.error && !bankPagination && bankLinePage > 1 && <ErpButton label="بازگشت به صفحه اول بانک" variant="outline" onClick={() => setBankLinePage(1)} />}
+            {bankPagination && <ErpPagination currentPage={bankPagination.bankLinePage} totalPages={Math.max(1, Math.ceil(bankPagination.bankLineCount / 100))}
+              totalItems={bankPagination.bankLineCount} itemsPerPage={100} itemLabel="ردیف بانکی"
+              onPageChange={(page) => { if (!actionPending && !bank.pending) setBankLinePage(page); }} />}
+            {bank.data?.bankLines.length ? (
               <div className="grid gap-3">
                 {data.capabilities?.canManage && (
                   <ErpField label="دلیل تأیید یا برگشت تطبیق">
                     <ErpInput value={matchReason} onChange={(event) => setMatchReason(event.target.value)} />
                   </ErpField>
                 )}
-                {data.bankLines.map((row: any) => (
+                {bank.data.bankLines.map((row: any) => (
                   <ErpCard key={row.id} className="p-4">
                     <div className="flex flex-wrap justify-between gap-3">
                       <strong>{row.description}</strong>
@@ -1557,7 +1572,7 @@ export default function TreasuryControlPage() {
                       </span>
                     </div>
                     {data.capabilities?.canManage && <div className="mt-3 flex flex-wrap gap-2">
-                      <ErpButton disabled={actionPending}
+                      <ErpButton disabled={bankActionsDisabled}
                         label="یافتن تطبیق"
                         variant="outline"
                         onClick={() =>
@@ -1574,7 +1589,7 @@ export default function TreasuryControlPage() {
                             label="تأیید پیشنهاد"
                             tone="success"
                             variant="outline"
-                            disabled={actionPending || (matchReason.trim().length < 8)}
+                            disabled={bankActionsDisabled || (matchReason.trim().length < 8)}
                             onClick={() =>
                               void run(
                                 () =>
@@ -1592,7 +1607,7 @@ export default function TreasuryControlPage() {
                             label="برگشت تطبیق"
                             tone="danger"
                             variant="outline"
-                            disabled={actionPending || (matchReason.trim().length < 8)}
+                            disabled={bankActionsDisabled || (matchReason.trim().length < 8)}
                             onClick={() =>
                               void run(
                                 () =>
@@ -1612,32 +1627,21 @@ export default function TreasuryControlPage() {
                 ))}
               </div>
             ) : (
-              <ErpEmptyState title="ردیف بانکی وارد نشده است" />
+              bank.data && !bank.pending && !bank.error && <ErpEmptyState title="ردیف بانکی وارد نشده است" />
             )}
 
 </ErpSection>
-          <ErpSection className={workspaceTab === "cash" ? "" : "hidden"} title="چک، صندوق و تنخواه"
+          {summary.data && <ErpSection className={workspaceTab === "cash" ? "" : "hidden"} title="چک، صندوق و تنخواه"
             description="هویت چک، تحویل‌دار، کسری یا اضافه صندوق و تسویه تنخواه با شاهد و سند مرتبط نگهداری می‌شود."
           ><ErpSegmentedControl value={cashTab} onChange={setCashTab} options={[{"value":"checks","label":"چک‌ها"},{"value":"count","label":"شمارش صندوق"},{"value":"petty","label":"تنخواه"}]} />
             {data.capabilities?.canManage && (
               <ErpCard className={cashTab === "checks" ? "mb-4 p-4" : "hidden"}>
                 <strong>ثبت چک دریافتنی</strong>
                 <div className="mt-3 grid gap-3 md:grid-cols-3">
-                  <ErpField label="مشتری" required>
-                    <ErpSearchableSelect
-                      value={check.profileId}
-                      onChange={(event) =>
-                        setCheck({ ...check, profileId: event.target.value })
-                      }
-                    >
-                      <option value="">انتخاب مشتری</option>
-                      {customerAccounts.map((item) => (
-                        <option key={item.id} value={item.id}>
-                          {item.displayName}
-                        </option>
-                      ))}
-                    </ErpSearchableSelect>
-                  </ErpField>
+                  {workspaceTab === "cash" && cashTab === "checks" && <>
+                    <TreasuryCustomerPicker selected={checkCustomer} onChange={selectCheckCustomer} onDenied={denyLookup} />
+                    {customerState}
+                  </>}
                   <ErpField label="شناسه صیاد">
                     <ErpInput
                       value={check.sayadId}
@@ -1693,7 +1697,7 @@ export default function TreasuryControlPage() {
                   <ErpButton
                     label="ثبت چک"
                     disabled={
-                      actionPending || (!check.profileId ||
+                      ledgerActionsDisabled || (!check.profileId ||
                       !check.serialNumber ||
                       !check.bankName ||
                       !check.amountRials ||
@@ -1704,7 +1708,7 @@ export default function TreasuryControlPage() {
                         () =>
                           accountingAPI.createReceivableCheck({
                             ...check,
-                            legalEntityId: data.ledger?.legalEntity?.id,
+                            legalEntityId: data.ledger?.id,
                             dueAt: new Date(check.dueAt).toISOString(),
                             sayadId: check.sayadId || undefined,
                             custodianId: check.custodianId || undefined,
@@ -1814,7 +1818,7 @@ export default function TreasuryControlPage() {
                       <ErpButton
                         label="ثبت رویداد"
                         variant="outline"
-                        disabled={actionPending || (!checkEvent.occurredAt)}
+                        disabled={commandsDisabled || (!checkEvent.occurredAt)}
                         onClick={() =>
                           void run(
                             () =>
@@ -1931,7 +1935,7 @@ export default function TreasuryControlPage() {
                   <ErpButton
                     label="ثبت شمارش"
                     disabled={
-                      actionPending || (!cashCount.financialAccountId ||
+                      ledgerActionsDisabled || (!cashCount.financialAccountId ||
                       !cashCount.custodianId ||
                       !cashCount.countedAt ||
                       !cashCount.expectedRials ||
@@ -2146,7 +2150,7 @@ export default function TreasuryControlPage() {
                 <div className="mt-3 flex justify-end">
                   <ErpButton
                     label="پرداخت تنخواه"
-                    disabled={actionPending || (Object.values(petty).some((value) => !value))}
+                    disabled={ledgerActionsDisabled || (Object.values(petty).some((value) => !value))}
                     onClick={() =>
                       void run(
                         () =>
@@ -2212,7 +2216,7 @@ export default function TreasuryControlPage() {
                         label="ثبت تسویه"
                         variant="outline"
                         disabled={
-                          actionPending || (!pettySettlement.ledgerVoucherId ||
+                          commandsDisabled || (!pettySettlement.ledgerVoucherId ||
                           !pettySettlement.settledAt)
                         }
                         onClick={() =>
@@ -2242,7 +2246,7 @@ export default function TreasuryControlPage() {
 </ErpCard>
               ))}
             </div>
-          </ErpSection>
+          </ErpSection>}
         </>
       )}
     </ErpPage>

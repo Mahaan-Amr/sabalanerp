@@ -155,11 +155,13 @@ function QueueCase({
 
 export default function AccountingDispatchDocuments({
   client,
+  actorId = 'fixture',
 }: {
   client: DispatchDocumentsClient;
+  actorId?: string;
 }) {
   const [sheet, setSheet] = useState<DetailSheet>(null);
-  const session = useAccountingDispatchDocuments(client);
+  const session = useAccountingDispatchDocuments(client, actorId);
   const {
     workspace,
     filter,
@@ -177,11 +179,13 @@ export default function AccountingDispatchDocuments({
     queueRef,
     persist,
     load,
-    runCommand,
+    runDecision,
+    runHandoff,
     view,
     selected,
   } = session;
 
+  const unsafeDetail = stale || loading || Boolean(session.intent) || (!!session.groupError && session.groupError === selected?.loadingId);
   const handoff = async (kind: DispatchDocumentHandoff["kind"]) => {
     if (
       !selected ||
@@ -189,14 +193,14 @@ export default function AccountingDispatchDocuments({
         kind.startsWith("PRINT") ? "PRINT" : "DOWNLOAD",
         workspace,
         selected,
-        stale || pending,
+        unsafeDetail || pending,
       )
     )
       return;
     const printWindow = kind.startsWith("PRINT")
       ? window.open("about:blank", "_blank")
       : null;
-    await runCommand(
+    await runHandoff(
       async () => {
         let result;
         try {
@@ -260,31 +264,25 @@ export default function AccountingDispatchDocuments({
       />
     );
 
+  const totalPages = Math.max(1, Math.ceil(view.counts[filter] / (workspace.pageSize ?? 50)));
   const selectedFirst = selected ? (
     <CaseReview
       item={selected}
       workspace={workspace}
-      stale={stale}
+      stale={unsafeDetail}
       pending={pending}
-      onAccept={() =>
-        void runCommand(
-          () =>
-            client.decide(selected.id, {
-              action: "ACCEPT",
-              reason: "",
-              idempotencyKey: crypto.randomUUID(),
-            }),
-          "بارنامه و صورت‌حساب محموله صادر شدند.",
-          () => {
-            selectFilter("ISSUED");
-            setSelectedId(selected.id);
-          },
-        )
-      }
+      onAccept={() => runDecision('ACCEPT', '')}
       onReject={() => setSheet("REJECT")}
       onHandoff={(kind) => void handoff(kind)}
       onMore={setSheet}
     />
+  ) : session.detailStatus === 'loading' ? <ErpLoading /> : session.detailStatus === 'error' ? (
+    <ErpInlineState kind="error" title="جزئیات این پرونده دریافت نشد."
+      actions={[{ label: "تلاش دوباره برای جزئیات", onClick: session.retryDetail }]} />
+  ) : view.pageNeedsReload && !view.visibleCases.length ? (
+    <ErpEmptyState title="ردیف‌های این صفحه را تکمیل کنید" />
+  ) : view.visibleCases.length ? (
+    <ErpEmptyState title="یک پرونده را انتخاب کنید" />
   ) : (
     <ErpEmptyState
       title={
@@ -348,6 +346,14 @@ export default function AccountingDispatchDocuments({
             title="نمای زنده در دسترس نیست؛ آخرین نمایش موفق، فیلتر، انتخاب و دلیل رد حفظ شده‌اند. فرمان‌های ناامن غیرفعال‌اند."
           />
         )}
+        {session.intent && !pending && (
+          <ErpInlineState kind="stale" title="پاسخ قطعی فرمان دریافت نشد."
+            actions={[{ label: "بازیابی همان فرمان", onClick: session.recoverIntent }]} />
+        )}
+        {session.groupError && (
+          <ErpInlineState kind="stale" title="وضعیت جدید این بارگیری دریافت نشد."
+            actions={[{ label: "تازه‌سازی همین بارگیری", onClick: session.retryGroup }]} />
+        )}
         {workspace.permission === "VIEW" && (
           <ErpInlineState
             kind="permission"
@@ -382,16 +388,34 @@ export default function AccountingDispatchDocuments({
                   <QueueCase
                     key={item.id}
                     item={item}
-                    selected={selected?.id === item.id}
-                    onSelect={() => setSelectedId(item.id)}
+                    selected={session.selectedId === item.id}
+                    onSelect={() => { setSheet(null); setSelectedId(item.id); }}
                   />
                 ))}
-                {!view.visibleCases.length && (
+                {!view.visibleCases.length && !view.pageNeedsReload && (
                   <p className="py-5 text-center text-sm text-[var(--sds-text-secondary)]">
                     موردی در فیلتر «{filterLabels[filter]}» نیست.
                   </p>
                 )}
               </div>
+              {view.pageNeedsReload && !stale && (
+                <ErpButton label="تکمیل ردیف‌های این صفحه" variant="outline" className="mt-3"
+                  disabled={loading || pending} onClick={() => {
+                    if (session.page > totalPages) session.selectPage(totalPages);
+                    else void load();
+                  }} />
+              )}
+              {totalPages > 1 && session.page <= totalPages && (
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <ErpButton label="صفحهٔ قبل" variant="ghost" disabled={loading || pending || session.page <= 1}
+                    onClick={() => session.selectPage(session.page - 1)} />
+                  <span className="text-sm sds-text-secondary">
+                    {session.page.toLocaleString('fa-IR')} از {totalPages.toLocaleString('fa-IR')}
+                  </span>
+                  <ErpButton label="صفحهٔ بعد" variant="ghost" disabled={loading || pending || session.page >= totalPages}
+                    onClick={() => session.selectPage(session.page + 1)} />
+                </div>
+              )}
             </ErpCard>
           }
         />
@@ -399,6 +423,7 @@ export default function AccountingDispatchDocuments({
       <ErpSheet
         presentation="modal"
         open={Boolean(sheet)}
+        pending={pending}
         onClose={() => setSheet(null)}
         title={
           sheet === "ARTIFACTS"
@@ -461,17 +486,10 @@ export default function AccountingDispatchDocuments({
               label="جایگزینی بسته اسناد"
               icon={FaRedo}
               tone="warning"
-              disabled={!replacementReason.trim() || pending || stale}
+              disabled={!replacementReason.trim() || pending || unsafeDetail}
               className="min-h-11"
               onClick={() =>
-                void runCommand(
-                  () =>
-                    client.replace(selected.id, {
-                      reason: replacementReason,
-                      idempotencyKey: crypto.randomUUID(),
-                    }),
-                  "بسته جایگزین صادر و بسته قبلی به سابقه تغییرناپذیر منتقل شد.",
-                  () => {
+                runDecision('REPLACE', replacementReason, () => {
                     setReplacementReason("");
                     setSheet(null);
                   },
@@ -496,17 +514,9 @@ export default function AccountingDispatchDocuments({
               label="بازگرداندن برای اصلاح"
               icon={FaTimes}
               tone="danger"
-              disabled={!rejectionReason.trim() || pending || stale}
+              disabled={!rejectionReason.trim() || pending || unsafeDetail}
               onClick={() =>
-                void runCommand(
-                  () =>
-                    client.decide(selected.id, {
-                      action: "REJECT",
-                      reason: rejectionReason,
-                      idempotencyKey: crypto.randomUUID(),
-                    }),
-                  "پرونده برای اصلاح به بخش مالک بازگردانده شد.",
-                  () => {
+                runDecision('REJECT', rejectionReason, () => {
                     setRejectionReason("");
                     setSheet(null);
                     setSelectedId(null);

@@ -19,6 +19,7 @@ import {
   getCrossWorkspaceDutyDetail,
   getCrossWorkspaceDutySummary,
   listCrossWorkspaceDuties,
+  listCrossWorkspaceDutyHistoryPage,
   markCrossWorkspaceDutyHistorySeen,
   markCrossWorkspaceDutyAvailableSeen,
 } from '../services/crossWorkspaceDutyInbox';
@@ -332,11 +333,19 @@ router.get(
   asyncHandler(async (req, res) => {
     const view = String(req.query.view || 'assigned');
     if (!['assigned', 'available', 'triage', 'history'].includes(view)) throw new Error('DUTY_VIEW_INVALID');
-    const data = await listCrossWorkspaceDuties(prisma, {
+    const input = {
       actorUserId: req.user!.id,
       workspaceCode: res.locals.destinationWorkspaceCode,
-      view: view as 'assigned' | 'available' | 'triage' | 'history',
       search: typeof req.query.search === 'string' ? req.query.search.slice(0, 200) : undefined,
+    };
+    if (view === 'history' && req.query.page === 'cursor') {
+      const after = typeof req.query.after === 'string' ? req.query.after.slice(0, 128) : undefined;
+      const { duties, nextCursor } = await listCrossWorkspaceDutyHistoryPage(prisma, { ...input, after });
+      res.json({ success: true, data: duties, nextCursor });
+      return;
+    }
+    const data = await listCrossWorkspaceDuties(prisma, {
+      ...input, view: view as 'assigned' | 'available' | 'triage' | 'history',
     });
     res.json({ success: true, data });
   }),

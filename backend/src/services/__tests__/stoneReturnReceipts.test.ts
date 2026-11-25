@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parseStoneReturnAcceptance } from '../stoneReturnReceipts';
+import { parseStoneReturnAcceptance, StoneReturnIntakeRejected } from '../stoneReturnReceipts';
 
 const command = {
   requestId: 'dcc61352-0398-4ec8-9a88-2a04687f33e7',
@@ -42,7 +42,7 @@ test('an intake cannot reuse a witness already verified for this stone and unit'
   };
   await assert.rejects(recordStoneReturnReceipt(tx as unknown as Parameters<typeof recordStoneReturnReceipt>[0], 'logistics-user', {
     ...command, guardReturnMovementId: 'existing-return',
-  }), /قبلاً ثبت شده است/);
+  }), (error: unknown) => error instanceof StoneReturnIntakeRejected && error.requestId === command.requestId);
 });
 
 test('an intake retries a serializable conflict and returns the existing receipt on replay', async () => {

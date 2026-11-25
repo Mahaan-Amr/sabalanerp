@@ -2,13 +2,13 @@
 // Manages data fetching for contract creation wizard
 
 import { useState, useCallback, useEffect, useRef } from 'react';
-import type { CrmCustomer, CuttingType, Product, SubService, StoneFinishing } from '../types/contract.types';
-import { crmAPI, salesAPI, servicesAPI, dashboardAPI } from '@/lib/api';
+import type { CuttingType, Product, SubService, StoneFinishing } from '../types/contract.types';
+import { salesAPI, servicesAPI, dashboardAPI } from '@/lib/api';
 import { getSalesOperationalErrorKind, getSalesOperationalErrorMessage } from '@/features/sales/salesOperationalError';
 import { createLatestRequestTracker } from '@/features/sales/latestRequestTracker';
 
 interface UseDataLoadingOptions {
-  autoLoad?: boolean;
+  productStepActive: boolean;
   onError?: (error: string, kind: 'error' | 'permission' | 'stale') => void;
   onDataLoaded?: () => void;
 }
@@ -40,7 +40,6 @@ interface DataCapabilities {
 type StoneFinishingLoadState = 'idle' | 'available' | 'empty' | 'forbidden' | 'error';
 
 type PermissionLevel = 'view' | 'edit' | 'admin';
-type CustomerLoadParams = { limit?: number; search?: string };
 type DataLoadError = {
   message: string;
   kind: 'error' | 'permission' | 'stale';
@@ -55,8 +54,7 @@ const loadErrorMessage = (err: unknown, resource: string) =>
     nextStep: 'اتصال را بررسی کنید و دوباره تلاش کنید.'
   });
 
-export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
-  const { autoLoad = true, onError, onDataLoaded } = options;
+export const useDataLoading = ({ productStepActive, onError, onDataLoaded }: UseDataLoadingOptions) => {
 
   const onErrorRef = useRef(onError);
   const onDataLoadedRef = useRef(onDataLoaded);
@@ -66,7 +64,6 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
     onDataLoadedRef.current = onDataLoaded;
   }, [onError, onDataLoaded]);
 
-  const [customers, setCustomers] = useState<CrmCustomer[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [cuttingTypes, setCuttingTypes] = useState<CuttingType[]>([]);
@@ -88,7 +85,10 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const hasLoadedRef = useRef(false);
+  const productCatalogRequest = useRef<Promise<unknown> | null>(null);
+  const productCatalogStarted = useRef(false);
+  const [productCatalogReady, setProductCatalogReady] = useState(false);
+  const [productCatalogError, setProductCatalogError] = useState<DataLoadError>();
   const errorSequenceRef = useRef(0);
   const activeErrorsRef = useRef(new Map<string, DataLoadError>());
   const requestTrackerRef = useRef(createLatestRequestTracker());
@@ -185,36 +185,6 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
     }),
     [hasAnyFeature, hasWorkspaceAccess]
   );
-
-  const loadCustomers = useCallback(async (params: CustomerLoadParams = {}) => {
-    const requestSequence = beginRequest('customers');
-    try {
-      const response = await crmAPI.getCustomers({
-        limit: params.limit ?? 3,
-        search: params.search?.trim() || undefined
-      });
-      if (!isLatestRequest('customers', requestSequence)) return [];
-      if (response.data.success) {
-        const data = response.data.data || [];
-        setCustomers(data);
-        recoverError('customers');
-        return data;
-      }
-      reportResponseFailure('customers', response, 'فهرست مشتریان');
-      return [];
-    } catch (err: any) {
-      if (!isLatestRequest('customers', requestSequence)) return [];
-      if (isForbiddenError(err)) {
-        const message = 'برای دریافت مشتریان از CRM دسترسی لازم را ندارید.';
-        reportError('customers', message, 'permission');
-        setCustomers([]);
-        return [];
-      }
-      const errorMsg = loadErrorMessage(err, 'فهرست مشتریان');
-      reportError('customers', errorMsg, getSalesOperationalErrorKind(err));
-      return [];
-    }
-  }, [beginRequest, isLatestRequest, recoverError, reportError, reportResponseFailure]);
 
   const loadProducts = useCallback(async (limit: number = 1000) => {
     const requestSequence = beginRequest('products');
@@ -381,29 +351,7 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
       const profile = await loadUserProfile();
       if (!isLatestRequest('initial', requestSequence)) return;
       if (!profile) return;
-      const features = (profile?.permissions?.features || []).map((item: any) => item.feature);
-      const workspaces = profile?.permissions?.workspaces || [];
-      const nextCapabilities = buildCapabilities(features, workspaces);
-      setCapabilities(nextCapabilities);
-
-      const tasks: Promise<any>[] = [loadProducts(1000), loadDepartments()];
-      if (nextCapabilities.canLoadCustomers) {
-        tasks.push(loadCustomers());
-      } else {
-        const message = 'برای دریافت مشتریان از CRM دسترسی لازم را ندارید.';
-        setCustomers([]);
-        reportError('customers', message, 'permission');
-      }
-      if (nextCapabilities.canLoadCuttingTypes) tasks.push(loadCuttingTypes());
-      if (nextCapabilities.canLoadSubServices) tasks.push(loadSubServices(1000));
-      if (nextCapabilities.canLoadStoneFinishings) {
-        tasks.push(loadStoneFinishings(1000));
-      } else {
-        setStoneFinishings([]);
-        setStoneFinishingLoadState('forbidden');
-      }
-
-      await Promise.all(tasks);
+      await loadDepartments();
       if (!isLatestRequest('initial', requestSequence)) return;
       const recoveredInitialError = activeErrorsRef.current.has('initial');
       recoverError('initial');
@@ -419,14 +367,35 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
     } finally {
       if (isLatestRequest('initial', requestSequence)) setLoading(false);
     }
-  }, [beginRequest, buildCapabilities, isLatestRequest, loadUserProfile, loadProducts, loadDepartments, loadCustomers, loadCuttingTypes, loadSubServices, loadStoneFinishings, recoverError, reportError]);
+  }, [beginRequest, isLatestRequest, loadUserProfile, loadDepartments, recoverError, reportError]);
+
+  const loadProductCatalog = useCallback(async () => {
+    if (!currentUser || productCatalogRequest.current) return;
+    const loads: Record<string, () => Promise<unknown>> = { products: loadProducts };
+    if (capabilities.canLoadCuttingTypes) loads.cuttingTypes = loadCuttingTypes;
+    if (capabilities.canLoadSubServices) loads.subServices = loadSubServices;
+    if (capabilities.canLoadStoneFinishings) loads.stoneFinishings = loadStoneFinishings;
+    else setStoneFinishingLoadState('forbidden');
+
+    const sources = Object.keys(loads);
+    const pending = productCatalogStarted.current ? sources.filter(source => activeErrorsRef.current.has(source)) : sources;
+    productCatalogStarted.current = true;
+    setProductCatalogError(undefined);
+    const request = Promise.all(pending.map(source => loads[source]()));
+    productCatalogRequest.current = request;
+    try {
+      await request;
+      const failure = sources.map(source => activeErrorsRef.current.get(source)).find(Boolean);
+      setProductCatalogError(failure);
+      setProductCatalogReady(!failure);
+    } finally {
+      productCatalogRequest.current = null;
+    }
+  }, [currentUser, capabilities, loadProducts, loadCuttingTypes, loadSubServices, loadStoneFinishings]);
 
   useEffect(() => {
-    if (autoLoad && !hasLoadedRef.current) {
-      hasLoadedRef.current = true;
-      loadInitialData();
-    }
-  }, [autoLoad, loadInitialData]);
+    if (productStepActive && !productCatalogStarted.current) void loadProductCatalog();
+  }, [productStepActive, loadProductCatalog]);
 
   const getCuttingTypePricePerMeter = useCallback(
     (code: string): number | null => {
@@ -437,7 +406,6 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
   );
 
   return {
-    customers,
     products,
     departments,
     cuttingTypes,
@@ -449,11 +417,13 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
     grantedFeatures,
     grantedWorkspaces,
     capabilities,
+    productCatalogReady,
+    productCatalogError,
+    loadProductCatalog,
 
     loading,
     error,
 
-    setCustomers,
     setProducts,
     setDepartments,
     setCuttingTypes,
@@ -462,7 +432,6 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
     setUserDepartment,
     setCurrentUser,
 
-    loadCustomers,
     loadProducts,
     loadDepartments,
     loadCuttingTypes,

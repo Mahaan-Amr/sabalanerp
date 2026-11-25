@@ -1,5 +1,5 @@
-import { AccountingRecordStatus, FinancialRecordKind, Prisma, type UserRole } from '@prisma/client';
-import type { CrossWorkspaceDutySourceAdapter } from './types';
+import { AccountingRecordStatus, FinancialRecordKind, Prisma, type CrossWorkspaceDuty, type UserRole } from '@prisma/client';
+import type { CrossWorkspaceDutySourceAdapter, CrossWorkspaceDutyDatabase, CrossWorkspaceDutySourceProjectionInput } from './types';
 import { addTehranWorkingDays } from '../tehranBusinessCalendar';
 import { resolveNarrowFeatureAccess } from '../narrowFeatureAccess';
 import { getEffectiveUserAccess } from '../effectiveAccessService';
@@ -418,30 +418,33 @@ const responseRequiresReason: CrossWorkspaceDutySourceAdapter['responseRequiresR
   return Boolean(duty?.sourceActionCode === 'ACCOUNTING_VERIFY_CONTRACT_CORRECTION' && await hasExpiredOpportunity(database, duty.sourceId));
 };
 
-const canAccessSharedDecision: CrossWorkspaceDutySourceAdapter['canAccessSharedDecision'] = async (database, input) => {
-  const duty = await database.crossWorkspaceDuty.findUnique({ where: { id: input.dutyId } });
+type SharedDuty = Pick<CrossWorkspaceDuty, 'sourceType' | 'sourceActionCode' | 'status' | 'sourceActorUserId'>;
+type ReadAuthority = (feature: string) => ReturnType<typeof resolveWorkspaceDutyAuthority>;
+
+const canAccessSharedCorrection = async (
+  duty: SharedDuty | null, actorUserId: string, includeCompleted: boolean, readAuthority: ReadAuthority,
+) => {
   if (!duty || duty.sourceType !== 'SALES_CONTRACT_CORRECTION') return false;
   const definition = definitionFor(duty.sourceActionCode);
   const feature = accountingFeatureFor(duty.sourceActionCode);
   if (definition.accountabilityModel !== 'SHARED_DECISION' || !feature) return false;
-  if (!input.includeCompleted && duty.status !== 'OPEN') return false;
-  const authority = await resolveWorkspaceDutyAuthority(database, {
-    userId: input.actorUserId,
-    workspace: 'accounting',
-    feature,
-    at: input.now,
-  });
+  if (!includeCompleted && duty.status !== 'OPEN') return false;
+  const authority = await readAuthority(feature);
   if (!authority.hasFeatureEdit) return false;
-  return duty.sourceActorUserId !== input.actorUserId || authority.canSelfDecide;
+  return duty.sourceActorUserId !== actorUserId || authority.canSelfDecide;
 };
 
-const sharedDecisionAccessProvenance: NonNullable<CrossWorkspaceDutySourceAdapter['sharedDecisionAccessProvenance']> = async (database, input) => {
+const canAccessSharedDecision: CrossWorkspaceDutySourceAdapter['canAccessSharedDecision'] = async (database, input) => {
   const duty = await database.crossWorkspaceDuty.findUnique({ where: { id: input.dutyId } });
-  const feature = duty && accountingFeatureFor(duty.sourceActionCode);
-  if (!duty || !feature) return [];
-  const authority = await resolveWorkspaceDutyAuthority(database, {
+  return canAccessSharedCorrection(duty, input.actorUserId, input.includeCompleted ?? false, feature => resolveWorkspaceDutyAuthority(database, {
     userId: input.actorUserId, workspace: 'accounting', feature, at: input.now,
-  });
+  }));
+};
+
+const correctionAccessProvenance = async (sourceActionCode: string, readAuthority: ReadAuthority) => {
+  const feature = accountingFeatureFor(sourceActionCode);
+  if (!feature) return [];
+  const authority = await readAuthority(feature);
   const labels: Record<string, string> = {
     SYSTEM_ADMIN_OVERRIDE: 'اختیار مدیر سیستم', DIRECT_WORKSPACE: 'مدیریت مستقیم فضای کاری',
     ROLE_WORKSPACE: 'مدیریت فضای کاری از نقش', DIRECT_FEATURE: 'مجوز مستقیم قابلیت',
@@ -450,6 +453,13 @@ const sharedDecisionAccessProvenance: NonNullable<CrossWorkspaceDutySourceAdapte
   return [authority.provenance.workspace, authority.provenance.feature]
     .filter(Boolean)
     .map((grant) => labels[grant!.source] ?? 'مجوز مؤثر سازمانی');
+};
+
+const sharedDecisionAccessProvenance: NonNullable<CrossWorkspaceDutySourceAdapter['sharedDecisionAccessProvenance']> = async (database, input) => {
+  const duty = await database.crossWorkspaceDuty.findUnique({ where: { id: input.dutyId } });
+  return duty ? correctionAccessProvenance(duty.sourceActionCode, feature => resolveWorkspaceDutyAuthority(database, {
+    userId: input.actorUserId, workspace: 'accounting', feature, at: input.now,
+  })) : [];
 };
 
 const canClaim: CrossWorkspaceDutySourceAdapter['canClaim'] = async (database, input) => {
@@ -1064,6 +1074,86 @@ const canReassign: CrossWorkspaceDutySourceAdapter['canReassign'] = async (datab
   } catch { return false; }
 };
 
+const correctionInboxSelect = { id: true, contractId: true, dutySourceVersion: true, accountantNote: true } as const;
+const contractInboxSelect = {
+  id: true, contractNumber: true, status: true, partnerCaseId: true,
+  customer: { select: { firstName: true, lastName: true } },
+} as const;
+type CorrectionInboxSource = Prisma.AccountingCorrectionRequestGetPayload<{ select: typeof correctionInboxSelect }>;
+type CorrectionInboxContract = Prisma.SalesContractGetPayload<{ select: typeof contractInboxSelect }>;
+
+const projectCorrectionInbox = (
+  input: CrossWorkspaceDutySourceProjectionInput,
+  correction: CorrectionInboxSource | null | undefined,
+  contract: CorrectionInboxContract | null | undefined,
+) => {
+  if (!correction?.contractId || !contract) throw new Error('DUTY_SOURCE_CHANGED');
+  return {
+    title: `اصلاح قرارداد ${contract.contractNumber}`,
+    description: `مشتری: ${[contract.customer.firstName, contract.customer.lastName].filter(Boolean).join(' ')}\n` + (input.sourceActionCode === 'ACCOUNTING_VERIFY_CONTRACT_CORRECTION'
+      ? `${correction.accountantNote}\nمبلغ اصلاح‌شده و رکورد مالی قبلی را در قرارداد بررسی کنید؛ در صورت نیاز ابطال و جایگزینی را پیش از تأیید تکمیل کنید.`
+      : correction.accountantNote),
+    ...(input.sourceActionCode === 'SALES_EDIT_CONTRACT_CORRECTION'
+      ? { destinationHref: `/dashboard/sales/contracts/${correction.contractId}${contract.status === 'CANCELLED' ? '' : '/edit'}` }
+      : input.sourceActionCode === 'ACCOUNTING_VERIFY_CONTRACT_CORRECTION'
+        ? { destinationHref: contract.partnerCaseId ? `/dashboard/accounting/contracts/partner/${contract.partnerCaseId}?section=financial` : `/dashboard/accounting/contracts/${correction.contractId}?section=financial` }
+        : {}),
+    sourceIsCurrent: input.sourceVersion === correction.dutySourceVersion,
+  };
+};
+
+const loadCorrectionInboxSources = async (database: CrossWorkspaceDutyDatabase, sourceIds: string[]) => {
+  const corrections = await database.accountingCorrectionRequest.findMany({
+    where: { id: { in: sourceIds } }, select: correctionInboxSelect,
+  });
+  const contractIds = [...new Set(corrections.flatMap(correction => correction.contractId ? [correction.contractId] : []))];
+  const contracts = contractIds.length ? await database.salesContract.findMany({
+    where: { id: { in: contractIds } }, select: contractInboxSelect,
+  }) : [];
+  return {
+    corrections: new Map(corrections.map(correction => [correction.id, correction])),
+    contracts: new Map(contracts.map(contract => [contract.id, contract])),
+  };
+};
+
+export const createSalesCorrectionInboxReader = (database: CrossWorkspaceDutyDatabase, actorUserId: string, now: Date) => {
+  const authority = new Map<string, ReturnType<ReadAuthority>>();
+  const readAuthority: ReadAuthority = feature => {
+    let reading = authority.get(feature);
+    if (!reading) {
+      reading = resolveWorkspaceDutyAuthority(database, { userId: actorUserId, workspace: 'accounting', feature, at: now });
+      authority.set(feature, reading);
+    }
+    return reading;
+  };
+  const evidence = new Map<string, ReturnType<typeof loadCorrectionInboxSources>>();
+  let batchFinished = Promise.resolve();
+  return {
+    prepare(duties: readonly Pick<CrossWorkspaceDuty, 'sourceType' | 'sourceId'>[]) {
+      const ids = [...new Set(duties.filter(duty => duty.sourceType === 'SALES_CONTRACT_CORRECTION' && !evidence.has(duty.sourceId))
+        .map(duty => duty.sourceId))];
+      for (let offset = 0; offset < ids.length; offset += 500) {
+        const batch = ids.slice(offset, offset + 500);
+        const reading = batchFinished.then(() => loadCorrectionInboxSources(database, batch));
+        // Candidate authorization handles evidence failures, including the closed-duty redaction fallback.
+        batchFinished = reading.then(() => undefined, () => undefined);
+        for (const id of batch) evidence.set(id, reading);
+      }
+      return batchFinished;
+    },
+    async loadProjection(input: CrossWorkspaceDutySourceProjectionInput) {
+      const sources = await evidence.get(input.sourceId);
+      const correction = sources?.corrections.get(input.sourceId);
+      const contract = correction?.contractId ? sources?.contracts.get(correction.contractId) : undefined;
+      return projectCorrectionInbox(input, correction, contract);
+    },
+    canAccessSharedDecision(duty: SharedDuty) {
+      return canAccessSharedCorrection(duty, actorUserId, duty.status !== 'OPEN', readAuthority);
+    },
+    accessProvenance: (duty: SharedDuty) => correctionAccessProvenance(duty.sourceActionCode, readAuthority),
+  };
+};
+
 export const salesContractCorrectionDutyAdapter = {
   sourceType: 'SALES_CONTRACT_CORRECTION',
   synchronize,
@@ -1079,24 +1169,14 @@ export const salesContractCorrectionDutyAdapter = {
   respond,
   reconcileAssignment: async () => { throw new Error('DUTY_ACTION_NOT_IMPLEMENTED'); },
   loadInboxProjection: async (database, input) => {
-    const correction = await database.accountingCorrectionRequest.findUnique({ where: { id: input.sourceId } });
+    const correction = await database.accountingCorrectionRequest.findUnique({
+      where: { id: input.sourceId }, select: correctionInboxSelect,
+    });
     if (!correction?.contractId) throw new Error('DUTY_SOURCE_CHANGED');
     const contract = await database.salesContract.findUnique({
       where: { id: correction.contractId },
-      select: { contractNumber: true, status: true, partnerCaseId: true, customer: { select: { firstName: true, lastName: true } } },
+      select: contractInboxSelect,
     });
-    if (!contract) throw new Error('DUTY_SOURCE_CHANGED');
-    return {
-      title: `اصلاح قرارداد ${contract.contractNumber}`,
-      description: `مشتری: ${[contract.customer.firstName, contract.customer.lastName].filter(Boolean).join(' ')}\n` + (input.sourceActionCode === 'ACCOUNTING_VERIFY_CONTRACT_CORRECTION'
-        ? `${correction.accountantNote}\nمبلغ اصلاح‌شده و رکورد مالی قبلی را در قرارداد بررسی کنید؛ در صورت نیاز ابطال و جایگزینی را پیش از تأیید تکمیل کنید.`
-        : correction.accountantNote),
-      ...(input.sourceActionCode === 'SALES_EDIT_CONTRACT_CORRECTION'
-        ? { destinationHref: `/dashboard/sales/contracts/${correction.contractId}${contract.status === 'CANCELLED' ? '' : '/edit'}` }
-        : input.sourceActionCode === 'ACCOUNTING_VERIFY_CONTRACT_CORRECTION'
-          ? { destinationHref: contract.partnerCaseId ? `/dashboard/accounting/contracts/partner/${contract.partnerCaseId}?section=financial` : `/dashboard/accounting/contracts/${correction.contractId}?section=financial` }
-        : {}),
-      sourceIsCurrent: input.sourceVersion === correction.dutySourceVersion,
-    };
+    return projectCorrectionInbox(input, correction, contract);
   },
 } satisfies CrossWorkspaceDutySourceAdapter;

@@ -3,7 +3,7 @@ import type { AddressInfo } from 'node:net';
 import test from 'node:test';
 import express from '../../backend/node_modules/express';
 import accountingRoutes from '../../backend/src/routes/accounting';
-import { dispatchDocumentApiPaths } from '../../frontend/src/features/accounting/dispatch-documents/dispatchDocumentsClient';
+import { dispatchDocumentApiPaths } from '../../frontend/src/features/accounting/dispatch-documents/dispatchDocumentApiPaths';
 
 test('every production Accounting UI path reaches a mounted backend route protected by auth', async (context) => {
   const app = express();
@@ -16,6 +16,8 @@ test('every production Accounting UI path reaches a mounted backend route protec
   const paths = dispatchDocumentApiPaths(`${origin}/api/accounting`);
   const requests: Array<[string, RequestInit?]> = [
     [paths.candidates()],
+    [paths.queue('READY', 1)],
+    [paths.group('loading-1')],
     [paths.readModel('candidate-1')],
     [paths.decision('candidate-1'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }],
     [paths.replace('waybill-1'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }],

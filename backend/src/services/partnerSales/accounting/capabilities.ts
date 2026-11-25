@@ -1,6 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import { getEffectiveUserAccess } from '../../effectiveAccessService';
 import { resolveNarrowFeatureAccess } from '../../narrowFeatureAccess';
+import type { PartnerPermissionReadClient } from '../authorization/fencedPermissionReads';
 
 /** Current internal Accounting authority, in addition to the audited Case grant.
  * Never accept a route's earlier permission snapshot as mutation authority.
@@ -10,17 +11,39 @@ import { resolveNarrowFeatureAccess } from '../../narrowFeatureAccess';
  * permission replacement owns those rows before entering the revision fence. */
 export async function readPartnerAccountingCapabilities(tx: Prisma.TransactionClient, actorId: string) {
   const denied = { payments: false, tax: false, approve: false, deleteDraft: false, receivables: false };
-  const actor = await tx.user.findUnique({ where: { id: actorId }, select: { role: true, isActive: true } });
-  if (!actor?.isActive) return denied;
-  const effective = await getEffectiveUserAccess(tx, { userId: actorId, userRole: actor.role });
-  const workspace = effective.workspaces.find(row => row.workspace === 'accounting')?.permission;
-  if (!['edit', 'admin'].includes(workspace || '')) return denied;
-  const allowed = async (feature: string) => (await resolveNarrowFeatureAccess(tx, { userId: actorId, role: actor.role,
-    workspace: 'accounting', feature, requiredPermission: 'edit' })).allowed;
+  const edit = await readPartnerAccountingEditAuthority(tx, actorId);
+  if (!edit) return denied;
   const [payments, tax, approve, receivables] = await Promise.all([
-    allowed('accounting_payments_manage'), allowed('accounting_tax_manage'), allowed('accounting_records_approve_void'), allowed('accounting_receivables_manage'),
+    edit.allows('accounting_payments_manage'), edit.allows('accounting_tax_manage'),
+    edit.allows('accounting_records_approve_void'), edit.allows('accounting_receivables_manage'),
   ]);
-  return { payments, tax, receivables, deleteDraft: approve, approve: approve && (actor.role === 'ADMIN' || workspace === 'admin') };
+  return { payments, tax, receivables, deleteDraft: approve, approve: approve && (edit.role === 'ADMIN' || edit.workspace === 'admin') };
+}
+
+export async function readPartnerAccountingListCapabilities(tx: PartnerPermissionReadClient, actorId: string) {
+  const edit = await readPartnerAccountingEditAuthority(tx, actorId);
+  if (!edit) return { payments: false, tax: false };
+  const [payments, tax] = await Promise.all([
+    edit.allows('accounting_payments_manage'), edit.allows('accounting_tax_manage'),
+  ]);
+  return { payments, tax };
+}
+
+async function readPartnerAccountingEditAuthority(tx: PartnerPermissionReadClient, actorId: string, at?: Date) {
+  const actor = await tx.user.findUnique({ where: { id: actorId }, select: { role: true, isActive: true } });
+  if (!actor?.isActive) return;
+  const effective = await getEffectiveUserAccess(tx, { userId: actorId, userRole: actor.role, at });
+  const workspace = effective.workspaces.find(row => row.workspace === 'accounting')?.permission;
+  if (workspace !== 'edit' && workspace !== 'admin') return;
+  return { role: actor.role, workspace, allows: async (feature: string) => (await resolveNarrowFeatureAccess(tx,
+    { userId: actorId, role: actor.role, workspace: 'accounting', feature, requiredPermission: 'edit' }, at)).allowed };
+}
+
+/** Re-evaluate payments authority against the Case snapshot's permission
+ * rows at the current decision time. */
+export async function readPartnerPaymentsCapability(tx: PartnerPermissionReadClient, actorId: string, at: Date) {
+  const edit = await readPartnerAccountingEditAuthority(tx, actorId, at);
+  return edit ? edit.allows('accounting_payments_manage') : false;
 }
 
 /** Re-evaluate the narrow dispatch mutation capability in the transaction that
@@ -49,13 +72,13 @@ export async function readPartnerDispatchAccountingViewCapability(tx: Prisma.Tra
 }
 
 
-export async function readPartnerCommercialAccountingCapabilities(tx: Prisma.TransactionClient, actorId: string,
-  options: { viewOnly?: boolean; accessClient?: Prisma.TransactionClient } = {}) {
+export async function readPartnerCommercialAccountingCapabilities(tx: PartnerPermissionReadClient, actorId: string,
+  options: { viewOnly?: boolean; at?: Date } = {}) {
   const actor = await tx.user.findUnique({ where: { id: actorId }, select: { role: true, isActive: true } });
   if (!actor?.isActive) return { view: false, paper: false };
-  const effective = await getEffectiveUserAccess(options.accessClient ?? tx, { userId: actorId, userRole: actor.role });
+  const effective = await getEffectiveUserAccess(tx, { userId: actorId, userRole: actor.role, at: options.at });
   const workspace = effective.workspaces.find(row => row.workspace === 'accounting')?.permission;
-  const view = ['view', 'edit', 'admin'].includes(workspace || '') && (await resolveNarrowFeatureAccess(tx, { userId: actorId, role: actor.role, workspace: 'accounting', feature: 'accounting_contracts_view', requiredPermission: 'view' })).allowed;
-  const paper = !options.viewOnly && view && ['edit', 'admin'].includes(workspace || '') && (await resolveNarrowFeatureAccess(tx, { userId: actorId, role: actor.role, workspace: 'accounting', feature: 'accounting_actions_manage', requiredPermission: 'edit' })).allowed;
+  const view = ['view', 'edit', 'admin'].includes(workspace || '') && (await resolveNarrowFeatureAccess(tx, { userId: actorId, role: actor.role, workspace: 'accounting', feature: 'accounting_contracts_view', requiredPermission: 'view' }, options.at)).allowed;
+  const paper = !options.viewOnly && view && ['edit', 'admin'].includes(workspace || '') && (await resolveNarrowFeatureAccess(tx, { userId: actorId, role: actor.role, workspace: 'accounting', feature: 'accounting_actions_manage', requiredPermission: 'edit' }, options.at)).allowed;
   return { view, paper };
 }

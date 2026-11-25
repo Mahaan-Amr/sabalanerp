@@ -1,3 +1,4 @@
+import { reportAccountingRequestFailure } from '../middleware/accountingRequestObserver';
 import { prisma } from '../lib/prisma';
 import { runtimeHttpRequests } from '../services/httpRequestLifecycle';
 import express, { Response } from 'express';
@@ -14,7 +15,7 @@ import { PilotSafetyPauseError } from '../services/dispatchCutover';
 import { resolveNarrowFeatureAccess } from '../services/narrowFeatureAccess';
 import { requireHrFeature } from '../middleware/hrAuthorization';
 import { authorizeHrUser } from '../services/hrAuthorizationService';
-import { BiometricWorkstationGateway, readBiometricWorkstationConfig } from '../services/biometricWorkstationGateway';
+import { BiometricWorkstationGateway, BiometricWorkstationNotRegisteredError, readBiometricWorkstationConfig } from '../services/biometricWorkstationGateway';
 
 const router = express.Router();
 const subjectKey = (req: AuthRequest) => req.path.startsWith('/external-drivers/') ? `external:${req.params.personnelId}` : req.params.personnelId;
@@ -60,9 +61,10 @@ const biometricErrorText = (message: string) => ({
   'The internal driver is not currently eligible for biometric confirmation.': 'راننده داخلی در حال حاضر مجوز فعال برای ثبت یا تأیید بیومتریک ندارد.',
 } as Record<string, string>)[message] || message;
 const handle = (res: Response, error: unknown) => {
+  if (error instanceof BiometricWorkstationNotRegisteredError) return res.status(409).json({ success: false, code: error.code, error: error.message });
   if (error instanceof DispatchConfirmationValidationError) return res.status(400).json({ success: false, error: biometricErrorText(error.message) });
   if (error instanceof DispatchConfirmationConflictError || error instanceof PilotSafetyPauseError) return res.status(409).json({ success: false, error: biometricErrorText(error.message) });
-  console.error('Dispatch confirmation error:', error);
+  reportAccountingRequestFailure(res, error);
   return res.status(500).json({ success: false, error: 'نتیجه تأیید هویت مشخص نشد. وضعیت فعلی را بررسی کنید و اگر ثبت نشده بود دوباره اقدام کنید.' });
 };
 const hrManage = [protect, requireHrFeature(FEATURES.HR_DRIVER_BIOMETRIC_ENROLLMENT_MANAGE, 'EDIT')];

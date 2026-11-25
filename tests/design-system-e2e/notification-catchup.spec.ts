@@ -5,7 +5,7 @@ import { assertNoHorizontalOverflow, assertNoSeriousAxeViolations, setTheme, set
 // responses are controlled here; real cookie/database enforcement is separately
 // exercised by notificationServiceDevice.fixture.ts, never inferred from mocks.
 async function setup(page: Page) {
-  const state = { owner: 'notification_owner_a', sessionId: 'notification_session_a', logins: 0, revision: 1, privateRequests: 0, mutations: 0, mutationAttemptsAfterChange: 0, probesDenied: 0, switchOwnerOnAction: false };
+  const state = { owner: 'notification_owner_a', sessionId: 'notification_session_a', logins: 0, revision: 1, privateRequests: 0, badgeReads: 0, badgeUnavailable: false, previewReads: [] as string[], mutations: 0, mutationAttemptsAfterChange: 0, probesDenied: 0, switchOwnerOnAction: false };
   const user = { id: 'notification_owner_a', firstName: 'آزمون', lastName: 'اعلان', username: 'notification-qa', email: 'notification@example.invalid', role: 'ADMIN', isActive: true };
   await page.route('**/socket.io/**', route => route.abort());
   await page.route('**/api/**', async route => {
@@ -46,7 +46,14 @@ async function setup(page: Page) {
         return route.fulfill({ status: 401, json: { code: 'AUTH_CONTEXT_CHANGED', error: 'نشست این صفحه تغییر کرده است' } });
       }
       if (request.method() !== 'GET') { state.mutations++; return send({}); }
-      if (path.endsWith('/unread-count')) return send({ count: 1 });
+      if (path.endsWith('/unread-count')) {
+        state.badgeReads++;
+        if (state.badgeUnavailable) return route.fulfill({ status: 503,
+          json: { success: false, code: 'NOTIFICATION_COUNT_UNAVAILABLE' } });
+        return send({ count: 1 });
+      }
+      const previewState = url.searchParams.get('state');
+      if (['5', '3'].includes(url.searchParams.get('limit') ?? '')) state.previewReads.push(previewState || '');
       if (path.endsWith('/metadata')) return send({ workspaces: [], categories: [] });
       if (path.endsWith('/settings/preferences')) return send({ supported: false, preference: { webPushEnabled: false, mutedCategories: [], lowPriorityDelivery: 'IMMEDIATE' }, devices: [{ id: 'qa-device', deviceLabel: 'دستگاه خصوصی', createdAt: '2026-10-15T00:00:00Z' }] });
       const cursor = url.searchParams.get('cursor');
@@ -60,6 +67,42 @@ async function setup(page: Page) {
   await expect(page.getByRole('heading', { name: 'اعلان خصوصی 1', exact: true })).toBeVisible();
   return state;
 }
+
+test('the closed notification header refreshes only its badge and loads both lists when opened', async ({ page }) => {
+  const state = await setup(page);
+  const bell = page.getByRole('button', { name: /^اعلان‌ها،/ });
+  await expect(bell).toBeVisible();
+  expect(state.previewReads).toEqual([]);
+
+  const badgeReads = state.badgeReads;
+  await page.evaluate(() => window.dispatchEvent(new Event('notifications:read-state-changed')));
+  await expect.poll(() => state.badgeReads).toBeGreaterThan(badgeReads);
+  expect(state.previewReads).toEqual([]);
+
+  await bell.click();
+  const sheet = page.getByRole('dialog', { name: 'اعلان‌ها', exact: true });
+  await expect(sheet.getByText('اعلان خصوصی 1', { exact: true })).toBeVisible();
+  expect(state.previewReads.sort()).toEqual(['READ', 'UNREAD']);
+  await page.keyboard.press('Escape');
+  await expect(sheet).toBeHidden();
+  const readsAfterClosing = state.badgeReads;
+  await page.evaluate(() => window.dispatchEvent(new Event('notifications:read-state-changed')));
+  await expect.poll(() => state.badgeReads).toBeGreaterThan(readsAfterClosing);
+  expect(state.previewReads.sort()).toEqual(['READ', 'UNREAD']);
+});
+
+test('an unavailable count leaves the notification preview usable', async ({ page }) => {
+  const state = await setup(page);
+  const badge = page.locator('[data-dynamic="notification-count"]');
+  await expect(badge).toHaveText('۱');
+  state.badgeUnavailable = true;
+  await page.evaluate(() => window.dispatchEvent(new Event('notifications:read-state-changed')));
+  await expect(badge).toHaveCount(0);
+  await page.getByRole('button', { name: 'اعلان‌ها، شمارش در دسترس نیست' }).click();
+  const sheet = page.getByRole('dialog', { name: 'اعلان‌ها', exact: true });
+  await expect(sheet.getByText('اعلان خصوصی 1', { exact: true })).toBeVisible();
+  await expect(sheet.getByRole('button', { name: 'خواندن همه' })).toBeEnabled();
+});
 
 test('notification catch-up preserves visible pages and unsaved preferences in the compiled browser', async ({ page }, testInfo) => {
   const state = await setup(page);

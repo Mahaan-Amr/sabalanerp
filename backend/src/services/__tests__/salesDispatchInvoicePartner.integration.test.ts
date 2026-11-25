@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { PrismaClient, type Prisma } from '@prisma/client';
 import { PartnerEventSchema, canonicalHash } from '@sabalanerp/partner-sales-contracts';
+import { assertDispatchDocumentsMigrationTarget } from './dispatchDocumentsTemporaryDatabase';
 import { seedHistoricalAccountingRead } from './partnerAccountingHistoricalReadSeed';
 import { createSalesInvoiceService } from '../salesDispatchInvoice/service';
 import { bytesHash } from '../salesDispatchInvoice/source';
@@ -11,8 +12,11 @@ import { pricedAllocationIntegrityHash } from '../pricedAllocationLedger';
 // Public issuance/download seam; only persistence fixture assembly and the PDF
 // transport are adapted. All source, ownership, official-price and hash readers run.
 const url = new URL(process.env.DATABASE_URL ?? '');
-if (url.hostname !== '127.0.0.1' || url.port !== '55432' || url.pathname !== '/sabalanerp')
+if (url.hostname !== '127.0.0.1' || url.port !== '55432')
   throw new Error('Use the existing sabalanerp-local database at 127.0.0.1:55432.');
+const candidateDatabase = process.env.SABALAN_CANDIDATE_QA_DATABASE_NAME;
+if (candidateDatabase) assertDispatchDocumentsMigrationTarget(url.toString(), candidateDatabase);
+else if (url.pathname !== '/sabalanerp') throw new Error('Only the existing local database or a verified candidate QA clone is allowed.');
 const db = new PrismaClient();
 const rollback = Symbol('rollback Partner invoice acceptance');
 const json = (value: unknown) => JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;

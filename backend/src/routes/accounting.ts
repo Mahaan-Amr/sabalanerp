@@ -1,5 +1,7 @@
 import { DispatchPickupVerificationError, processPickupVerification, requirePickupVerification } from '../services/dispatchPickupVerification';
 import smsService from '../services/smsService';
+import { reportAccountingRequestFailure } from '../middleware/accountingRequestObserver';
+import { isDispatchDocumentQueueState, readDispatchDocumentQueueSummary } from '../services/dispatchDocuments/queueSummary';
 import { prisma } from '../lib/prisma';
 import { createSalesInvoiceRouter } from '../services/salesDispatchInvoice/routes';
 import { createSalesInvoiceService } from '../services/salesDispatchInvoice/service';
@@ -101,8 +103,10 @@ import { getEffectiveUserAccess } from '../services/effectiveAccessService';
 import { PartnerAccountingCommandError, PartnerAccountingTechnicalError } from '../services/partnerSales/accounting/errors';
 import { readPartnerSnapshot } from '../services/partnerSales/authorization/readSnapshot';
 import { createAuditedPartnerAuthorization } from '../services/partnerSales/authorization/audited';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { projectAccountingDispatchCandidateSummary, projectAccountingDispatchLines } from '../services/accountingDispatchCandidatePresentation';
+import { parseSepidarInvoices, presentSepidarInvoices, readSepidarLoadingTotal,
+  sepidarInvoiceFields, sumSepidarInvoiceAmounts } from '../services/sepidarDispatchInvoices';
 import { readPartnerDispatchAccountingCapability, readPartnerDispatchAccountingViewCapability } from '../services/partnerSales/accounting/capabilities';
 import accountingLedgerRouter from './accountingLedger';
 import accountingPeriodEndRouter from './accountingPeriodEnd';
@@ -318,7 +322,7 @@ const dispatchError = (res: Response, error: unknown) => {
   if (documentStatus) return res.status(documentStatus).json({ success: false, error: (error as Error).message });
   if (error instanceof PilotSafetyPauseError || error instanceof DispatchAllocationConflictError || error instanceof DispatchRecoveryConflictError) return res.status(409).json({ success: false, error: error.message });
   if (error instanceof DispatchAllocationValidationError || error instanceof DispatchRecoveryValidationError) return res.status(400).json({ success: false, error: error.message });
-  console.error('Accounting dispatch error:', error);
+  reportAccountingRequestFailure(res, error);
   return res.status(500).json({ success: false, error: 'Accounting dispatch command failed.' });
 };
 
@@ -358,25 +362,54 @@ router.get('/dispatch-waybills/:waybillId/reconstruction/pdf', accountingDispatc
   }
 });
 
+const validLoadingIssueCommandId = (id: unknown): id is string =>
+  typeof id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id);
+
+router.get('/loadings/:loadingId/issue-dispatch-documents/:commandId', accountingDispatchEdit, async (req: WorkspaceRequest & FeatureRequest, res: Response) => {
+  res.setHeader('Cache-Control', 'private, no-store');
+  const { loadingId, commandId } = req.params;
+  if (!validLoadingIssueCommandId(commandId)) return res.status(400).json({ success: false });
+  try {
+    const invoice = await createSalesInvoiceService(prisma).loadingIssueReceipt(
+      { actorId: req.user!.id, workspace: 'accounting' }, loadingId, commandId,
+    );
+    if (!invoice) return res.status(404).json({ success: false, code: 'LOADING_ISSUE_RECEIPT_MISSING' });
+    return res.json({ success: true, data: { status: 'ISSUED', commandId, invoice } });
+  } catch (error) {
+    if (error instanceof SalesInvoiceError) return res.status(error.status).json({ success: false, error: error.message });
+    return dispatchError(res, error);
+  }
+});
+
 router.post('/loadings/:loadingId/issue-dispatch-documents', accountingDispatchEdit, async (req: WorkspaceRequest & FeatureRequest, res: Response) => {
   try {
     const loadingId = req.params.loadingId;
     const invoices = createSalesInvoiceService(prisma, undefined, dispatchDocuments.documentStorage);
     const context = { actorId: req.user!.id, workspace: 'accounting' as const };
+    const { commandId, recovery } = req.body ?? {};
+    if (commandId !== undefined && !validLoadingIssueCommandId(commandId)) {
+      return res.status(400).json({ success: false, error: 'شناسه فرمان صدور معتبر نیست.' });
+    }
+    if (recovery !== undefined && (!recovery || typeof recovery.waybillId !== 'string' ||
+        typeof recovery.invoiceId !== 'string' || typeof recovery.reason !== 'string')) {
+      return res.status(400).json({ success: false, error: 'اسناد باطل‌شده و دلیل صدور مجدد را مشخص کنید.' });
+    }
+    const command = commandId ? { id: commandId, fingerprint: createHash('sha256').update(JSON.stringify(
+      recovery ? [recovery.waybillId, recovery.invoiceId, recovery.reason.trim()] : null,
+    )).digest('hex') } : undefined;
+    if (command) {
+      const invoice = await invoices.loadingIssueReceipt(context, loadingId, command.id, command.fingerprint);
+      if (invoice) return res.json({ success: true, data: { status: 'ISSUED', commandId, invoice } });
+    }
     const invoiceState = await invoices.list(context, loadingId);
     if (invoiceState.invoices.some(invoice => invoice.status === 'INVALIDATED')) {
       throw new LoadingDocumentIssuanceError('فاکتور موجود نامعتبر است؛ ابتدا حسابداری باید آن را تعیین‌تکلیف کند.');
     }
-    const recovery = req.body?.recovery;
     let recoveredWaybillId: string | undefined;
     if (recovery !== undefined) {
-      if (!recovery || typeof recovery.waybillId !== 'string' || typeof recovery.invoiceId !== 'string' ||
-          typeof recovery.reason !== 'string') {
-        return res.status(400).json({ success: false, error: 'اسناد باطل‌شده و دلیل صدور مجدد را مشخص کنید.' });
-      }
       recoveredWaybillId = await recoverLegacyLoadingWaybill(prisma, {
         loadingId, actorId: context.actorId, waybillId: recovery.waybillId,
-        invoiceId: recovery.invoiceId, reason: recovery.reason,
+        invoiceId: recovery.invoiceId, reason: recovery.reason, commandId: command?.id,
       });
     }
     const [loading, cutover, control] = await Promise.all([
@@ -399,7 +432,7 @@ router.post('/loadings/:loadingId/issue-dispatch-documents', accountingDispatchE
       return classifyLoadingDocumentPart(revision, revision.sourceKind === 'PARTNER_CASE' || Boolean(gate && gate.cutoverAt &&
         isShipmentStatementFlowActive(process.env, gate) && isPostCutoverFinalization(revision.finalizedAt, gate.cutoverAt)), legacy);
     });
-    await issueLoadingDocuments({ loadingId, parts, invoicePredecessorId: invoiceState.invoices[0]?.id ?? null,
+    const invoice = await issueLoadingDocuments({ loadingId, parts, invoicePredecessorId: invoiceState.invoices[0]?.id ?? null,
       issueWaybill: async (candidateId, idempotencyKey) => {
         const result = await decideAccountingDispatchCandidate(prisma, { candidateId, action: 'ACCEPT', idempotencyKey,
           actorId: req.user!.id, effectiveAuthority: { actorRole: req.user!.role, workspace: req.workspace,
@@ -419,10 +452,10 @@ router.post('/loadings/:loadingId/issue-dispatch-documents', accountingDispatchE
         await reconstructLegacyWaybill(prisma, { waybillId: candidate.waybills[0].id, actorId: req.user!.id,
           reason: 'ساخت نسخه بازسازی‌شده برای بارنامه قدیمی فاقد فایل' });
       },
-      issueInvoice: async idempotencyKey => { await invoices.issue({ ...context, requireDispatchDocumentGate: true,
-        expectedRevisionIds: parts.map(part => part.revisionId), expectedWaybillId: recoveredWaybillId }, loadingId, idempotencyKey); },
+      issueInvoice: idempotencyKey => invoices.issue({ ...context, requireDispatchDocumentGate: true,
+        expectedRevisionIds: parts.map(part => part.revisionId), expectedWaybillId: recoveredWaybillId }, loadingId, idempotencyKey, command),
     });
-    return res.json({ success: true, data: { status: 'ISSUED' } });
+    return res.json({ success: true, data: { status: 'ISSUED', commandId, invoice } });
   } catch (error) {
     if (error instanceof LoadingDocumentIssuanceError) return res.status(409).json({ success: false, error: error.message });
     if (error instanceof LegacyWaybillReconstructionError) return res.status(409).json({ success: false, error: error.message });
@@ -548,10 +581,49 @@ const sepidarReferenceAuditActions = ['REGISTER_SEPIDAR_LOADING_REFERENCE', 'COR
 const sepidarReferenceAuditOrder = [{ createdAt: 'desc' }, { id: 'desc' }] satisfies Prisma.AccountingAuditLogOrderByWithRelationInput[];
 const sepidarReferenceAuditFields = { id: true, beforeState: true, afterState: true, actorId: true, createdAt: true, note: true } as const;
 
+const normalizeDispatchSearch = (value: unknown) => String(value ?? '').toLowerCase().trim()
+  .replace(/[۰-۹]/g, digit => String(digit.charCodeAt(0) - 1776))
+  .replace(/[٠-٩]/g, digit => String(digit.charCodeAt(0) - 1632))
+  .replace(/ي/g, 'ی').replace(/ك/g, 'ک').replace(/[\u200c\u200f\u200e]/g, ' ').replace(/\s+/g, ' ').trim();
+
+const dispatchCandidateStatusFilters = new Set([
+  'PENDING', 'ACCEPTED', 'REJECTED', 'RETURNED', 'WITHDRAWN', 'STALE_REQUIRES_SUCCESSOR', 'EVIDENCE_CONFLICT', 'CANCELLED',
+]);
+const dispatchInvoiceFilters = new Set(['registered', 'legacy', 'missing']);
+const dispatchSearchStatusLabels: Record<string, string> = {
+  PENDING: 'در انتظار بررسی',
+  ACCEPTED: 'پذیرفته‌شده',
+  REJECTED: 'برای اصلاح بازگردانده‌شده',
+  RETURNED: 'برای اصلاح بازگردانده‌شده',
+  CANCELLED: 'بارگیری لغوشده',
+};
+
 router.get('/dispatch-candidates', accountingDispatchView, async (req: AuthRequest, res: Response) => {
+  const loadingId = typeof req.query.loadingId === 'string' ? req.query.loadingId.trim() : undefined;
+  if (req.query.loadingId !== undefined && !loadingId) return res.sendStatus(400);
+  const documentQueue = req.query.documentQueue;
+  const statusFilter = req.query.status;
+  const invoiceFilter = req.query.sepidar;
+  if ((statusFilter !== undefined && (typeof statusFilter !== 'string' || !dispatchCandidateStatusFilters.has(statusFilter)))
+    || (invoiceFilter !== undefined && (typeof invoiceFilter !== 'string' || !dispatchInvoiceFilters.has(invoiceFilter)))
+    || ((loadingId || documentQueue) && (statusFilter !== undefined || invoiceFilter !== undefined))) return res.sendStatus(400);
+  if (documentQueue !== undefined && (documentQueue === 'GROUP'
+    ? !loadingId || req.query.page !== undefined || req.query.pageSize !== undefined || req.query.search !== undefined
+    : !isDispatchDocumentQueueState(documentQueue) || !!loadingId || req.query.search !== undefined)) return res.sendStatus(400);
+  const paginated = req.query.page !== undefined || req.query.pageSize !== undefined || req.query.search !== undefined
+    || statusFilter !== undefined || invoiceFilter !== undefined;
+  const page = Number(req.query.page ?? 1);
+  const pageSize = Number(req.query.pageSize ?? 50);
+  const searchInput = req.query.search ?? '';
+  if (paginated && (loadingId || !Number.isSafeInteger(page) || page < 1
+    || !Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > 100
+    || typeof searchInput !== 'string' || searchInput.length > 200)) return res.sendStatus(400);
+  const search = normalizeDispatchSearch(searchInput).split(/[\s،,]+/).filter(Boolean);
   try {
-    const { manage, candidates } = await readPartnerSnapshot(prisma, async tx => {
-      const owners = await tx.accountingDispatchCandidate.findMany({ orderBy: { id: 'asc' }, select: {
+    const { manage, confirmation, candidates, relatedCandidates, invoiceActionCandidateIds, pagination, documentSummary } = await readPartnerSnapshot(prisma, async tx => {
+      const owners = await tx.accountingDispatchCandidate.findMany({
+        where: loadingId ? { allocationRevision: { loadingId } } : undefined,
+        orderBy: { id: 'asc' }, select: {
         id: true, allocationRevision: { select: { sourceKind: true, partnerCaseId: true, loadingId: true } },
       } });
       const authority = createAuditedPartnerAuthorization(tx, { actorId: req.user!.id, purpose: 'ACCOUNTING', channel: 'LIST' }, {
@@ -578,24 +650,46 @@ router.get('/dispatch-candidates', accountingDispatchView, async (req: AuthReque
       const manage = await resolveNarrowFeatureAccess(tx, { userId: req.user!.id, role: req.user!.role,
         workspace: WORKSPACES.ACCOUNTING, feature: FEATURES.ACCOUNTING_DISPATCH_CANDIDATES_MANAGE,
         requiredPermission: FEATURE_PERMISSIONS.EDIT });
+      const confirmation = await resolveNarrowFeatureAccess(tx, { userId: req.user!.id, role: req.user!.role,
+        workspace: WORKSPACES.ACCOUNTING, feature: FEATURES.ACCOUNTING_DISPATCH_CONFIRMATION_MANAGE,
+        requiredPermission: FEATURE_PERMISSIONS.EDIT });
       const canManageOwner = (owner: typeof owners[number]['allocationRevision']) => manage.allowed &&
         (owner.sourceKind === 'SALES_CONTRACT' || (owner.sourceKind === 'PARTNER_CASE' &&
           owner.partnerCaseId !== null && writablePartnerCases.has(owner.partnerCaseId)));
       const blockedReferenceLoadingIds = new Set(owners.filter(owner => !canManageOwner(owner.allocationRevision))
         .map(owner => owner.allocationRevision.loadingId));
+      // A Partner profile never receives internal wholesale documents even when a residual
+      // grant permits the generic dispatch registry or a physical waybill.
+      const partnerProfile = await tx.partnerProfile.findUnique({
+        where: { userId: req.user!.id }, select: { id: true },
+      });
       const allowedIds = owners.flatMap(owner => owner.allocationRevision.sourceKind === 'SALES_CONTRACT'
         || (owner.allocationRevision.sourceKind === 'PARTNER_CASE' && owner.allocationRevision.partnerCaseId
-          && allowedPartnerCases.has(owner.allocationRevision.partnerCaseId)) ? [owner.id] : []);
+          && !(documentQueue && partnerProfile) && allowedPartnerCases.has(owner.allocationRevision.partnerCaseId)) ? [owner.id] : []);
+      const partnerCases = allowedPartnerCases.size ? await tx.partnerSaleCase.findMany({
+        where: { id: { in: [...allowedPartnerCases] } }, select: {
+          id: true, caseNumber: true, customerContract: { select: { contractNumber: true } },
+        },
+      }) : [];
+      const partnerCaseById = new Map(partnerCases.map(row => [row.id, row]));
+      const allowedOwnerIds = new Set(allowedIds);
+      const restrictedLoadingIds = new Set(owners.filter(owner => !allowedOwnerIds.has(owner.id))
+        .map(owner => owner.allocationRevision.loadingId));
+      if (partnerProfile) {
+        for (const owner of owners) {
+          if (owner.allocationRevision.sourceKind === 'PARTNER_CASE') restrictedLoadingIds.add(owner.allocationRevision.loadingId);
+        }
+      }
       const candidates = await tx.accountingDispatchCandidate.findMany({ where: { id: { in: allowedIds } }, select: {
-        id: true, status: true, createdAt: true, dispositionAt: true, dispositionReason: true,
+        id: true, allocationRevisionId: true, status: true, createdAt: true, dispositionAt: true, dispositionReason: true,
         pickupVerification: { select: { verifiedAt: true } },
-        allocationRevision: { select: { snapshot: true, loadingId: true,
-          loading: { select: { sepidarLoadingReference: true, status: true } },
-          lines: { select: { snapshot: true, quantity: true, unit: true } } } },
+        allocationRevision: { select: { snapshot: true, loadingId: true, queueTurnId: true, revisionNumber: true,
+          loading: { select: { status: true, loadingNumber: true } } } },
         waybills: { orderBy: { issuedAt: 'asc' }, select: { id: true, number: true, status: true,
           issuedAt: true, voidedAt: true, replacesWaybillId: true,
           legacyReconstruction: { select: { id: true, createdAt: true } },
-          physicalExit: { select: { recordedAt: true } } } },
+          physicalExit: { select: { recordedAt: true } },
+          _count: { select: { documentArtifacts: { where: { kind: 'WAYBILL' } } } } } },
       } });
       const currentInvoices = await tx.salesDispatchInvoice.findMany({
         where: { loadingId: { in: [...new Set(candidates.map(candidate => candidate.allocationRevision.loadingId))] }, voidedAt: null },
@@ -609,114 +703,260 @@ router.get('/dispatch-candidates', accountingDispatchView, async (req: AuthReque
         _max: { issuedAt: true, voidedAt: true },
       });
       const invoiceActivityByLoading = new Map(invoiceActivity.map(invoice => [invoice.loadingId, invoice._max]));
-      const referenceHistory = await tx.accountingAuditLog.findMany({ where: {
-        entityType: 'LogisticsLoading', entityId: { in: [...new Set(candidates.map(candidate => candidate.allocationRevision.loadingId))] },
-        action: { in: sepidarReferenceAuditActions },
-      }, select: { entityId: true, ...sepidarReferenceAuditFields }, orderBy: sepidarReferenceAuditOrder });
-      const historyByLoading = new Map<string, typeof referenceHistory>();
-      for (const entry of referenceHistory) {
-        const entries = historyByLoading.get(entry.entityId!) ?? [];
-        entries.push(entry);
-        historyByLoading.set(entry.entityId!, entries);
+      const authorizedLoadingIds = [...new Set(candidates.map(candidate => candidate.allocationRevision.loadingId))]
+        .filter(id => !restrictedLoadingIds.has(id));
+      const sepidarRows = !documentQueue && authorizedLoadingIds.length ? await tx.sepidarDispatchInvoice.findMany({
+        where: { loadingId: { in: authorizedLoadingIds } },
+        select: { ...sepidarInvoiceFields, loadingId: true }, orderBy: { number: 'asc' },
+      }) : [];
+      const sepidarByLoading = new Map<string, typeof sepidarRows>();
+      for (const invoice of sepidarRows) {
+        const group = sepidarByLoading.get(invoice.loadingId) ?? [];
+        group.push(invoice);
+        sepidarByLoading.set(invoice.loadingId, group);
       }
       const time = (value?: Date | null) => value?.getTime() ?? 0;
       const ownerById = new Map(owners.map(owner => [owner.id, owner.allocationRevision]));
-      return { manage, candidates: candidates.map(candidate => {
+      const readLines = async (rows: Array<{ id: string; allocationRevisionId: string }>) => {
+        const revisionIds = rows.filter(row => ownerById.get(row.id)?.sourceKind === 'SALES_CONTRACT')
+          .map(row => row.allocationRevisionId);
+        const lines = revisionIds.length ? await tx.logisticsAllocationRevisionLine.findMany({
+          where: { revisionId: { in: revisionIds } },
+          select: { revisionId: true, snapshot: true, quantity: true, unit: true },
+        }) : [];
+        const byRevision = new Map<string, typeof lines>();
+        for (const line of lines) {
+          const group = byRevision.get(line.revisionId) ?? [];
+          group.push(line);
+          byRevision.set(line.revisionId, group);
+        }
+        return byRevision;
+      };
+      // Only a contract-number search needs line snapshots beyond the returned page.
+      const searchLines = search.length ? await readLines(candidates) : undefined;
+      const ordered = candidates.map(candidate => {
         const owner = ownerById.get(candidate.id);
-        const { allocationRevision, ...candidateData } = candidate;
+        const { allocationRevision, waybills, ...candidateData } = candidate;
         const invoice = invoiceActivityByLoading.get(allocationRevision.loadingId);
         const lastActivityAt = new Date(Math.max(time(candidate.createdAt), time(candidate.dispositionAt),
           time(invoice?.issuedAt), time(invoice?.voidedAt), ...candidate.waybills.map(waybill => Math.max(
             time(waybill.issuedAt), time(waybill.voidedAt), time(waybill.legacyReconstruction?.createdAt), time(waybill.physicalExit?.recordedAt),
           ))));
+        const maySeeInvoices = !restrictedLoadingIds.has(allocationRevision.loadingId);
+        const sepidarInvoices = presentSepidarInvoices(sepidarByLoading.get(allocationRevision.loadingId) ?? []);
+        const partnerCase = owner?.partnerCaseId ? partnerCaseById.get(owner.partnerCaseId) : undefined;
+        const partnerContractNumber = !partnerProfile ? partnerCase?.customerContract?.contractNumber : undefined;
         return { ...candidateData, lastActivityAt, currentSalesInvoice: currentInvoiceByLoading.get(allocationRevision.loadingId) ?? null, loadingId: allocationRevision.loadingId,
-          sepidarLoadingReference: allocationRevision.loading.sepidarLoadingReference,
+          queueTurnId: allocationRevision.queueTurnId, revisionNumber: allocationRevision.revisionNumber,
+          contractNumbers: partnerContractNumber ? [partnerContractNumber] : [],
+          sepidarInvoices,
+          sepidarLoadingReference: sepidarInvoices[0]?.number ?? null,
           loadingStatus: allocationRevision.loading.status,
-          sepidarLoadingReferenceHistory: historyByLoading.get(allocationRevision.loadingId) ?? [],
           canManageSepidarLoadingReference: allocationRevision.loading.status === 'FINALIZED' &&
-            !blockedReferenceLoadingIds.has(allocationRevision.loadingId),
-          summary: projectAccountingDispatchCandidateSummary(allocationRevision.snapshot),
-          lines: owner?.sourceKind === 'SALES_CONTRACT' ? projectAccountingDispatchLines(allocationRevision.lines) : [],
+            maySeeInvoices && !blockedReferenceLoadingIds.has(allocationRevision.loadingId),
+          summary: { ...projectAccountingDispatchCandidateSummary(allocationRevision.snapshot), loadingNumber: allocationRevision.loading.loadingNumber },
+          partnerCaseNumber: partnerCase?.caseNumber ?? null,
+          waybills: waybills.map(({ _count, ...waybill }) => ({
+            ...waybill, number: waybill.number.toString(), hasWaybillArtifact: _count.documentArtifacts === 1,
+          })),
           canManage: Boolean(owner && canManageOwner(owner)) };
       }).sort((left, right) => right.lastActivityAt.getTime() - left.lastActivityAt.getTime()
-        || right.createdAt.getTime() - left.createdAt.getTime() || left.id.localeCompare(right.id)) };
+        || right.createdAt.getTime() - left.createdAt.getTime() || left.id.localeCompare(right.id));
+      if (documentQueue === 'GROUP' || isDispatchDocumentQueueState(documentQueue)) return {
+        manage, confirmation, candidates: undefined, relatedCandidates: undefined, invoiceActionCandidateIds: undefined, pagination: undefined,
+        documentSummary: await readDispatchDocumentQueueSummary(
+          tx, ordered, new Map(candidates.map(row => [row.id, row.allocationRevision.snapshot])),
+          { state: documentQueue, page, pageSize },
+        ),
+      };
+      const contractNumbers = (lines: ReturnType<typeof projectAccountingDispatchLines>) =>
+        [...new Set(lines.flatMap(line => line.contractNumber ? [line.contractNumber] : []))];
+      const hydrate = async (rows: typeof ordered, related: typeof ordered = []) => {
+        const returned = [...rows, ...related];
+        const loadingIds = [...new Set(returned.map(row => row.loadingId))].filter(id => !restrictedLoadingIds.has(id));
+        const [lineGroups, referenceHistory] = await Promise.all([
+          searchLines ?? readLines(returned),
+          loadingIds.length ? tx.accountingAuditLog.findMany({ where: {
+            entityType: 'LogisticsLoading', entityId: { in: loadingIds },
+            action: { in: sepidarReferenceAuditActions },
+          }, select: { entityId: true, ...sepidarReferenceAuditFields }, orderBy: sepidarReferenceAuditOrder }) : [],
+        ]);
+        const historyByLoading = new Map<string, typeof referenceHistory>();
+        for (const entry of referenceHistory) {
+          if (!entry.entityId) continue;
+          const history = historyByLoading.get(entry.entityId) ?? [];
+          history.push(entry);
+          historyByLoading.set(entry.entityId, history);
+        }
+        const project = ({ allocationRevisionId, ...row }: typeof ordered[number]) => {
+          const lines = projectAccountingDispatchLines(lineGroups.get(allocationRevisionId) ?? []);
+          return { ...row, lines, contractNumbers: [...new Set([...row.contractNumbers, ...contractNumbers(lines)])],
+            sepidarLoadingReferenceHistory: historyByLoading.get(row.loadingId) ?? [] };
+        };
+        return { candidates: rows.map(project), relatedCandidates: related.map(project) };
+      };
+      if (!paginated) return {
+        manage, confirmation, candidates: (await hydrate(ordered)).candidates,
+        relatedCandidates: undefined, invoiceActionCandidateIds: undefined, pagination: undefined, documentSummary: undefined,
+      };
+      const matches = ordered.filter(row => {
+        const status = row.loadingStatus === 'CANCELLED' ? 'CANCELLED' : row.status;
+        if (statusFilter && statusFilter !== status && !(statusFilter === 'REJECTED' && status === 'RETURNED')) return false;
+        const invoiceState = !row.sepidarInvoices.length ? 'missing'
+          : row.sepidarInvoices.some(invoice => invoice.amountRial === null) ? 'legacy' : 'registered';
+        if (invoiceFilter && invoiceState !== invoiceFilter) return false;
+        if (!search.length) return true;
+        const values = [
+          row.summary.loadingNumber, ...row.sepidarInvoices.map(invoice => invoice.number), row.summary.driverName, row.summary.plate,
+          row.summary.customerName, row.summary.projectName, row.summary.projectAddress, row.partnerCaseNumber,
+          dispatchSearchStatusLabels[status], ...(row.summary.personalPickup?.partners ?? []).map(partner => partner.name),
+          ...row.waybills.map(waybill => waybill.number), ...row.contractNumbers,
+          ...contractNumbers(projectAccountingDispatchLines(searchLines?.get(row.allocationRevisionId) ?? [])),
+        ].map(normalizeDispatchSearch);
+        return search.every(token => values.some(value => value.includes(token)));
+      });
+      const currentPage = Math.min(page, Math.max(1, Math.ceil(matches.length / pageSize)));
+      const start = (currentPage - 1) * pageSize;
+      const selected = matches.slice(start, start + pageSize);
+      const ids = new Set(selected.map(row => row.id));
+      const loadingIds = new Set(selected.map(row => row.loadingId));
+      const invoiceCandidatesByLoading = new Map<string, string>();
+      for (const row of matches) {
+        if (!loadingIds.has(row.loadingId) || !row.currentSalesInvoice) continue;
+        const activeWaybill = row.waybills.find(waybill => waybill.status === 'ISSUED' || waybill.status === 'EXIT_RECORDED');
+        if (!invoiceCandidatesByLoading.has(row.loadingId) || activeWaybill?.status === 'ISSUED') {
+          invoiceCandidatesByLoading.set(row.loadingId, row.id);
+        }
+      }
+      return {
+        manage, confirmation,
+        documentSummary: undefined,
+        ...await hydrate(selected, ordered.filter(row => loadingIds.has(row.loadingId) && !ids.has(row.id))),
+        invoiceActionCandidateIds: [...invoiceCandidatesByLoading.values()].filter(id => ids.has(id)),
+        pagination: { page: currentPage, pageSize, total: matches.length },
+      };
     });
     res.setHeader('X-Dispatch-Documents-Permission', manage.allowed ? 'MANAGE' : 'VIEW');
-    return res.json({ success: true, data: candidates.map((candidate) => ({ ...candidate,
-      waybills: candidate.waybills.map((waybill) => ({ ...waybill, number: waybill.number.toString() })) })) });
+    if (documentSummary) {
+      res.setHeader('Cache-Control', 'private, no-store');
+      return res.json({ success: true, data: documentSummary });
+    }
+    return res.json({ success: true, data: candidates, relatedCandidates, invoiceActionCandidateIds, pagination, capabilities: {
+      canManageAccountingCandidates: manage.allowed,
+      canManageAccountingConfirmation: confirmation.allowed,
+    } });
   } catch (error) { return dispatchError(res, error); }
 });
 
-router.post('/loadings/:loadingId/sepidar-reference', accountingDispatchEdit, async (req: WorkspaceRequest & FeatureRequest, res: Response) => {
-  const raw = req.body?.value;
-  if (raw !== null && typeof raw !== 'string') return res.status(400).json({ success: false, error: 'شماره بارگیری سپیدار را وارد کنید.' });
-  const value = (raw === null ? null : raw.trim().replace(/[۰-۹]/g, digit => String(digit.charCodeAt(0) - 1776))
-    .replace(/[٠-٩]/g, digit => String(digit.charCodeAt(0) - 1632))) || null;
-  if (value !== null && !/^[0-9]{1,64}$/.test(value)) return res.status(400).json({ success: false, error: 'شماره بارگیری سپیدار باید فقط رقم باشد.' });
+const authorizeSepidarInvoices = async (tx: Prisma.TransactionClient, req: WorkspaceRequest & FeatureRequest, loadingId: string) => {
+  const candidates = await tx.accountingDispatchCandidate.findMany({
+    where: { allocationRevision: { loadingId } },
+    select: { allocationRevision: { select: { sourceKind: true, partnerCaseId: true } } },
+  });
+  if (!candidates.length) return false;
+  const partnerCases = [...new Set(candidates.flatMap(candidate => candidate.allocationRevision.sourceKind === 'PARTNER_CASE'
+    ? candidate.allocationRevision.partnerCaseId ? [candidate.allocationRevision.partnerCaseId] : [''] : []))].sort();
+  if (partnerCases.length) {
+    if (partnerCases.includes('')) return false;
+    const authority = createAuditedPartnerAuthorization(tx, { actorId: req.user!.id, purpose: 'ACCOUNTING', channel: 'API' }, {
+      correlationId: String(req.get('X-Correlation-Id') || randomUUID()), reason: 'ثبت شماره فاکتور سپیدار',
+    });
+    for (const caseId of partnerCases) {
+      if (!(await authority.authorize('ACCOUNTING_WRITE', { kind: 'CASE', id: caseId })).ok) return false;
+    }
+    const actor = await tx.user.findUnique({ where: { id: req.user!.id }, select: { partnerProfile: { select: { id: true } } } });
+    if (actor?.partnerProfile) return false;
+  } else {
+    await tx.$queryRaw`SELECT id FROM users WHERE id = ${req.user!.id} FOR UPDATE`;
+    await tx.$queryRaw`SELECT revision FROM effective_authorization_state WHERE id = 1 FOR UPDATE`;
+  }
+  return readPartnerDispatchAccountingCapability(tx, req.user!.id);
+};
+
+const recentSepidarChange = (tx: Prisma.TransactionClient, loadingId: string) =>
+  tx.accountingAuditLog.findFirst({ where: {
+    entityType: 'LogisticsLoading', entityId: loadingId, action: { in: sepidarReferenceAuditActions },
+  }, select: { id: true, createdAt: true }, orderBy: sepidarReferenceAuditOrder });
+
+const readSepidarInvoices = async (tx: Prisma.TransactionClient, loadingId: string) => presentSepidarInvoices(
+  await tx.sepidarDispatchInvoice.findMany({ where: { loadingId }, select: sepidarInvoiceFields, orderBy: { number: 'asc' } }),
+);
+
+const sepidarInvoicePath = '/loadings/:loadingId/sepidar-reference';
+const lockLoadingForSepidar = async (tx: Prisma.TransactionClient, loadingId: string) => {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'LOGISTICS_LOADING:' + loadingId}))`;
+  await tx.$queryRaw`SELECT id FROM logistics_loadings WHERE id = ${loadingId} FOR UPDATE`;
+};
+
+router.get(sepidarInvoicePath, accountingDispatchEdit, async (req: WorkspaceRequest & FeatureRequest, res: Response) => {
+  res.setHeader('Cache-Control', 'private, no-store');
+  try {
+    const data = await prisma.$transaction(async tx => {
+      const loadingId = req.params.loadingId;
+      if (!await authorizeSepidarInvoices(tx, req, loadingId)) return null;
+      await lockLoadingForSepidar(tx, loadingId);
+      const loading = await tx.logisticsLoading.findUnique({ where: { id: loadingId }, select: { status: true } });
+      if (loading?.status !== 'FINALIZED') return null;
+      return { invoices: await readSepidarInvoices(tx, loadingId),
+        expectedVersion: (await recentSepidarChange(tx, loadingId))?.id ?? null,
+        totalRial: await readSepidarLoadingTotal(tx, loadingId) };
+    });
+    return data ? res.json({ success: true, data }) : res.sendStatus(404);
+  } catch (error) { return dispatchError(res, error); }
+});
+
+router.post(sepidarInvoicePath, accountingDispatchEdit, async (req: WorkspaceRequest & FeatureRequest, res: Response) => {
+  const invoices = parseSepidarInvoices(req.body?.invoices);
+  if (!invoices) return res.status(400).json({ success: false, error: 'برای هر فاکتور سپیدار یک شماره یکتا و مبلغ معتبر به ریال وارد کنید.' });
   const expectedVersion = req.body?.expectedVersion ?? null;
-  if (expectedVersion !== null && (typeof expectedVersion !== 'string' || expectedVersion.length === 0 || expectedVersion.length > 64))
-    return res.status(400).json({ success: false, error: 'نسخه شماره قبلی معتبر نیست.' });
+  if (expectedVersion !== null && (typeof expectedVersion !== 'string' || !expectedVersion || expectedVersion.length > 64))
+    return res.status(400).json({ success: false, error: 'نسخه فاکتورهای قبلی معتبر نیست.' });
   const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
   if (reason.length > 200) return res.status(400).json({ success: false, error: 'دلیل باید کوتاه باشد.' });
   try {
     const result = await prisma.$transaction(async tx => {
       const loadingId = req.params.loadingId;
-      const candidates = await tx.accountingDispatchCandidate.findMany({
-        where: { allocationRevision: { loadingId } },
-        select: { allocationRevision: { select: { sourceKind: true, partnerCaseId: true } } },
-      });
-      if (!candidates.length) return 'missing' as const;
-      const partnerCases = [...new Set(candidates.flatMap(candidate => candidate.allocationRevision.sourceKind === 'PARTNER_CASE'
-        ? candidate.allocationRevision.partnerCaseId ? [candidate.allocationRevision.partnerCaseId] : [''] : []))].sort();
-      if (partnerCases.length) {
-        if (partnerCases.includes('')) return 'missing' as const;
-        const authority = createAuditedPartnerAuthorization(tx, { actorId: req.user!.id, purpose: 'ACCOUNTING', channel: 'API' }, {
-          correlationId: String(req.get('X-Correlation-Id') || randomUUID()), reason: 'ثبت شماره بارگیری سپیدار',
-        });
-        for (const caseId of partnerCases) {
-          if (!(await authority.authorize('ACCOUNTING_WRITE', { kind: 'CASE', id: caseId })).ok) return 'missing' as const;
-        }
-      } else {
-        await tx.$queryRaw`SELECT id FROM users WHERE id = ${req.user!.id} FOR UPDATE`;
-        await tx.$queryRaw`SELECT revision FROM effective_authorization_state WHERE id = 1 FOR UPDATE`;
-      }
-      if (!await readPartnerDispatchAccountingCapability(tx, req.user!.id)) return 'missing' as const;
-      const [loading] = await tx.$queryRaw<{ status: string; sepidarLoadingReference: string | null }[]>
-        `SELECT status, "sepidarLoadingReference" FROM logistics_loadings WHERE id = ${loadingId} FOR UPDATE`;
+      if (!await authorizeSepidarInvoices(tx, req, loadingId)) return 'missing' as const;
+      await lockLoadingForSepidar(tx, loadingId);
+      const loading = await tx.logisticsLoading.findUnique({ where: { id: loadingId }, select: { status: true } });
       if (!loading) return 'missing' as const;
       if (loading.status !== 'FINALIZED') return 'not-finalized' as const;
-      const before = loading.sepidarLoadingReference;
-      const priorReference = await tx.accountingAuditLog.findFirst({ where: {
-        entityType: 'LogisticsLoading', entityId: loadingId,
-        action: { in: sepidarReferenceAuditActions },
-      }, select: { id: true, createdAt: true }, orderBy: sepidarReferenceAuditOrder });
+      const before = await readSepidarInvoices(tx, loadingId);
+      const priorReference = await recentSepidarChange(tx, loadingId);
       if (expectedVersion !== (priorReference?.id ?? null)) return 'stale' as const;
-      if (before === null && !value) return 'empty' as const;
-      const initial = before === null && !priorReference;
+      if (!before.length && !invoices.length) return 'empty' as const;
+      const initial = !before.length && !priorReference;
       if (!initial && !reason) return 'reason-required' as const;
-      if (before === value) return 'unchanged' as const;
-      const updated = await tx.logisticsLoading.updateMany({ where: { id: loadingId, status: 'FINALIZED' },
-        data: { sepidarLoadingReference: value } });
-      if (!updated.count) return 'stale' as const;
-      // The database transaction timestamp can precede a writer that finished while this request waited.
+      const amountsByNumber = new Map(invoices.map(invoice => [invoice.number, invoice.amountRial]));
+      const unchanged = before.length === invoices.length && before.every(entry => amountsByNumber.get(entry.number) === entry.amountRial);
+      if (unchanged) return 'unchanged' as const;
+      const totalRial = invoices.length ? await readSepidarLoadingTotal(tx, loadingId) : null;
+      if (invoices.length && (totalRial === null || sumSepidarInvoiceAmounts(invoices) !== totalRial)) return 'amount' as const;
+      await tx.sepidarDispatchInvoice.deleteMany({ where: { loadingId } });
+      if (invoices.length) {
+        await tx.sepidarDispatchInvoice.createMany({ data: invoices.map(invoice => ({ ...invoice, loadingId })) });
+      }
+      // The prior writer may have committed after this transaction started.
       const createdAt = new Date(Math.max(Date.now(), (priorReference?.createdAt.getTime() ?? 0) + 1));
       const auditEntry = await tx.accountingAuditLog.create({ data: {
         action: initial ? 'REGISTER_SEPIDAR_LOADING_REFERENCE' : 'CORRECT_SEPIDAR_LOADING_REFERENCE', actorId: req.user!.id,
-        entityType: 'LogisticsLoading', entityId: loadingId, beforeState: { sepidarLoadingReference: before },
-        afterState: { sepidarLoadingReference: value }, note: initial ? `شماره بارگیری سپیدار: ${value}` : reason, createdAt,
+        entityType: 'LogisticsLoading', entityId: loadingId, beforeState: { invoices: before },
+        afterState: { invoices, totalRial }, note: initial ? null : reason, createdAt,
       }, select: sepidarReferenceAuditFields });
       return { initial, auditEntry };
     });
     if (result === 'missing') return res.sendStatus(404);
     if (result === 'not-finalized') return res.status(409).json({ success: false, error: 'بارگیری نهایی نشده است.' });
-    if (result === 'stale') return res.status(409).json({ success: false, code: 'SEPIDAR_REFERENCE_STALE', error: 'شماره این بارگیری تغییر کرده است. صفحه را به‌روز کنید.' });
-    if (result === 'empty') return res.status(400).json({ success: false, error: 'شماره بارگیری سپیدار را وارد کنید.' });
-    if (result === 'reason-required') return res.status(400).json({ success: false, code: 'SEPIDAR_REFERENCE_REASON_REQUIRED', error: 'دلیل اصلاح شماره بارگیری سپیدار الزامی است.' });
-    if (result === 'unchanged') return res.status(400).json({ success: false, error: 'شماره تغییری نکرده است.' });
-    return res.status(result.initial ? 201 : 200).json({ success: true, data: { value, auditEntry: result.auditEntry } });
+    if (result === 'stale') return res.status(409).json({ success: false, code: 'SEPIDAR_REFERENCE_STALE', error: 'فاکتورهای این بارگیری تغییر کرده‌اند. دوباره دریافت کنید.' });
+    if (result === 'amount') return res.status(409).json({ success: false, code: 'SEPIDAR_AMOUNT_MISMATCH', error: 'جمع فاکتورها باید دقیقاً با جمع معتبر کل بارگیری برابر باشد.' });
+    if (result === 'empty') return res.status(400).json({ success: false, error: 'حداقل یک فاکتور سپیدار وارد کنید.' });
+    if (result === 'reason-required') return res.status(400).json({ success: false, code: 'SEPIDAR_REFERENCE_REASON_REQUIRED', error: 'دلیل اصلاح فاکتورهای سپیدار الزامی است.' });
+    if (result === 'unchanged') return res.status(400).json({ success: false, error: 'فاکتورها تغییری نکرده‌اند.' });
+    res.setHeader('X-Accounting-Commit-Acknowledged-Ms', Date.now().toString());
+    return res.status(result.initial ? 201 : 200).json({ success: true, data: { invoices, auditEntry: result.auditEntry } });
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')
-      return res.status(409).json({ success: false, error: 'این شماره برای بارگیری دیگری ثبت شده است.' });
+      return res.status(409).json({ success: false, error: 'یکی از شماره‌ها برای بارگیری دیگری ثبت شده است.' });
     return dispatchError(res, error);
   }
 });
@@ -894,7 +1134,7 @@ const accountingReadFailure = (res: Response, error: unknown) => {
     success: false, code: error.code, error: error.message, message: error.message, actionUrl: error.actionUrl,
   });
   const trackingId = `ACC-${Date.now().toString(36).toUpperCase()}`;
-  console.error('Accounting read technical failure:', { trackingId, error });
+  reportAccountingRequestFailure(res, error, trackingId);
   return res.status(500).json({ success: false, trackingId,
     error: 'دریافت اطلاعات حسابداری موقتاً ممکن نیست؛ دوباره تلاش کنید و در صورت تکرار، کد پیگیری را به پشتیبانی بدهید.' });
 };
@@ -904,7 +1144,6 @@ export const getAccountingWorkspaceResponse = async (req: AuthRequest, res: Resp
     const workspace = await getAccountingWorkspace(req.query, { userId: req.user!.id });
     res.json({ success: true, data: workspace });
   } catch (error) {
-    console.error('Accounting workspace error:', error);
     accountingReadFailure(res, error);
   }
 };
@@ -916,10 +1155,10 @@ export const createAccountingDashboardResponse = (
 ) => async (req: AuthRequest, res: Response) => {
   res.set('Cache-Control', 'private, no-store');
   try {
-    const dashboard = await loadDashboard(req.query, req.query.range, new Date(), { userId: req.user!.id });
+    const dashboard = await loadDashboard(req.query, req.query.range, undefined, { userId: req.user!.id },
+      error => reportAccountingRequestFailure(res, error));
     res.json({ success: true, data: dashboard });
   } catch (error) {
-    console.error('Accounting dashboard error:', error);
     accountingReadFailure(res, error);
   }
 };
@@ -953,10 +1192,9 @@ export const createAccountingFinancialTrendResponse = (
 ) => async (req: AuthRequest, res: Response) => {
   res.set('Cache-Control', 'private, no-store');
   try {
-    const trend = await loadTrend(req.query.range, new Date(), { userId: req.user!.id });
+    const trend = await loadTrend(req.query.range, undefined, { userId: req.user!.id });
     res.json({ success: true, data: trend });
   } catch (error) {
-    console.error('Accounting financial trend error:', error);
     accountingReadFailure(res, error);
   }
 };
@@ -977,7 +1215,6 @@ export const createAccountingContractsResponse = (
       items: data.items.map((record: any) => projectAccountingActions(record, capabilities)),
     } });
   } catch (error) {
-    console.error('Accounting contracts error:', error);
     accountingReadFailure(res, error);
   }
 };

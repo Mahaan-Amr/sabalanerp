@@ -1,4 +1,5 @@
 import api from '@/lib/api';
+import { createDutyCountRequests } from './dutyCountRequests';
 
 export type CrossWorkspaceDutyView = 'assigned' | 'available' | 'triage' | 'history';
 
@@ -57,6 +58,13 @@ export const crossWorkspaceDutyApi = {
   list: (workspace: string, view: CrossWorkspaceDutyView, search?: string) => api.get<{ success: true; data: CrossWorkspaceDuty[] }>(
     `/duties/workspaces/${workspace}/duties`, { params: { view, ...(view === 'history' && search ? { search } : {}) } },
   ),
+  historyPage: (workspace: string, search: string, after?: string) => api.get<{
+    success: true;
+    data: CrossWorkspaceDuty[];
+    nextCursor: string | null;
+  }>(`/duties/workspaces/${workspace}/duties`, {
+    params: { view: 'history', page: 'cursor', ...(search ? { search } : {}), ...(after ? { after } : {}) },
+  }),
   detail: (workspace: string, dutyId: string) => api.get<{ success: true; data: CrossWorkspaceDuty }>(
     `/duties/workspaces/${workspace}/duties/${dutyId}`,
   ),
@@ -102,3 +110,7 @@ export const crossWorkspaceDutyApi = {
     { headers: { 'Content-Type': 'multipart/form-data' } },
   ),
 };
+
+export const requestCrossWorkspaceDutySummary = createDutyCountRequests(async workspace => (
+  (await crossWorkspaceDutyApi.summary(workspace)).data.data
+));

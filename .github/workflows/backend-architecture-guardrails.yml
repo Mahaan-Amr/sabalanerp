@@ -41,9 +41,14 @@ jobs:
         run: npm run lint:backend
         env:
           NODE_OPTIONS: --max-old-space-size=4096
-      - run: npm run build:backend
+      - name: Type-check all backend sources and tests
+        working-directory: backend
+        run: npm exec -- tsc --noEmit -p tsconfig.json
         env:
-          # Match the compiler heap used by the backend Docker build.
+          NODE_OPTIONS: --max-old-space-size=4096
+      - name: Compile backend image and shipment cutover at the Docker heap limit
+        run: npm run build:image --prefix backend
+        env:
           NODE_OPTIONS: --max-old-space-size=3072
       - run: npm run test:personnel-performance-operations
       - name: Diagnose deployment Compose rendering

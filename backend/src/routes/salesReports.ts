@@ -1,14 +1,17 @@
 import express, { Response } from 'express';
 import path from 'path';
 import { Prisma } from '@prisma/client';
-import * as XLSX from 'xlsx';
+import { buildSalesReportWorkbook, SalesReportWorkbookUnavailable, tryAcquireSalesReportWorkbookSlot } from '../services/salesReportWorkbookExport';
 import { protect } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES, WorkspaceRequest } from '../middleware/workspace';
-import { buildSalesReport, getSalesReportSellers, SalesReportAccess } from '../services/salesReportingService';
+import {
+  buildSalesReport, buildSalesReportPage, buildSalesReportSummary, getSalesReportSellers,
+  SALES_REPORT_SECTIONS, SalesReportAccess, SalesReportDrilldown, SalesReportQuery, validateSalesReportScope,
+} from '../services/salesReportingService';
 import { generatePdfFromHtml } from '../utils/pdf';
 import { downloadAndRemoveDocumentPdf } from '../services/documentPdfDownload';
 import { renderReportPdfHeaderTemplate, renderYekanFontFaces } from '../utils/printTemplate';
-import { formatMoney, roundMoneyFields } from '../utils/money';
+import { formatMoney } from '../utils/money';
 
 const router = express.Router();
 import { prisma } from '../lib/prisma';
@@ -142,6 +145,48 @@ router.get('/overview', ...reportAccess, async (req: WorkspaceRequest, res: Resp
   catch (error: any) { res.status(error.message.includes('permitted') ? 403 : 400).json({ success: false, error: error.message }); }
 });
 
+router.get('/summary', ...reportAccess, async (req: WorkspaceRequest, res: Response) => {
+  const section = SALES_REPORT_SECTIONS.find((name) => name === (req.query.section ?? 'overview'));
+  if (!section) return res.status(400).json({ success: false, error: 'Invalid sales report section' });
+  try {
+    return res.json({ success: true, data: await buildSalesReportSummary(accessFor(req), req.query, section) });
+  } catch (error: any) {
+    return res.status(error.message.includes('permitted') ? 403 : 400).json({ success: false, error: error.message });
+  }
+});
+
+const parseDrilldown = ({ kind = 'contracts', key, commercialFlowVersion }: WorkspaceRequest['query']): SalesReportDrilldown | null => {
+  if (kind === 'contracts' || kind === 'accountingUnassigned' || kind === 'accountingConflict') return { kind };
+  if (typeof key !== 'string' || !key || key.length > 200) return null;
+  if (kind === 'status') {
+    if (commercialFlowVersion !== '0' && commercialFlowVersion !== '1') return null;
+    return { kind, key, commercialFlowVersion: commercialFlowVersion === '1' ? 1 : 0 };
+  }
+  if (kind === 'trend' || kind === 'customer' || kind === 'product' || kind === 'seller' || kind === 'accountingSeller') return { kind, key };
+  return null;
+};
+
+router.get('/details', ...reportAccess, async (req: WorkspaceRequest, res: Response) => {
+  const selection = parseDrilldown(req.query);
+  const requestedPage = req.query.page ?? '1';
+  const requestedSize = req.query.pageSize ?? '25';
+  if (!selection || typeof requestedPage !== 'string' || typeof requestedSize !== 'string'
+    || !/^\d{1,9}$/.test(requestedPage) || !/^\d{1,3}$/.test(requestedSize)
+    || Number(requestedPage) < 1 || Number(requestedSize) < 1 || Number(requestedSize) > 100) {
+    return res.status(400).json({ success: false, error: 'Invalid sales report drilldown or page' });
+  }
+  try {
+    return res.json({
+      success: true,
+      data: await buildSalesReportPage(accessFor(req), req.query, selection, {
+        page: Number(requestedPage), pageSize: Number(requestedSize),
+      }),
+    });
+  } catch (error: any) {
+    return res.status(error.message.includes('permitted') ? 403 : 400).json({ success: false, error: error.message });
+  }
+});
+
 router.get('/sellers', ...reportAccess, async (req: WorkspaceRequest, res: Response) => {
   const access = accessFor(req);
   res.json({ success: true, data: await getSalesReportSellers(access, typeof req.query.departmentId === 'string' ? req.query.departmentId : null) });
@@ -215,40 +260,78 @@ router.post('/export.pdf', ...reportAccess, async (req: WorkspaceRequest, res: R
   } catch (error: any) { res.status(400).json({ success: false, error: error.message }); }
 });
 
-router.post('/export.xlsx', ...reportAccess, async (req: WorkspaceRequest, res: Response) => {
+type PreparedSalesWorkbook = { access: SalesReportAccess; sessionId: string | undefined; filters: SalesReportQuery; buffer: Buffer };
+
+router.post('/export.xlsx', ...reportAccess, async (req: WorkspaceRequest, res: Response, next) => {
+  if (res.destroyed) return;
+  res.setHeader('Cache-Control', 'no-store, private');
+  const release = tryAcquireSalesReportWorkbookSlot();
+  if (!release) {
+    res.setHeader('Retry-After', '2');
+    return res.status(429).json({ success: false, code: 'SALES_WORKBOOK_BUSY' });
+  }
+
+  const controller = new AbortController();
+  let ready = false;
+  const onClose = () => {
+    controller.abort();
+    if (ready) release();
+  };
+  res.once('close', onClose);
   try {
-    const report = await buildSalesReport(accessFor(req), req.body?.filters || {});
-    const config = safeConfig(req.body?.configuration || {});
-    const workbook = XLSX.utils.book_new();
-    const add = (name: string, rows: any[]) => XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(rows), name.slice(0, 31));
-    if (config.sections.includes('overview')) add('نمای کلی', [roundMoneyFields(report.cards, ['grossRealized', 'adjustments', 'netRealized', 'pipelineValue', 'lostValue'])]);
-    if (config.sections.includes('contracts') && config.includeTables) add('قراردادها', report.contracts.map((row: any) => roundMoneyFields(Object.fromEntries(config.contractColumns.map((column) => [column, row[column === 'status' ? 'statusLabel' : column]])), ['amount'])));
-    if (config.sections.includes('customers')) add('مشتریان', report.customers.map((row: any) => roundMoneyFields(row, ['value'])));
-    if (config.sections.includes('products')) add('محصولات', report.products.map((row: any) => roundMoneyFields(row, ['value'])));
-    if (config.sections.includes('finance')) add('پرداخت و وصول', [roundMoneyFields({ ...report.finance, coverage: `${report.finance.coverage.coveredContracts}/${report.finance.coverage.totalContracts}` }, ['plannedPaymentAmount', 'receivedAmount', 'receivableAmount'])]);
-    if (config.sections.includes('delivery')) add('تحویل و بارگیری', [{ ...report.delivery, coverage: `${report.delivery.coverage.coveredContracts}/${report.delivery.coverage.totalContracts}` }]);
-    if (config.sections.includes('sellers') && report.permissions.canViewSellerComparisons) add('فروشندگان', report.sellers.map((row: any) => roundMoneyFields(row, ['pipelineValue', 'realizedValue', 'adjustments', 'netRealized'])));
-    if (config.sections.includes('accountingRegistered') && report.permissions.canViewSellerComparisons) {
-      if (!report.accountingRegistered.available) throw new Error('Accounting data is unavailable');
-      add('ثبت حسابداری فروشندگان', [
-        ...report.accountingRegistered.rows.map((row: any) => roundMoneyFields({ seller: row.name, contractCount: row.contractCount, totalAmountRial: row.totalAmount }, ['totalAmountRial'])),
-        ...(report.accountingRegistered.unassigned ? [roundMoneyFields({ seller: 'فروشندهٔ قطعی تخصیص‌نیافته', contractCount: report.accountingRegistered.unassigned.contractCount, totalAmountRial: report.accountingRegistered.unassigned.totalAmount }, ['totalAmountRial'])] : []),
-        roundMoneyFields({ seller: 'جمع کل', contractCount: report.accountingRegistered.contractCount, totalAmountRial: report.accountingRegistered.totalAmount }, ['totalAmountRial']),
-      ]);
-      add('جزئیات ثبت حسابداری', report.accountingRegistered.details.map((row: any) => roundMoneyFields({
-        contractNumber: row.contractNumber,
-        customer: row.customer,
-        realizedSeller: row.sellerName,
-        financiallyApprovedAt: row.financiallyApprovedAt,
-        amountRial: row.amount,
-        status: row.hasConflict ? 'تعارض رکورد مالی' : 'معتبر',
-      }, ['amountRial'])));
+    const access = accessFor(req);
+    const sessionId = req.sessionId;
+    const filters = req.body?.filters || {};
+    const { sections, contractColumns, includeTables } = safeConfig(req.body?.configuration || {});
+    const {
+      cards, contracts, customers, products, finance, delivery, sellers, accountingRegistered, permissions,
+    } = await buildSalesReport(access, filters);
+    if (res.destroyed) return;
+
+    const buffer = await buildSalesReportWorkbook({
+      cards, contracts, customers, products, finance, delivery, sellers, accountingRegistered, permissions,
+    }, { sections, contractColumns, includeTables }, controller.signal);
+    if (res.destroyed) return;
+
+    res.locals.salesWorkbook = { access, sessionId, filters, buffer } satisfies PreparedSalesWorkbook;
+    res.once('finish', () => {
+      res.off('close', onClose);
+      release();
+    });
+    ready = true;
+    next();
+  } catch (error) {
+    if (res.destroyed) return;
+    if (error instanceof SalesReportWorkbookUnavailable) {
+      return res.status(503).json({ success: false, code: 'SALES_WORKBOOK_UNAVAILABLE' });
     }
-    const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', 'attachment; filename="sales-report.xlsx"');
-    res.send(buffer);
-  } catch (error: any) { res.status(400).json({ success: false, error: error.message }); }
+    const message = error instanceof Error ? error.message : 'Workbook generation failed';
+    return res.status(400).json({ success: false, error: message });
+  } finally {
+    if (!ready) {
+      res.off('close', onClose);
+      release();
+    }
+  }
+}, ...reportAccess, async (req: WorkspaceRequest, res: Response) => {
+  const { access, sessionId, filters, buffer }: PreparedSalesWorkbook = res.locals.salesWorkbook;
+  const current = accessFor(req);
+  if (req.sessionId !== sessionId || current.userId !== access.userId || current.role !== access.role
+      || current.departmentId !== access.departmentId || current.canManage !== access.canManage
+      || current.canCompany !== access.canCompany) {
+    return res.status(403).json({ success: false, code: 'SALES_WORKBOOK_ACCESS_CHANGED' });
+  }
+  try {
+    await validateSalesReportScope(current, filters);
+  } catch {
+    return res.status(403).json({ success: false, code: 'SALES_WORKBOOK_ACCESS_CHANGED' });
+  }
+  if (res.destroyed) return;
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', 'attachment; filename="sales-report.xlsx"');
+  res.setHeader('Content-Length', buffer.byteLength);
+  res.setTimeout(60_000, () => res.destroy());
+  res.end(buffer);
 });
 
 export default router;

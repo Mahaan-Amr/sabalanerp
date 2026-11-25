@@ -43,7 +43,7 @@ import { salesAPI, crmAPI, dashboardAPI, servicesAPI } from '@/lib/api';
 import PersianCalendar from '@/lib/persian-calendar';
 import PersianCalendarComponent from '@/components/PersianCalendar';
 import { downloadBlobResponse } from '@/lib/downloadFile';
-import { formatDisplayNumber, formatPrice, formatPriceWithRial, formatDimensions, formatSquareMeters, formatQuantity, normalizeDigits, sumNumericValues, tomanToRial, toFiniteNumber } from '@/lib/numberFormat';
+import { formatDisplayNumber, formatPrice, formatPriceWithRial, formatDimensions, formatSquareMeters, formatQuantity, sumNumericValues, tomanToRial, toFiniteNumber } from '@/lib/numberFormat';
 import FormattedNumberInput from '@/components/FormattedNumberInput';
 import EnhancedDropdown from '@/components/EnhancedDropdown';
 import StoneCanvas from '@/components/StoneCanvas';
@@ -55,6 +55,7 @@ import {
   ErpNeumorphicWorkflowLayout,
   ErpPressable,
   ErpSelect,
+  ErpSkeleton,
   ErpTextarea
 } from '@/components/erp';
 
@@ -114,6 +115,8 @@ import { useRemainingStoneModal } from '@/features/contract-creation/hooks/useRe
 import { usePaymentHandlers } from '@/features/contract-creation/hooks/usePaymentHandlers';
 import { useDigitalSignature } from '@/features/contract-creation/hooks/useDigitalSignature';
 import { useStairSystemV2 } from '@/features/contract-creation/hooks/useStairSystemV2';
+import { useStairStoneSearch } from './hooks/useStairStoneSearch';
+import { createStairStoneSearch } from './services/stairStoneSearch';
 import { useStairLayerManagement } from '@/features/contract-creation/hooks/useStairLayerManagement';
 import { useDeliverySchedule } from '@/features/contract-creation/hooks/useDeliverySchedule';
 import { useContractSubmission } from '@/features/contract-creation/hooks/useContractSubmission';
@@ -143,7 +146,7 @@ import { createLatestRequestTracker } from '@/features/sales/latestRequestTracke
 import { PRODUCT_TYPES, WIZARD_STEPS } from '@/features/contract-creation/constants/contract.constants';
 
 // Import utilities
-import { generateCompactProductName, generateFullProductName, generateSlabContractProductName, inferCatalogContractType, productSupportsContractRoute, productSupportsContractType } from '@/features/contract-creation/utils/productUtils';
+import { generateCompactProductName, generateSlabContractProductName, inferCatalogContractType, productSupportsContractRoute, productSupportsContractType } from '@/features/contract-creation/utils/productUtils';
 import {
   hasLayerEdgeSelection,
   deriveLayerEdgesFromTools,
@@ -628,66 +631,6 @@ interface CreateContractWizardProps {
   correctionExpiresAt?: string | null;
 }
 
-const normalizeProductSearchText = (value: unknown): string =>
-  normalizeDigits(String(value ?? ''))
-    .replace(/ي/g, 'ی')
-    .replace(/ك/g, 'ک')
-    .replace(/\u200c/g, ' ')
-    .toLowerCase();
-
-const productMatchesSearch = (
-  product: Product,
-  term: string,
-  generatedName?: string
-): boolean => {
-  const searchTerms = normalizeProductSearchText(term).trim().split(/\s+/).filter(Boolean);
-  if (searchTerms.length === 0) return true;
-
-  const searchableFields = [
-    product.code,
-    product.namePersian,
-    product.name,
-    product.fullName,
-    generatedName,
-    product.cuttingDimensionNamePersian,
-    product.stoneTypeNamePersian,
-    product.widthName,
-    product.thicknessName,
-    product.mineNamePersian,
-    product.finishNamePersian,
-    product.colorNamePersian,
-    product.qualityNamePersian,
-    product.description,
-    product.widthValue?.toString(),
-    product.thicknessValue?.toString(),
-    product.basePrice?.toString(),
-    `${product.widthValue}×${product.thicknessValue}`,
-    `عرض ${product.widthValue}×ضخامت ${product.thicknessValue}`
-  ].filter(Boolean);
-
-  const searchableText = normalizeProductSearchText(searchableFields.join(' '));
-  return searchTerms.every((searchTerm) => searchableText.includes(searchTerm));
-};
-
-const uniqueProductsByIdentity = (items: Product[]): Product[] => {
-  const seenIds = new Set<string>();
-  const seenCodes = new Set<string>();
-
-  return items.filter((item) => {
-    if (item.id) {
-      if (seenIds.has(item.id)) return false;
-      seenIds.add(item.id);
-      return true;
-    }
-    if (item.code) {
-      if (seenCodes.has(item.code)) return false;
-      seenCodes.add(item.code);
-      return true;
-    }
-    return true;
-  });
-};
-
 const sumRemainingStoneArea = (stones: RemainingStone[] | undefined): number =>
   (stones || []).reduce((sum, stone) => sum + toFiniteNumber(stone.squareMeters), 0);
 
@@ -747,7 +690,6 @@ export default function CreateContractWizard({
     setCustomerSearchTerm,
     productSearchTerm,
     setProductSearchTerm,
-    stateRestored,
     setStateRestored,
     restorationAttempted
   } = useContractWizard();
@@ -757,6 +699,9 @@ export default function CreateContractWizard({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [generalErrorKind, setGeneralErrorKind] = useState<'error' | 'permission' | 'stale'>('error');
   const [dataLoadingError, setDataLoadingError] = useState<{ message: string; kind: 'error' | 'permission' | 'stale' }>();
+  const [customerSelectionPending, setCustomerSelectionPending] = useState(false);
+  const [authorizedCustomerKey, setAuthorizedCustomerKey] = useState<string>();
+  const [restoredProductConfiguration, setRestoredProductConfiguration] = useState(false);
 
   useEffect(() => {
     if (!Object.values(errors).some(Boolean)) return;
@@ -894,16 +839,15 @@ export default function CreateContractWizard({
     setDataLoadingError(undefined);
   }, []);
 
-  // Data loading is now provided by useDataLoading hook
+  const needsProductCatalog = currentStep === 4 || restoredProductConfiguration;
   const dataLoading = useDataLoading({
-    autoLoad: !stateRestored, // Only auto-load if not restoring from localStorage
+    productStepActive: needsProductCatalog,
     onError: handleDataLoadingError,
     onDataLoaded: handleDataLoaded
   });
 
   // Extract data from dataLoading hook
   const {
-    customers,
     products,
     departments,
     cuttingTypes,
@@ -913,25 +857,34 @@ export default function CreateContractWizard({
     userDepartment,
     currentUser,
     capabilities,
-    setCustomers,
-    setProducts,
-    setDepartments,
-    setCuttingTypes,
-    setSubServices,
-    setStoneFinishings,
-    loadCustomers,
+    productCatalogReady,
+    productCatalogError,
+    loadProductCatalog,
     loadInitialData: loadData,
     getCuttingTypePricePerMeter
   } = dataLoading;
+  const customerScopeId = currentUser?.id || currentUser?.username;
+  const customerType = isCollaborationContract ? 'Collaborative' : undefined;
+  const customerId = wizardData.customerId;
+  const customerKey = customerScopeId && customerId ? JSON.stringify([customerScopeId, customerType, customerId]) : undefined;
+  const customerSelectionAuthorized = Boolean(customerKey && capabilities.canLoadCustomers && authorizedCustomerKey === customerKey);
+  const applyCustomerSelectionAccess = useCallback((permitted: boolean) => {
+    setAuthorizedCustomerKey(current => permitted ? customerKey : current === customerKey ? undefined : current);
+  }, [customerKey]);
+
+  useEffect(() => {
+    if (currentStep <= 2 || isContractEditMode || !customerKey || customerSelectionAuthorized || !capabilities.canLoadCustomers) return;
+    const controller = new AbortController();
+    crmAPI.getCustomerOptions({ id: customerId, limit: 1, customerType }, controller.signal).then(response => {
+      assertSuccessfulSalesResponse(response);
+      if (!controller.signal.aborted && response.data.data.some(row => row.id === customerId)) {
+        setAuthorizedCustomerKey(customerKey);
+      }
+    }).catch(() => undefined);
+    return () => controller.abort();
+  }, [currentStep, isContractEditMode, customerId, customerKey, customerSelectionAuthorized, capabilities.canLoadCustomers, customerType]);
   const sellerProductHistory = useSellerProductHistory(
     currentUser?.id || currentUser?.username || null
-  );
-
-  const customerOptions = useMemo(
-    () => isCollaborationContract
-      ? customers.filter((customer) => customer.customerType === 'Collaborative')
-      : customers,
-    [customers, isCollaborationContract]
   );
 
   const discountBaseSubtotal = useMemo(
@@ -1063,20 +1016,6 @@ export default function CreateContractWizard({
     payableContractTotal,
     setWizardData
   ]);
-
-  useEffect(() => {
-    if (!capabilities.canLoadCustomers) return;
-
-    const search = customerSearchTerm.trim();
-    const timeoutId = window.setTimeout(() => {
-      loadCustomers({
-        limit: search ? 20 : 3,
-        search: search || undefined
-      });
-    }, search ? 300 : 0);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [capabilities.canLoadCustomers, customerSearchTerm, loadCustomers]);
 
   // Delivery step state is now provided by useDeliverySchedule hook
   const deliverySchedule = useDeliverySchedule(wizardData.products);
@@ -2082,142 +2021,6 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     };
   };
 
-  // Debounced stone search using products endpoint (acts as master data + price source)
-  useEffect(() => {
-    let active = true;
-    const term = stairSystemV2.stoneSearchTerm?.trim();
-    if (!term) {
-      stairSystemV2.setStoneSearchResults([]);
-      return;
-    }
-    stairSystemV2.setIsSearchingStones(true);
-    const timeout = setTimeout(async () => {
-      try {
-        const [stairResponse, longitudinalResponse] = await Promise.all([
-          salesAPI.getProducts({ search: term, limit: 10, contractType: 'stair' }),
-          salesAPI.getProducts({
-            search: term,
-            limit: 10,
-            contractType: 'longitudinal'
-          })
-        ]);
-        if (!active) return;
-        const rawItems: Product[] = [
-          ...(stairResponse?.data?.items || stairResponse?.data?.data || []),
-          ...(longitudinalResponse?.data?.items ||
-            longitudinalResponse?.data?.data ||
-            [])
-        ] as Product[];
-
-        const localFallbackProducts = products.filter(product =>
-          productSupportsContractRoute(product, 'stair') &&
-          productMatchesSearch(product, term, generateFullProductName(product))
-        );
-        const uniqueProducts = uniqueProductsByIdentity([...rawItems, ...localFallbackProducts]);
-        const stairEligibleProducts = uniqueProducts.filter(product =>
-          productSupportsContractRoute(product, 'stair')
-        );
-        stairSystemV2.setStoneSearchResults(stairEligibleProducts);
-      } catch (e) {
-        console.error('Stone search failed', e);
-        if (active) stairSystemV2.setStoneSearchResults([]);
-      } finally {
-        if (active) stairSystemV2.setIsSearchingStones(false);
-      }
-    }, 300);
-    return () => { active = false; clearTimeout(timeout); };
-  }, [stairSystemV2.stoneSearchTerm, products]);
-
-  useEffect(() => {
-    let active = true;
-    const term = stairSystemV2.layerStoneSearchTerm?.trim();
-    if (!term) {
-      stairSystemV2.setLayerStoneSearchResults([]);
-      return;
-    }
-    stairSystemV2.setIsSearchingLayerStones(true);
-    const timeout = setTimeout(async () => {
-      try {
-        const [stairResponse, longitudinalResponse] = await Promise.all([
-          salesAPI.getProducts({ search: term, limit: 10, contractType: 'stair' }),
-          salesAPI.getProducts({
-            search: term,
-            limit: 10,
-            contractType: 'longitudinal'
-          })
-        ]);
-        if (!active) return;
-        const rawItems: Product[] = [
-          ...(stairResponse?.data?.items || stairResponse?.data?.data || []),
-          ...(longitudinalResponse?.data?.items ||
-            longitudinalResponse?.data?.data ||
-            [])
-        ] as Product[];
-        const localFallbackProducts = products.filter(product =>
-          productSupportsContractRoute(product, 'stair') &&
-          productMatchesSearch(product, term, generateFullProductName(product))
-        );
-        const stairEligible = uniqueProductsByIdentity([...rawItems, ...localFallbackProducts])
-          .filter(product => productSupportsContractRoute(product, 'stair'));
-        stairSystemV2.setLayerStoneSearchResults(stairEligible);
-      } catch (e) {
-        console.error('Layer stone search failed', e);
-        if (active) stairSystemV2.setLayerStoneSearchResults([]);
-      } finally {
-        if (active) stairSystemV2.setIsSearchingLayerStones(false);
-      }
-    }, 300);
-    return () => {
-      active = false;
-      clearTimeout(timeout);
-    };
-  }, [stairSystemV2.layerStoneSearchTerm, products]);
-
-  // Debounced tools search
-  useEffect(() => {
-    let active = true;
-    const term = stairSystemV2.toolsSearchTerm?.trim();
-    if (!capabilities.canLoadSubServices) {
-      stairSystemV2.setToolsResults([]);
-      stairSystemV2.setIsSearchingTools(false);
-      return;
-    }
-    // If no term, load top tools (initial list) instead of clearing
-    stairSystemV2.setIsSearchingTools(true);
-    const timeout = setTimeout(async () => {
-      try {
-        const params: any = { isActive: true, limit: 1000 };
-        if (term) params.search = term;
-        const res = await servicesAPI.getSubServices(params);
-        if (!active) return;
-        const items = res?.data?.items || res?.data?.data || [];
-        stairSystemV2.setToolsResults(items);
-      } catch (e) {
-        console.error('Tools search failed', e);
-        if (active) stairSystemV2.setToolsResults([]);
-      } finally {
-        if (active) stairSystemV2.setIsSearchingTools(false);
-      }
-    }, 300);
-    return () => { active = false; clearTimeout(timeout); };
-  }, [stairSystemV2.toolsSearchTerm, capabilities.canLoadSubServices]);
-
-  // Preload tools list once when modal flow is used
-  useEffect(() => {
-    if (!capabilities.canLoadSubServices) {
-      stairSystemV2.setToolsResults([]);
-      return;
-    }
-    (async () => {
-      try {
-        const res = await servicesAPI.getSubServices({ isActive: true, limit: 1000 });
-        const items = res?.data?.items || res?.data?.data || [];
-        stairSystemV2.setToolsResults(items);
-      } catch (e) {
-        console.error('Initial tools preload failed', e);
-      }
-    })();
-  }, [capabilities.canLoadSubServices]);
 
   // Product modal state is now managed by useProductModal hook (see above)
 
@@ -2618,6 +2421,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     }
 
     const savedRemaining = savedProductModal.remainingStone as Record<string, unknown> | undefined;
+    setRestoredProductConfiguration(savedProductModal.showProductModal === true || savedRemaining?.isOpen === true);
     if (savedRemaining) {
       if (typeof savedRemaining.isOpen === 'boolean') remainingStoneModal.setShowRemainingStoneModal(savedRemaining.isOpen);
       if ('selectedStone' in savedRemaining) remainingStoneModal.setSelectedRemainingStone(savedRemaining.selectedStone as RemainingStone | null);
@@ -2766,6 +2570,56 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     hasRecoverableDraft: Boolean(recoverableDraftOffer)
   });
   const editRecoveryBlocked = editRecovery.blocked;
+  const stairModalOpen = productCatalogReady && !editRecoveryBlocked && showProductModal && productConfig.productType === 'stair';
+  const { toolsSearchTerm, setToolsResults, setIsSearchingTools } = stairSystemV2;
+  useEffect(() => {
+    if (!stairModalOpen || !capabilities.canLoadSubServices) {
+      setToolsResults([]);
+      setIsSearchingTools(false);
+      return;
+    }
+    const search = toolsSearchTerm.trim();
+    if (!search) {
+      setToolsResults(subServices);
+      setIsSearchingTools(false);
+      return;
+    }
+    let active = true;
+    setIsSearchingTools(true);
+    const timeout = setTimeout(async () => {
+      try {
+        const response = await servicesAPI.getSubServices({ isActive: true, limit: 1000, search });
+        if (active) setToolsResults(response.data?.items || response.data?.data || []);
+      } catch {
+        if (active) setToolsResults([]);
+      } finally {
+        if (active) setIsSearchingTools(false);
+      }
+    }, 300);
+    return () => {
+      active = false;
+      clearTimeout(timeout);
+    };
+  }, [capabilities.canLoadSubServices, setIsSearchingTools, setToolsResults, stairModalOpen, subServices, toolsSearchTerm]);
+  const [activeStairDraft] = getActiveDraft();
+  const searchStairStones = useMemo(
+    () => createStairStoneSearch(products, salesAPI.getProducts),
+    [products]
+  );
+  const stairStoneSearch = useStairStoneSearch(
+    stairModalOpen && stairSystemV2.stoneSearchTerm !== activeStairDraft.stoneLabel
+      ? stairSystemV2.stoneSearchTerm
+      : '',
+    searchStairStones
+  );
+  const layerStoneSearch = useStairStoneSearch(
+    stairModalOpen && stairSystemV2.layerStoneDropdownOpen &&
+      activeStairDraft.layerUseDifferentStone && activeStairDraft.layerSourceKind === 'newMaterial' &&
+      !activeStairDraft.layerStoneProduct
+      ? stairSystemV2.layerStoneSearchTerm
+      : '',
+    searchStairStones
+  );
   const takeoverEditRecovery = editRecovery.takeover;
   useEffect(() => {
     if (!hasMeaningfulDraftProgress || !recoveryUserId || !recoveryDraftId) return;
@@ -2835,9 +2689,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
 
   // Product filtering hook provides all filtered lists
   const productFiltering = useProductFiltering({
-    customers: customerOptions,
     products,
-    customerSearchTerm,
     productSearchTerm,
     treadProductSearchTerm,
     riserProductSearchTerm,
@@ -2846,7 +2698,6 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     sellerProductHistory: sellerProductHistory.history
   });
   const {
-    filteredCustomers,
     filteredProducts,
     filteredTreadProducts,
     filteredRiserProducts,
@@ -3121,10 +2972,6 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
             // Clear the saved state after successful restoration
             contractNavigationStorage.removeItem('contractWizardState');
 
-            // Refresh data to show newly created entities
-            await loadData();
-            await generateContractNumber();
-
             // Re-fetch customer so project list (Step 3) includes newly added projects
             const returnedCustomerId = returnSelection?.customerId || savedWizardData.customerId;
             if (returnedCustomerId) {
@@ -3135,11 +2982,16 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                   const returnedProject = returnSelection?.projectId
                     ? returnedCustomer.projectAddresses?.find((project: ProjectAddress) => project.id === returnSelection.projectId) || null
                     : returnedCustomerId === savedWizardData.customerId ? savedWizardData.project : null;
-                  updateWizardData({
-                    customerId: returnedCustomerId,
-                    customer: returnedCustomer,
-                    projectId: returnedProject?.id || '',
-                    project: returnedProject
+                  setWizardData(previous => {
+                    if (previous.customerId !== (savedWizardData.customerId || '') ||
+                        previous.projectId !== (savedWizardData.projectId || '')) return previous;
+                    return {
+                      ...previous,
+                      customerId: returnedCustomerId,
+                      customer: returnedCustomer,
+                      projectId: returnedProject?.id || '',
+                      project: returnedProject
+                    };
                   });
                 }
               } catch (err) {
@@ -3153,20 +3005,12 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
             setCurrentStep(normalizeWizardStep(parseInt(step, 10)));
             setStateRestored(true);
             restorationAttempted.current = true;
-
-            // Refresh data to show newly created entities
-            await loadData();
-            await generateContractNumber();
           }
         } else {
           // If no saved state, use URL step as fallback
           setCurrentStep(normalizeWizardStep(parseInt(step, 10)));
           setStateRestored(true);
           restorationAttempted.current = true;
-
-          // Refresh data to show newly created entities
-          await loadData();
-          await generateContractNumber();
         }
       })().finally(() => setAutosaveHydrated(true));
     }
@@ -5741,8 +5585,10 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         }
         break;
       case 2:
-        if (!wizardData.customerId) {
+        if (!wizardData.customerId || wizardData.customer?.id !== wizardData.customerId) {
           newErrors.customerId = 'انتخاب مشتری الزامی است';
+        } else if (!customerSelectionAuthorized && (!isContractEditMode || currentStep === 2)) {
+          newErrors.customerId = 'دسترسی به مشتری انتخاب‌شده را در مرحلهٔ انتخاب مشتری بررسی کنید.';
         }
         break;
       case 3:
@@ -5985,10 +5831,12 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
             errors={errors}
             customerSearchTerm={customerSearchTerm}
             setCustomerSearchTerm={setCustomerSearchTerm}
-            customers={customerOptions}
-            filteredCustomers={filteredCustomers}
+            canLoadCustomers={capabilities.canLoadCustomers}
+            customerScopeId={customerScopeId}
+            customerType={customerType}
+            onSelectionPending={setCustomerSelectionPending}
+            onSelectionAccess={applyCustomerSelectionAccess}
             currentStep={currentStep}
-            isOwnerScopedUser={currentUser?.role !== 'ADMIN'}
           />
         );
 
@@ -6003,6 +5851,17 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         );
 
       case 4:
+        if (!productCatalogReady) {
+          if (productCatalogError) {
+            return <ErpInlineState kind={productCatalogError.kind} title={productCatalogError.message}
+              action={{ label: 'تلاش دوباره', onClick: () => { void loadProductCatalog(); } }} />;
+          }
+          if (!currentUser && dataLoadingError) {
+            return <ErpInlineState kind={dataLoadingError.kind} title={dataLoadingError.message}
+              action={{ label: 'تلاش دوباره', onClick: () => { void loadData(); } }} />;
+          }
+          return <ErpSkeleton label="در حال دریافت کاتالوگ محصولات و خدمات" />;
+        }
         return (
           <Step5ProductSelection
             controller={productCartController}
@@ -6506,7 +6365,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           currentStep={currentStep}
           navigationStep={visibleCurrentStep}
           steps={visibleWizardSteps as WizardStep[]}
-          clickableSteps={isContractEditMode}
+          clickableSteps={isContractEditMode && !customerSelectionPending}
           onStepClick={(step) => {
             setCurrentStep(step);
             setErrors({});
@@ -6517,10 +6376,10 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
             onSubmit: handleWizardSubmit,
             loading: contractCreationPrimaryPending({
               creationComplete: isContractCreationComplete,
-              mutationPending: loading || wizardLoading || contractSubmission.isSubmitting,
+              mutationPending: loading || wizardLoading || contractSubmission.isSubmitting || customerSelectionPending,
               recoveryReady: editRecovery.ready
             }),
-            canGoNext: true,
+            canGoNext: currentStep !== 2 || !customerId || customerSelectionAuthorized,
             canGoPrevious: visibleCurrentStep > 1,
             showSubmitOnEveryStep: isContractEditMode,
             labels: {
@@ -6546,7 +6405,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
             title="ذخیرهٔ بازیابی محلی محدود شده است؛ تا برقراری ذخیرهٔ امن سرور این صفحه را نبندید."
           />
         )}
-        {dataLoadingError && (
+        {dataLoadingError && (currentStep !== 4 || currentUser) && (
           <ErpInlineState kind={dataLoadingError.kind} title={dataLoadingError.message} />
         )}
         {errors.general && (
@@ -6555,7 +6414,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
 
         {/* Product Configuration Modal */}
         <ErpNeumorphicDialog
-          open={!editRecoveryBlocked && showProductModal && productConfig.productType === 'stair'}
+          open={stairModalOpen}
           onClose={requestCloseStairConfiguration}
           labelledBy="stair-product-dialog-title"
           className="stair-v2-modal sds-neumorphic-workflow-scope flex w-full max-w-4xl flex-col overflow-hidden rounded-[var(--sds-radius-dialog)] text-[var(--sds-text-primary)]"
@@ -6788,15 +6647,15 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                             {stairSystemV2.stoneSearchTerm &&
                               stairSystemV2.stoneSearchTerm !== draft.stoneLabel && (
                               <div className="mt-2 max-h-48 divide-y divide-[var(--sds-border-subtle)] overflow-auto border-y border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] dark:divide-[var(--sds-border-subtle)] dark:border-[var(--sds-border-subtle)] dark:bg-[var(--sds-surface-subtle)]">
-                                {stairSystemV2.isSearchingStones && (
+                                {stairStoneSearch.loading && (
                                   <div className="p-3 text-center text-sm text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">
                                     <span className="animate-pulse">در حال جستجو...</span>
                                   </div>
                                 )}
-                                {!stairSystemV2.isSearchingStones && stairSystemV2.stoneSearchResults.length === 0 && (
+                                {!stairStoneSearch.loading && stairStoneSearch.products.length === 0 && (
                                   <div className="p-3 text-center text-sm text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">نتیجه‌ای یافت نشد</div>
                                 )}
-                                {stairSystemV2.stoneSearchResults.map((p: Product) => (
+                                {stairStoneSearch.products.map((p: Product) => (
                                   <ErpPressable
                                     key={p.id}
                                     type="button"
@@ -7981,15 +7840,15 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                             />
                                             {stairSystemV2.layerStoneDropdownOpen && (
                                               <div className="mt-2 max-h-48 overflow-auto rounded-lg border border-[var(--sds-border-default)] dark:border-[var(--sds-border-subtle)] bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-subtle)] shadow-lg">
-                                                {stairSystemV2.isSearchingLayerStones && (
+                                                {layerStoneSearch.loading && (
                                                   <div className="p-3 text-center text-sm text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">
                                                     <span className="animate-pulse">در حال جستجو...</span>
                                                   </div>
                                                 )}
-                                                {!stairSystemV2.isSearchingLayerStones && stairSystemV2.layerStoneSearchResults.length === 0 && (
+                                                {!layerStoneSearch.loading && layerStoneSearch.products.length === 0 && (
                                                   <div className="p-3 text-center text-sm text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">نتیجه‌ای یافت نشد</div>
                                                 )}
-                                                {stairSystemV2.layerStoneSearchResults.map((p) => (
+                                                {layerStoneSearch.products.map((p) => (
                                                   <ErpPressable
                                                     key={p.id}
                                                     type="button"
@@ -11098,7 +10957,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         </ErpNeumorphicDialog>
         {/* New Modal Components */}
         <ProductConfigurationModal
-          isOpen={!editRecoveryBlocked && productModal.showProductModal && productModal.productConfig.productType !== 'stair' && !!productModal.selectedProduct}
+          isOpen={productCatalogReady && !editRecoveryBlocked && productModal.showProductModal && productModal.productConfig.productType !== 'stair' && !!productModal.selectedProduct}
           onClose={() => {
             productModal.setShowProductModal(false);
             productModal.setSelectedProduct(null);
@@ -11121,7 +10980,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         />
 
         <RemainingStoneModal
-          isOpen={remainingStoneModal.showRemainingStoneModal}
+          isOpen={productCatalogReady && remainingStoneModal.showRemainingStoneModal}
           onClose={() => {
             remainingStoneModal.setShowRemainingStoneModal(false);
             remainingStoneModal.setSelectedRemainingStone(null);

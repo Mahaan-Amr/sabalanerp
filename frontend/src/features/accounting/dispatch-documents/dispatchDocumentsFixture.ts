@@ -2,7 +2,7 @@ import type {
   DispatchDocumentCase,
   DispatchDocumentPermission,
 } from './dispatchDocumentsViewModel';
-import type { DispatchDocumentsClient } from './dispatchDocumentsClient';
+import type { DispatchDocumentReceipt, DispatchDocumentsClient } from './dispatchDocumentsClient';
 
 const now = '2026-08-09T12:00:00.000Z';
 const artifact = (id: string, kind: 'WAYBILL' | 'STATEMENT' | 'ADJUSTMENT', fileName: string, checksum: string) => ({
@@ -47,9 +47,9 @@ const seedCases = (): DispatchDocumentCase[] => [
 const clone = <T,>(value: T): T => structuredClone(value);
 
 export function createFixtureDispatchDocumentsClient(permission: DispatchDocumentPermission = 'MANAGE'): DispatchDocumentsClient {
-  let cases = permission === 'UNAUTHORIZED' ? [] : seedCases().map(item => ({ ...item, canManage: permission === 'MANAGE' }));
-  const decisions = new Map<string, DispatchDocumentCase>();
-  const replacements = new Map<string, DispatchDocumentCase>();
+  let cases = permission === 'UNAUTHORIZED' ? [] : seedCases().map(item => ({ ...item, loadingId: item.id, canManage: permission === 'MANAGE' }));
+  const decisions = new Map<string, DispatchDocumentReceipt>();
+  const replacements = new Map<string, DispatchDocumentReceipt>();
   const find = (caseId: string) => {
     const item = cases.find((candidate) => candidate.id === caseId);
     if (!item) throw new Error('پرونده اسناد ارسال در دسترس نیست.');
@@ -58,7 +58,13 @@ export function createFixtureDispatchDocumentsClient(permission: DispatchDocumen
   const requireManage = () => { if (permission !== 'MANAGE') throw new Error('اجازه اجرای این فرمان را ندارید.'); };
 
   return {
-    async load() { return { permission, cases: clone(cases), retrievedAt: now }; },
+    async load(filter) {
+      const counts = { READY: 0, BLOCKED: 0, ISSUED: 0 };
+      for (const item of cases) counts[item.state]++;
+      return { permission, cases: clone(cases.filter(item => !filter || item.state === filter)), retrievedAt: now, counts };
+    },
+    async loadGroup(loadingId) { return { permission, cases: clone(cases.filter(item => item.id === loadingId)), retrievedAt: now }; },
+    async read(candidate) { return clone(find(candidate.id)); },
     async decide(caseId, input) {
       requireManage();
       const replay = decisions.get(input.idempotencyKey);
@@ -77,8 +83,10 @@ export function createFixtureDispatchDocumentsClient(permission: DispatchDocumen
           printHistory: [], adjustments: [], history: [{ id: 'history-1260', number: '۱۲۶۰', status: 'ISSUED', occurredAt: now }],
         };
       }
-      decisions.set(input.idempotencyKey, clone(item));
-      return clone(item);
+      const receipt: DispatchDocumentReceipt = item.bundle
+        ? { status: 'ISSUED', number: item.bundle.number } : { status: 'REJECTED' };
+      decisions.set(input.idempotencyKey, receipt);
+      return receipt;
     },
     async replace(caseId, input) {
       requireManage();
@@ -93,8 +101,9 @@ export function createFixtureDispatchDocumentsClient(permission: DispatchDocumen
         artifacts: [artifact('waybill-1266', 'WAYBILL', 'waybill-1266.pdf', 'sha256:1ee04a…8d'), artifact('statement-1266', 'STATEMENT', 'statement-1266.pdf', 'sha256:fa2190…41')],
         history: [{ id: `history-${previous.id}`, number: previous.number, status: 'REPLACED', occurredAt: now, reason: input.reason }, ...previous.history],
       };
-      replacements.set(input.idempotencyKey, clone(item));
-      return clone(item);
+      const receipt = { status: 'REPLACED' as const, number: item.bundle.number };
+      replacements.set(input.idempotencyKey, receipt);
+      return receipt;
     },
     async handoff(caseId, input) {
       const item = find(caseId);

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import express from 'express';
 import { randomUUID } from 'node:crypto';
+import express from 'express';
 import type { AddressInfo } from 'node:net';
 import { prisma } from '../../lib/prisma';
 import logisticsRouter from '../../routes/logistics';
@@ -14,6 +14,7 @@ import { ProtectedTemplateVault } from '../biometricTemplateVault';
 import { readdir } from 'node:fs/promises';
 import path from 'node:path';
 import type { Prisma } from '@prisma/client';
+import { createReadyPartnerLoadingDriver } from './partnerLoadingDriverFixture';
 
 async function main() {
   const url = new URL(process.env.DATABASE_URL || '');
@@ -83,20 +84,10 @@ async function main() {
       assert.equal(created.status, 201, JSON.stringify(created.body));
       const loadingId = created.body.data.loadingId;
       const source = (await request(`/loadings/${loadingId}`)).body.data.source;
-      const licenceExpiresAt = new Date('2099-01-01');
-      const driver = await prisma.externalDriver.create({ data: { firstName: 'Final', lastName: 'Dispatch',
-        nationalCode: '3340000001', phone: '09120003341', licenceNumber: '3340000001', licenceClass: '1', licenceExpiresAt,
-        status: 'ACTIVE', statusRecordedBy: actorId, createdBy: actorId,
-        documents: { create: { documentType: 'DRIVING_LICENCE', expiresAt: licenceExpiresAt, reference: 'isolated-334-final-driver', recordedBy: actorId } } } });
-      const vehicle = await prisma.externalVehicle.create({ data: { vehicleType: 'Final Partner dispatch', status: 'ACTIVE',
-        statusRecordedBy: actorId, createdBy: actorId,
-        plates: { create: { plate: '334-final', normalizedPlate: '334final', effectiveFrom: new Date(),
-          reason: 'isolated finalization fixture', recordedBy: actorId } },
-        documents: { create: { documentType: 'VEHICLE_REGISTRATION', reference: 'isolated-334-final-vehicle', recordedBy: actorId } } } });
-      await prisma.externalDriverVehicleAssignment.create({ data: { driverId: driver.id, vehicleId: vehicle.id,
-        effectiveFrom: new Date(), reason: 'isolated Partner loading fixture', recordedBy: actorId } });
-      await prisma.driverBiometricEnrollment.create({ data: { externalDriverId: driver.id, status: 'ACTIVE',
-        confirmationPhone: driver.phone, enrolledBy: actorId } });
+      const { driver, vehicle } = await createReadyPartnerLoadingDriver(prisma, actorId, {
+        firstName: 'Final', lastName: 'Dispatch', nationalCode: '3340000001', phone: '09120003341',
+        plate: '334-final', normalizedPlate: '334final', vehicleType: 'Final Partner dispatch',
+      });
       const admission = await request('/api/security/canonical-driver-queue', 'POST',
         { source: 'EXTERNAL', driverId: driver.id, vehicleId: vehicle.id }, logisticsSession.token, `${expected.caseId}-final-turn`);
       assert.equal(admission.status, 201, JSON.stringify(admission.body));
@@ -110,9 +101,13 @@ async function main() {
           productRowId: source.rows[0].productRowId, quantity: '0.250', unit: source.rows[0].unit }] },
       logisticsSession.token, `${expected.caseId}-final-allocation`);
       assert.equal(allocated.status, 200, JSON.stringify(allocated.body));
-      const finalized = await request(`/loadings/${loadingId}/finalize`, 'POST', { expected,
+      const finalize = () => request(`/loadings/${loadingId}/finalize`, 'POST', { expected,
         reason: 'نهایی‌سازی بارگیری با شواهد مالی رسمی' }, logisticsSession.token, `${expected.caseId}-finalize`);
+      const finalized = await finalize();
       assert.equal(finalized.status, 200, JSON.stringify(finalized.body));
+      const finalizedAgain = await finalize();
+      assert.equal(finalizedAgain.status, 200, JSON.stringify(finalizedAgain.body));
+      assert.equal(finalizedAgain.body.data.id, finalized.body.data.id, 'authorized replay returns the same allocation batch');
       if (!repairFixture) assert.equal((await prisma.partnerOperationsControl.findUniqueOrThrow({ where: { id: 'partner-operations' } })).operationalPaused,
         true, 'committed loading create, reserve, allocate, and finalize must survive the emergency pause');
       const revisionId = finalized.body.data.revisions[0].id;
@@ -205,14 +200,33 @@ async function main() {
       const combinedDenied = await request(`/api/accounting/dispatch-candidates/${candidateId}/document-read-model?waybillId=${waybillId}`,
         'GET', undefined, readerSession.token);
       assert.equal(combinedDenied.status, 404, 'the combined model is wholesale-sensitive');
+      // The schema-only database omits the disabled cutover singleton rows from migrations.
+      const cutoverId = 'customer-shipment-statements';
+      await prisma.shipmentStatementCutover.create({ data: { id: cutoverId, enabled: false } });
+      await prisma.shipmentStatementOperationsControl.create({ data: { id: cutoverId, paused: true,
+        reason: 'Disabled ordinary-document cutover in the isolated Partner fixture.' } });
+      const loadingInvoice = await request('/api/accounting/loadings/' + loadingId + '/issue-dispatch-documents',
+        'POST', { commandId: randomUUID() }, accountingSession.token);
+      assert.equal(loadingInvoice.status, 200, JSON.stringify(loadingInvoice.body));
       let otp = '';
       const connector = new DeterministicBiometricSimulator();
       const confirmation = new DispatchConfirmationService(prisma, {
         connector,
         vault: new ProtectedTemplateVault({ activeKeyId: 'test', keys: { test: Buffer.alloc(32, 7) } }),
         otpSecret: 'issue-334-isolated-dispatch-confirmation-secret',
-        sendOtp: async message => { otp = message.code; },
+        sendOtp: async ({ code }) => { otp = code; },
       });
+      const enrollment = await prisma.driverBiometricEnrollment.findFirstOrThrow({
+        where: { externalDriverId: driver.id, status: 'ACTIVE' }, select: { id: true },
+      });
+      await confirmation.deactivateEnrollment({ enrollmentId: enrollment.id, actorId,
+        reason: 'جایگزینی ثبت اولیه راننده با الگوی آزمایش' });
+      await confirmation.enrollInternalDriver({ personnelId: 'external:' + driver.id,
+        confirmationPhone: driver.phone, actorId, templates: ['RIGHT_INDEX', 'LEFT_INDEX'].map(finger => ({
+          finger, format: 'ISO-19794-2', material: Buffer.from('isolated-template-' + finger),
+          image: { material: Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 1]), mimeType: 'image/png', width: 2, height: 2 },
+          deviceEvidence: {}, provenance: 'APPROVED_CONNECTOR',
+        })) });
       const confirmationSession = await confirmation.startSession({ waybillId, actorId: accountantId,
         workstationId: 'ISSUE-334-ACCOUNTING-DESK' });
       const failedCapture = await connector.execute({ commandId: randomUUID(), nonce: randomUUID(), workstationId: 'ISSUE-334-ACCOUNTING-DESK',

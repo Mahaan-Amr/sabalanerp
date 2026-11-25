@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import type { Prisma, PrismaClient } from '@prisma/client';
 import { startOrdinaryApplicationWorkers } from './services/applicationWorkers';
 import { readFile } from 'fs/promises';
 import { performance } from 'node:perf_hooks';
@@ -10,6 +11,17 @@ import { disconnectDatabase, prisma } from './lib/prisma';
 import { getRecoveryRuntimeState, initializeRecoveryRuntime, waitForActiveWrites, waitForRecoveryOperationDrain } from './services/recoveryRuntime';
 import { initializeSystemRecovery } from './services/systemRecoveryLifecycle';
 import { verifyHrRedesignCutover } from './services/hrRedesignCutover';
+import { startRuntimeCapacityObservation } from './services/runtimeCapacityObservation';
+
+import { accountingMeasurementCommit } from './middleware/accountingRequestObserver';
+
+const logStartup = (phase: 'starting' | 'listening' | 'blocked') => {
+  console.info(JSON.stringify({
+    kind: 'backend_startup', phase, at: new Date().toISOString(),
+    commit: accountingMeasurementCommit(process.env.APP_COMMIT), pid: process.pid,
+  }));
+};
+logStartup('starting');
 
 const runtimeRole = resolveRuntimeRole(process.env.BACKEND_RUNTIME_ROLE);
 if (runtimeRole === 'standalone') {
@@ -23,6 +35,7 @@ const { app, server, io, realtimeDelivery, hrRedesignCutoverStartup } = createAp
 const PORT = process.env.PORT || 5000;
 
 let applicationWorkers: Awaited<ReturnType<typeof startOrdinaryApplicationWorkers>> | undefined;
+let stopCapacityObservation: ReturnType<typeof startRuntimeCapacityObservation> | undefined;
 
 // Start only after interrupted recovery has been finalized or safely rolled back.
 startRuntime(runtimeRole, {
@@ -44,10 +57,19 @@ startRuntime(runtimeRole, {
     }
   },
   listen: () => server.listen(PORT, () => {
+    if (process.env.RUNTIME_CAPACITY_OBSERVATION === '1') {
+      const observedPrisma = prisma as PrismaClient & { $metrics?: { json(): Promise<Prisma.Metrics> } };
+      stopCapacityObservation = startRuntimeCapacityObservation({
+        commit: accountingMeasurementCommit(process.env.APP_COMMIT),
+        poolMetrics: async () => getRecoveryRuntimeState().mode === 'NORMAL' ? observedPrisma.$metrics?.json() : undefined,
+      });
+    }
+    logStartup('listening');
     console.log(`? Server running on port ${PORT}`);
     console.log(`? Health check: http://localhost:${PORT}/api/health`);
   }),
 }).catch((error) => {
+  logStartup('blocked');
   console.error("Backend startup blocked:", error);
   process.exitCode = 1;
 });
@@ -57,6 +79,7 @@ const shutdown = async (signal: NodeJS.Signals) => {
   if (isShuttingDown) return;
   isShuttingDown = true;
   applicationWorkers?.stopNewTicks();
+  stopCapacityObservation?.();
   console.log(`Received ${signal}; draining connections before shutdown.`);
 
   try {

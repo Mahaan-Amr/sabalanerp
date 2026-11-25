@@ -46,7 +46,7 @@ RUN --mount=type=cache,target=/root/.npm \
   && PRISMA_SKIP_POSTINSTALL_GENERATE=true npm ci --prefer-offline --no-audit --fund=false
 
 COPY backend/prisma ./prisma
-COPY backend/tsconfig.json ./
+COPY backend/tsconfig.json backend/tsconfig.image.json ./
 COPY backend/tsconfig.cutover.json ./
 COPY backend/scripts/shipment-statement-cutover.ts ./scripts/shipment-statement-cutover.ts
 COPY backend/scripts/clamav-checkpoint.mjs backend/scripts/clamav-checkpoint.d.mts backend/scripts/clamav-incident-policy.mjs backend/scripts/preserved-clamav-policy.mjs backend/scripts/preserved-clamav-policy.d.mts ./scripts/
@@ -56,7 +56,7 @@ COPY backend/src ./src
 # Generate once the real schema is present, rather than during dependency install.
 RUN npx prisma generate
 # Bound compiler memory independently of the production runtime's default heap.
-RUN NODE_OPTIONS=--max-old-space-size=3072 npm run build
+RUN NODE_OPTIONS=--max-old-space-size=3072 npm run build:image
 RUN npm prune --omit=dev --no-audit --fund=false
 
 FROM node:22-bookworm-slim AS recovery-postgres-launcher

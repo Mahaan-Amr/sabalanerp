@@ -38,6 +38,8 @@ export type DispatchDocumentContract = {
 
 export type DispatchDocumentCase = {
   id: string;
+  loadingId?: string;
+  waybillId?: string;
   canManage: boolean;
   state: DispatchDocumentFilter;
   customerName: string;
@@ -56,12 +58,17 @@ export type DispatchDocumentWorkspace = {
   permission: DispatchDocumentPermission;
   cases: DispatchDocumentCase[];
   retrievedAt: string;
+  counts?: Record<DispatchDocumentFilter, number>;
+  relatedCases?: DispatchDocumentCase[];
+  page?: number;
+  pageSize?: number;
 };
 
 export type DispatchDocumentView = {
   counts: Record<DispatchDocumentFilter, number>;
   visibleCases: DispatchDocumentCase[];
   selectedCase: DispatchDocumentCase | null;
+  pageNeedsReload: boolean;
   permission: DispatchDocumentPermission;
 };
 
@@ -83,15 +90,22 @@ export function buildDispatchDocumentView(
   selectedId: string | null,
 ): DispatchDocumentView {
   if (workspace.permission === 'UNAUTHORIZED') {
-    return { counts: emptyCounts(), visibleCases: [], selectedCase: null, permission: workspace.permission };
+    return { counts: emptyCounts(), visibleCases: [], selectedCase: null, pageNeedsReload: false, permission: workspace.permission };
   }
-  const counts = workspace.cases.reduce((result, item) => {
+  const counts = workspace.counts ?? workspace.cases.reduce((result, item) => {
     result[item.state] += 1;
     return result;
   }, emptyCounts());
   const visibleCases = workspace.cases.filter((item) => item.state === filter);
-  const selectedCase = visibleCases.find((item) => item.id === selectedId) || visibleCases[0] || null;
-  return { counts, visibleCases, selectedCase, permission: workspace.permission };
+  const selectedCase = visibleCases.find((item) => item.id === selectedId) || null;
+  const { page, pageSize } = workspace;
+  // A scoped group refresh can move a case out of this page without fetching
+  // the first row of the next page. Let the operator fill the page explicitly.
+  const pageNeedsReload = page !== undefined && pageSize !== undefined && (
+    page > Math.max(1, Math.ceil(counts[filter] / pageSize)) ||
+    visibleCases.length < Math.min(pageSize, Math.max(0, counts[filter] - (page - 1) * pageSize))
+  );
+  return { counts, visibleCases, selectedCase, pageNeedsReload, permission: workspace.permission };
 }
 
 export function canRunDispatchDocumentCommand(

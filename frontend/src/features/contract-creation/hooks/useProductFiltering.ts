@@ -2,7 +2,7 @@
 // Provides filtered lists for customers and products based on search terms
 
 import { useMemo } from 'react';
-import type { CrmCustomer, Product, ContractUsageType } from '../types/contract.types';
+import type { Product, ContractUsageType } from '../types/contract.types';
 import { productSupportsContractRoute } from '../utils/productUtils';
 import { normalizeDigits } from '@/lib/numberFormat';
 import {
@@ -10,12 +10,8 @@ import {
   type SellerProductHistory
 } from '../components/steps/catalogProductRanking';
 
-const CUSTOMER_PREVIEW_COUNT = 3;
-
 interface UseProductFilteringOptions {
-  customers: CrmCustomer[];
   products: Product[];
-  customerSearchTerm: string;
   productSearchTerm: string;
   treadProductSearchTerm: string;
   riserProductSearchTerm: string;
@@ -25,7 +21,6 @@ interface UseProductFilteringOptions {
 }
 
 interface UseProductFilteringReturn {
-  filteredCustomers: CrmCustomer[];
   filteredProducts: Product[];
   filteredTreadProducts: Product[];
   filteredRiserProducts: Product[];
@@ -54,9 +49,7 @@ const compareProductsByWidthAsc = (a: Product, b: Product): number => {
 
 export const useProductFiltering = (options: UseProductFilteringOptions): UseProductFilteringReturn => {
   const {
-    customers,
     products,
-    customerSearchTerm,
     productSearchTerm,
     treadProductSearchTerm,
     riserProductSearchTerm,
@@ -64,29 +57,6 @@ export const useProductFiltering = (options: UseProductFilteringOptions): UsePro
     selectedProductTypeForAddition,
     sellerProductHistory
   } = options;
-
-  // Filter customers based on search term
-  const filteredCustomers = useMemo(() => {
-    if (!customerSearchTerm.trim()) {
-      // Show latest customers as preview when no search term
-      return customers.slice(0, CUSTOMER_PREVIEW_COUNT);
-    }
-
-    // Show full filtered list when searching
-    const searchLower = normalizeSearchText(customerSearchTerm);
-    return customers.filter(customer =>
-      normalizeSearchText(`${customer.firstName} ${customer.lastName}`).includes(searchLower) ||
-      normalizeSearchText(customer.firstName).includes(searchLower) ||
-      normalizeSearchText(customer.lastName).includes(searchLower) ||
-      (customer.companyName && normalizeSearchText(customer.companyName).includes(searchLower)) ||
-      (customer.nationalCode && normalizeSearchText(customer.nationalCode).includes(searchLower)) ||
-      (customer.homeNumber && normalizeSearchText(customer.homeNumber).includes(searchLower)) ||
-      (customer.workNumber && normalizeSearchText(customer.workNumber).includes(searchLower)) ||
-      (customer.phoneNumbers && customer.phoneNumbers.some(phone =>
-        normalizeSearchText(phone.number).replace(/\s+/g, '').includes(searchLower.replace(/\s+/g, ''))
-      ))
-    );
-  }, [customers, customerSearchTerm]);
 
   const filteredProducts = useMemo(
     () => rankContractCatalogProducts({
@@ -142,7 +112,6 @@ export const useProductFiltering = (options: UseProductFilteringOptions): UsePro
   }, [products, landingProductSearchTerm]);
 
   return {
-    filteredCustomers,
     filteredProducts,
     filteredTreadProducts,
     filteredRiserProducts,

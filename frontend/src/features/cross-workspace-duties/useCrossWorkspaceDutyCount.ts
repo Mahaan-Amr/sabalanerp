@@ -2,16 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { createDutyCountRequests } from './dutyCountRequests';
 import {
   CROSS_WORKSPACE_DUTY_CHANGED_EVENT,
-  crossWorkspaceDutyApi,
+  requestCrossWorkspaceDutySummary,
 } from './crossWorkspaceDutyApi';
-
-const requestCount = createDutyCountRequests(async workspace => {
-  const response = await crossWorkspaceDutyApi.summary(workspace);
-  return response.data.data.attention;
-});
 
 export const useCrossWorkspaceDutyCount = (workspace: string | null) => {
   const { user } = useAuth();
@@ -20,9 +14,9 @@ export const useCrossWorkspaceDutyCount = (workspace: string | null) => {
   useEffect(() => {
     if (!user || !workspace) return;
     let active = true;
-    const refresh = async (changed = false) => {
+    const refresh = async (change?: Event) => {
       try {
-        const count = await requestCount(user, workspace, changed);
+        const { attention: count } = await requestCrossWorkspaceDutySummary(user, workspace, change);
         if (active) setResult({ session: user, workspace, count });
       } catch {
         // Preserve the last successful count for this session during transient failures.
@@ -30,7 +24,7 @@ export const useCrossWorkspaceDutyCount = (workspace: string | null) => {
     };
     void refresh();
     const interval = window.setInterval(() => void refresh(), 60_000);
-    const onChange = () => void refresh(true);
+    const onChange = (event: Event) => void refresh(event);
     const onFocus = () => void refresh();
     window.addEventListener(CROSS_WORKSPACE_DUTY_CHANGED_EVENT, onChange);
     window.addEventListener('focus', onFocus);

@@ -1,12 +1,13 @@
 import { Prisma, type AccountingReceivable } from '@prisma/client';
 import type { PartnerEvent } from '@sabalanerp/partner-sales-contracts';
 import { readPersistedPartnerEvents, ownsPartnerRevision } from '../events/persisted';
-import { readPartnerOfficialPurchase } from './officialPurchase';
+import { readPartnerOfficialPurchase, scopedPartnerOfficialPurchase } from './officialPurchase';
 import { PartnerAccountingCommandError } from './errors';
 import { PARTNER_INTERNAL_ACCOUNTING_SOURCE, matchesFinancialPreparation, preparePartnerFinancialSource,
   type PartnerFinancialPreparation } from './source';
 import { sum, negate } from '../reporting/money';
-import { sumPartnerCollections } from './collections';
+import { partnerCollectionBalancesAt } from './collections';
+import type { AccountingReadScope } from './readScope';
 import type { FinancialTrendPeriod } from '../../accountingFinancialTrend';
 import { PARTNER_REPLACEMENT_MODE, matchesPartnerStagedApproval } from './sharedCorrection';
 import { readPartnerRevisionProjections } from '../cases/lifecycle';
@@ -21,10 +22,16 @@ const conflict = () => new PartnerAccountingCommandError('INTEGRITY_CONFLICT', '
 /** Caller supplies already-authorized, canonically validated invoice ids from
  * the same read transaction. A historical obligation requires its published
  * approval and dated collections; drafts never stand in for an official debt. */
-async function publishedInvoices(tx: Prisma.TransactionClient, input: { invoiceIds: readonly string[]; asOf: Date }) {
+async function publishedInvoices(tx: Prisma.TransactionClient, input: { invoiceIds: readonly string[]; asOf: Date },
+  scope?: AccountingReadScope) {
   const invoices = await tx.accountingFinancialRecord.findMany({ where: { id: { in: [...input.invoiceIds] },
     sourceKind: PARTNER_INTERNAL_ACCOUNTING_SOURCE, financiallyApprovedAt: { not: null, lte: input.asOf } },
     include: { receivables: true } });
+  // Scoped trend reads select these rows in the same repeatable-read snapshot
+  // that authorized and rebuilt their sources. Direct history has no such proof.
+  const invoicePreparation = async (invoice: typeof invoices[number], caseId: string) => scope
+    ? scope.verifiedInvoicePreparation(invoice, caseId)
+    : (await readPartnerInvoiceSource(tx, invoice, caseId)).preparation;
   const caseIds = [...new Set(invoices.map(invoice => object(invoice.metadata)?.partnerCaseId).filter((id): id is string => typeof id === 'string'))];
   const cases = await tx.partnerSaleCase.findMany({ where: { id: { in: caseIds }, internalRecordId: { not: null } },
     include: { events: { orderBy: { sequence: 'asc' } } } });
@@ -62,7 +69,7 @@ async function publishedInvoices(tx: Prisma.TransactionClient, input: { invoiceI
       if (typeof caseId !== 'string' || invoice.receivables.length || !invoice.systemInvoiceDate ||
           !['ISSUED', 'POSTED', 'VOIDED'].includes(invoice.status) || typeof approvalId !== 'string' ||
           eventsByCase.get(caseId)?.some(event => event.eventId === approvalId)) throw conflict();
-      await readPartnerInvoiceSource(tx, invoice, caseId);
+      await invoicePreparation(invoice, caseId);
       await validatePendingPartnerApproval(invoice);
       continue;
     }
@@ -96,8 +103,8 @@ async function publishedInvoices(tx: Prisma.TransactionClient, input: { invoiceI
       if (!prepared.ok || !matchesFinancialPreparation(prepared.value, historical)) throw conflict();
       effectiveAt = replacesDebt ? new Date(effect.recordedAt) : invoice.systemInvoiceDate;
     }
-    const canonical = await readPartnerInvoiceSource(tx, invoice, approval.owner.caseId);
-    rows.push({ invoice, approval, effectiveAt, preparation: canonical.preparation });
+    const preparation = await invoicePreparation(invoice, approval.owner.caseId);
+    rows.push({ invoice, approval, effectiveAt, preparation });
   }
   return rows;
 }
@@ -108,6 +115,19 @@ export async function readPartnerOutstandingHistory(tx: Prisma.TransactionClient
   return projectPartnerOutstandingHistory(tx, input, await publishedInvoices(tx, input));
 }
 
+type PublishedInvoice = Awaited<ReturnType<typeof publishedInvoices>>[number];
+function outstandingAt({ invoice, approval, effectiveAt }: PublishedInvoice, cutoff: Date, activeCases: Set<string>) {
+  if (effectiveAt >= cutoff || (invoice.voidedAt && invoice.voidedAt < cutoff)) return false;
+  if (activeCases.has(approval.owner.caseId)) throw conflict();
+  activeCases.add(approval.owner.caseId);
+  return true;
+}
+
+function requireOfficialPurchase(purchase: Awaited<ReturnType<typeof readPartnerOfficialPurchase>>, receivableId: string) {
+  if (!purchase.covered || !purchase.official || purchase.official.receivable.id !== receivableId) throw conflict();
+  return purchase.official;
+}
+
 async function projectPartnerOutstandingHistory(tx: Prisma.TransactionClient, input: {
   cutoff: Date; asOf: Date;
 }, published: Awaited<ReturnType<typeof publishedInvoices>>) {
@@ -115,16 +135,13 @@ async function projectPartnerOutstandingHistory(tx: Prisma.TransactionClient, in
     paidAmount: string; remainingAmount: string; originalAmount: string; status: string; metadata: Record<string, unknown>;
   }> = [];
   const activeCases = new Set<string>();
-  for (const { invoice, approval, effectiveAt } of published) {
-    if (effectiveAt >= input.cutoff ||
-        (invoice.voidedAt && invoice.voidedAt < input.cutoff)) continue;
-    if (activeCases.has(approval.owner.caseId)) throw conflict();
-    activeCases.add(approval.owner.caseId);
+  for (const row of published) {
+    if (!outstandingAt(row, input.cutoff, activeCases)) continue;
+    const { invoice, approval } = row;
     const purchase = await readPartnerOfficialPurchase(tx, { internalRecordId: invoice.sourceId!, approval,
       cutoff: new Date(input.cutoff.getTime() - 1), asOf: input.asOf, voided: false });
-    if (!purchase.covered || !purchase.official) throw conflict();
-    const official = purchase.official, receivable = invoice.receivables[0];
-    if (official.receivable.id !== receivable.id) throw conflict();
+    const receivable = invoice.receivables[0];
+    const official = requireOfficialPurchase(purchase, receivable.id);
     if (official.balance.amount === '0') continue;
     rows.push({ ...receivable, paidAmount: official.received.amount, remainingAmount: official.balance.amount,
       originalAmount: official.receivable.originalAmount.amount, status: official.status,
@@ -134,15 +151,27 @@ async function projectPartnerOutstandingHistory(tx: Prisma.TransactionClient, in
 }
 
 /** Separate exact-currency series; ordinary contract/Rial chart stays unchanged. */
-export async function readPartnerAccountingTrend(tx: Prisma.TransactionClient, input: {
+export async function readPartnerAccountingTrend(source: Prisma.TransactionClient | AccountingReadScope, input: {
   invoiceIds: readonly string[]; periods: readonly FinancialTrendPeriod[]; asOf: Date;
 }) {
-  const published = await publishedInvoices(tx, input);
+  const { tx, scope } = 'contextualize' in source ? { tx: source.database, scope: source } : { tx: source, scope: undefined };
+  const published = await publishedInvoices(tx, input, scope);
+  const scopedPurchases = scope ? new Map(published.map(({ invoice, approval }) => [invoice.id,
+    scopedPartnerOfficialPurchase(scope, invoice.id, invoice.sourceId!, approval, input.asOf)])) : undefined;
   const receivableIds = [...new Set(published.map(({ approval }) => approval.accountingReceivableId))];
-  const payments = receivableIds.length ? await tx.accountingPaymentStatus.findMany({ where: {
+  const payments = !scopedPurchases && receivableIds.length ? await tx.accountingPaymentStatus.findMany({ where: {
     receivableId: { in: receivableIds }, createdAt: { lte: input.asOf },
   } }) : [];
   const paymentsByReceivable = groupPaymentsByReceivable(payments);
+  const cutoffs = input.periods.flatMap(period => [period.startsAt.getTime() - 1, period.endsAt.getTime() - 1]);
+  const collectionBalances = new Map(published.map(({ invoice, approval, preparation }) => {
+    const purchase = scopedPurchases?.get(invoice.id);
+    if (scopedPurchases && !purchase) throw conflict();
+    const ledger = purchase?.payments ?? paymentsByReceivable.get(approval.accountingReceivableId) ?? [];
+    const balances = cutoffs.length ? partnerCollectionBalancesAt(ledger,
+      { currency: invoice.currency, asOf: input.asOf, preparation }, cutoffs) : new Map<number, string>();
+    return [invoice.id, balances] as const;
+  }));
   const currencies = [...new Set(published.map(({ invoice }) => invoice.currency))].sort();
   const series: Array<{ currency: string; points: Array<{ periodKey: string; label: string; startsAt: string; endsAt: string;
     invoiced: string; received: string; outstanding: string }> }> = [];
@@ -155,19 +184,29 @@ export async function readPartnerAccountingTrend(tx: Prisma.TransactionClient, i
         ...(within(effectiveAt) ? [invoice.amount.toString()] : []),
         ...(invoice.voidedAt && within(invoice.voidedAt) ? [negate(invoice.amount.toString())] : []),
       ]));
-      const receivedAmounts: string[] = [];
-      for (const { invoice, approval, preparation } of selected) {
-        const ledger = paymentsByReceivable.get(approval.accountingReceivableId) ?? [];
-        const before = sumPartnerCollections(ledger, { currency,
-          cutoff: new Date(period.startsAt.getTime() - 1), asOf: input.asOf, preparation });
-        const after = sumPartnerCollections(ledger, { currency,
-          cutoff: new Date(period.endsAt.getTime() - 1), asOf: input.asOf, preparation });
-        if (before === null || after === null || invoice.receivables[0].id !== approval.accountingReceivableId) throw conflict();
+      const receivedAmounts: string[] = [], closingBalances: string[] = [];
+      const activeCases = new Set<string>();
+      for (const row of selected) {
+        const { invoice, approval } = row;
+        const purchase = scopedPurchases?.get(invoice.id);
+        const balances = collectionBalances.get(invoice.id);
+        const before = balances?.get(period.startsAt.getTime() - 1);
+        const after = balances?.get(period.endsAt.getTime() - 1);
+        if (before === undefined || after === undefined || invoice.receivables[0].id !== approval.accountingReceivableId) throw conflict();
         receivedAmounts.push(after, negate(before));
+        const active = outstandingAt(row, period.endsAt, activeCases);
+        if (!active && !within(row.effectiveAt) && !(invoice.voidedAt && within(invoice.voidedAt)) && before === after) continue;
+        // A publication can affect invoicing or collections and have no closing debt.
+        const verified = purchase ? purchase.atCollection(after) : await readPartnerOfficialPurchase(tx, {
+          internalRecordId: invoice.sourceId!, approval, cutoff: new Date(period.endsAt.getTime() - 1),
+          asOf: input.asOf, voided: !active && Boolean(invoice.voidedAt && invoice.voidedAt < period.endsAt),
+        });
+        const official = requireOfficialPurchase(verified, invoice.receivables[0].id);
+        if (active) closingBalances.push(official.balance.amount);
       }
-      const outstanding = await projectPartnerOutstandingHistory(tx, { cutoff: period.endsAt, asOf: input.asOf }, selected);
+      const outstanding = sum(closingBalances);
       points.push({ periodKey: period.key, label: period.label, startsAt: period.startsAt.toISOString(), endsAt: period.endsAt.toISOString(),
-        invoiced, received: sum(receivedAmounts), outstanding: sum(outstanding.map(row => row.remainingAmount)) });
+        invoiced, received: sum(receivedAmounts), outstanding });
     }
     series.push({ currency, points });
   }

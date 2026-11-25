@@ -41,6 +41,8 @@ export default function SalesDispatchInvoices({
   onPrintAll,
   documentBlockReason,
   issuanceBlockReason,
+  groupedIssueBlocked,
+  confirmedInvoiceId,
   onCloseVoid,
 }: {
   loadingId: string;
@@ -53,6 +55,8 @@ export default function SalesDispatchInvoices({
   onPrintAll?: () => Promise<void>;
   documentBlockReason?: string;
   issuanceBlockReason?: string;
+  groupedIssueBlocked?: boolean;
+  confirmedInvoiceId?: string;
   onCloseVoid?: () => void;
 }) {
   const [data, setData] = useState<ReadModel | null>(null),
@@ -79,14 +83,14 @@ export default function SalesDispatchInvoices({
   useEffect(() => {
     void load();
   }, [load, refreshKey]);
-  const run = async (work: () => Promise<void>) => {
+  const run = async (work: () => Promise<void>, reload = true) => {
     if (busy.current) return;
     busy.current = true;
     setPending(true);
     setError("");
     try {
       await work();
-      await load();
+      if (reload) await load();
     } catch (e) {
       setError(userFacingError(e, "عملیات فاکتور انجام نشد."));
     } finally {
@@ -165,6 +169,7 @@ export default function SalesDispatchInvoices({
   const hasInvalidInvoice = data?.invoices.some(invoice => invoice.status === "INVALIDATED");
   const canIssueReplacement = data?.documentsComplete && data.ready && data.invoices.length > 0 &&
     data.invoices.every(invoice => invoice.status === "VOIDED");
+  const issueBlocked = groupedIssueBlocked || Boolean(confirmedInvoiceId && !data?.invoices.some(invoice => invoice.id === confirmedInvoiceId));
   return (
     <ErpCard className="mt-4 space-y-3 p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -177,7 +182,7 @@ export default function SalesDispatchInvoices({
             onClick={() => void load()}
           />
           {recovery && recoveryDraft?.waybillId !== recovery.waybillId && (
-            <ErpButton label="صدور مجدد بارنامه و فاکتور" icon={FaFileInvoice} disabled={pending}
+            <ErpButton label="صدور مجدد بارنامه و فاکتور" icon={FaFileInvoice} disabled={pending || issueBlocked}
               onClick={() => setRecoveryDraft({ waybillId: recovery.waybillId, reason: "" })} />
           )}
           {!recovery && canManage && workspace === "accounting" && !(onIssueAll && data?.documentsComplete && data.invoices.some(i => i.status === "ISSUED")) && (
@@ -187,6 +192,7 @@ export default function SalesDispatchInvoices({
                 onIssueAll ? (data?.invoices.some(i => i.status === "ISSUED") ? "تکمیل صدور بارنامه‌ها" : "صدور بارنامه‌ها و فاکتور فروش") : "صدور فاکتور فروش"}
               disabled={
                 pending ||
+                issueBlocked ||
                 Boolean(issuanceBlockReason) ||
                 hasInvalidInvoice ||
                 (!onIssueAll && !data?.ready) ||
@@ -199,7 +205,7 @@ export default function SalesDispatchInvoices({
                   requestKey.current ||= crypto.randomUUID();
                   await api.post(base, { idempotencyKey: requestKey.current });
                   requestKey.current = null;
-                })
+                }, !onIssueAll)
               }
             />
           )}
@@ -217,16 +223,11 @@ export default function SalesDispatchInvoices({
               onChange={event => setRecoveryDraft({ waybillId: recovery.waybillId, reason: event.target.value })} />
           </ErpField>
           <div className="flex flex-wrap gap-2">
-            <ErpButton label="تأیید و صدور مجدد" disabled={pending || recoveryDraft.reason.trim().length < 3}
+            <ErpButton label="تأیید و صدور مجدد" disabled={pending || issueBlocked || recoveryDraft.reason.trim().length < 3}
               onClick={() => void run(async () => {
-                try {
-                  await onIssueAll?.({ waybillId: recovery.waybillId, invoiceId: recovery.invoiceId, reason: recoveryDraft.reason.trim() });
-                  setRecoveryDraft(null);
-                } catch (error) {
-                  await load();
-                  throw error;
-                }
-              })} />
+                await onIssueAll?.({ waybillId: recovery.waybillId, invoiceId: recovery.invoiceId, reason: recoveryDraft.reason.trim() });
+                setRecoveryDraft(null);
+              }, false)} />
             <ErpButton label="انصراف" variant="ghost" disabled={pending} onClick={() => setRecoveryDraft(null)} />
           </div>
         </div>

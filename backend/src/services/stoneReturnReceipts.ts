@@ -10,6 +10,12 @@ export class StoneReturnReceiptError extends Error {
   }
 }
 
+export class StoneReturnIntakeRejected extends StoneReturnReceiptError {
+  constructor(readonly requestId: string, status: 400 | 404 | 409, message: string) {
+    super(status, message);
+  }
+}
+
 const returnUnits = ['squareMeter', 'meter', 'count', 'ton'] as const;
 
 function inputText(value: unknown, maximum: number, label: string) {
@@ -29,11 +35,16 @@ function inputQuantity(value: unknown, label: string) {
   }
 }
 
-export function parseStoneReturnAcceptance(body: Record<string, unknown>) {
-  const requestId = inputText(body.requestId, 36, 'شناسه درخواست');
+function parseRequestId(value: unknown) {
+  const requestId = inputText(value, 36, 'شناسه درخواست');
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(requestId)) {
     throw new StoneReturnReceiptError(400, 'شناسه درخواست معتبر نیست.');
   }
+  return requestId;
+}
+
+export function parseStoneReturnAcceptance(body: Record<string, unknown>) {
+  const requestId = parseRequestId(body.requestId);
   const received = inputQuantity(body.receivedQuantity, 'مقدار دریافتی');
   const accepted = inputQuantity(body.acceptedQuantity, 'مقدار پذیرفته‌شده');
   const unit = returnUnits.find(value => value === body.unit);
@@ -143,13 +154,20 @@ export function findPriorGuardReturnForStone(tx: Prisma.TransactionClient, movem
 }
 
 export function recordStoneReturnReceipt(db: PrismaClient | Prisma.TransactionClient, actorId: string, body: Record<string, unknown>) {
-  const command = parseStoneReturnAcceptance(body);
+  const requestId = parseRequestId(body.requestId);
   const record = async (tx: Prisma.TransactionClient) => {
-    const lock = `stone-return-intake:${actorId}:${command.requestId}`;
+    const lock = `stone-return-intake:${actorId}:${requestId}`;
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lock}))`;
     const prior = await tx.stoneReturnReceipt.findUnique({
-      where: { createdBy_requestId: { createdBy: actorId, requestId: command.requestId } },
+      where: { createdBy_requestId: { createdBy: actorId, requestId } },
     });
+    let command: ReturnType<typeof parseStoneReturnAcceptance>;
+    try {
+      command = parseStoneReturnAcceptance(body);
+    } catch (error) {
+      if (!prior && error instanceof StoneReturnReceiptError) throw new StoneReturnIntakeRejected(requestId, error.status, error.message);
+      throw error;
+    }
     if (prior) {
       const data = presentReceipt(prior);
       const { requestId: _requestId, ...immutableInput } = command;
@@ -167,7 +185,7 @@ export function recordStoneReturnReceipt(db: PrismaClient | Prisma.TransactionCl
         select: { id: true },
       });
       if (existing || await findPriorGuardReturnForStone(tx, command.guardReturnMovementId, command.productId, command.unit)) {
-        throw new StoneReturnReceiptError(409, 'برای این شاهد ورود، همین سنگ و واحد قبلاً ثبت شده است.');
+        throw new StoneReturnIntakeRejected(requestId, 409, 'برای این شاهد ورود، همین سنگ و واحد قبلاً ثبت شده است.');
       }
     }
 
@@ -179,10 +197,10 @@ export function recordStoneReturnReceipt(db: PrismaClient | Prisma.TransactionCl
         select: { id: true, movementNumber: true, occurredAt: true },
       }) : null,
     ]);
-    if (!customer) throw new StoneReturnReceiptError(404, 'پرونده مشتری در CRM پیدا نشد.');
-    if (!product) throw new StoneReturnReceiptError(404, 'سنگ در فهرست محصولات فعال پیدا نشد.');
+    if (!customer) throw new StoneReturnIntakeRejected(requestId, 404, 'پرونده مشتری در CRM پیدا نشد.');
+    if (!product) throw new StoneReturnIntakeRejected(requestId, 404, 'سنگ در فهرست محصولات فعال پیدا نشد.');
     if (command.guardReturnMovementId && !movement) {
-      throw new StoneReturnReceiptError(400, 'فقط شاهد تکمیل‌شده برگشت همین مشتری قابل انتخاب است.');
+      throw new StoneReturnIntakeRejected(requestId, 400, 'فقط شاهد تکمیل‌شده برگشت همین مشتری قابل انتخاب است.');
     }
     const guardEvidence = movement ? await resolveAccountingOperationalEvidence(
       tx, { type: 'GUARD_INBOUND_MOVEMENT', id: movement.id, version: 1 }, ['GUARD_INBOUND_MOVEMENT'],

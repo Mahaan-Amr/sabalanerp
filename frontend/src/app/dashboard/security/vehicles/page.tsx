@@ -24,7 +24,7 @@ import {
   ErpPressable,
   ErpSection,
   ErpSegmentedControl,
-  ErpSelect,
+  ErpSearchableSelect,
   ErpSheet,
   ErpSkeleton,
   ErpWorkspacePage,
@@ -39,6 +39,7 @@ import {
   WORKSPACE_PERMISSIONS,
   useWorkspace,
 } from "@/contexts/WorkspaceContext";
+import { projectReturnStatuses, type ProjectReturnStatus } from "@/features/stone-returns/projectReturnVisitApi";
 import { operationalStatusLabel } from "@/features/dispatch/operationalStatusPresentation";
 import { useAuth } from "@/contexts/AuthContext";
 import CanonicalQueueHistory, { canonicalQueueStatusLabel } from "./CanonicalQueueHistory";
@@ -117,6 +118,8 @@ const statusTone = (status: string) => {
   return "neutral" as const;
 };
 
+type AdmissionSource = "INTERNAL" | "EXTERNAL" | "CUSTOMER_PICKUP" | "PERSONAL_PICKUP";
+
 type VehicleSection =
   | "registry"
   | "queue"
@@ -166,9 +169,8 @@ function SecurityVehicleWorkspace({ actorId, canViewQueue, canEditQueue, permiss
   const [historyRefresh, setHistoryRefresh] = useState(0);
   const [authorizedExits, setAuthorizedExits] = useState<any[]>([]);
   const [admissionOptions, setAdmissionOptions] = useState<any>(emptyAdmissionOptions);
-  const [admissionSource, setAdmissionSource] = useState<
-    "INTERNAL" | "EXTERNAL" | "CUSTOMER_PICKUP"
-  >("INTERNAL");
+  const [admissionSource, setAdmissionSource] = useState<AdmissionSource>("INTERNAL");
+  const [admissionPurpose, setAdmissionPurpose] = useState<"LOADING" | "PROJECT_RETURN">("LOADING");
   const [internalDriverId, setInternalDriverId] = useState("");
   const [externalDriverId, setExternalDriverId] = useState("");
   const [externalVehicleId, setExternalVehicleId] = useState("");
@@ -177,6 +179,7 @@ function SecurityVehicleWorkspace({ actorId, canViewQueue, canEditQueue, permiss
   const [pickupPhone, setPickupPhone] = useState("");
   const admissionReady = admissionSource === "INTERNAL" ? Boolean(internalDriverId)
     : admissionSource === "EXTERNAL" ? Boolean(externalDriverId && externalVehicleId)
+    : admissionSource === "PERSONAL_PICKUP" ? completeCompanyPlate(pickupPlate)
     : Boolean(pickupVehicleType && completeCompanyPlate(pickupPlate) && pickupPhone.trim());
   const [queueReason, setQueueReason] = useState("");
   const [voidTarget, setVoidTarget] = useState<any>(null);
@@ -185,6 +188,7 @@ function SecurityVehicleWorkspace({ actorId, canViewQueue, canEditQueue, permiss
     turn: any;
   } | null>(null);
   const [admissionOpen, setAdmissionOpen] = useState(false);
+  const [projectReturnExit, setProjectReturnExit] = useState<{ id: string; driverName: string; plate: string } | null>(null);
   const [exitTarget, setExitTarget] = useState<any>(null);
   const [customers, setCustomers] = useState<CrmCustomerOption[]>([]);
   const customerSearchRequest = useRef<AbortController>();
@@ -386,31 +390,34 @@ function SecurityVehicleWorkspace({ actorId, canViewQueue, canEditQueue, permiss
   };
 
   const admitQueueTurn = async () => {
-    const selectedInternal = admissionOptions.internalAssignments.find(
-      (option: any) => option.driverId === internalDriverId,
-    );
-    const driverId =
-      admissionSource === "INTERNAL"
-        ? selectedInternal?.driverId
-        : externalDriverId;
-    const vehicleId =
-      admissionSource === "INTERNAL" ? undefined : externalVehicleId;
     if (!admissionReady) return false;
     if (mutationLock.current) return false;
     mutationLock.current = true;
     setSaving(true);
     setError("");
     try {
-      await securityAPI.admitCanonicalQueueTurn(admissionSource === "CUSTOMER_PICKUP"
-        ? { source: admissionSource, vehicleType: pickupVehicleType, plate: formatCompanyPlate(pickupPlate), phone: pickupPhone.trim() }
-        : { source: admissionSource, driverId, vehicleId });
+      const purpose = admissionPurpose === "PROJECT_RETURN" ? admissionPurpose : undefined;
+      const plate = formatCompanyPlate(pickupPlate);
+      if (admissionSource === "PERSONAL_PICKUP") {
+        await securityAPI.admitCanonicalQueueTurn({ source: admissionSource, purpose: "PROJECT_RETURN", plate });
+      } else if (admissionSource === "CUSTOMER_PICKUP") {
+        await securityAPI.admitCanonicalQueueTurn({ source: admissionSource, purpose, plate, vehicleType: pickupVehicleType, phone: pickupPhone.trim() });
+      } else {
+        const internal = admissionSource === "INTERNAL";
+        await securityAPI.admitCanonicalQueueTurn({
+          source: admissionSource, purpose, driverId: internal ? internalDriverId : externalDriverId,
+          vehicleId: internal ? undefined : externalVehicleId,
+        });
+      }
+      setAdmissionSource("INTERNAL");
+      setAdmissionPurpose("LOADING");
       setInternalDriverId("");
       setExternalDriverId("");
       setExternalVehicleId("");
       setPickupVehicleType("");
       setPickupPlate(emptyCompanyPlate);
       setPickupPhone("");
-      setMessage("پذیرش راننده و خودرو در صف ثبت شد.");
+      setMessage(admissionPurpose === "PROJECT_RETURN" ? "ورود برای مرجوعی ثبت شد." : "پذیرش راننده و خودرو در صف ثبت شد.");
       await loadData(true);
       return true;
     } catch (err: any) {
@@ -561,6 +568,12 @@ function SecurityVehicleWorkspace({ actorId, canViewQueue, canEditQueue, permiss
                   <div className="space-y-3">
                     {canonicalQueue.map((turn) => {
                       const snapshot = turn.admissionSnapshot || {};
+                      const personal = turn.driverSource === "PERSONAL_PICKUP";
+                      const completedPersonalReturn = personal && Boolean(turn.projectReturnReleasedAt);
+                      const waitingForReturn = turn.status === "WAITING_AT_GATE" && (personal || !turn.projectReturnReleasedAt);
+                      const returnStatus = waitingForReturn
+                        ? projectReturnStatuses[turn.projectReturnStatus as ProjectReturnStatus] : undefined;
+                      const canFinishReturn = returnStatus && turn.projectReturnStatus !== "AWAITING_RECEIPT";
                       const driverName =
                         [snapshot.driver?.firstName, snapshot.driver?.lastName]
                           .filter(Boolean)
@@ -583,20 +596,44 @@ function SecurityVehicleWorkspace({ actorId, canViewQueue, canEditQueue, permiss
                             </div>
                             <ErpBadge
                               tone={
-                                turn.status === "AVAILABLE_FOR_LOADING"
+                                returnStatus?.tone || (turn.status === "AVAILABLE_FOR_LOADING"
                                   ? "success"
                                   : turn.status === "RESERVED_FOR_LOADING"
                                     ? "warning"
-                                    : "neutral"
+                                    : "neutral")
                               }
                             >
-                              {canonicalQueueStatusLabel[turn.status] ||
+                              {completedPersonalReturn ? "اتمام مرجوعی ثبت شد" : returnStatus?.label || canonicalQueueStatusLabel[turn.status] ||
                                 operationalStatusLabel(turn.status)}
                             </ErpBadge>
                           </div>
                           {canEditQueue && (
                             <div className="mt-3 flex flex-wrap gap-2">
-                              {turn.status === "WAITING_AT_GATE" && (
+                              {canFinishReturn && (
+                                <ErpButton label="خروج مرجوعی" icon={FaCheck} tone="success"
+                                  disabled={dispatchTimelineStale || saving}
+                                  onClick={() => {
+                                    setError("");
+                                    setProjectReturnExit({ id: turn.id, driverName, plate: snapshot.plate?.plate || "" });
+                                  }} />
+                              )}
+                              {canFinishReturn && !personal && (
+                                <ErpButton label="انتقال به صف بارگیری" variant="soft"
+                                  disabled={dispatchTimelineStale || saving}
+                                  onClick={() => runQueueCommand(
+                                    () => securityAPI.transferProjectReturnToLoading(turn.id),
+                                    "راننده به صف بارگیری منتقل شد.",
+                                  )} />
+                              )}
+                              {canFinishReturn && personal && !completedPersonalReturn && (
+                                <ErpButton label="ثبت اتمام مرجوعی" variant="soft"
+                                  disabled={dispatchTimelineStale || saving}
+                                  onClick={() => runQueueCommand(
+                                    () => securityAPI.completePersonalProjectReturn(turn.id),
+                                    "اتمام مرجوعی خودروی شخصی ثبت شد.",
+                                  )} />
+                              )}
+                              {turn.status === "WAITING_AT_GATE" && !returnStatus && (
                                 <ErpButton
                                   label="ورود برای بارگیری"
                                   icon={FaCheck}
@@ -632,7 +669,7 @@ function SecurityVehicleWorkspace({ actorId, canViewQueue, canEditQueue, permiss
                                 "WAITING_AT_GATE",
                                 "AVAILABLE_FOR_LOADING",
                                 "RESERVED_FOR_LOADING",
-                              ].includes(turn.status) && (
+                              ].includes(turn.status) && !returnStatus && (
                                 <>
                                   <ErpButton
                                     label="خروج بدون بارگیری"
@@ -702,26 +739,41 @@ function SecurityVehicleWorkspace({ actorId, canViewQueue, canEditQueue, permiss
           >
             <div className="space-y-4">
               {error && <ErpInlineState kind="error" title={error} />}
-              <ErpSegmentedControl<"INTERNAL" | "EXTERNAL" | "CUSTOMER_PICKUP">
+              <label>
+                <span className={labelClass}>هدف ورود</span>
+                <ErpSearchableSelect aria-label="هدف ورود" searchable={false} value={admissionPurpose} onChange={event => {
+                  const purpose = event.target.value === "PROJECT_RETURN" ? "PROJECT_RETURN" : "LOADING";
+                  setAdmissionPurpose(purpose);
+                  if (purpose === "LOADING" && admissionSource === "PERSONAL_PICKUP") setAdmissionSource("INTERNAL");
+                }}>
+                  <option value="LOADING">بارگیری</option>
+                  <option value="PROJECT_RETURN">مرجوعی پروژه</option>
+                </ErpSearchableSelect>
+              </label>
+              <ErpSegmentedControl<AdmissionSource>
                 value={admissionSource}
                 onChange={setAdmissionSource}
                 options={[
                   { value: "INTERNAL", label: "راننده داخلی" },
                   { value: "EXTERNAL", label: "راننده بیرونی" },
                   { value: "CUSTOMER_PICKUP", label: "راننده متفرقه" },
+                  ...(admissionPurpose === "PROJECT_RETURN" ? [{ value: "PERSONAL_PICKUP" as const, label: "خودروی شخصی" }] : []),
                 ]}
               />
-              {admissionSource === "CUSTOMER_PICKUP" ? (
+              {admissionSource === "PERSONAL_PICKUP" ? (
+                <CompanyPlateFields dropdownLetter label="شماره پلاک" value={pickupPlate} onChange={setPickupPlate} />
+              ) : admissionSource === "CUSTOMER_PICKUP" ? (
                 <div className="grid gap-3 sm:grid-cols-2">
                   <label>
                     <span className={labelClass}>نوع خودرو</span>
-                    <ErpSelect value={pickupVehicleType} onChange={event => setPickupVehicleType(event.target.value)}>
+                    <ErpSearchableSelect aria-label="نوع خودرو" searchable={false} value={pickupVehicleType} onChange={event => setPickupVehicleType(event.target.value)}>
                       <option value="">انتخاب کنید</option>
                       <option value="کامیون">کامیون</option>
                       <option value="وانت">وانت</option>
-                    </ErpSelect>
+                    </ErpSearchableSelect>
                   </label>
                   <CompanyPlateFields
+                    dropdownLetter
                     label="شماره پلاک"
                     value={pickupPlate}
                     onChange={setPickupPlate}
@@ -735,8 +787,8 @@ function SecurityVehicleWorkspace({ actorId, canViewQueue, canEditQueue, permiss
               ) : admissionSource === "INTERNAL" ? (
                 <label>
                   <span className={labelClass}>راننده و خودروی آماده</span>
-                  <ErpSelect
-                    value={internalDriverId}
+                  <ErpSearchableSelect
+                    aria-label="راننده و خودروی آماده" value={internalDriverId}
                     onChange={(event) =>
                       setInternalDriverId(event.target.value)
                     }
@@ -748,14 +800,14 @@ function SecurityVehicleWorkspace({ actorId, canViewQueue, canEditQueue, permiss
                         {option.fleetCode}
                       </option>
                     ))}
-                  </ErpSelect>
+                  </ErpSearchableSelect>
                 </label>
               ) : (
                 <div className="grid gap-3 sm:grid-cols-2">
                   <label>
                     <span className={labelClass}>راننده</span>
-                    <ErpSelect
-                      value={externalDriverId}
+                    <ErpSearchableSelect
+                      aria-label="راننده" value={externalDriverId}
                       onChange={(event) => {
                         setExternalDriverId(event.target.value);
                         setExternalVehicleId(admissionOptions.externalDrivers.find((d: any) => d.id === event.target.value)?.vehicleId || "");
@@ -767,12 +819,12 @@ function SecurityVehicleWorkspace({ actorId, canViewQueue, canEditQueue, permiss
                           {option.firstName} {option.lastName}
                         </option>
                       ))}
-                    </ErpSelect>
+                    </ErpSearchableSelect>
                   </label>
                   <label>
                     <span className={labelClass}>خودرو</span>
-                    <ErpSelect
-                      value={externalVehicleId}
+                    <ErpSearchableSelect
+                      aria-label="خودرو" value={externalVehicleId}
                       disabled
                       onChange={(event) =>
                         setExternalVehicleId(event.target.value)
@@ -784,11 +836,26 @@ function SecurityVehicleWorkspace({ actorId, canViewQueue, canEditQueue, permiss
                           {option.vehicleType} · {option.plate}
                         </option>
                       ))}
-                    </ErpSelect>
+                    </ErpSearchableSelect>
                   </label>
                 </div>
               )}
             </div>
+          </ErpSheet>
+          <ErpSheet open={Boolean(projectReturnExit)} onClose={() => setProjectReturnExit(null)}
+            title="تأیید خروج مرجوعی" presentation="modal" pending={saving}
+            footer={<div className="flex flex-wrap justify-end gap-2">
+              <ErpButton label="انصراف" variant="ghost" disabled={saving} onClick={() => setProjectReturnExit(null)} />
+              <ErpButton label="ثبت خروج فیزیکی" tone="success" disabled={dispatchTimelineStale || saving}
+                onClick={async () => {
+                  if (projectReturnExit && await runQueueCommand(
+                    () => securityAPI.recordProjectReturnExit(projectReturnExit.id),
+                    "خروج خودرو از مراجعهٔ مرجوعی ثبت شد.",
+                  )) setProjectReturnExit(null);
+                }} />
+            </div>}>
+            {error && <ErpInlineState kind="error" title={error} />}
+            <p>{projectReturnExit?.driverName} · {projectReturnExit?.plate}</p>
           </ErpSheet>
           <ErpSheet
             open={Boolean(queueActionTarget)}
@@ -1041,8 +1108,8 @@ function SecurityVehicleWorkspace({ actorId, canViewQueue, canEditQueue, permiss
               <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
                 <label>
                   <span className={labelClass}>نوع ورود</span>
-                  <ErpSelect
-                    value={inboundForm.purpose}
+                  <ErpSearchableSelect
+                    aria-label="نوع ورود" searchable={false} value={inboundForm.purpose}
                     onChange={(event) =>
                       setInboundForm((current: any) => ({
                         ...current,
@@ -1055,7 +1122,7 @@ function SecurityVehicleWorkspace({ actorId, canViewQueue, canEditQueue, permiss
                     <option value="CONSIGNMENT" disabled>
                       امانی - در دست تعریف
                     </option>
-                  </ErpSelect>
+                  </ErpSearchableSelect>
                 </label>
                 <ErpCard className="p-3 text-sm sds-text-secondary">
                   راننده و خودرو برای ورود جدید به‌صورت تصویر لحظه‌ای ثبت

@@ -17,6 +17,7 @@ export type StoneReturnAllocationInput = StoneReturnSourceKey & { quantity: stri
 export type StoneReturnCandidateCapacity = StoneReturnSourceKey & {
   lineRemainingQuantity: string;
   dispatchRemainingQuantity: string;
+  replacementCapacity?: { ownQuantity: string; lineRemainingQuantity: string; dispatchRemainingQuantity: string };
 };
 
 export const stoneReturnSourceKey = (row: StoneReturnSourceKey) => JSON.stringify([
@@ -62,11 +63,14 @@ export function validateStoneReturnAllocations<Candidate extends StoneReturnCand
     const quantity = allocationQuantity(row.quantity, receipt.unit);
     total += quantity;
 
+    const replacement = candidate.replacementCapacity;
+    const ownQuantity = replacement ? parseExactQuantityAtoms(replacement.ownQuantity) : 0n;
+    const additional = quantity > ownQuantity ? quantity - ownQuantity : 0n;
     const lineKey = stoneReturnLineKey(row.originalInvoiceId, row.originalLineId);
-    const lineTotal = (lineQuantities.get(lineKey) ?? 0n) + quantity;
-    const dispatchTotal = (dispatchQuantities.get(row.dispatchEvidenceId) ?? 0n) + quantity;
-    if (lineTotal > parseExactQuantityAtoms(candidate.lineRemainingQuantity)
-      || dispatchTotal > parseExactQuantityAtoms(candidate.dispatchRemainingQuantity)) {
+    const lineTotal = (lineQuantities.get(lineKey) ?? 0n) + additional;
+    const dispatchTotal = (dispatchQuantities.get(row.dispatchEvidenceId) ?? 0n) + additional;
+    if (lineTotal > parseExactQuantityAtoms(replacement?.lineRemainingQuantity ?? candidate.lineRemainingQuantity)
+      || dispatchTotal > parseExactQuantityAtoms(replacement?.dispatchRemainingQuantity ?? candidate.dispatchRemainingQuantity)) {
       throw new StoneReturnAllocationError(409, 'مقدار تخصیص از مانده قابل برگشت ردیف فروش یا بارگیری بیشتر است.');
     }
     lineQuantities.set(lineKey, lineTotal);

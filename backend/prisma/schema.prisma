@@ -890,6 +890,12 @@ enum GuardDriverSource {
   PERSONAL_PICKUP
 }
 
+enum GuardProjectReturnStatus {
+  AWAITING_RECEIPT
+  CANCELLED_WITHOUT_DELIVERY
+  RECEIVED
+}
+
 enum GuardDriverQueueTurnStatus {
   WAITING_AT_GATE
   AVAILABLE_FOR_LOADING
@@ -1194,6 +1200,8 @@ model GuardDriverQueueTurn {
   id                    String                        @id @default(cuid())
   driverSource          GuardDriverSource
   status                GuardDriverQueueTurnStatus    @default(WAITING_AT_GATE)
+  projectReturnStatus   GuardProjectReturnStatus?
+  projectReturnReleasedAt DateTime?
   internalDriverId      String?
   externalDriverId      String?
   companyVehicleId      String?
@@ -1235,8 +1243,10 @@ model GuardDriverQueueTurn {
   allocationRevisions   LogisticsAllocationRevision[]
   physicalExit          GuardPhysicalExit?
   manualOutageExit      ManualOutageExit?
+  projectReturnCase     ProjectReturnCase?
 
   @@index([status, admittedAt])
+  @@index([projectReturnStatus, status, admittedAt])
   @@index([internalDriverId, status])
   @@index([externalDriverId, status])
   @@index([companyVehicleId, status])
@@ -2276,6 +2286,9 @@ model CrmCustomer {
   logisticsLoadings        LogisticsLoading[]
   securityVehicleMovements SecurityVehicleMovement[]
 
+  projectReturnCases       ProjectReturnCase[]
+  projectReturnVersions    ProjectReturnVersion[]
+
   @@index([ownerUserId])
   @@index([partnerOwnerProfileId])
   @@index([createdBy])
@@ -2301,6 +2314,8 @@ model ProjectAddress {
   customer                 CrmCustomer               @relation(fields: [customerId], references: [id], onDelete: Cascade)
   logisticsLoadings        LogisticsLoading[]
   securityVehicleMovements SecurityVehicleMovement[]
+
+  projectReturnVersions    ProjectReturnVersionProject[]
 
   @@map("project_addresses")
 }
@@ -2500,6 +2515,7 @@ model CrmTimelineEvent {
 
 model Product {
   stoneReturnReceipts StoneReturnReceipt[]
+  projectReturnItems ProjectReturnVersionItem[]
   id                                String                             @id @default(cuid())
   code                              String                             @unique
   name                              String
@@ -7165,6 +7181,7 @@ model AccountingCheckCustodyEvent {
 
 model AccountingInventoryIdentity {
   stoneReturnReceipt StoneReturnReceipt?
+  projectReturnItem ProjectReturnVersionItem?
   id              String                              @id
   kind            AccountingInventoryIdentityKind
   originId        String?
@@ -13224,6 +13241,128 @@ model PurchasingExistingEvidence {
   @@map("purchasing_existing_evidence")
 }
 
+enum ProjectReturnOperationStatus {
+  ACTIVE
+  REWORK_REQUESTED
+  RETURNED_TO_LOGISTICS
+  CANCELLED
+}
+
+enum ProjectReturnOperationKind {
+  EDITED
+  CANCELLED
+  REWORK_REQUESTED
+  RETURNED_TO_LOGISTICS
+}
+
+model ProjectReturnCase {
+  id            String                 @id @default(cuid())
+  guardVisitId  String?                @unique
+  legacyFinalizationId String?          @unique
+  customerId    String
+  customerName  String
+  intakeHash    String?
+  createdAt     DateTime               @default(now())
+  guardVisit    GuardDriverQueueTurn?  @relation(fields: [guardVisitId], references: [id], onDelete: Restrict)
+  legacyFinalization StoneReturnFinalization? @relation(fields: [legacyFinalizationId], references: [id], onDelete: Restrict)
+  customer      CrmCustomer            @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  versions      ProjectReturnVersion[]
+  operationStatus ProjectReturnOperationStatus @default(ACTIVE)
+  operations    ProjectReturnOperation[]
+
+  @@index([createdAt, id])
+  @@map("project_return_cases")
+}
+
+model ProjectReturnVersion {
+  id            String                        @id @default(cuid())
+  caseId        String
+  number        Int
+  baseVersionId String?
+  submittedAt   DateTime?
+  submittedBy   String?
+  assignedAt    DateTime?
+  assignedBy    String?
+  customerId    String
+  customerName  String
+  customer      CrmCustomer @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  returnCase    ProjectReturnCase             @relation(fields: [caseId], references: [id], onDelete: Restrict)
+  baseVersion   ProjectReturnVersion?         @relation("ProjectReturnVersionLineage", fields: [caseId, baseVersionId], references: [caseId, id], onDelete: Restrict)
+  revisions     ProjectReturnVersion[]        @relation("ProjectReturnVersionLineage")
+  projects      ProjectReturnVersionProject[]
+  items         ProjectReturnVersionItem[]
+  allocationDrafts ProjectReturnAllocationDraft[]
+  operations       ProjectReturnOperation[]
+
+  @@unique([caseId, number])
+  @@unique([caseId, id])
+  @@index([customerId])
+  @@map("project_return_versions")
+}
+
+model ProjectReturnOperation {
+  id                      String                     @id @default(cuid())
+  caseId                  String
+  versionId               String
+  kind                    ProjectReturnOperationKind
+  actorId                 String
+  occurredAt              DateTime                   @default(now())
+  releasedReservationIds  String[]                   @default([])
+  clearedDraftNumber      Int?
+  returnCase              ProjectReturnCase          @relation(fields: [caseId], references: [id], onDelete: Restrict)
+  version                 ProjectReturnVersion       @relation(fields: [caseId, versionId], references: [caseId, id], onDelete: Restrict)
+
+  @@index([caseId, occurredAt])
+  @@map("project_return_operations")
+}
+
+model ProjectReturnVersionProject {
+  versionId    String
+  projectId    String
+  projectName  String
+  version      ProjectReturnVersion @relation(fields: [versionId], references: [id], onDelete: Restrict)
+  project      ProjectAddress       @relation(fields: [projectId], references: [id], onDelete: Restrict)
+
+  @@id([versionId, projectId])
+  @@index([projectId])
+  @@map("project_return_version_projects")
+}
+
+model ProjectReturnVersionItem {
+  id                  String                       @id @default(cuid())
+  versionId           String
+  productId           String
+  productName         String
+  productCode         String
+  unit                String
+  healthyQuantity     Decimal                      @db.Decimal(65, 30)
+  damagedQuantity     Decimal                      @db.Decimal(65, 30)
+  healthyCalculation  Json?
+  damagedCalculation  Json?
+  contractSources     Json?
+  inventoryIdentityId String?                      @unique
+  version             ProjectReturnVersion         @relation(fields: [versionId], references: [id], onDelete: Restrict)
+  product             Product                      @relation(fields: [productId], references: [id], onDelete: Restrict)
+  inventoryIdentity   AccountingInventoryIdentity? @relation(fields: [inventoryIdentityId], references: [id], onDelete: Restrict)
+
+  @@unique([versionId, productId, unit])
+  @@index([productId])
+  @@map("project_return_version_items")
+}
+
+model ProjectReturnAllocationDraft {
+  id          String               @id @default(cuid())
+  versionId   String
+  number      Int
+  items       Json
+  createdBy   String
+  createdAt   DateTime             @default(now())
+  version     ProjectReturnVersion @relation(fields: [versionId], references: [id], onDelete: Restrict)
+
+  @@unique([versionId, number])
+  @@map("project_return_allocation_drafts")
+}
+
 model StoneReturnReceipt {
   id                    String                       @id @default(cuid())
   requestId             String
@@ -13310,6 +13449,7 @@ model StoneReturnFinalization {
   summary       Json
   receipt       StoneReturnReceipt         @relation(fields: [receiptId], references: [id], onDelete: Restrict)
   draft         StoneReturnAllocationDraft @relation(fields: [draftId], references: [id], onDelete: Restrict)
+  projectCorrection ProjectReturnCase?
 
   @@map("stone_return_finalizations")
 }

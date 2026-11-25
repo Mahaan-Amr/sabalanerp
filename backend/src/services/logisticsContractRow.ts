@@ -16,3 +16,19 @@ export const resolveLogisticsContractRow = (
   }
   return matches[0];
 };
+
+export const inferLogisticsContractUnit = (item: { productType: string | null }, snapshot: Record<string, any> | null) => {
+  const explicitUnit = snapshot?.unit || snapshot?.preparedUnit || snapshot?.meta?.unit;
+  if (explicitUnit) {
+    const unit = String(explicitUnit);
+    if (unit.includes('متر طول') || unit === 'meter') return 'meter';
+    if (unit.includes('متر مربع') || unit === 'squareMeter') return 'squareMeter';
+    if (unit.includes('عدد') || unit === 'count') return 'count';
+    return unit;
+  }
+
+  const productType = String(item?.productType || snapshot?.productType || '').toLowerCase();
+  if (productType.includes('longitudinal') || productType.includes('طولی')) return 'meter';
+  if (productType.includes('slab') || productType.includes('اسلب')) return 'squareMeter';
+  return 'count';
+};

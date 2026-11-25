@@ -4,6 +4,9 @@ import { useEffect, useState } from 'react';
 import { FaEye } from 'react-icons/fa';
 import { ErpButton, ErpEmptyState, ErpInlineState, ErpListPage, ErpStatus } from '@/components/erp';
 import { userFacingError } from '@/features/dispatch/userFacingError';
+import { projectReturnAccountingHref } from './projectReturnAllocationApi';
+import { projectReturnListHref } from './projectReturnReceiptApi';
+import { ProjectReturnVisitQueue } from './ProjectReturnVisitQueue';
 import { displayStoneReturnQuantity, stoneReturnAllocationStatuses, stoneReturnApi, type StoneReturnReceipt } from './stoneReturnApi';
 
 export function StoneReturnList({ workspace }: { workspace: 'logistics' | 'accounting' }) {
@@ -34,12 +37,16 @@ export function StoneReturnList({ workspace }: { workspace: 'logistics' | 'accou
 
   const logistics = workspace === 'logistics';
   return <ErpListPage
-    title="مرجوعی‌ها"
+    title={logistics ? "مرجوعی‌ها" : "سوابق مرجوعی سنگ"}
     eyebrow={logistics ? 'لجستیک' : 'بررسی و پیگیری'}
-    backHref={logistics ? '/dashboard/logistics' : '/dashboard/accounting/workflows/review'}
-    actions={logistics && canRecord ? [{ label: 'ثبت دریافت سنگ', href: '/dashboard/logistics/returns/new', tone: 'primary', variant: 'solid' }] : []}
+    backHref={logistics ? '/dashboard/logistics' : projectReturnAccountingHref}
+    actions={logistics ? [
+      ...(canRecord ? [{ label: 'مرجوعی جدید', href: '/dashboard/logistics/returns/new', tone: 'primary' as const, variant: 'solid' as const }] : []),
+      { label: 'پرونده‌های مرجوعی پروژه', href: projectReturnListHref, variant: 'soft' },
+    ] : []}
     rows={items}
     rowKey={row => row.id}
+    sectionNavigation={logistics ? <ProjectReturnVisitQueue /> : undefined}
     rowActionMode="menu"
     rowActions={row => logistics ? [] : [{
       label: 'مشاهده پرونده', href: `/dashboard/accounting/returns/${encodeURIComponent(row.id)}`, icon: FaEye, tone: 'primary',

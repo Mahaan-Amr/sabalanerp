@@ -24,7 +24,9 @@ const activeAt = (at: Date) => ({ effectiveFrom: { lte: at }, OR: [{ effectiveTo
 type GuardQueueEventType = 'PERSONAL_PICKUP_SELECTED' | 'ADMITTED' | 'MADE_AVAILABLE_FOR_LOADING' | 'RESERVED_FOR_LOADING' | 'RESERVATION_RELEASED'
   | 'LOADING_FINALIZED' | 'PHYSICAL_EXIT_RECORDED' | 'MANUAL_OUTAGE_EXIT_REGISTERED'
   | 'RETURNED_TO_GATE_WAITING' | 'RESERVATION_RELEASED_FOR_DEPARTURE' | 'CLOSED_WITHOUT_LOADING'
-  | 'RESERVATION_RELEASED_FOR_VOID' | 'VOIDED' | 'FINALIZED_LOADING_CANCELLED';
+  | 'RESERVATION_RELEASED_FOR_VOID' | 'VOIDED' | 'FINALIZED_LOADING_CANCELLED'
+  | 'PROJECT_RETURN_CANCELLED_WITHOUT_DELIVERY' | 'PROJECT_RETURN_RECEIVED'
+  | 'PROJECT_RETURN_TRANSFERRED_TO_LOADING' | 'PROJECT_RETURN_PERSONAL_COMPLETED';
 
 export class GuardQueueConflictError extends Error {}
 export class GuardQueueValidationError extends Error {}
@@ -184,9 +186,10 @@ const buildExternalAdmission = async (tx: Prisma.TransactionClient, driverId: st
 
 const openQueueStatuses: GuardDriverQueueTurnStatus[] = ['WAITING_AT_GATE', 'AVAILABLE_FOR_LOADING', 'RESERVED_FOR_LOADING', 'LOADING_FINALIZED'];
 
-type AdmissionInput = { actorId: string } & (
+type AdmissionInput = { actorId: string; purpose?: 'PROJECT_RETURN' } & (
   | { source: 'INTERNAL' | 'EXTERNAL'; driverId: string; vehicleId?: string }
   | { source: 'CUSTOMER_PICKUP'; vehicleType: unknown; plate: unknown; phone: unknown }
+  | { source: 'PERSONAL_PICKUP'; purpose: 'PROJECT_RETURN'; plate: unknown }
 );
 
 const buildAdmission = async (tx: Prisma.TransactionClient, input: AdmissionInput, admittedAt: Date) => {
@@ -198,18 +201,19 @@ const buildAdmission = async (tx: Prisma.TransactionClient, input: AdmissionInpu
     const { driver, vehicle, snapshot } = await buildExternalAdmission(tx, input.driverId, input.vehicleId || '', input.actorId, admittedAt);
     return { snapshot, identity: { externalDriverId: driver.id, externalVehicleId: vehicle.id } };
   }
-  if (input.source !== 'CUSTOMER_PICKUP') throw new GuardQueueValidationError('نوع راننده معتبر نیست.');
-  const { vehicleType } = input;
-  if (vehicleType !== 'کامیون' && vehicleType !== 'وانت') throw new GuardQueueValidationError('نوع خودرو را انتخاب کنید.');
-  const phone = typeof input.phone === 'string' ? normalizePlateDigits(input.phone.trim()).replace(/[\s-]/g, '').replace(/^(?:\+98|0098|98)/, '0') : '';
-  if (!/^09\d{9}$/.test(phone)) throw new GuardQueueValidationError('شماره همراه معتبر وارد کنید.');
+  if (input.source !== 'CUSTOMER_PICKUP' && input.source !== 'PERSONAL_PICKUP') throw new GuardQueueValidationError('نوع راننده معتبر نیست.');
+  const personal = input.source === 'PERSONAL_PICKUP';
+  const vehicleType = personal ? 'سواری' : input.vehicleType;
+  if (!personal && vehicleType !== 'کامیون' && vehicleType !== 'وانت') throw new GuardQueueValidationError('نوع خودرو را انتخاب کنید.');
+  const phone = !personal && typeof input.phone === 'string' ? normalizePlateDigits(input.phone.trim()).replace(/[\s-]/g, '').replace(/^(?:\+98|0098|98)/, '0') : '';
+  if (!personal && !/^09\d{9}$/.test(phone)) throw new GuardQueueValidationError('شماره همراه معتبر وارد کنید.');
   let plate: string;
   try { plate = requireCompanyPlate(input.plate); }
   catch (error) { throw new GuardQueueValidationError((error as Error).message); }
   const id = randomUUID();
   const snapshot = {
     schemaVersion: 1, admittedAt, actorId: input.actorId,
-    driver: { source: input.source, id, firstName: 'راننده متفرقه', phone },
+    driver: { source: input.source, id, firstName: personal ? 'راننده شخصی' : 'راننده متفرقه', ...(phone ? { phone } : {}) },
     vehicle: { source: input.source, id, vehicleType },
     plate: { plate, normalizedPlate: normalizeIranianPlate(plate) },
     readiness: { status: 'READY', checkedAt: admittedAt },
@@ -222,26 +226,30 @@ export const admitGuardDriverQueueTurn = async (prisma: PrismaClient, input: Adm
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('HR_VEHICLE_OPERATIONS'))`;
   const admittedAt = new Date();
   const resolved = await buildAdmission(tx, input, admittedAt);
-  const snapshot = stableValue(resolved.snapshot) as Prisma.InputJsonObject;
+  const projectReturn = input.purpose === 'PROJECT_RETURN';
+  const snapshot = stableValue(projectReturn ? { ...(resolved.snapshot as object), purpose: 'PROJECT_RETURN' } : resolved.snapshot) as Prisma.InputJsonObject;
   const plate = snapshot.plate as { plate: string; normalizedPlate?: string };
   const duplicate = await tx.guardDriverQueueTurn.findFirst({ where: {
     status: { in: openQueueStatuses },
-    ...(input.source === 'CUSTOMER_PICKUP' ? {} : { driverSource: 'CUSTOMER_PICKUP' }),
-    OR: [
+    ...(projectReturn || input.source === 'CUSTOMER_PICKUP' ? {} : {
+      OR: [{ driverSource: 'CUSTOMER_PICKUP' }, { projectReturnStatus: { not: null } }],
+    }),
+    AND: [{ OR: [
       { admissionSnapshot: { path: ['plate', 'normalizedPlate'], equals: normalizeIranianPlate(plate.plate) } },
       { admissionSnapshot: { path: ['plate', 'plate'], equals: plate.plate } },
-    ],
+    ] }],
   }, select: { id: true } });
   if (duplicate) throw new GuardQueueConflictError('برای این پلاک پذیرش باز وجود دارد.');
   const integrityHash = digest(snapshot);
   try {
     const turn = await tx.guardDriverQueueTurn.create({ data: {
       driverSource: input.source, ...resolved.identity,
+      projectReturnStatus: projectReturn ? 'AWAITING_RECEIPT' : null,
       admittedAt, admittedBy: input.actorId, admissionSnapshot: snapshot, integrityHash,
     } });
     await appendQueueEvent(tx, {
       turnId: turn.id, eventType: 'ADMITTED', fromStatus: null, toStatus: turn.status, actorId: input.actorId,
-      payload: { integrityHash, snapshotSchemaVersion: turn.snapshotSchemaVersion },
+      payload: { integrityHash, snapshotSchemaVersion: turn.snapshotSchemaVersion, ...(projectReturn ? { purpose: input.purpose } : {}) },
     });
     await recordFirstCanonicalAdmission(tx, input.actorId, turn.id, admittedAt);
     return turn;
@@ -258,7 +266,13 @@ export const makeGuardQueueTurnAvailable = async (prisma: PrismaClient, turnId: 
   await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', `GUARD_QUEUE:${turnId}`);
   const current = await tx.guardDriverQueueTurn.findUnique({ where: { id: turnId } });
   if (!current) throw new GuardQueueValidationError('Canonical queue turn was not found.');
+  if (current.projectReturnStatus && (!current.projectReturnReleasedAt || current.driverSource === 'PERSONAL_PICKUP')) {
+    throw new GuardQueueConflictError('تردد مرجوعی از گردش مرجوعی پیگیری می‌شود.');
+  }
   if (current.status !== GuardDriverQueueTurnStatus.WAITING_AT_GATE) throw new GuardQueueConflictError('Only a turn waiting at the gate can become available for loading.');
+  if (current.projectReturnStatus && !await isGuardQueueTurnCurrentlyReady(tx, current)) {
+    throw new GuardQueueConflictError('راننده یا خودرو در حال حاضر شرایط بارگیری را ندارد.');
+  }
   const changed = await tx.guardDriverQueueTurn.updateMany({
     where: { id: turnId, status: GuardDriverQueueTurnStatus.WAITING_AT_GATE },
     data: { status: GuardDriverQueueTurnStatus.AVAILABLE_FOR_LOADING, availableAt: new Date(), availableBy: actorId },
@@ -288,6 +302,7 @@ export const reserveGuardQueueTurn = async (prisma: PrismaClient, input: { turnI
   if (!turn) throw new GuardQueueValidationError('Canonical queue turn was not found.');
   if (!loading) throw new GuardQueueValidationError('Loading was not found.');
   if (loading.status !== 'DRAFT') throw new GuardQueueConflictError('Only a draft loading can reserve a queue turn.');
+  if (turn.projectReturnStatus && (!turn.projectReturnReleasedAt || turn.driverSource === 'PERSONAL_PICKUP')) throw new GuardQueueConflictError('راننده در مراجعهٔ مرجوعی است و برای بارگیری در دسترس نیست.');
   if (turn.status !== GuardDriverQueueTurnStatus.AVAILABLE_FOR_LOADING) throw new GuardQueueConflictError('Only an available queue turn can be reserved.');
   if (!await isGuardQueueTurnCurrentlyReady(tx, turn)) throw new GuardQueueConflictError('The admitted driver or vehicle is no longer currently ready for loading.');
   if (turn.driverSource === 'PERSONAL_PICKUP' || await tx.guardDriverQueueTurn.count({ where: { loadingId: loading.id, driverSource: 'PERSONAL_PICKUP', status: 'RESERVED_FOR_LOADING' } }))
@@ -374,6 +389,7 @@ export const closeGuardQueueTurnWithoutLoading = async (prisma: PrismaClient, in
   let turn = await tx.guardDriverQueueTurn.findUnique({ where: { id: input.turnId } });
   if (!turn) throw new GuardQueueValidationError('Canonical queue turn was not found.');
   if (turn.loadingId !== owner.value.loadingId) throw new GuardQueueConflictError('The queue reservation changed before departure.');
+  if (turn.projectReturnStatus && !turn.projectReturnReleasedAt) throw new GuardQueueConflictError('تردد مرجوعی از گردش مرجوعی پیگیری می‌شود.');
   if (turn.driverSource === 'PERSONAL_PICKUP') throw new GuardQueueConflictError('بارگیری شخصی از لجستیک مدیریت می‌شود.');
   const reason = input.reason.trim();
   if (!reason) throw new GuardQueueValidationError('A close-without-loading reason is required.');
@@ -421,6 +437,7 @@ export const voidGuardQueueTurn = async (prisma: PrismaClient, input: { turnId: 
   let turn = await tx.guardDriverQueueTurn.findUnique({ where: { id: input.turnId } });
   if (!turn) throw new GuardQueueValidationError('Canonical queue turn was not found.');
   if (turn.loadingId !== owner.value.loadingId) throw new GuardQueueConflictError('The queue reservation changed before voiding.');
+  if (turn.projectReturnStatus && !turn.projectReturnReleasedAt) throw new GuardQueueConflictError('تردد مرجوعی از گردش مرجوعی پیگیری می‌شود.');
   if (turn.driverSource === 'PERSONAL_PICKUP') throw new GuardQueueConflictError('بارگیری شخصی از لجستیک مدیریت می‌شود.');
   const reason = input.reason.trim();
   if (!reason) throw new GuardQueueValidationError('A void reason is required.');
@@ -460,11 +477,7 @@ export const voidGuardQueueTurn = async (prisma: PrismaClient, input: { turnId: 
 });
 
 export const listGuardQueueAdmissionOptions = async (prisma: PrismaClient, at = new Date()) => {
-  const openStatuses: GuardDriverQueueTurnStatus[] = [
-    GuardDriverQueueTurnStatus.WAITING_AT_GATE, GuardDriverQueueTurnStatus.AVAILABLE_FOR_LOADING,
-    GuardDriverQueueTurnStatus.RESERVED_FOR_LOADING, GuardDriverQueueTurnStatus.LOADING_FINALIZED,
-  ];
-  const openTurns = await prisma.guardDriverQueueTurn.findMany({ where: { status: { in: openStatuses } }, select: {
+  const openTurns = await prisma.guardDriverQueueTurn.findMany({ where: { status: { in: openQueueStatuses } }, select: {
     internalDriverId: true, externalDriverId: true, companyVehicleId: true, externalVehicleId: true,
   } });
   const usedInternalDrivers = openTurns.flatMap((turn) => turn.internalDriverId ? [turn.internalDriverId] : []);

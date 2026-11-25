@@ -15,6 +15,7 @@ export interface DropdownOption {
 interface EnhancedDropdownProps {
   id?: string;
   'aria-describedby'?: string;
+  'aria-label'?: string;
   'aria-invalid'?: boolean | 'true' | 'false';
   options: DropdownOption[];
   value: string;
@@ -36,6 +37,7 @@ interface EnhancedDropdownProps {
 export default function EnhancedDropdown({
   id,
   'aria-describedby': ariaDescribedBy,
+  'aria-label': ariaLabel,
   'aria-invalid': ariaInvalid,
   options,
   value,
@@ -360,7 +362,7 @@ export default function EnhancedDropdown({
           aria-haspopup="listbox"
           aria-describedby={ariaDescribedBy}
           aria-invalid={ariaInvalid}
-          aria-label={label || placeholder}
+          aria-label={ariaLabel || label || placeholder}
         >
           <div className="flex items-center space-x-2 space-x-reverse flex-1 min-w-0">
             <span className={`truncate ${displayValue ? 'sds-text-primary ' : 'sds-text-muted '}`}>

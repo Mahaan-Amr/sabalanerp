@@ -67,6 +67,22 @@ export const publishStoneReturnAcceptanceEvidence = (
   ownerWorkspace: 'logistics', sourceType: 'LOGISTICS_STONE_RETURN_ACCEPTANCE', sourceVersion: 1, ...input,
 });
 
+export const PROJECT_RETURN_ACCEPTANCE_EVIDENCE = 'LOGISTICS_PROJECT_RETURN_ACCEPTANCE';
+
+export const publishProjectReturnAcceptanceEvidence = (
+  prisma: EvidenceDatabase,
+  input: { sourceId: string; sourcePayload: unknown; occurredAt: Date },
+) => publishAccountingOperationalEvidence(prisma, {
+  ownerWorkspace: 'logistics', sourceType: PROJECT_RETURN_ACCEPTANCE_EVIDENCE, sourceVersion: 1, ...input,
+});
+
+export const publishProjectReturnStockReversal = (
+  prisma: EvidenceDatabase,
+  input: { sourceId: string; sourcePayload: unknown; occurredAt: Date },
+) => publishAccountingOperationalEvidence(prisma, {
+  ownerWorkspace: 'logistics', sourceType: 'LOGISTICS_PROJECT_RETURN_STOCK_REVERSAL', sourceVersion: 1, ...input,
+});
+
 export const publishInventoryPurchaseOperationalEvidence = (
   prisma: EvidenceDatabase,
   input: { sourceId: string; sourceVersion: number; sourcePayload: unknown; occurredAt: Date },

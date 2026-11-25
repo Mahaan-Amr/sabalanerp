@@ -1,6 +1,6 @@
 import { normalizeDigits } from '@/lib/numberFormat';
 
-const scale = 30;
+export const stoneReturnQuantityScale = 30;
 
 export function normalizeStoneReturnQuantity(value: string, allowGrouping = false) {
   const normalized = normalizeDigits(value).trim();
@@ -11,5 +11,5 @@ export function normalizeStoneReturnQuantity(value: string, allowGrouping = fals
 export function stoneReturnQuantityAtoms(value: string, unit: string): bigint | null {
   const parsed = /^(\d{1,35})(?:\.(\d{1,30}))?$/.exec(value);
   if (!parsed || (unit === 'count' && parsed[2])) return null;
-  return BigInt(parsed[1] + (parsed[2] ?? '').padEnd(scale, '0'));
+  return BigInt(parsed[1] + (parsed[2] ?? '').padEnd(stoneReturnQuantityScale, '0'));
 }

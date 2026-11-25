@@ -15,6 +15,7 @@ import {
 } from '../services/stoneReturnReceipts';
 
 import { listStoneReturnAllocationReviews, readStoneReturnAllocationReview, saveStoneReturnAllocationDraft } from '../services/stoneReturnAllocationDraft';
+import { ProjectReturnReceiptError } from '../services/projectReturnReceipts';
 import { StoneReturnAllocationError } from '../services/stoneReturnAllocationRules';
 
 export function stoneReturnEndpoint(action: (req: AuthRequest & FeatureRequest & WorkspaceRequest) => Promise<unknown>, created = false): RequestHandler {
@@ -28,7 +29,7 @@ export function stoneReturnEndpoint(action: (req: AuthRequest & FeatureRequest &
         res.status(409).json({ success: false, error: error.message });
         return;
       }
-      if (error instanceof StoneReturnReceiptError || error instanceof StoneReturnAllocationError || error instanceof SupplyChainAccountingError
+      if (error instanceof ProjectReturnReceiptError || error instanceof StoneReturnReceiptError || error instanceof StoneReturnAllocationError || error instanceof SupplyChainAccountingError
         || error instanceof AccountingCustomerTreasuryError || error instanceof AccountingLedgerError) {
         res.status(error.status).json({ success: false, error: error.message, ...(error instanceof StoneReturnIntakeRejected
           ? { code: 'STONE_RETURN_INTAKE_REJECTED', requestId: error.requestId } : {}) });
@@ -65,11 +66,11 @@ const stoneReturnPostingAccess = [
   requireFeatureAccess(FEATURES.ACCOUNTING_CUSTOMER_POSTING_MANAGE, FEATURE_PERMISSIONS.EDIT),
 ];
 
-const hasEditAccess = (req: FeatureRequest & WorkspaceRequest) =>
+export const hasStoneReturnEditAccess = (req: FeatureRequest & WorkspaceRequest) =>
   [req.workspacePermission, req.featurePermission].every(level => level === 'edit' || level === 'admin');
 
 async function canFinalizeStoneReturn(req: AuthRequest & FeatureRequest & WorkspaceRequest) {
-  if (!req.user || !hasEditAccess(req)) return false;
+  if (!req.user || !hasStoneReturnEditAccess(req)) return false;
   const features = await getUserFeatures(req.user.id, req.user.role);
   return features.some(({ feature, permission }) => feature === FEATURES.ACCOUNTING_CUSTOMER_POSTING_MANAGE
     && (permission === FEATURE_PERMISSIONS.EDIT || permission === FEATURE_PERMISSIONS.ADMIN));
@@ -93,7 +94,7 @@ accountingStoneReturnsRouter.get('/:id', ...accountingStoneReturnsView, stoneRet
   ...await prisma.$transaction(tx => readStoneReturnAllocationReview(tx, req.params.id), {
     isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
   }),
-  canAllocate: hasEditAccess(req),
+  canAllocate: hasStoneReturnEditAccess(req),
   canFinalize: await canFinalizeStoneReturn(req),
 })));
 accountingStoneReturnsRouter.put('/:id/allocations', ...accountingStoneReturnsEdit, stoneReturnEndpoint(async req => ({
@@ -114,7 +115,7 @@ accountingStoneReturnsRouter.post('/:id/finalize', ...stoneReturnPostingAccess, 
 export const logisticsStoneReturnsRouter = express.Router();
 logisticsStoneReturnsRouter.get('/', ...logisticsView, stoneReturnEndpoint(async req => ({
   ...await listStoneReturnReceipts(prisma, queryText(req.query.after, 100)),
-  canRecord: hasEditAccess(req),
+  canRecord: hasStoneReturnEditAccess(req),
 })));
 logisticsStoneReturnsRouter.get('/customers', ...logisticsEdit, stoneReturnEndpoint(req => searchStoneReturnCustomers(prisma, queryText(req.query.search, 120))));
 logisticsStoneReturnsRouter.get('/products', ...logisticsEdit, stoneReturnEndpoint(req => searchStoneReturnProducts(prisma, queryText(req.query.search, 120))));

@@ -42,6 +42,8 @@ import { readPartnerOutstandingHistory, readPartnerAccountingTrend } from '../pa
 import { createPartnerCaseLoading, findLoadablePartnerDeliveries, readPartnerCaseLoading } from '../dispatchAllocation';
 import { shipmentQuantityEvidenceIntegrityHash } from '../shipmentQuantityProjectionStore';
 import { dryRunLegacyContractProductGraphMigration } from '../contractProductGraphMigration';
+import { projectReturnCustomerScope, searchProjectReturnPartnerContracts, searchProjectReturnProducts } from '../projectReturnReceipts';
+import { searchStoneReturnCustomers } from '../stoneReturnReceipts';
 
 function databaseUrl(schemaOnly = true) {
   const url = new URL((schemaOnly ? process.env.PARTNER_LIFECYCLE_SCHEMA_SOURCE_URL : undefined) ??
@@ -322,7 +324,7 @@ const idsFor = (prefix: string) => ({ caseId: `${prefix}-case`, partnerId: `${pr
   internalId: `${prefix}-internal`, contractId: `${prefix}-contract`, rowId: `${prefix}-row`, cohortId: `${prefix}-cohort` });
 
 async function seedCase(tx: Prisma.TransactionClient, ids: Ids, tamperAccounting = false, passThrough = false,
-  deliveryPlan?: partnerContracts.FulfillmentView['deliveries'], loss = false) {
+  deliveryPlan?: partnerContracts.FulfillmentView['deliveries'], loss = false, returnProject?: { id: string; productId: string }) {
   const base = createPartnerFixtures();
   if (loss) {
     base.partner.products[0].retailUnitPrice = '700';
@@ -362,12 +364,14 @@ async function seedCase(tx: Prisma.TransactionClient, ids: Ids, tamperAccounting
     retailUnitPrice: product.retailUnitPrice }], totals: base.partner.retailTotals, belowCostConfirmed: false };
   const paymentEvidence = { customerPaymentPlan: base.customer.customerPaymentPlan,
     sabalanPaymentPlan: base.accounting.sabalanPaymentPlan };
+  const catalogProductId = returnProject?.productId ?? 'fixture-stone';
   const revisionCustomerContent = { contractDate: base.customer.contractDate, legalText: base.customer.legalText,
+    ...(returnProject ? { projectId: returnProject.id } : {}),
     deliveries, confirmation: 'NOT_SENT', signatures: [] };
   const graph = parseCanonicalProductGraph({ schemaVersion: 1, revision: 1,
     calculationPolicy: { calculation: 'calculation-v1', packing: 'packing-v1', pricing: 'pricing-v1', rounding: 'rounding-v1' },
-    catalogSnapshots: [{ catalogProductId: 'fixture-stone', snapshotVersion: 'catalog-v1', facts: {} }],
-    rows: [{ productRowId: ids.rowId, catalogProductId: 'fixture-stone', catalogSnapshotVersion: 'catalog-v1',
+    catalogSnapshots: [{ catalogProductId, snapshotVersion: 'catalog-v1', facts: {} }],
+    rows: [{ productRowId: ids.rowId, catalogProductId, catalogSnapshotVersion: 'catalog-v1',
       productType: 'longitudinal', contractualTitle: product.description, commercial: { requestedLengthMeters: '1',
         requestedQuantity: '2', requestedAreaSquareMeters: '1', totalAmountToman: '200',
         calculationSnapshot: { quantityMode: 'piece-count' } } }], stairSystems: [], layerConfigurations: [], sourceBatches: [],
@@ -411,8 +415,13 @@ async function seedCase(tx: Prisma.TransactionClient, ids: Ids, tamperAccounting
   update: { cohortId: ids.cohortId, enrollmentPaused: false, operationalPaused: false } });
   await tx.partnerCohortMembership.create({ data: { id: `${ids.cohortId}-membership`, profileId: ids.profileId,
     cohortId: ids.cohortId, actorId: ids.partnerId, eligibilityEvidence: { fixture: true } } });
-  await tx.crmCustomer.create({ data: { id: ids.customerId, firstName: 'Customer', lastName: 'Lifecycle',
+  if (returnProject) await tx.$executeRaw`SELECT set_config('sabalan.partner_crm_profile', ${ids.profileId}, true)`;
+  await tx.crmCustomer.create({ data: { id: ids.customerId, firstName: 'Customer', lastName: returnProject ? ids.customerId : 'Lifecycle',
+    ...(returnProject ? { partnerOwnerProfileId: ids.profileId, partnerRevision: 1 } : {}),
     ownerUserId: ids.partnerId, createdBy: ids.partnerId } });
+  if (returnProject) {
+    await tx.projectAddress.create({ data: { id: returnProject.id, customerId: ids.customerId, address: 'نشانی آزمون' } });
+  }
   const [tracking] = await tx.$queryRaw<Array<{ number: bigint }>>`SELECT nextval('partner_case_tracking_number_seq') AS number`;
   await tx.partnerSaleCase.create({ data: { id: ids.caseId, caseNumber: partner.caseNumber,
     profileId: ids.profileId,
@@ -566,6 +575,48 @@ const migrationAuditInFixture = (tx: Prisma.TransactionClient) =>
   dryRunLegacyContractProductGraphMigration({ salesContract: tx.salesContract,
     $transaction: (read: (snapshot: Prisma.TransactionClient) => Promise<unknown>) => read(tx),
   } as unknown as PrismaClient);
+
+test('project returns search committed Partner contracts and catalog products in the selected project', async () => {
+  const database = new PrismaClient({ datasources: { db: { url: databaseUrl(false) } } });
+  const rollback = new Error('rollback Partner project return fixture');
+  try {
+    await database.$transaction(async tx => {
+      const ids = idsFor(`partner-return-${randomUUID()}`);
+      const productId = `${ids.caseId}-stone`, projectId = `${ids.caseId}-project`;
+      await tx.product.create({ data: {
+        id: productId, code: productId, name: 'Partner return stone', namePersian: 'سنگ مرجوعی همکار',
+        cuttingDimensionCode: '1', cuttingDimensionName: 'Cut', cuttingDimensionNamePersian: 'برش',
+        stoneTypeCode: '1', stoneTypeName: 'Stone', stoneTypeNamePersian: 'سنگ', widthCode: '1',
+        widthValue: 1, widthName: 'Width', thicknessCode: '1', thicknessValue: 1, thicknessName: 'Thickness',
+        mineCode: '1', mineName: 'Mine', mineNamePersian: 'معدن', finishCode: '1', finishName: 'Finish',
+        finishNamePersian: 'پرداخت', colorCode: '1', colorName: 'Color', colorNamePersian: 'رنگ',
+        qualityCode: '1', qualityName: 'Quality', qualityNamePersian: 'کیفیت', images: [],
+      } });
+      const owner = await seedCase(tx, ids, false, false, undefined, false, { id: projectId, productId });
+      assert.deepEqual(await searchStoneReturnCustomers(tx, ids.customerId, projectReturnCustomerScope), []);
+      const lifecycle = createPartnerCaseLifecycleService(dependencies(tx, ids));
+      await lifecycle.markAwaitingCustomerConfirmation({ expected: owner, commandId: `${ids.caseId}-send`,
+        correlationId: `${ids.caseId}-send`, snapshotId: `${ids.caseId}-snapshot` });
+      const committed = await lifecycle.execute(await commitCommand(ids, owner, 'SIGNED', 'signed', 'AWAITING_CUSTOMER_CONFIRMATION'));
+      assert.equal(committed.ok, true, JSON.stringify(committed));
+      assert.equal((await searchStoneReturnCustomers(tx, ids.customerId, projectReturnCustomerScope))[0]?.id, ids.customerId);
+      assert.deepEqual(await searchStoneReturnCustomers(tx, ids.customerId), []);
+      const contracts = await searchProjectReturnPartnerContracts(tx, ids.customerId, [projectId], ids.contractId);
+      assert.equal(contracts[0]?.id, ids.contractId);
+      assert.deepEqual(await searchProjectReturnProducts(tx, ids.customerId, [projectId], 'همکار', ids.contractId), [{
+        productId, productCode: productId, productName: 'سنگ مرجوعی همکار', unit: 'meter',
+      }]);
+      const otherProject = await tx.projectAddress.create({ data: { address: 'Other', customerId: ids.customerId } });
+      assert.deepEqual(await searchProjectReturnPartnerContracts(tx, ids.customerId, [otherProject.id], ''), []);
+      assert.deepEqual(await searchProjectReturnProducts(tx, ids.customerId, [otherProject.id], '', ids.contractId), []);
+      throw rollback;
+    }, { timeout: 30_000 });
+  } catch (error) {
+    if (error !== rollback) throw error;
+  } finally {
+    await database.$disconnect();
+  }
+});
 
 test('release product graph audit verifies Partner ownership instead of migrating its customer projection', () =>
   fixture(async (tx, ids) => {

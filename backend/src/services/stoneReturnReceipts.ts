@@ -68,12 +68,12 @@ export function parseStoneReturnAcceptance(body: Record<string, unknown>) {
   };
 }
 
-const customerScope = { cardDeletedAt: null, partnerOwnerProfileId: null } satisfies Prisma.CrmCustomerWhereInput;
+export const stoneReturnCustomerScope = { cardDeletedAt: null, partnerOwnerProfileId: null } satisfies Prisma.CrmCustomerWhereInput;
 const productScope = { deletedAt: null, isActive: true } satisfies Prisma.ProductWhereInput;
-const customerSelect = { id: true, firstName: true, lastName: true, companyName: true } satisfies Prisma.CrmCustomerSelect;
+export const stoneReturnCustomerSelect = { id: true, firstName: true, lastName: true, companyName: true } satisfies Prisma.CrmCustomerSelect;
 const productSelect = { id: true, code: true, name: true, namePersian: true } satisfies Prisma.ProductSelect;
 
-function customerName(customer: { firstName: string; lastName: string; companyName: string | null }) {
+export function stoneReturnCustomerName(customer: { firstName: string; lastName: string; companyName: string | null }) {
   return `${customer.firstName} ${customer.lastName}`.trim() || customer.companyName || 'مشتری';
 }
 
@@ -87,10 +87,12 @@ function guardReturnScope(customerId: string) {
   } satisfies Prisma.SecurityVehicleMovementWhereInput;
 }
 
-export async function searchStoneReturnCustomers(db: PrismaClient, search: string) {
+export async function searchStoneReturnCustomers(db: Prisma.TransactionClient, search: string,
+  scope: Prisma.CrmCustomerWhereInput = stoneReturnCustomerScope,
+) {
   const terms = normalizePersianSearchTokens(search).slice(0, 8);
   const rows = await db.crmCustomer.findMany({
-    where: { ...customerScope, AND: terms.map(term => ({
+    where: { AND: [scope, ...terms.map(term => ({
       OR: expandPersianSearchTokenVariants(term).flatMap(variant => {
         const filter = textFilter(variant);
         return [
@@ -98,10 +100,10 @@ export async function searchStoneReturnCustomers(db: PrismaClient, search: strin
           { phoneNumbers: { some: { number: filter, isActive: true } } },
         ];
       }),
-    })) },
-    select: customerSelect, take: 30, orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+    }))] },
+    select: stoneReturnCustomerSelect, take: 30, orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
   });
-  return rows.map(row => ({ id: row.id, label: customerName(row), description: row.companyName }));
+  return rows.map(row => ({ id: row.id, label: stoneReturnCustomerName(row), description: row.companyName }));
 }
 
 export async function searchStoneReturnProducts(db: PrismaClient, search: string) {
@@ -190,7 +192,7 @@ export function recordStoneReturnReceipt(db: PrismaClient | Prisma.TransactionCl
     }
 
     const [customer, product, movement] = await Promise.all([
-      tx.crmCustomer.findFirst({ where: { id: command.customerId, ...customerScope }, select: customerSelect }),
+      tx.crmCustomer.findFirst({ where: { id: command.customerId, ...stoneReturnCustomerScope }, select: stoneReturnCustomerSelect }),
       tx.product.findFirst({ where: { id: command.productId, ...productScope }, select: productSelect }),
       command.guardReturnMovementId ? tx.securityVehicleMovement.findFirst({
         where: { id: command.guardReturnMovementId, ...guardReturnScope(command.customerId) },
@@ -210,7 +212,7 @@ export function recordStoneReturnReceipt(db: PrismaClient | Prisma.TransactionCl
     const createdAt = new Date();
     const inventoryIdentityId = command.acceptedQuantity === '0' ? null : `stone-return-receipt:${id}`;
     const data = {
-      ...command, id, customerName: customerName(customer), productCode: product.code,
+      ...command, id, customerName: stoneReturnCustomerName(customer), productCode: product.code,
       productName: product.namePersian || product.name, inventoryIdentityId, createdAt, createdBy: actorId,
     };
     const evidence = await publishStoneReturnAcceptanceEvidence(tx, {

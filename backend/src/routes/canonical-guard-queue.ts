@@ -1,7 +1,8 @@
 import { prisma } from '../lib/prisma';
 import express from 'express';
 import { HrVehicleError } from '../services/hrVehicleOperations';
-import { GuardDriverSource, Prisma, PrismaClient } from '@prisma/client';
+import { recordProjectReturnExit, releaseProjectReturnVisit } from '../services/projectReturnGuardVisits';
+import { GuardDriverSource, Prisma } from '@prisma/client';
 import { AuthRequest, protect } from '../middleware/auth';
 import { requireWorkspaceAccess, WorkspaceRequest, WORKSPACES, WORKSPACE_PERMISSIONS } from '../middleware/workspace';
 import { admitGuardDriverQueueTurn, closeGuardQueueTurnWithoutLoading, GuardQueueConflictError, GuardQueueValidationError, listGuardQueueAdmissionOptions, makeGuardQueueTurnAvailable, queueTurnDriverIdentity, returnGuardQueueTurnToWaiting, voidGuardQueueTurn } from '../services/guardDriverQueue';
@@ -22,7 +23,8 @@ const responseTurn = (turn: any, redacted = false) => {
   const snapshot = turn.admissionSnapshot || {};
   const plate = String(snapshot.plate?.plate || '');
   return {
-    id: turn.id, driverSource: turn.driverSource, status: turn.status, admittedAt: turn.admittedAt,
+    id: turn.id, driverSource: turn.driverSource, status: turn.status, projectReturnStatus: turn.projectReturnStatus, admittedAt: turn.admittedAt,
+    projectReturnReleasedAt: turn.projectReturnReleasedAt,
     availableAt: turn.availableAt, reservedAt: turn.reservedAt, finalizedAt: turn.finalizedAt, exitedAt: turn.exitedAt,
     closedAt: turn.closedAt, voidedAt: turn.voidedAt,
     admissionSnapshot: {
@@ -97,7 +99,7 @@ router.get('/dispatch-evidence-exceptions', protect, guardView, async (_req: Wor
   catch (error) { return fail(res, error, 'List dispatch evidence exceptions'); }
 });
 
-const visibleQueueTurns = { driverSource: { not: GuardDriverSource.PERSONAL_PICKUP } } satisfies Prisma.GuardDriverQueueTurnWhereInput;
+const visibleQueueTurns = { OR: [{ driverSource: { not: GuardDriverSource.PERSONAL_PICKUP } }, { projectReturnStatus: { not: null } }] } satisfies Prisma.GuardDriverQueueTurnWhereInput;
 const currentQueueStatuses = ['WAITING_AT_GATE', 'AVAILABLE_FOR_LOADING', 'RESERVED_FOR_LOADING', 'LOADING_FINALIZED'] as const;
 const historicalQueueStatuses = ['CLOSED_WITHOUT_LOADING', 'VOIDED', 'EXIT_RECORDED'] as const;
 
@@ -105,6 +107,7 @@ const historicalQueueStatuses = ['CLOSED_WITHOUT_LOADING', 'VOIDED', 'EXIT_RECOR
 const queueTurnSummary = {
   id: true, driverSource: true, status: true, admittedAt: true, admissionSnapshot: true,
   internalDriverId: true, externalDriverId: true, companyVehicleId: true, externalVehicleId: true,
+  projectReturnStatus: true, projectReturnReleasedAt: true,
   availableAt: true, reservedAt: true, finalizedAt: true, exitedAt: true, closedAt: true, voidedAt: true,
 } satisfies Prisma.GuardDriverQueueTurnSelect;
 
@@ -178,18 +181,49 @@ router.get('/canonical-driver-queue/admission-options', protect, guardEdit, asyn
 
 router.post('/canonical-driver-queue', protect, guardEdit, async (req: AuthRequest, res) => {
   try {
-    const source = String(req.body.source || '') as GuardDriverSource;
-    if (source !== 'INTERNAL' && source !== 'EXTERNAL' && source !== 'CUSTOMER_PICKUP') return res.status(400).json({ success: false, error: 'A valid driver source is required.' });
-    const driverId = String(req.body.driverId || '').trim();
-    if (source !== 'CUSTOMER_PICKUP' && !driverId) return res.status(400).json({ success: false, error: 'driverId is required.' });
+    const { source, purpose, plate, phone, vehicleType } = req.body || {};
+    if (purpose !== undefined && purpose !== 'PROJECT_RETURN') {
+      throw new GuardQueueValidationError('هدف ورود معتبر نیست.');
+    }
     const actorId = req.user!.id;
+    if (source === 'PERSONAL_PICKUP') {
+      if (purpose !== 'PROJECT_RETURN') throw new GuardQueueValidationError('خودروی شخصی فقط برای مرجوعی از گارد پذیرش می‌شود.');
+      const turn = await admitGuardDriverQueueTurn(prisma, { source, purpose, actorId, plate });
+      return res.status(201).json({ success: true, data: responseTurn(turn) });
+    }
+    if (source !== 'INTERNAL' && source !== 'EXTERNAL' && source !== 'CUSTOMER_PICKUP') {
+      throw new GuardQueueValidationError('نوع راننده معتبر نیست.');
+    }
+    const driverId = String(req.body.driverId || '').trim();
+    if (source !== 'CUSTOMER_PICKUP' && !driverId) throw new GuardQueueValidationError('راننده را انتخاب کنید.');
     const turn = await admitGuardDriverQueueTurn(prisma, source === 'CUSTOMER_PICKUP'
-      ? { source, actorId, vehicleType: req.body.vehicleType, plate: req.body.plate, phone: req.body.phone }
-      : { source, actorId, driverId, vehicleId: req.body.vehicleId });
+      ? { source, purpose, actorId, vehicleType, plate, phone }
+      : { source, purpose, actorId, driverId, vehicleId: req.body.vehicleId });
     return res.status(201).json({ success: true, data: responseTurn(turn) });
   } catch (error) {
     return fail(res, error, 'Canonical Guard queue admission error:');
   }
+});
+
+router.post('/canonical-driver-queue/:id/project-return-exit', protect, guardEdit, async (req: AuthRequest, res) => {
+  try {
+    const turn = await recordProjectReturnExit(prisma, { turnId: req.params.id, actorId: req.user!.id });
+    return res.json({ success: true, data: responseTurn(turn) });
+  } catch (error) { return fail(res, error, 'Record Guard project return exit'); }
+});
+
+router.post('/canonical-driver-queue/:id/project-return-transfer', protect, guardEdit, async (req: AuthRequest, res) => {
+  try {
+    const turn = await releaseProjectReturnVisit(prisma, { turnId: req.params.id, actorId: req.user!.id, action: 'transfer' });
+    return res.json({ success: true, data: responseTurn(turn) });
+  } catch (error) { return fail(res, error, 'Transfer project return visit to loading'); }
+});
+
+router.post('/canonical-driver-queue/:id/project-return-complete', protect, guardEdit, async (req: AuthRequest, res) => {
+  try {
+    const turn = await releaseProjectReturnVisit(prisma, { turnId: req.params.id, actorId: req.user!.id, action: 'complete-personal' });
+    return res.json({ success: true, data: responseTurn(turn) });
+  } catch (error) { return fail(res, error, 'Complete personal-car project return visit'); }
 });
 
 router.post('/canonical-driver-queue/:id/available', protect, guardEdit, async (req: AuthRequest, res) => {

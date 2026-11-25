@@ -1,6 +1,7 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { ExactQuantityDecimal, exactQuantityText } from './exactQuantity';
 import { resolveAccountingOperationalEvidence } from './accountingOperationalEvidence';
+import { loadProjectReturnStock, loadProjectReturnStocks } from './projectReturnStock';
 import { hashSupplyChainEvidence } from './accountingSupplyChain';
 
 type Tx = Prisma.TransactionClient;
@@ -52,8 +53,17 @@ async function readPhysicalStoneReturnQuantities(tx: Tx, identityIds: string[]) 
 
 export async function readAcceptedStoneReturnQuantity(tx: Tx, identityId: string) {
   const receipt = await tx.stoneReturnReceipt.findUnique({ where: { inventoryIdentityId: identityId } });
-  if (!receipt) return null;
-  const stock = await loadAcceptedStoneReturnStock(tx, { ...receipt, acceptedQuantity: receipt.acceptedQuantity.toFixed() });
+  const projectStock = receipt ? undefined : await loadProjectReturnStock(tx, identityId);
+  if (projectStock) {
+    const { returnCase, revisions } = projectStock.item.version;
+    if (returnCase.operationStatus !== 'ACTIVE' || revisions.length) {
+      return { unit: projectStock.identity.governedUnit, quantity: '0' };
+    }
+  }
+  const stock = receipt
+    ? await loadAcceptedStoneReturnStock(tx, { ...receipt, acceptedQuantity: receipt.acceptedQuantity.toFixed() })
+    : projectStock;
+  if (stock === undefined) return null;
   const onHand = stock && (await readPhysicalStoneReturnQuantities(tx, [identityId])).get(identityId);
   return { unit: stock?.identity.governedUnit ?? null, quantity: onHand && onHand.gt(0) ? onHand.toFixed() : '0' };
 }
@@ -64,10 +74,17 @@ export async function readStoneReturnAvailability(
 ) {
   const productFilter = Array.isArray(products) ? { id: { in: products } } : products;
   const read = async (tx: Tx) => {
-    const lots = await tx.stoneReturnReceipt.findMany({
-      where: { product: { AND: [{ isActive: true, deletedAt: null }, productFilter] }, inventoryIdentityId: { not: null } },
-      select: { productId: true, unit: true, inventoryIdentityId: true },
-    });
+    const where = { product: { AND: [{ isActive: true, deletedAt: null }, productFilter] }, inventoryIdentityId: { not: null } };
+    const select = { productId: true, unit: true, inventoryIdentityId: true } as const;
+    const [stoneLots, projectLots] = await Promise.all([
+      tx.stoneReturnReceipt.findMany({ where, select }),
+      tx.projectReturnVersionItem.findMany({
+        where: { ...where, version: { revisions: { none: {} }, returnCase: { operationStatus: 'ACTIVE' } } }, select,
+      }),
+    ]);
+    const projectStock = projectLots.length
+      ? await loadProjectReturnStocks(tx, projectLots.map(lot => lot.inventoryIdentityId!)) : new Map();
+    const lots = [...stoneLots, ...projectLots.filter(lot => projectStock.get(lot.inventoryIdentityId!))];
     if (!lots.length) return new Map<string, { unit: string; quantity: string }[]>();
     const identityIds = lots.map(lot => lot.inventoryIdentityId!);
     const [onHand, reservationTotals] = await Promise.all([

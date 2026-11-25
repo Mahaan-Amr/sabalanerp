@@ -40,12 +40,19 @@ const eventLabel: Record<string, string> = {
   RESERVATION_RELEASED_FOR_VOID: "آزادسازی رزرو هنگام ابطال",
   VOIDED: "ابطال پذیرش",
   FINALIZED_LOADING_CANCELLED: "ابطال بارگیری نهایی‌شده",
+  PROJECT_RETURN_CANCELLED_WITHOUT_DELIVERY: "لغو مرجوعی بدون تحویل",
+  PROJECT_RETURN_RECEIVED: "ثبت تحویل مرجوعی",
+  PROJECT_RETURN_TRANSFERRED_TO_LOADING: "انتقال از مرجوعی به صف بارگیری",
+  PROJECT_RETURN_PERSONAL_COMPLETED: "ثبت اتمام مرجوعی خودروی شخصی",
 };
 
 type HistoryTurn = {
   id: string;
   status: string;
   admittedAt: string;
+  driverSource: string;
+  projectReturnStatus?: "CANCELLED_WITHOUT_DELIVERY" | "RECEIVED" | "AWAITING_RECEIPT" | null;
+  projectReturnReleasedAt?: string | null;
   admissionSnapshot: {
     driver?: { firstName?: string; lastName?: string };
     plate?: { plate?: string };
@@ -138,9 +145,16 @@ export default function CanonicalQueueHistory({ refresh, securityAPI }: {
                   <p className="text-sm sds-text-primary">{turnLabel(turn)}</p>
                   <p className="mt-1 text-xs sds-text-muted">پذیرش {formatTime(turn.admittedAt)}</p>
                 </div>
-                <ErpBadge tone={turn.status === "VOIDED" ? "danger" : "neutral"}>
-                  {canonicalQueueStatusLabel[turn.status] || operationalStatusLabel(turn.status)}
-                </ErpBadge>
+                <div className="flex flex-wrap gap-2">
+                  {turn.projectReturnStatus === "CANCELLED_WITHOUT_DELIVERY" && <ErpBadge tone="neutral">مرجوعی لغو شد</ErpBadge>}
+                  {turn.projectReturnStatus === "RECEIVED" && <ErpBadge tone="success">تحویل مرجوعی ثبت شد</ErpBadge>}
+                  {turn.projectReturnReleasedAt && turn.driverSource !== "PERSONAL_PICKUP" && (
+                    <ErpBadge tone="info">منتقل‌شده از مرجوعی</ErpBadge>
+                  )}
+                  <ErpBadge tone={turn.status === "VOIDED" ? "danger" : "neutral"}>
+                    {canonicalQueueStatusLabel[turn.status] || operationalStatusLabel(turn.status)}
+                  </ErpBadge>
+                </div>
               </div>
               <ErpButton
                 className="mt-2"

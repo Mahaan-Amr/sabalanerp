@@ -13,7 +13,7 @@ export const selectOptions = (children: React.ReactNode, group?: string): Dropdo
   return selectOptions(child.props.children, child.type === 'optgroup' ? child.props.label : group);
 });
 
-export default function ErpSearchableSelect({ children, value, defaultValue, onChange, id, disabled, required, className, ...props }: {
+export default function ErpSearchableSelect({ children, value, defaultValue, onChange, id, disabled, required, className, placeholder, searchable = true, ...props }: {
   children: React.ReactNode;
   value?: string | number | readonly string[];
   defaultValue?: string | number | readonly string[];
@@ -21,15 +21,16 @@ export default function ErpSearchableSelect({ children, value, defaultValue, onC
   onSearchChange?: (query: string) => void;
   loading?: boolean;
   filterLocally?: boolean;
-  id?: string; disabled?: boolean; required?: boolean; className?: string;
+  id?: string; disabled?: boolean; required?: boolean; className?: string; placeholder?: string; searchable?: boolean;
   'aria-describedby'?: string; 'aria-invalid'?: boolean | 'true' | 'false'; 'aria-label'?: string;
 }) {
   const [localValue, setLocalValue] = React.useState(String(defaultValue ?? ''));
   const options = selectOptions(children);
   return <EnhancedDropdown id={id} options={options} value={value === undefined ? localValue : String(value)}
     onChange={(next) => { setLocalValue(next); onChange?.({ target: { value: next }, currentTarget: { value: next } }); }}
-    placeholder={props['aria-label'] || options.find((option) => option.value === '')?.label || 'انتخاب گزینه'}
+    placeholder={placeholder ?? (props['aria-label'] || options.find((option) => option.value === '')?.label || 'انتخاب گزینه')}
+    aria-label={props['aria-label']}
     aria-describedby={props['aria-describedby']} aria-invalid={props['aria-invalid']}
     onSearchChange={props.onSearchChange} loading={props.loading} filterLocally={props.filterLocally}
-    disabled={disabled} required={required} className={className} searchable noOptionsText="نتیجه‌ای پیدا نشد" />;
+    disabled={disabled} required={required} className={className} searchable={searchable} noOptionsText="نتیجه‌ای پیدا نشد" />;
 }

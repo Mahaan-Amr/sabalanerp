@@ -20,13 +20,18 @@ import { partnerError, type Result } from '@sabalanerp/partner-sales-contracts';
 import { ordinaryContractDispatchEligible, assertOrdinaryContractsDispatchEligible } from '../services/ordinaryContractDispatchEligibility';
 import { PartnerLoadingCommandError } from '../services/partnerSales/fulfillment/loadingAuthority';
 import { expandPersianSearchTokenVariants, normalizePersianSearchTokens } from '../services/crmCustomerSearch';
-import { resolveLogisticsContractRow } from '../services/logisticsContractRow';
+import { calculateLogisticsLinearQuantity } from '../services/logisticsLineQuantity';
+import { inferLogisticsContractUnit, resolveLogisticsContractRow } from '../services/logisticsContractRow';
 import { readShipmentQuantityProjection } from '../services/shipmentQuantityProjectionStore';
 
 import { logisticsStoneReturnsRouter } from './stoneReturns';
+import projectReturnVisitsRouter from './projectReturnVisits';
+import projectReturnReceiptsRouter from './projectReturnReceipts';
 
 const router = express.Router();
 router.use('/stone-returns', logisticsStoneReturnsRouter);
+router.use('/project-return-visits', projectReturnVisitsRouter);
+router.use('/project-returns', projectReturnReceiptsRouter);
 const respondPartnerLoading = (res: Response, result: Result<unknown>, successStatus = 200) => {
   res.setHeader('Cache-Control', 'private, no-store');
   return result.ok ? res.status(successStatus).json({ success: true, data: result.value })
@@ -166,22 +171,6 @@ const isLinearUnit = (unit?: string | null) => {
   return ['meter', 'linear_meter', 'linear-meter', 'm'].includes(normalized) || normalized.includes('طول');
 };
 
-const inferUnit = (item: any, snapshot: any) => {
-  const explicitUnit = snapshot?.unit || snapshot?.preparedUnit || snapshot?.meta?.unit;
-  if (explicitUnit) {
-    const unit = String(explicitUnit);
-    if (unit.includes('متر طول') || unit === 'meter') return 'meter';
-    if (unit.includes('متر مربع') || unit === 'squareMeter') return 'squareMeter';
-    if (unit.includes('عدد') || unit === 'count') return 'count';
-    return unit;
-  }
-
-  const productType = String(item?.productType || snapshot?.productType || '').toLowerCase();
-  if (productType.includes('longitudinal') || productType.includes('طولی')) return 'meter';
-  if (productType.includes('slab') || productType.includes('اسلب')) return 'squareMeter';
-  return 'count';
-};
-
 const unitLabel = (unit: string) => {
   if (unit === 'meter') return 'متر طول';
   if (unit === 'squareMeter') return 'متر مربع';
@@ -219,7 +208,7 @@ const getDeliverableQuantity = (item: any, snapshot: any, unit: string) => {
 
 const productSnapshotFor = (contract: any, item: any) => {
   const snapshot = resolveLogisticsContractRow(contract?.contractData, item);
-  const unit = inferUnit(item, snapshot);
+  const unit = inferLogisticsContractUnit(item, snapshot);
   const contractedQuantity = getDeliverableQuantity(item, snapshot, unit);
   return {
     productId: item.productId,
@@ -616,13 +605,13 @@ const linePayloadToCreate = async (line: any) => {
     throw new DispatchAllocationConflictError('قرارداد برای بارگیری باید قطعی و دارای تأیید مالی، مجوز مدیر یا پوشش کامل دریافت و اعتبار باشد.');
   }
 
-  const unit = String(line.unit || inferUnit(sourceItem, null));
+  const unit = String(line.unit || inferLogisticsContractUnit(sourceItem, null));
   const khatRas = line.khatRas === undefined || line.khatRas === null || line.khatRas === '' ? null : decimalInput(line.khatRas);
   const pieceCount = line.pieceCount === undefined || line.pieceCount === null || line.pieceCount === '' ? null : decimalInput(line.pieceCount);
   const plus = decimalInput(line.plus || 0);
   const minus = decimalInput(line.minus || 0);
   const calculated = khatRas !== null && pieceCount !== null
-    ? decimalInput(khatRas.mul(pieceCount).plus(plus).minus(minus))
+    ? calculateLogisticsLinearQuantity(khatRas, pieceCount, plus, minus)
     : decimalInput(line.quantity);
   const productSnapshot = productSnapshotFor(sourceItem.contract, sourceItem);
   const projection = await readShipmentQuantityProjection(prisma, { contractId: sourceItem.contractId });
@@ -1382,7 +1371,7 @@ router.post('/loadings/:id/corrections', canEdit, canCreateCorrections, [
     const sourceItem = await prisma.contractItem.findUnique({ where: { id: req.body.sourceContractItemId } });
     if (!sourceItem) return res.status(404).json({ success: false, error: 'Source contract item not found' });
     const deltaQuantity = decimalInput(req.body.deltaQuantity);
-    const unit = String(req.body.unit || inferUnit(sourceItem, null));
+    const unit = String(req.body.unit || inferLogisticsContractUnit(sourceItem, null));
 
     if (deltaQuantity.gt(0)) {
       await validateLineRemaining([{ sourceContractItemId: sourceItem.id, quantity: deltaQuantity, unit }]);

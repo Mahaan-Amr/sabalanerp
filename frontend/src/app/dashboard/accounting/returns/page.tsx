@@ -1,5 +1,5 @@
-import { StoneReturnList } from '@/features/stone-returns/StoneReturnList';
+import { ProjectReturnReviewList } from '@/features/stone-returns/ProjectReturnReviewList';
 
-export default function AccountingStoneReturnsPage() {
-  return <StoneReturnList workspace="accounting" />;
+export default function AccountingReturnsPage() {
+  return <ProjectReturnReviewList />;
 }

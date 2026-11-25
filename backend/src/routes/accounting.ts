@@ -113,10 +113,12 @@ import accountingPeriodEndRouter from './accountingPeriodEnd';
 import accountingSupplyChainRouter from './accountingSupplyChain';
 import accountingReplacementRouter from './accountingReplacement';
 
+import accountingProjectReturnsRouter from './accountingProjectReturns';
 import { accountingStoneReturnsRouter } from './stoneReturns';
 
 const router = express.Router();
 router.use('/stone-returns', accountingStoneReturnsRouter);
+router.use('/project-returns', accountingProjectReturnsRouter);
 router.use('/ledger', accountingLedgerRouter);
 router.use('/period-end', accountingPeriodEndRouter);
 router.use('/supply-chain', accountingSupplyChainRouter);

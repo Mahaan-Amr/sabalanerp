@@ -1,5 +1,6 @@
 'use client';
 
+import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import {
   ErpButton, ErpCard, ErpEmptyState, ErpField, ErpFieldView, ErpInlineState,
@@ -13,7 +14,7 @@ import {
   type StoneReturnAllocationInput, type StoneReturnCandidate, type StoneReturnReview, type StoneReturnSourceKey,
 } from './stoneReturnApi';
 
-const listHref = '/dashboard/accounting/returns';
+import { projectReturnAllocationApi, projectReturnHistoryHref, projectReturnReviewHref } from './projectReturnAllocationApi';
 const candidateKey = (row: StoneReturnSourceKey) => JSON.stringify([row.originalInvoiceId, row.originalLineId, row.dispatchEvidenceId]);
 
 function candidateRate(rate: string) {
@@ -49,6 +50,29 @@ function StoneReturnCandidateFields({ candidate, quantity, editable, disabled, e
       <ErpInput inputMode="decimal" maxLength={100} value={quantity} disabled={disabled} onChange={event => onChange(event.target.value)} />
     </ErpField> : quantity && <ErpFieldView label="مقدار تخصیص‌یافته" value={readable(quantity)} />}
   </ErpCard>;
+}
+
+function OpenProjectReturnCorrection({ receiptId }: { receiptId: string }) {
+  const router = useRouter();
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState('');
+
+  async function open() {
+    setPending(true);
+    setError('');
+    try {
+      const correction = await projectReturnAllocationApi.openCorrection(receiptId);
+      router.push(projectReturnReviewHref(correction.id));
+    } catch (failure) {
+      setError(userFacingError(failure, 'بازکردن نسخهٔ اصلاحی ناموفق بود.'));
+      setPending(false);
+    }
+  }
+
+  return <ErpSection title="اصلاح مرجوعی قطعی">
+    <ErpButton label="بازکردن نسخهٔ اصلاحی" variant="solid" tone="primary" disabled={pending} onClick={() => void open()} />
+    {error && <ErpInlineState kind="error" title={error} />}
+  </ErpSection>;
 }
 
 export function StoneReturnReviewPage({ receiptId }: { receiptId: string }) {
@@ -143,7 +167,7 @@ export function StoneReturnReviewPage({ receiptId }: { receiptId: string }) {
     }
   }
 
-  return <ErpPage eyebrow="حسابداری · مرجوعی‌ها" title={receipt ? `مرجوعی ${receipt.productName}` : 'پرونده مرجوعی'} backHref={listHref}>
+  return <ErpPage eyebrow="حسابداری · مرجوعی‌ها" title={receipt ? `مرجوعی ${receipt.productName}` : 'پرونده مرجوعی'} backHref={projectReturnHistoryHref}>
     {loading ? <ErpSkeleton /> : <>
       {error && <ErpInlineState kind="error" title={error} action={stale || !review ? {
         label: stale ? 'بارگذاری دوباره پرونده' : 'تلاش دوباره', onClick: () => setReload(value => value + 1),
@@ -190,6 +214,8 @@ export function StoneReturnReviewPage({ receiptId }: { receiptId: string }) {
           acceptedQuantity={receipt.acceptedQuantity} unit={receipt.unit} posting={posting} onPostingChange={setPosting}
           onPosted={finalization => setReview({ ...review, finalization, allocationStatus: 'FINALIZED' })} />}
         {review.finalization && <StoneReturnPostingResult finalization={review.finalization} draft={review.draft} unit={receipt.unit} />}
+        {review.finalization && review.canAllocate
+          && <OpenProjectReturnCorrection receiptId={receipt.id} />}
       </>}
     </>}
   </ErpPage>;

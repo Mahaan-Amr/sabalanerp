@@ -1,5 +1,7 @@
-import { StoneReturnIntake } from '@/features/stone-returns/StoneReturnIntake';
+import { ProjectReturnIntake } from '@/features/stone-returns/ProjectReturnIntake';
 
-export default function NewLogisticsStoneReturnPage() {
-  return <StoneReturnIntake />;
+export default async function NewLogisticsStoneReturnPage({ searchParams }: { searchParams: Promise<{ visitId?: string | string[] }> }) {
+  const { visitId } = await searchParams;
+  const selectedVisit = typeof visitId === 'string' ? visitId : undefined;
+  return <ProjectReturnIntake key={selectedVisit} visitId={selectedVisit} />;
 }

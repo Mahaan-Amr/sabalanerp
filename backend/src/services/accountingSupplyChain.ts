@@ -407,6 +407,24 @@ const purchasePostingLines = (lines: ReadonlyArray<PurchaseLine>, direction: 'RE
   });
 };
 
+export async function releaseInventoryReservationWithin(tx: AccountingSupplyChainRepository, command: {
+  reservationId: string; evidence: ImmutableEvidence; actorId: string; releasedAt: Date;
+}) {
+  requireEvidence(command.evidence);
+  const reservation = await tx.getReservation(command.reservationId);
+  if (!reservation) throw new SupplyChainAccountingError('RESERVATION_NOT_FOUND', 'رزرو موجودی یافت نشد.', 404);
+  if (reservation.status === 'RELEASED') {
+    if (reservation.releaseEvidence?.hash !== command.evidence.hash) throw new SupplyChainAccountingError('RESERVATION_RELEASE_CONFLICT', 'این رزرو قبلاً با شاهد دیگری آزاد شده است.');
+    return reservation;
+  }
+  const released: InventoryReservationRecord = {
+    ...reservation, status: 'RELEASED', releaseEvidence: command.evidence,
+    releasedAt: command.releasedAt, releasedByActorId: command.actorId,
+  };
+  await tx.saveReservation(released);
+  return released;
+}
+
 export const createAccountingSupplyChainApplication = (
   repository: AccountingSupplyChainRepository,
   dependencies: {
@@ -932,6 +950,7 @@ export const createAccountingSupplyChainApplication = (
           }
           return prior;
         }
+        await tx.lockInventoryIdentities([command.identityId]);
         const acceptedReturn = await tx.readAcceptedStoneReturnQuantity(command.identityId);
         const requested = decimal(command.quantity);
         if (acceptedReturn && command.unit === 'count' && requested.units % power(requested.scale) !== 0n) {
@@ -959,20 +978,10 @@ export const createAccountingSupplyChainApplication = (
     releaseInventoryReservation: async (command: { reservationId: string; evidence: ImmutableEvidence; actor: SupplyChainActor }) => {
       requireWrite(command.actor);
       requireEvidence(command.evidence);
-      return repository.transaction(async (tx) => {
-        const reservation = await tx.getReservation(command.reservationId);
-        if (!reservation) throw new SupplyChainAccountingError('RESERVATION_NOT_FOUND', 'رزرو موجودی یافت نشد.', 404);
-        if (reservation.status === 'RELEASED') {
-          if (reservation.releaseEvidence?.hash !== command.evidence.hash) throw new SupplyChainAccountingError('RESERVATION_RELEASE_CONFLICT', 'این رزرو قبلاً با شاهد دیگری آزاد شده است.');
-          return reservation;
-        }
-        const released: InventoryReservationRecord = {
-          ...reservation, status: 'RELEASED', releaseEvidence: command.evidence,
-          releasedAt: dependencies.now(), releasedByActorId: command.actor.id,
-        };
-        await tx.saveReservation(released);
-        return released;
-      });
+      return repository.transaction(tx => releaseInventoryReservationWithin(tx, {
+        reservationId: command.reservationId, evidence: command.evidence,
+        actorId: command.actor.id, releasedAt: dependencies.now(),
+      }));
     },
 
     consumeInventory: async (command: {

@@ -1680,8 +1680,14 @@ export const createSecurityAPI = (api: RequestClient) => ({
   getCanonicalDriverQueueEvents: (id: string, signal?: AbortSignal) =>
     api.get(`/security/canonical-driver-queue/${encodeURIComponent(id)}/events`, { signal }),
   getCanonicalQueueAdmissionOptions: () => api.get('/security/canonical-driver-queue/admission-options'),
-  admitCanonicalQueueTurn: (data: { source: 'INTERNAL' | 'EXTERNAL'; driverId: string; vehicleId?: string } |
-    { source: 'CUSTOMER_PICKUP'; vehicleType: string; plate: string; phone: string }) => api.post('/security/canonical-driver-queue', data),
+  admitCanonicalQueueTurn: (data: { purpose?: 'PROJECT_RETURN' } & (
+    { source: 'INTERNAL' | 'EXTERNAL'; driverId: string; vehicleId?: string } |
+    { source: 'CUSTOMER_PICKUP'; vehicleType: string; plate: string; phone: string } |
+    { source: 'PERSONAL_PICKUP'; purpose: 'PROJECT_RETURN'; plate: string }
+  )) => api.post('/security/canonical-driver-queue', data),
+  recordProjectReturnExit: (id: string) => api.post(`/security/canonical-driver-queue/${encodeURIComponent(id)}/project-return-exit`),
+  transferProjectReturnToLoading: (id: string) => api.post(`/security/canonical-driver-queue/${encodeURIComponent(id)}/project-return-transfer`),
+  completePersonalProjectReturn: (id: string) => api.post(`/security/canonical-driver-queue/${encodeURIComponent(id)}/project-return-complete`),
   makeCanonicalQueueTurnAvailable: (id: string) => api.post(`/security/canonical-driver-queue/${id}/available`),
   returnCanonicalQueueTurnToWaiting: (id: string, reason: string) => api.post(`/security/canonical-driver-queue/${id}/return-to-waiting`, { reason }),
   closeCanonicalQueueTurnWithoutLoading: (id: string, reason: string) => api.post(`/security/canonical-driver-queue/${id}/close-without-loading`, { reason }),

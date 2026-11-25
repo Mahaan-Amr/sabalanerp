@@ -13,7 +13,7 @@ import {
 import { describeStoneReturnRate } from './stoneReturnRate';
 
 const displayRials = (amount: string) => `${displayExactDecimal(amount)} ریال`;
-const rateLabel = (unit: string) => `نرخ توافقی هر ${stoneReturnUnitLabels[unit] ?? unit} (ریال)`;
+export const rateLabel = (unit: string) => `نرخ توافقی هر ${stoneReturnUnitLabels[unit] ?? unit} (ریال)`;
 
 export function StoneReturnPosting({ receiptId, draft, acceptedQuantity, unit, posting, onPostingChange, onPosted }: {
   receiptId: string;

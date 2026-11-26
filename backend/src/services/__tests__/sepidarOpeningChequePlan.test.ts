@@ -3,7 +3,7 @@ import test from 'node:test';
 import { previewSepidarOpeningCheques, SepidarOpeningChequePlanError, type SepidarOpeningChequeEvidence } from '../sepidarOpeningChequePlan';
 
 import { hashAccountingEvidence } from '../accountingLedgerFoundation';
-import { applySepidarOpeningBankHistories } from '../sepidarOpeningChequeApplication';
+import { applySepidarOpeningBankAndCustomerReturnHistories, applySepidarOpeningBankHistories } from '../sepidarOpeningChequeApplication';
 
 const basis = '2026-03-20T20:30:00.000Z';
 const depositAt = '2026-04-01T08:00:00.000Z';
@@ -177,6 +177,8 @@ test('a nontrade assignment returns to custody before the separate return to the
   };
   assert.equal(previewSepidarOpeningCheques(trade).instruments[0].finalStatus, 'ENDORSED');
   await assert.rejects(bankApplicationFixture(trade).run, { code: 'UNSUPPORTED_POSTING_OWNER' });
+  await assert.rejects(() => bankApplicationFixture(evidence).run(applySepidarOpeningBankAndCustomerReturnHistories),
+    { code: 'UNSUPPORTED_POSTING_OWNER' });
   assert.throws(() => previewSepidarOpeningCheques({ ...trade,
     instruments: [{ ...trade.instruments[0], sayadId: null }],
   }), (error: unknown) => error instanceof SepidarOpeningChequePlanError && error.code === 'INVALID_POSTING');
@@ -187,13 +189,14 @@ function bankApplicationFixture(evidence = bankHistory()) {
   const [cheque] = plan.instruments;
   const ledgerLine = (id: string, accountId: string, amount: bigint, bank = false, evidencePayload?: unknown) => ({
     id, accountId, partyId: bank ? null : 'party', financialAccountId: bank ? 'bank' : null, dimensions: [],
+    account: { bookId: 'book', code: accountId === 'custody' ? '111202' : accountId === 'receivable' ? '111201' : accountId },
     debitRials: amount > 0n ? amount : 0n, creditRials: amount < 0n ? -amount : 0n,
     evidenceType: 'SEPIDAR_ACC_VOUCHER_ITEM', evidencePayload, evidenceHash: evidencePayload ? hashAccountingEvidence(evidencePayload) : null,
   });
   const voucher = (at: string, sourceType: string, sourceId: string, sourcePayload: unknown,
     lines: ReturnType<typeof ledgerLine>[]) => ({
     bookId: 'book', status: 'POSTED', documentDate: new Date(at), occurredAt: new Date(at), reversalOfId: null,
-    sourceType, sourceId, sourceVersion: 1, sourceHash: hashAccountingEvidence(sourcePayload), lines,
+    sourceType, sourceId, sourceVersion: 1, sourceHash: hashAccountingEvidence(sourcePayload), lines, reversals: [] as { id: string }[],
   });
   const vouchers = new Map([
     [plan.openingVoucherId, voucher(basis, 'SEPIDAR_CHEQUE_OPENING', plan.sourceOpeningVoucherId, {
@@ -201,7 +204,8 @@ function bankApplicationFixture(evidence = bankHistory()) {
     }, [ledgerLine(cheque.opening.targetLineId, cheque.opening.targetAccountId, 100n)])],
     ...cheque.events.map(event => [event.targetPosting.voucherId, voucher(event.occurredAt, 'SEPIDAR_CHEQUE_EVENT', event.historyId, {
       snapshotSha256: plan.snapshotSha256, sourceInstrumentId: cheque.instrument.id, historyId: event.historyId,
-      previousHistoryId: event.previousHistoryId, document: event.document, bankFinancialAccountId: 'bank',
+      previousHistoryId: event.previousHistoryId, document: event.document,
+      ...(event.targetPosting.reference.kind === 'CUSTOMER' ? { customerPartyId: 'party' } : { bankFinancialAccountId: 'bank' }),
       allocations: event.targetPosting.lines.map(({ sourceLineId, signedRials, targetAccountId, tracking }) =>
         ({ sourceLineId, signedRials: signedRials.toString(), targetAccountId, ...(tracking ? { tracking } : {}) })),
     }, event.targetPosting.lines.map(line => ledgerLine(line.targetLineId, line.targetAccountId,
@@ -246,11 +250,11 @@ function bankApplicationFixture(evidence = bankHistory()) {
     },
   } as unknown as Parameters<typeof applySepidarOpeningBankHistories>[0];
   const input = { evidence, custodyFinancialAccountId: 'till', actor: { id: 'accountant', profile: 'ACCOUNTANT' as const } };
-  const run = async () => {
+  const run = async (apply = applySepidarOpeningBankHistories) => {
     const previous = process.env.DEPLOYMENT_RELEASE_ID;
     process.env.DEPLOYMENT_RELEASE_ID = 'fixture-release';
     try {
-      return await applySepidarOpeningBankHistories(database, input);
+      return await apply(database, input);
     } finally {
       if (previous === undefined) delete process.env.DEPLOYMENT_RELEASE_ID;
       else process.env.DEPLOYMENT_RELEASE_ID = previous;
@@ -258,6 +262,49 @@ function bankApplicationFixture(evidence = bankHistory()) {
   };
   return { run, state, vouchers };
 }
+
+test('direct historical customer return links the exact posted voucher and releases custody', async () => {
+  const original = bankHistory();
+  const [deposit] = original.events;
+  const evidence: SepidarOpeningChequeEvidence = {
+    ...original, instruments: [{ ...original.instruments[0], lastHistoryId: '31', currentState: 64 }],
+    events: [{ ...deposit, state: 64, type: 51,
+      document: { kind: 'REFUND', type: 1, chequeId: '1', itemId: '51', headerId: '61', voucherId: '71', recipientDetailId: '20' },
+      posting: { ...deposit.posting, voucherId: 'return-voucher', reference: { kind: 'CUSTOMER', sourceId: '20', targetId: 'party' },
+        lines: deposit.posting.lines.map(line => line.signedRials > 0n ? { ...line, targetAccountId: 'receivable' } : line) } }],
+    ledgerLines: original.ledgerLines.slice(0, 2).map(line => ({ ...line, issuerKind: 'REFUND', accountId: line.signedRials > 0n ? 117 : 118 })),
+  };
+  const { run, state, vouchers } = bankApplicationFixture(evidence);
+  const apply = () => run(applySepidarOpeningBankAndCustomerReturnHistories);
+  state.allowed = false;
+  await assert.rejects(apply, { code: 'ADMISSION_CLOSED' });
+  assert.equal(state.locks, 0);
+  state.allowed = true;
+  await assert.rejects(run, { code: 'UNSUPPORTED_POSTING_OWNER' });
+  const voucher = vouchers.get('return-voucher')!;
+  const debit = voucher.lines.find(line => line.accountId === 'receivable')!;
+  debit.account.code = '111203';
+  await assert.rejects(apply, { code: 'INVALID_TARGET' });
+  debit.account.code = '111201';
+  debit.partyId = 'other-customer';
+  await assert.rejects(apply, { code: 'INVALID_TARGET' });
+  debit.partyId = 'party';
+  voucher.reversals.push({ id: 'already-reversed' });
+  await assert.rejects(apply, { code: 'INVALID_TARGET' });
+  assert.equal(Boolean(state.instrument), false);
+  voucher.reversals.pop();
+  const result = await apply();
+  assert.equal(result.planSha256, hashAccountingEvidence({ plan: previewSepidarOpeningCheques(evidence),
+    custodyFinancialAccountId: 'till', lane: 'BANK_AND_CUSTOMER_RETURN' }));
+  assert.equal(state.instrument?.status, 'RETURNED');
+  assert.equal(state.instrument?.clearedRials, '0');
+  assert.equal(state.instrument?.receipt, null);
+  const events = state.instrument?.events as Array<Record<string, unknown>>;
+  assert.deepEqual(events.map(event => [event.eventType, event.ledgerVoucherId, event.fromCustodianId, event.toCustodianId]), [
+    ['RECEIVED', null, null, 'till'], ['RETURNED', 'return-voucher', 'till', null],
+  ]);
+  assert.deepEqual((await apply()).instruments, [{ instrumentId: 'instrument', replayed: true }]);
+});
 
 test('review and application bind original tracking to its allocated ledger row', async () => {
   const original = bankHistory();

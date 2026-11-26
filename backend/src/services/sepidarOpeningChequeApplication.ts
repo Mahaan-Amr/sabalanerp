@@ -17,7 +17,8 @@ function requireValid(condition: unknown, code: Code): asserts condition {
   if (!condition) throw new SepidarOpeningChequeApplicationError(code);
 }
 
-function bankEventEvidence(plan: Plan, cheque: Cheque, event: Cheque['events'][number]) {
+function eventEvidence(plan: Plan, cheque: Cheque, event: Cheque['events'][number]) {
+  const reference = event.targetPosting.reference;
   return {
     snapshotSha256: plan.snapshotSha256,
     sourceInstrumentId: cheque.instrument.id,
@@ -30,7 +31,7 @@ function bankEventEvidence(plan: Plan, cheque: Cheque, event: Cheque['events'][n
       signedRials: line.signedRials.toString(),
       ...(line.tracking ? { tracking: line.tracking } : {}),
     })),
-    bankFinancialAccountId: event.targetPosting.reference.targetId,
+    ...(reference.kind === 'CUSTOMER' ? { customerPartyId: reference.targetId } : { bankFinancialAccountId: reference.targetId }),
   };
 }
 
@@ -53,9 +54,13 @@ function instrumentEvents(plan: Plan, cheque: Cheque, actorId: string, tillId: s
     amountRials: cheque.opening.amountRials.toString(),
   }, null, tillId, null);
   const later = cheque.events.map(event => {
+    const evidence = eventEvidence(plan, cheque, event);
+    if (event.eventType === 'RETURNED') {
+      return makeEvent(event.sequence, event.eventType, event.occurredAt, evidence, tillId, null, event.targetPosting.voucherId);
+    }
     const bank = event.targetPosting.reference.targetId;
     const deposited = event.eventType === 'DEPOSITED';
-    return makeEvent(event.sequence, event.eventType, event.occurredAt, bankEventEvidence(plan, cheque, event),
+    return makeEvent(event.sequence, event.eventType, event.occurredAt, evidence,
       deposited ? tillId : bank, deposited ? bank : null, event.targetPosting.voucherId);
   });
   return [opening, ...later];
@@ -66,9 +71,12 @@ function activeAt(record: { activeFrom: Date; activeTo: Date | null }, at: strin
   return record.activeFrom <= date && (record.activeTo === null || record.activeTo >= date);
 }
 
-function matchesVoucher(voucher: { bookId: string; status: string; documentDate: Date; occurredAt: Date; reversalOfId: string | null },
+const postedReversals = { where: { status: 'POSTED' }, select: { id: true }, take: 1 } as const;
+
+function matchesVoucher(voucher: { bookId: string; status: string; documentDate: Date; occurredAt: Date;
+  reversalOfId: string | null; reversals: readonly { id: string }[] },
   bookId: string, at: string) {
-  return voucher.status === 'POSTED' && voucher.bookId === bookId && voucher.reversalOfId === null
+  return voucher.status === 'POSTED' && voucher.bookId === bookId && voucher.reversalOfId === null && voucher.reversals.length === 0
     && voucher.documentDate.toISOString() === at && voucher.occurredAt.toISOString() === at;
 }
 
@@ -77,7 +85,8 @@ async function verifyTargets(tx: Prisma.TransactionClient, plan: Plan, evidence:
   const till = await tx.accountingFinancialAccount.findUnique({ where: { id: tillId } });
   requireValid(till && till.kind === 'CASH' && till.legalEntityId === legalEntityId && till.currency === 'IRR'
     && activeAt(till, plan.basisAt), 'INVALID_TARGET');
-  const opening = await tx.accountingLedgerVoucher.findUnique({ where: { id: plan.openingVoucherId }, include: { lines: { include: { dimensions: true } } } });
+  const opening = await tx.accountingLedgerVoucher.findUnique({ where: { id: plan.openingVoucherId },
+    include: { lines: { include: { dimensions: true } }, reversals: postedReversals } });
   requireValid(opening && matchesVoucher(opening, plan.bookId, plan.basisAt) && opening.sourceType === 'SEPIDAR_CHEQUE_OPENING'
     && opening.sourceId === plan.sourceOpeningVoucherId && opening.sourceVersion === 1
     && opening.sourceHash === hashAccountingEvidence({ snapshotSha256: plan.snapshotSha256,
@@ -103,13 +112,20 @@ async function verifyTargets(tx: Prisma.TransactionClient, plan: Plan, evidence:
 
     for (const event of cheque.events) {
       const { voucherId, reference, lines } = event.targetPosting;
-      const bank = await tx.accountingFinancialAccount.findUnique({ where: { id: reference.targetId } });
-      requireValid(bank && bank.kind === 'BANK' && bank.legalEntityId === legalEntityId && bank.currency === 'IRR'
-        && activeAt(bank, event.occurredAt), 'INVALID_TARGET');
-      const voucher = await tx.accountingLedgerVoucher.findUnique({ where: { id: voucherId }, include: { lines: { include: { dimensions: true } } } });
+      const returned = event.eventType === 'RETURNED';
+      if (returned) {
+        requireValid(reference.kind === 'CUSTOMER' && reference.targetId === partyId && activeAt(profile, event.occurredAt), 'INVALID_TARGET');
+      } else {
+        const bank = await tx.accountingFinancialAccount.findUnique({ where: { id: reference.targetId } });
+        requireValid(bank && bank.kind === 'BANK' && bank.legalEntityId === legalEntityId && bank.currency === 'IRR'
+          && activeAt(bank, event.occurredAt), 'INVALID_TARGET');
+      }
+      const voucher = await tx.accountingLedgerVoucher.findUnique({ where: { id: voucherId }, include: {
+        lines: { include: { dimensions: true, account: { select: { code: true, bookId: true } } } }, reversals: postedReversals,
+      } });
       requireValid(voucher && matchesVoucher(voucher, plan.bookId, event.occurredAt)
         && voucher.sourceType === 'SEPIDAR_CHEQUE_EVENT' && voucher.sourceId === event.historyId && voucher.sourceVersion === 1
-        && voucher.sourceHash === hashAccountingEvidence(bankEventEvidence(plan, cheque, event))
+        && voucher.sourceHash === hashAccountingEvidence(eventEvidence(plan, cheque, event))
         && voucher.lines.length === lines.length, 'INVALID_TARGET');
 
       const voucherLines = new Map(voucher.lines.map(line => [line.id, line]));
@@ -117,9 +133,13 @@ async function verifyTargets(tx: Prisma.TransactionClient, plan: Plan, evidence:
         const line = voucherLines.get(allocation.targetLineId);
         const isBank = sourceAccounts.get(allocation.sourceLineId) === 105;
         requireValid(line && line.accountId === allocation.targetAccountId && line.dimensions.length === 0
-          && line.partyId === (isBank ? null : partyId) && line.financialAccountId === (isBank ? bank.id : null)
+          && line.partyId === (isBank ? null : partyId) && line.financialAccountId === (isBank ? reference.targetId : null)
           && BigInt(line.debitRials.toString()) === (allocation.signedRials > 0n ? allocation.signedRials : 0n)
           && BigInt(line.creditRials.toString()) === (allocation.signedRials < 0n ? -allocation.signedRials : 0n), 'INVALID_TARGET');
+        if (returned) {
+          requireValid(line.account.bookId === plan.bookId
+            && line.account.code === (allocation.signedRials > 0n ? '111201' : '111202'), 'INVALID_TARGET');
+        }
         if (allocation.tracking) {
           const payload = { snapshotSha256: plan.snapshotSha256, row: {
             VoucherItemId: allocation.sourceLineId, VoucherRef: event.document.voucherId, ...allocation.tracking,
@@ -185,28 +205,32 @@ async function recordInstrument(tx: Prisma.TransactionClient, plan: Plan, cheque
   return { instrumentId: created.id, replayed: false };
 }
 
-/**
- * Link complete bank histories to their already-posted, reviewed vouchers.
- * The separate SQL admission stays closed until protected release qualification.
- */
-export async function applySepidarOpeningBankHistories(database: Pick<PrismaClient, '$transaction'>, input: {
+type ApplyOpeningHistoriesInput = {
   evidence: SepidarOpeningChequeEvidence; custodyFinancialAccountId: string; actor: AccountingActor;
-}) {
+};
+
+async function applyOpeningHistories(database: Pick<PrismaClient, '$transaction'>, input: ApplyOpeningHistoriesInput,
+  lane: 'BANK' | 'BANK_AND_CUSTOMER_RETURN') {
   const releaseId = process.env.DEPLOYMENT_RELEASE_ID;
   requireValid(releaseId && input.actor.id.trim() && input.actor.profile === 'ACCOUNTANT', 'ADMISSION_CLOSED');
   const { custodyFinancialAccountId } = input;
   const actorId = input.actor.id;
   const evidence = structuredClone(input.evidence);
   const plan = previewSepidarOpeningCheques(evidence);
-  const planSha256 = hashAccountingEvidence({ plan, custodyFinancialAccountId });
+  const planSha256 = hashAccountingEvidence({ plan, custodyFinancialAccountId, ...(lane === 'BANK' ? {} : { lane }) });
   return database.$transaction(async tx => {
     const admission = await tx.$queryRaw<Array<{ admitted: boolean }>>`
       SELECT public.sepidar_opening_cheques_runtime_admitted(
         ${releaseId}, ${plan.bookId}, ${actorId}, ${planSha256}
       ) AS admitted`.catch(() => []);
     requireValid(admission[0]?.admitted === true, 'ADMISSION_CLOSED');
-    requireValid(plan.instruments.every(cheque => cheque.finalStatus === 'CLEARED' && cheque.events.length === 2
-      && cheque.events[0].eventType === 'DEPOSITED' && cheque.events[1].eventType === 'CLEARED'), 'UNSUPPORTED_POSTING_OWNER');
+    requireValid(plan.instruments.every(cheque => {
+      if (cheque.finalStatus === 'RETURNED') {
+        return lane === 'BANK_AND_CUSTOMER_RETURN' && cheque.events.length === 1 && cheque.events[0].eventType === 'RETURNED';
+      }
+      return cheque.finalStatus === 'CLEARED' && cheque.events.length === 2
+        && cheque.events[0].eventType === 'DEPOSITED' && cheque.events[1].eventType === 'CLEARED';
+    }), 'UNSUPPORTED_POSTING_OWNER');
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'sepidar-opening-cheques:' + plan.bookId}))`;
     const voucherIds = [plan.openingVoucherId, ...plan.instruments.flatMap(cheque =>
       cheque.events.map(event => event.targetPosting.voucherId))];
@@ -221,4 +245,13 @@ export async function applySepidarOpeningBankHistories(database: Pick<PrismaClie
     }
     return { planSha256, instruments: results };
   }, { isolationLevel: 'Serializable', timeout: 30_000 });
+}
+
+export function applySepidarOpeningBankHistories(database: Pick<PrismaClient, '$transaction'>, input: ApplyOpeningHistoriesInput) {
+  return applyOpeningHistories(database, input, 'BANK');
+}
+
+/** Link reviewed bank and direct customer-return histories under their own protected plan digest. */
+export function applySepidarOpeningBankAndCustomerReturnHistories(database: Pick<PrismaClient, '$transaction'>, input: ApplyOpeningHistoriesInput) {
+  return applyOpeningHistories(database, input, 'BANK_AND_CUSTOMER_RETURN');
 }

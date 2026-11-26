@@ -94,7 +94,7 @@ function expectedRateBasis(unit: string): ProjectReturnRateBasis {
 }
 
 function priceDraftAllocation(
-  item: Pick<Receipt['version']['items'][number], 'unit'> & { effectiveWidthMeters?: string | null },
+  item: Pick<Receipt['version']['items'][number], 'unit' | 'effectiveWidthMeters'>,
   entry: Draft['items'][number] | undefined,
   allocated: bigint,
   allocationError: string | null,

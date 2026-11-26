@@ -32,9 +32,9 @@ const contractDateText = (value: string) => /^\d{4}-\d{2}-\d{2}(?:T|$)/.test(val
   : value;
 const blankFields: DraftFields = { rate: '', quantities: {} };
 const agreedRateBasis = (unit: string): ProjectReturnRateBasis => unit === 'meter' ? 'HEALTHY_SQUARE_METER' : 'RECEIPT_UNIT';
-const isPositiveRate = (rate: string) => /^\d+(?:\.\d+)?$/.test(rate) && nonzero(rate);
+const isPositiveRate = (rate: string) => rate.length <= 100 && /^\d+(?:\.\d+)?$/.test(rate) && nonzero(rate);
 
-function previewDraftAmount(item: ReviewItem & { effectiveWidthMeters?: string | null }, fields: DraftFields) {
+function previewDraftAmount(item: ReviewItem, fields: DraftFields) {
   const rate = normalizeStoneReturnQuantity(fields.rate, true);
   const width = item.unit === 'meter' ? item.effectiveWidthMeters : '1';
   if (!isPositiveRate(rate) || !width || unavailableRows(item, fields).length) return null;
@@ -96,11 +96,12 @@ function ItemReview({ item, projects, fields, errors, editable, pending, onChang
       {healthy && <>
         <div className="grid gap-2 sm:grid-cols-2">
           {editable ? <ErpField label={rateFieldLabel} error={errors?.rate}>
-            <ErpInput numberFormat="money" maxLength={100} value={fields.rate} disabled={pending}
+            <ErpInput numberFormat="money" value={fields.rate} disabled={pending}
               onChange={event => onChange({ ...fields, rate: event.target.value })} />
           </ErpField> : <ErpFieldView label={rateFieldLabel}
             value={item.agreedUnitRateRials === null ? '—' : displayExactDecimal(item.agreedUnitRateRials)} />}
           <ErpFieldView label="مبلغ پیش‌نویس تخصیص"
+            hint={linear && !item.effectiveWidthMeters ? 'عرض مؤثر در رسید ثبت نشده است.' : undefined}
             value={draftAmount == null ? '—' : `${displayExactDecimal(draftAmount)} ریال`} />
         </div>
         {item.legacyRateNeedsReview && !fields.rate && <ErpInlineState kind="stale"

@@ -1,17 +1,20 @@
 import type { AccountingFinancialRecord, Prisma } from '@prisma/client';
-import { PartnerEventSchema } from '@sabalanerp/partner-sales-contracts';
+import { canonicalJson, PartnerEventSchema } from '@sabalanerp/partner-sales-contracts';
 import { pricingCurrencyKind } from './approvedPricing/domain';
+import {
+  persistedApprovedPricingInclude, persistedApprovedPricingRowIntegrityMatches, persistedApprovedPricingVersionIntegrityMatches,
+} from './approvedPricing/prismaEvidence';
 import { exactQuantityText, ExactQuantityDecimal, formatExactQuantityAtoms, parseExactQuantityAtoms } from './exactQuantity';
 import { inferLogisticsContractUnit, resolveLogisticsContractRow } from './logisticsContractRow';
 import { PartnerAccountingCommandError } from './partnerSales/accounting/errors';
 import { validatePendingPartnerApproval } from './partnerSales/accounting/financialApproval';
 import { readPartnerInvoiceSource } from './partnerSales/accounting/invoiceSource';
 import { hasConflictingPartnerAccountingEvidence } from './partnerSales/accounting/provenance';
+import { PartnerSabalanPlanIntegrityError } from './partnerSales/accounting/sabalanPlanEvidence';
 import { PartnerOfficialAccountingIntegrityError, latestPartnerFinancialApproval, readPartnerOfficialPurchase } from './partnerSales/accounting/officialPurchase';
-import { readCurrentPartnerCaseViews } from './partnerSales/cases/lifecycle';
+import { readCurrentPartnerCaseViews, readPartnerRevisionProjections } from './partnerSales/cases/lifecycle';
 import { partnerContractWasDeleted } from './partnerSales/cases/operationalDeletion';
 import { stoneReturnEvidenceRecord as record, type ProjectReturnContractSource } from './projectReturnDispatch';
-import { hasValidPersistedSalesShipmentEvidenceHash } from './shipmentQuantityProjectionStore';
 import type { StoneReturnCandidate } from './stoneReturnCandidates';
 import { stoneReturnLineKey, type FinancialAllocationSource } from './stoneReturnAllocationRules';
 
@@ -23,10 +26,10 @@ export type CapturedProjectReturnSource = ProjectReturnContractSource | PartnerP
 type Party = { kind: 'CUSTOMER' | 'PARTNER'; id: string };
 export type FinancialProjectReturnCandidate = FinancialAllocationSource & Pick<StoneReturnCandidate,
   'contractId' | 'contractNumber' | 'productRowId' | 'unit' | 'contractDate' | 'contractCreatedAt' | 'sellerName'
-  | 'originalInvoicedQuantity' | 'linePriorReturnedQuantity' | 'lineRemainingQuantity' | 'remainingQuantity'> & {
+  | 'originalInvoicedQuantity' | 'lineRemainingQuantity' | 'remainingQuantity'> & {
   projectId: string; contractItemId: string | null; partnerCaseId: string | null; financialParty: Party;
   originalInvoiceNumber: string; originalNetRateRials: string | null; dispatchEvidenceId: null;
-  financialQuantityEvidenceId?: string;
+  linePriorReturnedQuantity: string | null;
 };
 type Scope = {
   customerId: string; productId: string; unit: string; projectIds: string[];
@@ -107,17 +110,18 @@ async function directCandidates(tx: Tx, scope: Scope, existing: StoneReturnCandi
   const contractIds = [...new Set(eligible.map(item => item.contractId))];
   const financial = await tx.accountingFinancialRecord.findMany({
     where: { contractId: { in: contractIds }, customerId: scope.customerId, sourceKind: 'SALES_CONTRACT', kind: 'INVOICE_CANDIDATE' },
-    include: { invoiceItems: true },
+    include: { invoiceItems: true, approvedPricingVersions: { include: persistedApprovedPricingInclude } },
     orderBy: [{ financiallyApprovedAt: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
   });
   const ownedFinancial = financial.filter(row => row.sourceId === row.contractId
     && !hasConflictingPartnerAccountingEvidence(row));
-  const [returned, captured] = await Promise.all([
+  const [returned, approvals] = await Promise.all([
     returnedQuantities(tx, contractIds, scope.customerId),
-    tx.shipmentQuantityEvidence.findMany({ where: {
-      sourceKind: 'SALES_CONTRACT', contractItemId: { in: eligible.map(item => item.id) }, unit: scope.unit,
-      kind: 'CONTRACTED_SET', sourceType: 'FINANCIALLY_APPROVED_CONTRACT_QUANTITY_VERSION', sourceVersion: 1,
-    } }),
+    tx.accountingAuditLog.findMany({
+      where: { action: 'APPROVE_FINANCIAL_INVOICE', entityType: 'AccountingFinancialRecord',
+        recordId: { in: ownedFinancial.map(row => row.id) } },
+      select: { actorId: true, contractId: true, recordId: true, entityId: true, afterState: true },
+    }),
   ]);
   const candidates: FinancialProjectReturnCandidate[] = [];
   for (const item of eligible) {
@@ -128,41 +132,63 @@ async function directCandidates(tx: Tx, scope: Scope, existing: StoneReturnCandi
       if (invoice.contractId !== contract.id || !issued(invoice, scope.before)) continue;
       const snapshot = record(invoice.sourceSnapshot);
       const frozen = record(snapshot.contractData);
-      if (snapshot.id !== contract.id || snapshot.customerId !== scope.customerId || frozen.projectId !== projectId) continue;
-      let frozenCatalogId: unknown;
-      try {
-        const frozenRow = resolveLogisticsContractRow(frozen, { id: contractItemId, productId: scope.productId, productRowId });
-        const frozenItem = (Array.isArray(snapshot.items) ? snapshot.items.map(record) : []).find(row => row.id === contractItemId);
-        const productType = typeof frozenItem?.productType === 'string' ? frozenItem.productType : null;
-        if (inferLogisticsContractUnit({ productType }, frozenRow) !== scope.unit) continue;
-        frozenCatalogId = frozenRow.productId ?? frozenItem?.productId;
-        if (frozenCatalogId != null && frozenCatalogId !== scope.productId) continue;
-      } catch {
-        continue;
-      }
-
-      const exactLines = invoice.invoiceItems.filter(line => line.contractItemId === contractItemId);
-      if (exactLines.length > 1 || (exactLines[0] && exactLines[0].productId !== scope.productId)
-        || (!exactLines.length && invoice.invoiceItems.length)) continue;
       const approval = invoice.financiallyApprovedAt!.toISOString();
-      const capture = captured.find(evidence => evidence.contractId === contract.id && evidence.contractItemId === contractItemId
-        && evidence.productRowId === productRowId && record(evidence.metadata).financiallyApprovedAt === approval
-        && record(evidence.metadata).financialRecordId === invoice.id && evidence.sourceId === `${invoice.id}:${contractItemId}`
-        && evidence.effectiveAt.toISOString() === approval && hasValidPersistedSalesShipmentEvidenceHash(evidence));
+      const audited = approvals.some(event => {
+        const after = record(event.afterState);
+        return event.recordId === invoice.id && event.entityId === invoice.id && event.contractId === contract.id
+          && event.actorId === invoice.financiallyApprovedBy && after.id === invoice.id && after.contractId === contract.id
+          && after.customerId === scope.customerId && after.sourceKind === 'SALES_CONTRACT' && after.sourceId === contract.id
+          && ['ISSUED', 'POSTED'].includes(String(after.status)) && after.systemInvoiceNumber === invoice.systemInvoiceNumber
+          && after.financiallyApprovedBy === invoice.financiallyApprovedBy && after.financiallyApprovedAt === approval;
+      });
+      const exactLines = invoice.invoiceItems.filter(line => line.contractItemId === contractItemId);
+      if (exactLines.length > 1 || (exactLines[0] && exactLines[0].productId !== scope.productId)) continue;
       const [line] = exactLines;
-      // A contract-quantity capture covers the whole contract. Other invoice
-      // modes need the exact financial line to establish the amount covered.
-      const wholeContract = ['FROM_CONTRACT_TOTAL', 'REPLACEMENT_AFTER_CORRECTION'].includes(String(record(invoice.metadata).mode));
-      const quantityEvidence = wholeContract ? capture : undefined;
-      if (!line && (!quantityEvidence || frozenCatalogId !== scope.productId)) continue;
-      const quantity = quantityEvidence?.quantity ?? line.quantity;
+      const seal = invoice.approvedPricingVersions.find(version => {
+        const evidence = record(version.sourceEvidence);
+        const fromLegacySeal = version.origin === 'LEGACY_SEAL' && evidence.origin === 'LEGACY_SEAL';
+        const mode = record(evidence.financialApproval).mode;
+        const wholeContract = mode === 'FROM_CONTRACT_TOTAL' || mode === 'REPLACEMENT_AFTER_CORRECTION';
+        return version.contractId === contract.id && version.sourceFinancialRecordId === invoice.id
+          && version.approvedBy === invoice.financiallyApprovedBy && version.approvedAt.toISOString() === approval
+          && (fromLegacySeal
+            ? evidence.customerId === scope.customerId && evidence.projectId === projectId
+            : wholeContract && record(evidence.customer).id === scope.customerId && record(evidence.destination).projectId === projectId)
+          && persistedApprovedPricingVersionIntegrityMatches(version)
+          && version.rows.every(row => persistedApprovedPricingRowIntegrityMatches(version, row));
+      });
+      const sealedRow = seal?.rows.find(row => row.contractItemId === contractItemId && row.productRowId === productRowId
+        && row.unit === scope.unit && (!row.linkedContractItemId || row.linkedContractItemId === contractItemId));
+      const frozenItem = (Array.isArray(snapshot.items) ? snapshot.items.map(record) : []).find(row => row.id === contractItemId);
+      let frozenRow: ReturnType<typeof resolveLogisticsContractRow>;
+      try {
+        frozenRow = resolveLogisticsContractRow(frozen, { id: contractItemId, productId: scope.productId, productRowId });
+      } catch {
+        // Sealed historical snapshots also used productRowId as the frozen row key.
+        if (!sealedRow || !Array.isArray(frozen.products)) continue;
+        const legacyRows = frozen.products.map(record).filter(row => (row.rowId ?? row.productRowId) === productRowId);
+        if (legacyRows.length !== 1 || legacyRows[0].productId !== scope.productId) continue;
+        [frozenRow] = legacyRows;
+      }
+      const frozenCatalogId = frozenRow.productId ?? frozenItem?.productId;
+      if (frozenCatalogId != null && frozenCatalogId !== scope.productId) continue;
+      const productType = typeof frozenItem?.productType === 'string' ? frozenItem.productType : null;
+      const exactApprovalLine = audited && line && snapshot.id === contract.id
+        && snapshot.customerId === scope.customerId && frozen.projectId === projectId
+        && inferLogisticsContractUnit({ productType }, frozenRow) === scope.unit ? line : null;
+      // A quantity captured retrospectively from a live ContractItem cannot prove the original sale.
+      const sealedFallback = sealedRow && frozenCatalogId === scope.productId
+        && (snapshot.id == null || snapshot.id === contract.id)
+        && (snapshot.customerId ?? frozen.customerId) === scope.customerId && frozen.projectId === projectId ? sealedRow : null;
+      const proof = exactApprovalLine ?? sealedFallback;
+      if (!proof) continue;
+      const quantity = 'contractedQuantity' in proof ? proof.contractedQuantity : proof.quantity;
       const limits = capacity(quantity, returned.get(saleRowKey({ contractId: contract.id, productRowId })) ?? 0n, scope.unit);
       if (!limits) continue;
-      const rate = line && moneyRials(line.unitPrice.toFixed(), invoice.currency);
+      const rate = exactApprovalLine && moneyRials(exactApprovalLine.unitPrice.toFixed(), invoice.currency);
       const seller = contract.realizedSeller ?? contract.responsibleSeller;
       candidates.push({
-        financialRecordId: invoice.id, financialLineId: line?.id ?? quantityEvidence!.id,
-        ...(quantityEvidence && { financialQuantityEvidenceId: quantityEvidence.id }),
+        financialRecordId: invoice.id, financialLineId: proof.id,
         financialParty: { kind: 'CUSTOMER', id: scope.customerId }, originalInvoiceNumber: invoice.systemInvoiceNumber!,
         contractId: contract.id, contractItemId, contractNumber: contract.contractNumber, productRowId, projectId,
         partnerCaseId: null, dispatchEvidenceId: null, unit: scope.unit, ...limits,
@@ -178,9 +204,9 @@ async function directCandidates(tx: Tx, scope: Scope, existing: StoneReturnCandi
   return candidates;
 }
 
-function ownsPartnerRow(graph: unknown, productRowId: string, productId: string) {
+function partnerGraphRow(graph: unknown, productRowId: string, productId: string) {
   const rows = record(graph).rows;
-  return Array.isArray(rows) && rows.map(record).some(row => row.productRowId === productRowId && row.catalogProductId === productId);
+  return Array.isArray(rows) ? rows.map(record).find(row => row.productRowId === productRowId && row.catalogProductId === productId) : undefined;
 }
 
 async function readApprovedPartnerReturnInvoice(tx: Tx, caseId: string, internalRecordId: string, before: Date) {
@@ -215,7 +241,8 @@ async function readApprovedPartnerReturnInvoice(tx: Tx, caseId: string, internal
     const { preparation } = await readPartnerInvoiceSource(tx, invoice, caseId);
     return { invoice, preparation };
   } catch (error) {
-    if (!(error instanceof PartnerOfficialAccountingIntegrityError) && !(error instanceof PartnerAccountingCommandError)) throw error;
+    if (!(error instanceof PartnerOfficialAccountingIntegrityError) && !(error instanceof PartnerAccountingCommandError)
+      && !(error instanceof PartnerSabalanPlanIntegrityError)) throw error;
     return null;
   }
 }
@@ -245,23 +272,46 @@ async function partnerCandidates(tx: Tx, scope: Scope) {
     const { invoice, preparation } = approved;
     // The wholesale invoice belongs to Sabalan's relationship with the Partner.
     // The retail customer contract establishes receipt scope and catalog identity.
-    const revision = await tx.partnerCaseRevision.findUnique({ where: { caseId_revision: {
-      caseId, revision: preparation.owner.revision,
-    } }, select: { graph: true, customerContent: true } });
-    if (!revision || record(revision.customerContent).projectId !== projectId) continue;
+    const { owner } = preparation;
+    const approvalRevision = await tx.partnerCaseRevision.findUnique({ where: { caseId_revision: {
+      caseId, revision: owner.revision,
+    } }, select: { graph: true, customerContent: true, integrityHash: true } });
+    if (!approvalRevision || approvalRevision.integrityHash !== owner.integrityHash || owner.caseId !== caseId
+      || owner.revision > view.row.headRevision || record(approvalRevision.customerContent).projectId !== projectId) continue;
+    const scopeEntries = captured?.filter(entry => entry.contractId === contractId && entry.partnerCaseId === caseId && entry.projectId === projectId);
+    const capturedRevisions = new Map(await Promise.all([...new Set(scopeEntries?.map(entry => entry.partnerRevision))].map(async revision => {
+      if (revision === view.row.headRevision || revision === owner.revision || revision > view.row.headRevision) return [revision, null] as const;
+      const saved = await tx.partnerCaseRevision.findUnique({ where: { caseId_revision: { caseId, revision } },
+        select: { integrityHash: true, graph: true, customerContent: true } });
+      if (!saved || record(saved.customerContent).projectId !== projectId) return [revision, null] as const;
+      const projected = await readPartnerRevisionProjections(tx, { caseId, revision, integrityHash: saved.integrityHash });
+      return [revision, projected?.accounting?.commercialAccountId === preparation.debtor.commercialAccountId
+        ? { graph: saved.graph, products: projected.accounting.products } : null] as const;
+    })));
     for (const row of preparation.products) {
       const unit = row.unit === 'm' ? 'meter' : row.unit;
-      if (unit !== scope.unit || !ownsPartnerRow(revision.graph, row.productRowId, scope.productId)
-        || !ownsPartnerRow(view.row.head.graph, row.productRowId, scope.productId)
-        || (captured && !captured.some(entry => entry.contractId === contractId && entry.partnerCaseId === caseId
-          && entry.projectId === projectId && entry.productRowId === row.productRowId))) continue;
+      const sameOwnedRow = (graph: unknown, products: typeof preparation.products) => {
+        const graphRow = partnerGraphRow(graph, row.productRowId, scope.productId);
+        const approvedGraphRow = partnerGraphRow(approvalRevision.graph, row.productRowId, scope.productId);
+        const currentRow = products.find(product => product.productRowId === row.productRowId);
+        return graphRow && approvedGraphRow && currentRow
+          && record(graphRow.commercial).requestedWidthMeters === record(approvedGraphRow.commercial).requestedWidthMeters
+          && canonicalJson(currentRow) === canonicalJson(row);
+      };
+      if (unit !== scope.unit || !sameOwnedRow(view.row.head.graph, view.accounting.products)) continue;
+      if (scopeEntries && !scopeEntries.some(entry => {
+        if (entry.productRowId !== row.productRowId) return false;
+        if (entry.partnerRevision === owner.revision || entry.partnerRevision === view.row.headRevision) return true;
+        const capturedView = capturedRevisions.get(entry.partnerRevision);
+        return capturedView && sameOwnedRow(capturedView.graph, capturedView.products);
+      })) continue;
       const limits = capacity(row.quantity, 0n, unit);
       if (!limits) continue;
       candidates.push({
         financialRecordId: invoice.id, financialLineId: row.productRowId, financialParty: { kind: 'PARTNER', id: preparation.debtor.commercialAccountId },
         originalInvoiceNumber: invoice.systemInvoiceNumber!, originalNetRateRials: moneyRials(row.wholesaleUnitPrice, invoice.currency)?.toFixed() ?? null,
         contractId, contractItemId: null, contractNumber, projectId, productRowId: row.productRowId, partnerCaseId: caseId,
-        dispatchEvidenceId: null, unit, ...limits, contractCreatedAt: source.createdAt.toISOString(),
+        dispatchEvidenceId: null, unit, ...limits, linePriorReturnedQuantity: null, contractCreatedAt: source.createdAt.toISOString(),
         sellerName: [source.profile.user.firstName, source.profile.user.lastName].filter(Boolean).join(' ').trim() || null,
       });
     }

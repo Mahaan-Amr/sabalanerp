@@ -133,7 +133,7 @@ export async function changeProjectReturnOperation(db: PrismaClient, caseId: str
           throw new ProjectReturnReceiptError(400, 'مراجعهٔ گارد در اصلاح پرونده ثابت می‌ماند.');
         }
         const { version } = await prepareProjectReturnVersion(tx, {
-          caseId, actorId, deliveredBefore: receipt.visit.admittedAt, previousReceipt: receipt, body: { ...body, customerId: body.customerId === undefined ? receipt.customerId : body.customerId, visitId: receipt.visit.id },
+          caseId, actorId, deliveredBefore: receipt.visit.admittedAt, body: { ...body, customerId: body.customerId === undefined ? receipt.customerId : body.customerId, visitId: receipt.visit.id },
         });
         versionId = version.id;
         await tx.projectReturnVersion.create({

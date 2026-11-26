@@ -39,12 +39,47 @@ function previewDraftAmount(item: ReviewItem, fields: DraftFields) {
   const width = item.unit === 'meter' ? item.effectiveWidthMeters : '1';
   if (!isPositiveRate(rate) || !width || unavailableRows(item, fields).length) return null;
 
-  const quantities = Object.values(fields.quantities).filter(value => value.trim()).map(value => normalizeStoneReturnQuantity(value));
-  if (quantities.some(value => stoneReturnQuantityAtoms(value, item.unit) === null)) return null;
+  const toAtoms = (value: string) => stoneReturnQuantityAtoms(normalizeStoneReturnQuantity(value), item.unit);
+  const savedQuantities = new Map(item.rows.map(row => [sourceKey(row), toAtoms(row.quantity)]));
+  const lineUsed = new Map<string, bigint>();
+  const dispatchUsed = new Map<string, bigint>();
+  const quantities: string[] = [];
+  let total = BigInt(0);
+  let changed = false;
+  const zero = BigInt(0);
+  for (const candidate of item.candidates) {
+    const key = sourceKey(candidate);
+    const value = fields.quantities[key]?.trim();
+    const quantity = value ? toAtoms(value) : zero;
+    const remaining = toAtoms(candidate.remainingQuantity);
+    if (quantity === null || remaining === null || quantity > remaining) return null;
+    changed ||= quantity !== (savedQuantities.get(key) ?? zero);
+    if (quantity === zero) continue;
+
+    const replacement = candidate.replacementCapacity;
+    const own = replacement ? toAtoms(replacement.ownQuantity) : zero;
+    const lineRemaining = toAtoms(replacement?.lineRemainingQuantity ?? candidate.lineRemainingQuantity);
+    if (own === null || lineRemaining === null) return null;
+    const additional = quantity > own ? quantity - own : zero;
+    const lineKey = 'financialRecordId' in candidate ? key : JSON.stringify([candidate.originalInvoiceId, candidate.originalLineId]);
+    const lineTotal = (lineUsed.get(lineKey) ?? zero) + additional;
+    if (lineTotal > lineRemaining) return null;
+    lineUsed.set(lineKey, lineTotal);
+    if (!('financialRecordId' in candidate)) {
+      const dispatch = candidate.dispatchEvidenceId;
+      const dispatchRemaining = toAtoms(replacement?.dispatchRemainingQuantity ?? candidate.dispatchRemainingQuantity);
+      const dispatchTotal = (dispatchUsed.get(dispatch) ?? zero) + additional;
+      if (dispatchRemaining === null || dispatchTotal > dispatchRemaining) return null;
+      dispatchUsed.set(dispatch, dispatchTotal);
+    }
+    total += quantity;
+    quantities.push(normalizeStoneReturnQuantity(value!));
+  }
+  // A stale saved allocation remains stale when only its rate changes.
+  changed ||= item.rows.some(row => !item.candidates.some(candidate => sourceKey(candidate) === sourceKey(row)));
+  const healthy = toAtoms(item.healthyQuantity);
+  if ((item.allocationError && !changed) || total === zero || healthy === null || total > healthy) return null;
   const allocated = sumContractMonetaryAmounts(quantities);
-  const allocatedAtoms = stoneReturnQuantityAtoms(allocated, item.unit);
-  const healthyAtoms = stoneReturnQuantityAtoms(normalizeStoneReturnQuantity(item.healthyQuantity), item.unit);
-  if (allocatedAtoms === null || allocatedAtoms === BigInt(0) || healthyAtoms === null || allocatedAtoms > healthyAtoms) return null;
 
   const billable = multiplyContractMonetaryAmounts(allocated, width);
   return roundContractPayableTotal(multiplyContractMonetaryAmounts(billable, rate), 'IRR').roundedAmount;
@@ -64,20 +99,21 @@ function unavailableRows(item: ReviewItem, fields: DraftFields) {
   return item.rows.filter(row => !available.has(sourceKey(row)) && fields.quantities[sourceKey(row)]);
 }
 
-function ItemReview({ item, projects, fields, errors, editable, pending, onChange }: {
+function ItemReview({ item, projects, fields, errors, editable, pending, previewBlocked, onChange }: {
   item: ReviewItem;
   projects: Map<string, string>;
   fields: DraftFields;
   errors?: FieldErrors;
   editable: boolean;
   pending: boolean;
+  previewBlocked: boolean;
   onChange: (next: DraftFields) => void;
 }) {
   const quantity = (value: string) => displayStoneReturnQuantity(value, item.unit);
   const healthy = nonzero(item.healthyQuantity);
   const linear = agreedRateBasis(item.unit) === 'HEALTHY_SQUARE_METER';
   const rateFieldLabel = linear ? 'نرخ توافقی هر مترمربع سالم (ریال)' : rateLabel(item.unit);
-  const draftAmount = editable ? previewDraftAmount(item, fields) : item.draftAmountRials;
+  const draftAmount = previewBlocked ? null : editable ? previewDraftAmount(item, fields) : item.draftAmountRials;
   const savedRows = new Map(item.rows.map(row => [sourceKey(row), row.quantity]));
   const changeQuantity = (key: string, value: string) => onChange({ ...fields, quantities: { ...fields.quantities, [key]: value } });
 
@@ -165,12 +201,14 @@ export function ProjectReturnAllocationPage({ caseId }: { caseId: string }) {
   const [fieldErrors, setFieldErrors] = useState<Record<string, FieldErrors>>({});
   const [confirmReturn, setConfirmReturn] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [previewBlocked, setPreviewBlocked] = useState(false);
   const [reload, setReload] = useState(0);
   const busy = useRef(false);
 
   function apply(next: ProjectReturnAllocationReview) {
     setReview(next);
     setFields(fieldsFromReview(next));
+    setPreviewBlocked(false);
     setFieldErrors({});
   }
 
@@ -250,6 +288,8 @@ export function ProjectReturnAllocationPage({ caseId }: { caseId: string }) {
       }));
       setSaved(true);
     } catch (failure) {
+      const status = (failure as { response?: { status?: number } }).response?.status;
+      if (status === 400 || status === 409) setPreviewBlocked(true);
       setError(userFacingError(failure, 'ذخیره پیش‌نویس تخصیص ناموفق بود.'));
     } finally {
       busy.current = false;
@@ -324,7 +364,7 @@ export function ProjectReturnAllocationPage({ caseId }: { caseId: string }) {
       <ErpSection title="اقلام مرجوعی">
         <div className="divide-y divide-[var(--sds-border-subtle)]">
         {review.items.map(item => <ItemReview key={item.id} item={item} projects={projects} fields={fields[item.id] ?? blankFields}
-        errors={fieldErrors[item.id]} editable={editable} pending={pending} onChange={next => {
+        errors={fieldErrors[item.id]} editable={editable} pending={pending} previewBlocked={previewBlocked} onChange={next => {
           const previous = fields[item.id] ?? blankFields;
           setFields(current => ({ ...current, [item.id]: next }));
           setFieldErrors(current => {

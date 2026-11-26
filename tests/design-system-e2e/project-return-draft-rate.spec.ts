@@ -8,15 +8,15 @@ test('Accounting prices healthy allocated linear stone by square meter at 390px'
   const versionId = 'version-516';
   const item = {
     id: 'item-516', productId: 'product-516', productName: 'سنگ طولی', productCode: 'RETURN-516',
-    unit: 'meter', healthyQuantity: '13.5', damagedQuantity: '2', effectiveWidthMeters: '0.4',
-    healthyAreaSquareMeters: '5.4', damagedAreaSquareMeters: '0.8',
+    unit: 'meter', healthyQuantity: '15', damagedQuantity: '2', effectiveWidthMeters: '0.4',
+    healthyAreaSquareMeters: '6', damagedAreaSquareMeters: '0.8',
   };
   const firstSource = { originalInvoiceId: 'invoice-1', originalLineId: 'line-1', dispatchEvidenceId: 'dispatch-1' };
-  const secondSource = { originalInvoiceId: 'invoice-2', originalLineId: 'line-2', dispatchEvidenceId: 'dispatch-2' };
+  const secondSource = { originalInvoiceId: 'invoice-1', originalLineId: 'line-1', dispatchEvidenceId: 'dispatch-2' };
   const source = (number: string, row: typeof firstSource) => ({
     ...row, originalInvoiceNumber: 'SALE-' + number, contractNumber: 'CONTRACT-' + number,
     projectId, deliveredAt: date, originalNetRateRials: '10000000',
-    remainingQuantity: '9', draftRemainingQuantity: '4', lineRemainingQuantity: '9', dispatchRemainingQuantity: '9',
+    remainingQuantity: '9', draftRemainingQuantity: '4', lineRemainingQuantity: '13.5', dispatchRemainingQuantity: '9',
   });
   const rows = [
     { ...source('1', firstSource), quantity: '5' },
@@ -43,9 +43,9 @@ test('Accounting prices healthy allocated linear stone by square meter at 390px'
         ...item, candidates: [source('1', firstSource), source('2', secondSource)], rows,
         agreedUnitRateRials: saved ? '24000000' : null, agreedRateBasis: saved ? 'HEALTHY_SQUARE_METER' : null,
         draftAmountRials: saved ? '129600000' : null, legacyRateNeedsReview: !saved,
-        allocatedQuantity: '13.5', unallocatedQuantity: '0',
+        allocatedQuantity: '13.5', unallocatedQuantity: '1.5',
       }],
-      prior: null, draft: { number: saved ? 2 : 1, createdAt: date }, canAllocate: true, allocationStatus: 'ALLOCATION_COMPLETE',
+      prior: null, draft: { number: saved ? 2 : 1, createdAt: date }, canAllocate: true, allocationStatus: 'DRAFT',
       correctionBlocks: [], postingBlock: saved
         ? { code: 'FINANCE_CONNECTION_UNAVAILABLE', message: 'اتصال ثبت مالی مرجوعی پروژه هنوز فعال نیست.' }
         : { code: 'RATE_REQUIRED', message: 'نرخ توافقی هر محصول تخصیص‌یافته را وارد کنید.' },
@@ -61,6 +61,10 @@ test('Accounting prices healthy allocated linear stone by square meter at 390px'
   await rate.fill('۲۴۰۰۰۰۰۰');
   await expect(page.getByText('۱۲۹٬۶۰۰٬۰۰۰ ریال', { exact: true })).toBeVisible();
   const secondQuantity = page.getByRole('textbox', { name: /مقدار تخصیص.*SALE-2/ });
+  await secondQuantity.fill('۹٫۵');
+  await expect(page.getByText('۱۳۹٬۲۰۰٬۰۰۰ ریال', { exact: true })).toHaveCount(0);
+  await secondQuantity.fill('۹');
+  await expect(page.getByText('۱۳۴٬۴۰۰٬۰۰۰ ریال', { exact: true })).toHaveCount(0);
   await secondQuantity.fill('۷٫۵');
   await expect(page.getByText('۱۲۰٬۰۰۰٬۰۰۰ ریال', { exact: true })).toBeVisible();
   await secondQuantity.fill('۸٫۵');

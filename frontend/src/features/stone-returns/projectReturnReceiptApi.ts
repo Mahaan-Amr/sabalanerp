@@ -95,6 +95,13 @@ const path = '/logistics/project-returns';
 export const projectReturnListHref = '/dashboard/logistics/returns/project';
 export const projectReturnReceiptHref = (id: string) => `${projectReturnListHref}/${encodeURIComponent(id)}`;
 
+export async function findProjectReturnProduct(
+  customerId: string, projectIds: string[], product: Pick<ProjectReturnProduct, 'productId' | 'productCode' | 'unit' | 'partnerContractId'>,
+) {
+  const rows = await projectReturnReceiptApi.products(customerId, projectIds, product.productCode, product.partnerContractId ?? undefined);
+  return rows.find(row => row.productId === product.productId && row.unit === product.unit);
+}
+
 export const projectReturnReceiptApi = {
   customers: async (search: string) =>
     (await api.get<Envelope<StoneReturnOption[]>>(`${path}/customers`, { params: { search } })).data.data,

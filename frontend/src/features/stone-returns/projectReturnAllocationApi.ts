@@ -26,6 +26,7 @@ type FinancialCandidate = ProjectFinancialAllocationSource & {
   originalInvoiceNumber: string;
   originalNetRateRials: string | null;
   remainingQuantity: string;
+  lineRemainingQuantity: string;
   contractNumber: string;
   financialParty: { kind: 'CUSTOMER' | 'PARTNER'; id: string };
 };

@@ -1,12 +1,12 @@
 'use client';
 
-import { useCallback, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { ErpButton, ErpInlineState, ErpSection } from '@/components/erp';
 import { userFacingError } from '@/features/dispatch/userFacingError';
 import { ProjectReturnMeasurement, ProjectReturnWidth } from './ProjectReturnMeasurement';
 import { damagedProjectReturnAreaLabel, healthyProjectReturnAreaLabel } from './projectReturnAreaFacts';
 import { emptyProjectReturnQuantity, resolveProjectReturnQuantity, resolveProjectReturnWidth, type ProjectReturnLinearCalculation } from './projectReturnQuantity';
-import { projectReturnReceiptApi, type ProjectReturnReceipt } from './projectReturnReceiptApi';
+import { findProjectReturnProduct, projectReturnReceiptApi, type ProjectReturnReceipt } from './projectReturnReceiptApi';
 import { StoneReturnLookup } from './StoneReturnLookup';
 import type { StoneReturnOption } from './stoneReturnApi';
 
@@ -24,8 +24,11 @@ export function ProjectReturnCorrectionForm({ receipt, onSubmitted }: {
     receipt.version.projects.map(project => ({ id: project.projectId, label: project.projectName })));
   const [healthy, setHealthy] = useState(() => quantityDraft(item.healthyQuantity, item.healthyCalculation));
   const [damaged, setDamaged] = useState(() => quantityDraft(item.damagedQuantity, item.damagedCalculation));
-  const [manualWidth, setManualWidth] = useState('');
-  const widthMeters = item.effectiveWidthMeters ?? resolveProjectReturnWidth(manualWidth);
+  const [manualWidth, setManualWidth] = useState(item.effectiveWidthMeters ?? '');
+  const [suggestedWidth, setSuggestedWidth] = useState<string | null>(null);
+  const [loadingWidth, setLoadingWidth] = useState(item.unit === 'meter');
+  const [widthError, setWidthError] = useState('');
+  const widthMeters = suggestedWidth ?? resolveProjectReturnWidth(manualWidth);
   const [pending, setPending] = useState(false);
   const [validate, setValidate] = useState(false);
   const [error, setError] = useState('');
@@ -35,9 +38,34 @@ export function ProjectReturnCorrectionForm({ receipt, onSubmitted }: {
     return options.filter(option => !query || `${option.label} ${option.description ?? ''}`.includes(query));
   }, [receipt.customerId]);
 
+  useEffect(() => {
+    if (item.unit !== 'meter' || !projects.length) {
+      setLoadingWidth(false);
+      setSuggestedWidth(null);
+      return;
+    }
+    let current = true;
+    setLoadingWidth(true);
+    setWidthError('');
+    setSuggestedWidth(null);
+    void findProjectReturnProduct(receipt.customerId, projects.map(project => project.id), item).then(product => {
+      if (current) setSuggestedWidth(product?.suggestedWidthMeters ?? null);
+    }).catch(failure => {
+      if (current) setWidthError(userFacingError(failure, 'دریافت اطلاعات عرض محصول ناموفق بود.'));
+    }).finally(() => {
+      if (current) setLoadingWidth(false);
+    });
+    return () => { current = false; };
+  }, [item, projects, receipt.customerId]);
+
+  function changeProjects(next: StoneReturnOption[]) {
+    setManualWidth('');
+    setProjects(next);
+  }
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (busy.current) return;
+    if (busy.current || loadingWidth || widthError) return;
     setError('');
     setValidate(true);
     if (!projects.length) return setError('حداقل یک پروژهٔ این مشتری را انتخاب کنید.');
@@ -73,15 +101,15 @@ export function ProjectReturnCorrectionForm({ receipt, onSubmitted }: {
     <form className="space-y-4" onSubmit={submit} noValidate>
       <StoneReturnLookup label="افزودن پروژه" placeholder="انتخاب پروژهٔ مشتری" selected={null}
         fetchOptions={listProjects} excludedIds={projects.map(project => project.id)} disabled={pending}
-        onChange={project => { if (project) setProjects(previous => [...previous, project]); }} />
+        onChange={project => { if (project) changeProjects([...projects, project]); }} />
       {!!projects.length && <ul className="space-y-2">
         {projects.map(project => <li className="flex flex-wrap items-center justify-between gap-2" key={project.id}>
           <span>{project.label}</span>
           <ErpButton type="button" label={`حذف پروژهٔ ${project.label}`} variant="ghost" tone="neutral" disabled={pending}
-            onClick={() => setProjects(previous => previous.filter(option => option.id !== project.id))} />
+            onClick={() => changeProjects(projects.filter(option => option.id !== project.id))} />
         </li>)}
       </ul>}
-      {item.unit === 'meter' && <ProjectReturnWidth recorded={item.effectiveWidthMeters} manual={manualWidth}
+      {item.unit === 'meter' && !loadingWidth && <ProjectReturnWidth recorded={suggestedWidth} manual={manualWidth}
         onChange={setManualWidth} validate={validate} />}
       <div className="grid gap-4 md:grid-cols-2">
         <ProjectReturnMeasurement label="مقدار سالم" productName={item.productName} unit={item.unit} draft={healthy}
@@ -91,9 +119,9 @@ export function ProjectReturnCorrectionForm({ receipt, onSubmitted }: {
           widthMeters={widthMeters} areaLabel={damagedProjectReturnAreaLabel}
           onChange={setDamaged} validate={validate} />
       </div>
-      {error && <ErpInlineState kind="error" title={error} />}
+      {(widthError || error) && <ErpInlineState kind="error" title={widthError || error} />}
       <ErpButton type="submit" label={pending ? 'در حال ارسال…' : 'ارسال اصلاح به حسابداری'}
-        tone="primary" variant="solid" disabled={pending} />
+        tone="primary" variant="solid" disabled={pending || loadingWidth || !!widthError} />
     </form>
   </ErpSection>;
 }

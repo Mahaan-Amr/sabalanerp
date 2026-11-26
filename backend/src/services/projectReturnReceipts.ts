@@ -198,14 +198,12 @@ type ReturnProduct = {
 export function projectReturnVersionItem(
   product: ReturnProduct,
   item: ReturnType<typeof parseProjectReturnItems>['items'][number],
-  priorWidthMeters?: string | null,
 ) {
   const { suggestedWidthMeters, ...productFacts } = product;
-  const recordedWidth = priorWidthMeters ?? suggestedWidthMeters;
-  if (recordedWidth && item.effectiveWidthMeters && item.effectiveWidthMeters !== recordedWidth) {
+  if (suggestedWidthMeters && item.effectiveWidthMeters && item.effectiveWidthMeters !== suggestedWidthMeters) {
     throw new ProjectReturnReceiptError(400, 'عرض ثبت‌شدهٔ محصول تغییر کرده است. دوباره عرض محصول را بررسی کنید.');
   }
-  const effectiveWidthMeters = recordedWidth ?? item.effectiveWidthMeters ?? null;
+  const effectiveWidthMeters = suggestedWidthMeters ?? item.effectiveWidthMeters ?? null;
   let area: ReturnType<typeof projectReturnItemArea>;
   try {
     area = projectReturnItemArea(item, effectiveWidthMeters);
@@ -441,7 +439,6 @@ function parseIntake(body: Record<string, unknown>) {
 
 export async function prepareProjectReturnVersion(tx: Prisma.TransactionClient, input: {
   caseId: string; actorId: string; body: Record<string, unknown>; deliveredBefore: Date;
-  previousReceipt?: Awaited<ReturnType<typeof readProjectReturnReceipt>>;
 }) {
   const command = parseIntake(input.body);
   const projects = await findProjectReturnProjects(tx, command.customerId, command.projectIds);
@@ -453,10 +450,7 @@ export async function prepareProjectReturnVersion(tx: Prisma.TransactionClient, 
   for (const [index, row] of command.items.entries()) {
     const product = products[index];
     if (!product) throw new ProjectReturnReceiptError(400, 'محصول با این واحد در قراردادهای پروژه پیدا نشد.');
-    const prior = input.previousReceipt?.customerId === customer.id
-      ? input.previousReceipt.version.items.find(item => projectReturnProductKey(item) === projectReturnProductKey(row))
-      : undefined;
-    const versionItem = projectReturnVersionItem(product, row, prior?.effectiveWidthMeters);
+    const versionItem = projectReturnVersionItem(product, row);
     const itemId = randomUUID();
     const inventoryIdentityId = await recordProjectReturnStock(tx, {
       caseId: input.caseId, versionId: id, guardVisitId: command.visitId, customerId: customer.id,

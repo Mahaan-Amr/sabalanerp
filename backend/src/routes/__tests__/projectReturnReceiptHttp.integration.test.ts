@@ -31,6 +31,18 @@ test('Logistics records and reopens exact multi-project receipt quantities and h
     const { default: inventoryRouter } = await import('../accountingSupplyChain');
     const { hashSupplyChainEvidence } = await import('../../services/accountingSupplyChain');
     const { shipmentQuantityEvidenceIntegrityHash } = await import('../../services/shipmentQuantityProjectionStore');
+    const { approvedPricingRowIntegrityHash, approvedPricingVersionIntegrityHash } = await import('../../services/approvedPricing/domain');
+    const approveOrdinaryFixture = (invoice: { id: string; contractId: string | null; customerId: string | null;
+      financiallyApprovedAt: Date | null; financiallyApprovedBy: string | null; sourceKind: string; sourceId: string | null; status: string;
+      systemInvoiceNumber: string | null }) => db.accountingAuditLog.create({ data: {
+        action: 'APPROVE_FINANCIAL_INVOICE', actorId: invoice.financiallyApprovedBy!, contractId: invoice.contractId,
+        recordId: invoice.id, entityType: 'AccountingFinancialRecord', entityId: invoice.id,
+        afterState: { id: invoice.id, contractId: invoice.contractId, customerId: invoice.customerId,
+          sourceKind: invoice.sourceKind, sourceId: invoice.sourceId, status: invoice.status,
+          systemInvoiceNumber: invoice.systemInvoiceNumber, financiallyApprovedBy: invoice.financiallyApprovedBy,
+          financiallyApprovedAt: invoice.financiallyApprovedAt!.toISOString() },
+      } });
+
     const actor = await db.user.create({ data: {
       email: 'project-return-506@example.invalid', username: 'project-return-506',
       firstName: 'آزمون', lastName: 'مرجوعی', password: 'non-login-fixture', role: 'ADMIN', mustChangePassword: false,
@@ -468,6 +480,29 @@ test('Logistics records and reopens exact multi-project receipt quantities and h
     await readArea();
     await db.product.update({ where: { id: manualWidthProduct.id }, data: { widthValue: 50 } });
     await readArea();
+    const correctedWidth = await call(`${receipts}/${measured.data.id}/edit`, {
+      ...areaCommand, expectedVersionId: measured.data.version.id,
+      items: [areaItems[0], { ...areaItems[1], effectiveWidthMeters: '0.3' }],
+    });
+    assert.equal(correctedWidth.status, 200, JSON.stringify(correctedWidth));
+    const correctedManual = correctedWidth.data.version.items.find((item: { productId: string }) => item.productId === manualWidthProduct.id);
+    assert.equal(correctedManual.effectiveWidthMeters, '0.3');
+    assert.equal(correctedManual.healthyAreaSquareMeters, '4.05');
+    const firstWidthVersion = await call(`${receipts}/${measured.data.id}/versions/${measured.data.version.id}`);
+    assert.equal(firstWidthVersion.data.version.items.find((item: { productId: string }) => item.productId === manualWidthProduct.id)
+      .effectiveWidthMeters, '0.25');
+    await db.salesContract.create({ data: {
+      customerId: customer.id, departmentId: department.id, createdBy: actor.id, responsibleSellerId: actor.id,
+      contractNumber: 'RETURN-514-60CM', title: 'Return width fixture', titlePersian: 'آزمون عرض سنگ', content: 'fixture', status: 'APPROVED',
+      contractData: { projectId: project.id, products: [{ rowId: 'wider', productId: lengthProduct.id, unit: 'meter', widthMeters: '0.6' }] },
+      items: { create: { productId: lengthProduct.id, productRowId: 'wider', quantity: 40, unitPrice: 1, totalPrice: 40 } },
+    } });
+    const movedWidth = await call(`${receipts}/${measured.data.id}/edit`, {
+      ...areaCommand, projectIds: [project.id], expectedVersionId: correctedWidth.data.version.id,
+      items: [{ ...areaItems[0], effectiveWidthMeters: '0.6' }],
+    });
+    assert.equal(movedWidth.status, 200, JSON.stringify(movedWidth));
+    assert.equal(movedWidth.data.version.items[0].healthyAreaSquareMeters, '8.1');
 
     for (const [plate, disposition] of [
       ['46 ب 345 ایران 67', 'transfer'],
@@ -489,6 +524,12 @@ test('Logistics records and reopens exact multi-project receipt quantities and h
       where: { contractNumber: 'SECRET-RETURN-506' }, include: { items: true },
     });
     const [financialStone] = financialContract.items;
+    const financialVisit = await call(guard, { source: 'PERSONAL_PICKUP', plate: '50 ب 345 ایران 67', purpose: 'PROJECT_RETURN' });
+    const financialCase = await call(receipts, { ...command, visitId: financialVisit.data.id,
+      items: [{ ...command.items[0], healthyQuantity: '6' }] });
+    assert.equal(financialCase.status, 201, JSON.stringify(financialCase));
+    const financialPath = `/api/accounting/project-returns/${financialCase.data.id}`;
+    assert.equal((await call(financialPath)).data.items[0].candidates.length, 0);
     const approvedAt = new Date();
     const financialRecord = await db.accountingFinancialRecord.create({ data: {
       kind: 'INVOICE_CANDIDATE', status: 'ISSUED', sourceKind: 'SALES_CONTRACT',
@@ -521,11 +562,7 @@ test('Logistics records and reopens exact multi-project receipt quantities and h
       invoiceItems: { create: { ...issueFixture.invoiceItems.create, productId: lengthProduct.id } } } });
     await db.accountingFinancialRecord.create({ data: { ...issueFixture, status: 'ISSUED', systemInvoiceNumber: 'RETURN-515-WRONG-RELATION',
       metadata: { partnerCaseId: 'unrelated-partner-case' } } });
-    const financialVisit = await call(guard, { source: 'PERSONAL_PICKUP', plate: '50 ب 345 ایران 67', purpose: 'PROJECT_RETURN' });
-    const financialCase = await call(receipts, { ...command, visitId: financialVisit.data.id,
-      items: [{ ...command.items[0], healthyQuantity: '6' }] });
-    assert.equal(financialCase.status, 201, JSON.stringify(financialCase));
-    const financialPath = `/api/accounting/project-returns/${financialCase.data.id}`;
+    await approveOrdinaryFixture(financialRecord);
     const financialReview = await call(financialPath);
     assert.equal(financialReview.status, 200, JSON.stringify(financialReview));
     const [financialItem] = financialReview.data.items;
@@ -609,16 +646,40 @@ test('Logistics records and reopens exact multi-project receipt quantities and h
     const captureCase = await call(receipts, { ...command, visitId: captureVisit.data.id, projectIds: [extraProject.id],
       items: [{ productId: lengthProduct.id, unit: 'meter', healthyQuantity: '13.5', damagedQuantity: '0' }] });
     assert.equal(captureCase.status, 201, JSON.stringify(captureCase));
-    const captureReview = await call(`/api/accounting/project-returns/${captureCase.data.id}`);
-    assert.deepEqual(captureReview.data.items[0].candidates.map((row: { financialLineId: string; remainingQuantity: string }) =>
-      [row.financialLineId, row.remainingQuantity]), [['return-515-capture', '220.000']]);
+    const capturePath = `/api/accounting/project-returns/${captureCase.data.id}`;
+    assert.equal((await call(capturePath)).data.items[0].candidates.length, 0);
+    const versionIdentity = { contractId: linearContract.id, sourceFinancialRecordId: linearRecord.id, versionNumber: 1 };
+    const rowPayload = {
+      ...versionIdentity, versionId: 'return-515-legacy-seal', contractItemId: linearStone.id, productRowId: 'length',
+      ordinal: 1, contractedQuantity: '220.000', unit: 'meter', canonicalAllInTotal: '48000000.000000000000',
+      discountEligible: false, componentEvidence: {},
+    };
+    const rowHash = approvedPricingRowIntegrityHash(rowPayload);
+    const versionPayload = {
+      ...versionIdentity, id: rowPayload.versionId, approvedAt, approvedBy: actor.id, schemaVersion: 1, currency: 'ریال',
+      grossAmount: '48000000.000000000000', netAmount: '48000000.000000000000', discountAmount: '0.000000000000',
+      sourceEvidence: { origin: 'LEGACY_SEAL', customerId: customer.id, projectId: extraProject.id },
+    };
+    await db.contractApprovedPricingVersion.create({ data: {
+      ...versionPayload, origin: 'LEGACY_SEAL', legacySourceReference: versionIdentity,
+      integrityHash: approvedPricingVersionIntegrityHash({ ...versionPayload, rowHashes: [rowHash] }),
+      rows: { create: { id: 'return-515-sealed-row', contractItemId: rowPayload.contractItemId,
+        linkedContractItemId: linearStone.id, productRowId: rowPayload.productRowId, unit: rowPayload.unit, ordinal: rowPayload.ordinal,
+        contractedQuantity: rowPayload.contractedQuantity, canonicalAllInTotal: rowPayload.canonicalAllInTotal,
+        discountEligible: rowPayload.discountEligible, componentEvidence: rowPayload.componentEvidence, integrityHash: rowHash } },
+    } });
+    const sealedReview = await call(capturePath);
+    assert.deepEqual(sealedReview.data.items[0].candidates.map((row: { financialLineId: string; remainingQuantity: string }) =>
+      [row.financialLineId, row.remainingQuantity]), [['return-515-sealed-row', '220.000']]);
+    await db.accountingFinancialRecord.update({ where: { id: linearRecord.id }, data: { status: 'VOIDED' } });
+    assert.equal((await call(capturePath)).data.items[0].candidates.length, 0);
 
     const pricingContract = await db.salesContract.findUniqueOrThrow({
       where: { contractNumber: 'SECRET-RETURN-507' },
       include: { items: { where: { productId: lengthProduct.id } } },
     });
     const pricingApprovedAt = new Date();
-    await db.accountingFinancialRecord.create({ data: {
+    const pricingInvoice = await db.accountingFinancialRecord.create({ data: {
       kind: 'INVOICE_CANDIDATE', status: 'ISSUED', sourceKind: 'SALES_CONTRACT',
       contractId: pricingContract.id, sourceId: pricingContract.id, customerId: customer.id,
       systemInvoiceNumber: 'RETURN-516-ISSUED', amount: '1800', createdBy: actor.id,
@@ -628,6 +689,7 @@ test('Logistics records and reopens exact multi-project receipt quantities and h
         contractItemId: row.id, productId: lengthProduct.id, description: 'سنگ طولی', quantity: '9', unitPrice: '100', totalPrice: '900',
       })) },
     } });
+    await approveOrdinaryFixture(pricingInvoice);
     const pricingVisit = await call(guard, { source: 'PERSONAL_PICKUP', plate: '52 ب 345 ایران 67', purpose: 'PROJECT_RETURN' });
     const pricingCase = await call(receipts, { ...command, visitId: pricingVisit.data.id, projectIds: [extraProject.id],
       items: [{ productId: lengthProduct.id, unit: 'meter', healthyQuantity: '13.5', damagedQuantity: '2' }],

@@ -30,7 +30,10 @@ test('Guard completes and records exit for a personal-car return cancelled witho
       }
       return route.fulfill({ status: 201, json: { success: true, data: turn() } });
     }
-    return route.fulfill({ json: { success: true, data: status && (!exited || url.searchParams.get('history') === 'true') ? [turn()] : [] } });
+    const data = status && (!exited || url.searchParams.get('history') === 'true') ? [turn()] : [];
+    const pagination = { page: Number(url.searchParams.get('page') || 1),
+      pageSize: Number(url.searchParams.get('pageSize') || 20), total: data.length };
+    return route.fulfill({ json: { success: true, data, pagination } });
   });
   await page.route(/\/api\/logistics\/project-return-visits(?:[/?]|$)/, async route => {
     if (route.request().method() === 'POST') {

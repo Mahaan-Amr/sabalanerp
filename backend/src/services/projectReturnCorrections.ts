@@ -1,6 +1,6 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
 import {
-  findProjectReturnProjects, parseProjectReturnItems, projectLabel, projectReturnId, projectReturnProductKey, projectReturnVersionItem,
+  findProjectReturnProjects, parseProjectReturnItems, projectLabel, projectReturnId, projectReturnVersionItem,
   ProjectReturnReceiptError, readProjectReturnIntakeProducts, readProjectReturnReceipt,
 } from './projectReturnReceipts';
 import { readLegacyProjectReturnBase, readCurrentProjectReturnLegacyBase, requireCurrentLegacyProjectReturnBase } from './projectReturnLegacyBase';
@@ -96,8 +96,7 @@ export async function submitProjectReturnCorrection(db: PrismaClient, caseId: st
       if (!product || item.productId !== base.receipt.productId || item.unit !== base.receipt.unit) {
         throw new ProjectReturnReceiptError(400, 'محصول و واحد مرجوعی اصلی باید در پروژه‌های انتخابی این مشتری وجود داشته باشد.');
       }
-      const prior = version.items.find(row => projectReturnProductKey(row) === projectReturnProductKey(item));
-      return projectReturnVersionItem(product, item, prior?.effectiveWidthMeters);
+      return projectReturnVersionItem(product, item);
     });
     await tx.projectReturnVersion.create({
       data: {

@@ -68,6 +68,7 @@ async function sourcesForReceipt(tx: Tx, receipt: Receipt, base: LegacyBase | nu
     where: { versionId: receipt.version.id }, select: { id: true, contractSources: true },
   });
   const sourcesByItem = new Map(snapshots.map(item => [item.id, readCapturedContractSources(item.contractSources)]));
+  const reviewedAt = new Date();
   return Promise.all(receipt.version.items.map(async item => {
     const contractSources = sourcesByItem.get(item.id);
     const createdAt = base?.receipt.createdAt ?? receipt.createdAt;
@@ -79,7 +80,7 @@ async function sourcesForReceipt(tx: Tx, receipt: Receipt, base: LegacyBase | nu
     const financial = parseExactQuantityAtoms(item.healthyQuantity) > 0n
       ? await loadProjectReturnFinancialCandidates(tx, {
         customerId: receipt.customerId, productId: item.productId, unit: item.unit,
-        projectIds, before: createdAt, contractSources,
+        projectIds, before: reviewedAt, contractSources,
       }, sources.candidates)
       : [];
     const physical = base ? includePriorProjectReturnCapacity(sources.candidates, base) : sources.candidates;
@@ -282,7 +283,6 @@ export async function saveProjectReturnAllocationDraft(db: PrismaClient, caseId:
           };
           if ('financialRecordId' in candidate) {
             return { ...common, financialRecordId: candidate.financialRecordId, financialLineId: candidate.financialLineId,
-              ...(candidate.financialQuantityEvidenceId && { financialQuantityEvidenceId: candidate.financialQuantityEvidenceId }),
               financialParty: candidate.financialParty, dispatchEvidenceId: null,
               contractItemId: candidate.contractItemId, partnerCaseId: candidate.partnerCaseId };
           }

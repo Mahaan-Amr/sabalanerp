@@ -10,7 +10,7 @@ import {
 import { userFacingError } from '@/features/dispatch/userFacingError';
 import { LogisticsPage } from '@/features/logistics/LogisticsWorkspace';
 import { projectReturnDriverLabel, projectReturnVisitApi, type ProjectReturnVisit } from './projectReturnVisitApi';
-import { projectReturnReceiptApi, projectReturnReceiptHref, type ProjectReturnProduct, type ProjectReturnReceiptDetails } from './projectReturnReceiptApi';
+import { findProjectReturnProduct, projectReturnReceiptApi, projectReturnReceiptHref, type ProjectReturnProduct, type ProjectReturnReceiptDetails } from './projectReturnReceiptApi';
 import { StoneReturnLookup } from './StoneReturnLookup';
 import { ProjectReturnMeasurement, ProjectReturnWidth } from './ProjectReturnMeasurement';
 import { damagedProjectReturnAreaLabel, healthyProjectReturnAreaLabel, projectReturnQuantityFacts } from './projectReturnAreaFacts';
@@ -47,11 +47,11 @@ export function ProjectReturnIntake({ visitId, revision, onRevised, onClose }: {
   const [customer, setCustomer] = useState<StoneReturnOption | null>(revision ? { id: revision.customerId, label: revision.customerName } : null);
   const [projects, setProjects] = useState<StoneReturnOption[]>(revision?.version.projects.map(project => ({ id: project.projectId, label: project.projectName })) ?? []);
   const [items, setItems] = useState<Item[]>(revision?.version.items.map(item => ({
-    product: { ...item, suggestedWidthMeters: item.effectiveWidthMeters, id: JSON.stringify([item.productId, item.unit]), label: item.productName,
+    product: { ...item, suggestedWidthMeters: null, id: JSON.stringify([item.productId, item.unit]), label: item.productName,
       description: `${item.productCode} · ${stoneReturnUnitLabels[item.unit] ?? item.unit}` },
     healthy: priorQuantity(item.healthyQuantity, item.healthyCalculation),
     damaged: priorQuantity(item.damagedQuantity, item.damagedCalculation),
-    manualWidth: '',
+    manualWidth: item.effectiveWidthMeters ?? '',
   })) ?? []);
   const [partnerContract, setPartnerContract] = useState<StoneReturnOption | null>(null);
   const [showPartnerContracts, setShowPartnerContracts] = useState(false);
@@ -125,7 +125,8 @@ export function ProjectReturnIntake({ visitId, revision, onRevised, onClose }: {
   }
 
   function addProject(project: StoneReturnOption | null) {
-    if (!project) return;
+    if (!project || projects.some(row => row.id === project.id)) return;
+    setItems(rows => rows.map(row => ({ ...row, manualWidth: '' })));
     setProjects(rows => rows.some(row => row.id === project.id) ? rows : [...rows, project]);
   }
 
@@ -151,9 +152,9 @@ export function ProjectReturnIntake({ visitId, revision, onRevised, onClose }: {
 
   function addProduct(product: ProductOption | null) {
     if (!product) return;
-    setItems(rows => rows.some(row => row.product.id === product.id) ? rows : [
-      ...rows, { product, healthy: emptyProjectReturnQuantity(), damaged: emptyProjectReturnQuantity(), manualWidth: '' },
-    ]);
+    setItems(rows => rows.some(row => row.product.id === product.id)
+      ? rows.map(row => row.product.id === product.id ? { ...row, product, manualWidth: '' } : row)
+      : [...rows, { product, healthy: emptyProjectReturnQuantity(), damaged: emptyProjectReturnQuantity(), manualWidth: '' }]);
     setValidationError('');
   }
 
@@ -185,6 +186,32 @@ export function ProjectReturnIntake({ visitId, revision, onRevised, onClose }: {
         setValidationError(`مساحت «${invalidArea.product.productName}» از محدودهٔ قابل ثبت بیشتر است.`);
         return;
       }
+    }
+    if (step === 2 && customer && items.length) {
+      if (busy.current) return;
+      busy.current = true;
+      setPending(true);
+      try {
+        const projectIds = projects.map(project => project.id);
+        const refreshed = await Promise.all(items.map(async item => {
+          const product = await findProjectReturnProduct(customer.id, projectIds, item.product);
+          return product ? {
+            ...item, product: { ...item.product, ...product },
+            manualWidth: product.suggestedWidthMeters ? '' : item.manualWidth,
+          } : null;
+        }));
+        if (refreshed.some(item => !item)) {
+          setValidationError('محصول قبلی در پروژه‌ها و قرارداد انتخاب‌شده پیدا نشد. پروژه یا محصول را دوباره انتخاب کنید.');
+        }
+        setItems(refreshed.filter((item): item is Item => item !== null));
+        setStep(3);
+      } catch (reason) {
+        setError(userFacingError(reason, 'دریافت اطلاعات محصول ناموفق بود. دوباره تلاش کنید.'));
+      } finally {
+        busy.current = false;
+        setPending(false);
+      }
+      return;
     }
     if (step < 4) {
       setStep(step + 1);
@@ -242,14 +269,14 @@ export function ProjectReturnIntake({ visitId, revision, onRevised, onClose }: {
             {visitId && visit && <p className="break-words text-sm sds-text-secondary">{projectReturnDriverLabel(visit)}</p>}
             <div className="grid min-w-0 gap-3 sm:grid-cols-2">
               <StoneReturnLookup label="مشتری" placeholder="انتخاب مشتری" selected={customer}
-                onChange={selectCustomer} fetchOptions={projectReturnReceiptApi.customers} required disabled={false} />
+                onChange={selectCustomer} fetchOptions={projectReturnReceiptApi.customers} required disabled={pending} />
               <StoneReturnLookup key={customer?.id} label="پروژه‌ها" placeholder="انتخاب پروژه" selected={null}
                 onChange={addProject} fetchOptions={onProjects} excludedIds={projects.map(project => project.id)}
-                enabled={Boolean(customer)} disabled={projects.length >= 50} />
+                enabled={Boolean(customer)} disabled={pending || projects.length >= 50} />
             </div>
             {projects.length > 0 && <ul className="flex flex-wrap gap-2" aria-label="پروژه‌های انتخاب‌شده">
               {projects.map(project => <li key={project.id} className="min-w-0">
-                <ErpButton label={`حذف ${project.label}`} icon={FaTimes} variant="soft"
+                <ErpButton label={`حذف ${project.label}`} icon={FaTimes} variant="soft" disabled={pending}
                   onClick={() => removeProject(project.id)} />
               </li>)}
             </ul>}
@@ -258,7 +285,7 @@ export function ProjectReturnIntake({ visitId, revision, onRevised, onClose }: {
             {showPartnerContracts && <StoneReturnLookup label="فیلتر قرارداد فروش همکار" placeholder="همهٔ قراردادهای پروژه"
               selected={partnerContract} onChange={setPartnerContract} fetchOptions={onPartnerContracts} disabled={false} />}
             <StoneReturnLookup label="محصول" placeholder="جست‌وجوی محصول پروژه" selected={null} onChange={addProduct}
-              fetchOptions={onProducts} excludedIds={items.map(item => item.product.id)} disabled={items.length >= 100} />
+              fetchOptions={onProducts} excludedIds={items.filter(item => (item.product.partnerContractId ?? null) === (partnerContract?.id ?? null)).map(item => item.product.id)} disabled={items.length >= 100} />
             {items.map(item => {
               const { product } = item;
               const widthMeters = product.suggestedWidthMeters ?? resolveProjectReturnWidth(item.manualWidth);

@@ -7,7 +7,7 @@ type Tx = Prisma.TransactionClient;
 type PhysicalDraftRow = StoneReturnAllocationInput & Pick<StoneReturnCandidate,
   'originalInvoiceNumber' | 'contractId' | 'contractNumber' | 'contractItemId' | 'productRowId' | 'originalTaxInvoiceId' | 'originalTaxLineId' | 'projectId'>;
 export type ProjectReturnDraftRow = PhysicalDraftRow | Pick<FinancialProjectReturnCandidate,
-  'financialRecordId' | 'financialLineId' | 'financialParty' | 'originalInvoiceNumber' | 'contractId' | 'contractNumber'
+  'financialRecordId' | 'financialLineId' | 'financialQuantityEvidenceId' | 'financialParty' | 'originalInvoiceNumber' | 'contractId' | 'contractNumber'
   | 'contractItemId' | 'productRowId' | 'projectId' | 'partnerCaseId' | 'dispatchEvidenceId'> & { quantity: string };
 type DraftItem = { itemId: string; agreedUnitRateRials: string | null; rows: ProjectReturnDraftRow[] };
 type Draft = Omit<ProjectReturnAllocationDraft, 'items'> & { items: DraftItem[] };

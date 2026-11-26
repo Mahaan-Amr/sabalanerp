@@ -609,7 +609,7 @@ test('project returns find a committed Partner sale and require a verified whole
       const contracts = await searchProjectReturnPartnerContracts(tx, ids.customerId, [projectId], ids.contractId);
       assert.equal(contracts[0]?.id, ids.contractId);
       assert.deepEqual(await searchProjectReturnProducts(tx, ids.customerId, [projectId], 'همکار', ids.contractId), [{
-        productId, productCode: productId, productName: 'سنگ مرجوعی همکار', unit: 'meter',
+        productId, productCode: productId, productName: 'سنگ مرجوعی همکار', unit: 'meter', suggestedWidthMeters: null,
       }]);
       const otherProject = await tx.projectAddress.create({ data: { address: 'Other', customerId: ids.customerId } });
       assert.deepEqual(await searchProjectReturnPartnerContracts(tx, ids.customerId, [otherProject.id], ''), []);
@@ -641,7 +641,8 @@ test('project returns find a committed Partner sale and require a verified whole
         actorId: ids.partnerId, plate: '55 ب 515 ایران 67' });
       const { receipt } = await submitProjectReturnReceipt(inFixture, ids.partnerId, {
         visitId: visit.id, customerId: ids.customerId, projectIds: [projectId],
-        items: [{ productId, unit: 'meter', healthyQuantity: '1', damagedQuantity: '0' }],
+        items: [{ productId, unit: 'meter', healthyQuantity: '1', damagedQuantity: '0',
+          partnerContractId: ids.contractId, effectiveWidthMeters: '0.4' }],
       });
       assert.deepEqual((await readProjectReturnAllocationReview(tx, receipt.id)).items[0].candidates, [],
         'Partner retail contract and a broken wholesale seal cannot supply a return reference');

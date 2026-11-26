@@ -49,7 +49,7 @@ function readCapturedContractSources(value: Prisma.JsonValue): CapturedProjectRe
   // Earlier versions stored no source snapshot; preserve readback of those receipts.
   if (value === null) return undefined;
   if (!Array.isArray(value)) return [];
-  return value.flatMap(entry => {
+  return value.flatMap<CapturedProjectReturnSource>(entry => {
     const { projectId, contractId, contractItemId, productRowId, dispatchEvidenceId, partnerCaseId, partnerRevision } = stoneReturnEvidenceRecord(entry);
     if (typeof projectId !== 'string' || typeof contractId !== 'string') return [];
     if (typeof partnerCaseId === 'string' && typeof partnerRevision === 'number' && typeof productRowId === 'string') {
@@ -244,6 +244,7 @@ export async function saveProjectReturnAllocationDraft(db: PrismaClient, caseId:
           };
           if ('financialRecordId' in candidate) {
             return { ...common, financialRecordId: candidate.financialRecordId, financialLineId: candidate.financialLineId,
+              ...(candidate.financialQuantityEvidenceId && { financialQuantityEvidenceId: candidate.financialQuantityEvidenceId }),
               financialParty: candidate.financialParty, dispatchEvidenceId: null,
               contractItemId: candidate.contractItemId, partnerCaseId: candidate.partnerCaseId };
           }

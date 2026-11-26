@@ -6,26 +6,27 @@ import { inferLogisticsContractUnit, resolveLogisticsContractRow } from './logis
 import { PartnerAccountingCommandError } from './partnerSales/accounting/errors';
 import { validatePendingPartnerApproval } from './partnerSales/accounting/financialApproval';
 import { readPartnerInvoiceSource } from './partnerSales/accounting/invoiceSource';
+import { hasConflictingPartnerAccountingEvidence } from './partnerSales/accounting/provenance';
 import { PartnerOfficialAccountingIntegrityError, latestPartnerFinancialApproval, readPartnerOfficialPurchase } from './partnerSales/accounting/officialPurchase';
 import { readCurrentPartnerCaseViews } from './partnerSales/cases/lifecycle';
 import { partnerContractWasDeleted } from './partnerSales/cases/operationalDeletion';
 import { stoneReturnEvidenceRecord as record, type ProjectReturnContractSource } from './projectReturnDispatch';
 import { hasValidPersistedSalesShipmentEvidenceHash } from './shipmentQuantityProjectionStore';
 import type { StoneReturnCandidate } from './stoneReturnCandidates';
-import { stoneReturnLineKey } from './stoneReturnAllocationRules';
+import { stoneReturnLineKey, type FinancialAllocationSource } from './stoneReturnAllocationRules';
 
 type Tx = Prisma.TransactionClient;
 export type PartnerProjectReturnSource = {
   projectId: string; contractId: string; partnerCaseId: string; partnerRevision: number; productRowId: string;
 };
 export type CapturedProjectReturnSource = ProjectReturnContractSource | PartnerProjectReturnSource;
-export type FinancialReturnSourceKey = { financialRecordId: string; financialLineId: string };
 type Party = { kind: 'CUSTOMER' | 'PARTNER'; id: string };
-export type FinancialProjectReturnCandidate = FinancialReturnSourceKey & Pick<StoneReturnCandidate,
+export type FinancialProjectReturnCandidate = FinancialAllocationSource & Pick<StoneReturnCandidate,
   'contractId' | 'contractNumber' | 'productRowId' | 'unit' | 'contractDate' | 'contractCreatedAt' | 'sellerName'
   | 'originalInvoicedQuantity' | 'linePriorReturnedQuantity' | 'lineRemainingQuantity' | 'remainingQuantity'> & {
   projectId: string; contractItemId: string | null; partnerCaseId: string | null; financialParty: Party;
   originalInvoiceNumber: string; originalNetRateRials: string | null; dispatchEvidenceId: null;
+  financialQuantityEvidenceId?: string;
 };
 type Scope = {
   customerId: string; productId: string; unit: string; projectIds: string[];
@@ -85,7 +86,7 @@ async function directCandidates(tx: Tx, scope: Scope, existing: StoneReturnCandi
   const items = await tx.contractItem.findMany({
     where: {
       productId: scope.productId, retiredAt: null, productRowId: { not: null },
-      contract: { customerId: scope.customerId, partnerCaseId: null,
+      contract: { customerId: scope.customerId, partnerCaseId: null, partnerKind: null,
         OR: scope.projectIds.map(projectId => ({ contractData: { path: ['projectId'], equals: projectId } })) },
     },
     include: { contract: { select: { id: true, contractNumber: true, contractData: true, createdAt: true,
@@ -109,7 +110,8 @@ async function directCandidates(tx: Tx, scope: Scope, existing: StoneReturnCandi
     include: { invoiceItems: true },
     orderBy: [{ financiallyApprovedAt: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
   });
-  const ownedFinancial = financial.filter(row => row.sourceId === row.contractId);
+  const ownedFinancial = financial.filter(row => row.sourceId === row.contractId
+    && !hasConflictingPartnerAccountingEvidence(row));
   const [returned, captured] = await Promise.all([
     returnedQuantities(tx, contractIds, scope.customerId),
     tx.shipmentQuantityEvidence.findMany({ where: {
@@ -126,13 +128,15 @@ async function directCandidates(tx: Tx, scope: Scope, existing: StoneReturnCandi
       if (invoice.contractId !== contract.id || !issued(invoice, scope.before)) continue;
       const snapshot = record(invoice.sourceSnapshot);
       const frozen = record(snapshot.contractData);
-      if (snapshot.id !== contract.id || snapshot.customerId !== scope.customerId || frozen.projectId !== projectId
-        || snapshot.partnerCaseId != null) continue;
+      if (snapshot.id !== contract.id || snapshot.customerId !== scope.customerId || frozen.projectId !== projectId) continue;
+      let frozenCatalogId: unknown;
       try {
         const frozenRow = resolveLogisticsContractRow(frozen, { id: contractItemId, productId: scope.productId, productRowId });
         const frozenItem = (Array.isArray(snapshot.items) ? snapshot.items.map(record) : []).find(row => row.id === contractItemId);
         const productType = typeof frozenItem?.productType === 'string' ? frozenItem.productType : null;
         if (inferLogisticsContractUnit({ productType }, frozenRow) !== scope.unit) continue;
+        frozenCatalogId = frozenRow.productId ?? frozenItem?.productId;
+        if (frozenCatalogId != null && frozenCatalogId !== scope.productId) continue;
       } catch {
         continue;
       }
@@ -145,17 +149,20 @@ async function directCandidates(tx: Tx, scope: Scope, existing: StoneReturnCandi
         && evidence.productRowId === productRowId && record(evidence.metadata).financiallyApprovedAt === approval
         && record(evidence.metadata).financialRecordId === invoice.id && evidence.sourceId === `${invoice.id}:${contractItemId}`
         && evidence.effectiveAt.toISOString() === approval && hasValidPersistedSalesShipmentEvidenceHash(evidence));
-      const line = exactLines[0];
-      // A contract-quantity capture covers the whole contract. A selected-row invoice
-      // still needs its exact invoice item to establish the amount covered.
-      if (!line && (!capture || record(invoice.metadata).mode !== 'FROM_CONTRACT_TOTAL')) continue;
-      const quantity = capture && record(invoice.metadata).mode !== 'FROM_SELECTED_ITEMS' ? capture.quantity : line!.quantity;
+      const [line] = exactLines;
+      // A contract-quantity capture covers the whole contract. Other invoice
+      // modes need the exact financial line to establish the amount covered.
+      const wholeContract = ['FROM_CONTRACT_TOTAL', 'REPLACEMENT_AFTER_CORRECTION'].includes(String(record(invoice.metadata).mode));
+      const quantityEvidence = wholeContract ? capture : undefined;
+      if (!line && (!quantityEvidence || frozenCatalogId !== scope.productId)) continue;
+      const quantity = quantityEvidence?.quantity ?? line.quantity;
       const limits = capacity(quantity, returned.get(saleRowKey({ contractId: contract.id, productRowId })) ?? 0n, scope.unit);
       if (!limits) continue;
       const rate = line && moneyRials(line.unitPrice.toFixed(), invoice.currency);
       const seller = contract.realizedSeller ?? contract.responsibleSeller;
       candidates.push({
-        financialRecordId: invoice.id, financialLineId: line?.id ?? capture!.id,
+        financialRecordId: invoice.id, financialLineId: line?.id ?? quantityEvidence!.id,
+        ...(quantityEvidence && { financialQuantityEvidenceId: quantityEvidence.id }),
         financialParty: { kind: 'CUSTOMER', id: scope.customerId }, originalInvoiceNumber: invoice.systemInvoiceNumber!,
         contractId: contract.id, contractItemId, contractNumber: contract.contractNumber, productRowId, projectId,
         partnerCaseId: null, dispatchEvidenceId: null, unit: scope.unit, ...limits,

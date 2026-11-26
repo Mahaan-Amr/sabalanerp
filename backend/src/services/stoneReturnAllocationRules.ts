@@ -14,12 +14,12 @@ export type StoneReturnSourceKey = {
 
 export type StoneReturnAllocationInput = StoneReturnSourceKey & { quantity: string };
 
-type FinancialAllocationSource = { financialRecordId: string; financialLineId: string };
+export type FinancialAllocationSource = { financialRecordId: string; financialLineId: string };
 export type AllocationSource = StoneReturnSourceKey | FinancialAllocationSource;
 
-export type StoneReturnCandidateCapacity = AllocationSource & {
+export type StoneReturnCandidateCapacity = (StoneReturnSourceKey & { dispatchRemainingQuantity: string }
+  | FinancialAllocationSource) & {
   lineRemainingQuantity: string;
-  dispatchRemainingQuantity?: string;
   replacementCapacity?: { ownQuantity: string; lineRemainingQuantity: string; dispatchRemainingQuantity: string };
 };
 
@@ -35,9 +35,8 @@ function allocationCapacityKeys(row: AllocationSource) {
     : { lineKey: stoneReturnLineKey(row.originalInvoiceId, row.originalLineId), dispatchKey: row.dispatchEvidenceId };
 }
 
-function draftCapacityUse<Candidate extends StoneReturnCandidateCapacity>(
-  candidates: Candidate[],
-  rows: Array<AllocationSource & { quantity: string }>,
+export function stoneReturnDraftBalances<Candidate extends StoneReturnCandidateCapacity>(
+  candidates: Candidate[], rows: Array<AllocationSource & { quantity: string }>,
 ) {
   const byKey = new Map(candidates.map(candidate => [stoneReturnSourceKey(candidate), candidate]));
   const allocatedByLine = new Map<string, bigint>();
@@ -55,22 +54,14 @@ function draftCapacityUse<Candidate extends StoneReturnCandidateCapacity>(
     if (dispatchKey) allocatedByDispatch.set(dispatchKey, (allocatedByDispatch.get(dispatchKey) ?? 0n) + additional);
     unusedOwnBySource.set(sourceKey, own > quantity ? own - quantity : 0n);
   }
-  return { allocatedByLine, allocatedByDispatch, unusedOwnBySource };
-}
-
-export function stoneReturnDraftBalances<Candidate extends StoneReturnCandidateCapacity>(
-  candidates: Candidate[], rows: Array<AllocationSource & { quantity: string }>,
-) {
-  const { allocatedByLine, allocatedByDispatch, unusedOwnBySource } = draftCapacityUse(candidates, rows);
   return candidates.map(candidate => {
     const replacement = candidate.replacementCapacity;
-    const { lineKey, dispatchKey } = allocationCapacityKeys(candidate);
+    const { lineKey } = allocationCapacityKeys(candidate);
     const line = parseExactQuantityAtoms(replacement?.lineRemainingQuantity ?? candidate.lineRemainingQuantity)
       - (allocatedByLine.get(lineKey) ?? 0n);
-    const dispatch = dispatchKey
-      ? parseExactQuantityAtoms(replacement?.dispatchRemainingQuantity ?? candidate.dispatchRemainingQuantity!)
-        - (allocatedByDispatch.get(dispatchKey) ?? 0n)
-      : line;
+    const dispatch = 'financialRecordId' in candidate ? line
+      : parseExactQuantityAtoms(replacement?.dispatchRemainingQuantity ?? candidate.dispatchRemainingQuantity)
+        - (allocatedByDispatch.get(candidate.dispatchEvidenceId) ?? 0n);
     const own = unusedOwnBySource.get(stoneReturnSourceKey(candidate)) ?? parseExactQuantityAtoms(replacement?.ownQuantity ?? '0');
     const remainder = own + (line < dispatch ? line : dispatch);
     return { ...candidate, draftRemainingQuantity: formatExactQuantityAtoms(remainder > 0n ? remainder : 0n) };
@@ -109,7 +100,9 @@ export function validateStoneReturnAllocations<Candidate extends StoneReturnCand
     const key = stoneReturnSourceKey(row);
     const candidate = byKey.get(key);
     if (!candidate) throw new StoneReturnAllocationError(409, 'یکی از ردیف‌ها برای تخصیص این مرجوعی قابل استفاده نیست.');
-    if (usedKeys.has(key)) throw new StoneReturnAllocationError(400, 'هر مرجع فروش را یک بار تخصیص دهید.');
+    const financial = 'financialRecordId' in candidate;
+    if (usedKeys.has(key)) throw new StoneReturnAllocationError(400, financial
+      ? 'هر مرجع فروش را یک بار تخصیص دهید.' : 'هر ردیف فروش و بارگیری را یک بار تخصیص دهید.');
     usedKeys.add(key);
     const quantity = allocationQuantity(row.quantity, receipt.unit);
     total += quantity;
@@ -121,8 +114,10 @@ export function validateStoneReturnAllocations<Candidate extends StoneReturnCand
     const lineTotal = (lineQuantities.get(lineKey) ?? 0n) + additional;
     const dispatchTotal = dispatchKey ? (dispatchQuantities.get(dispatchKey) ?? 0n) + additional : 0n;
     if (lineTotal > parseExactQuantityAtoms(replacement?.lineRemainingQuantity ?? candidate.lineRemainingQuantity)
-      || (dispatchKey && dispatchTotal > parseExactQuantityAtoms(replacement?.dispatchRemainingQuantity ?? candidate.dispatchRemainingQuantity!))) {
-      throw new StoneReturnAllocationError(409, 'مقدار تخصیص از مانده قابل برگشت مرجع بیشتر است.');
+      || (!financial && dispatchTotal > parseExactQuantityAtoms(replacement?.dispatchRemainingQuantity ?? candidate.dispatchRemainingQuantity))) {
+      throw new StoneReturnAllocationError(409, financial
+        ? 'مقدار تخصیص از مانده قابل برگشت ردیف مالی بیشتر است.'
+        : 'مقدار تخصیص از مانده قابل برگشت ردیف فروش یا بارگیری بیشتر است.');
     }
     lineQuantities.set(lineKey, lineTotal);
     if (dispatchKey) dispatchQuantities.set(dispatchKey, dispatchTotal);

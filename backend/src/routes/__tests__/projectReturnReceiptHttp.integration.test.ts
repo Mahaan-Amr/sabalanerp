@@ -517,6 +517,8 @@ test('Logistics records and reopens exact multi-project receipt quantities and h
         products: [{ rowId: financialStone.productRowId, productId: product.id, unit: 'count' }] } } } });
     await db.accountingFinancialRecord.create({ data: { ...issueFixture, status: 'ISSUED', systemInvoiceNumber: 'RETURN-515-WRONG-PRODUCT',
       invoiceItems: { create: { ...issueFixture.invoiceItems.create, productId: lengthProduct.id } } } });
+    await db.accountingFinancialRecord.create({ data: { ...issueFixture, status: 'ISSUED', systemInvoiceNumber: 'RETURN-515-WRONG-RELATION',
+      metadata: { partnerCaseId: 'unrelated-partner-case' } } });
     const financialVisit = await call(guard, { source: 'PERSONAL_PICKUP', plate: '50 ب 345 ایران 67', purpose: 'PROJECT_RETURN' });
     const financialCase = await call(receipts, { ...command, visitId: financialVisit.data.id,
       items: [{ ...command.items[0], healthyQuantity: '6' }] });

@@ -30,6 +30,19 @@ test('Logistics records and reopens exact multi-project receipt quantities and h
     const { default: accountingProjectReturns } = await import('../accountingProjectReturns');
     const { default: inventoryRouter } = await import('../accountingSupplyChain');
     const { hashSupplyChainEvidence } = await import('../../services/accountingSupplyChain');
+    const { shipmentQuantityEvidenceIntegrityHash } = await import('../../services/shipmentQuantityProjectionStore');
+    const { approvedPricingRowIntegrityHash, approvedPricingVersionIntegrityHash } = await import('../../services/approvedPricing/domain');
+    const approveOrdinaryFixture = (invoice: { id: string; contractId: string | null; customerId: string | null;
+      financiallyApprovedAt: Date | null; financiallyApprovedBy: string | null; sourceKind: string; sourceId: string | null; status: string;
+      systemInvoiceNumber: string | null }) => db.accountingAuditLog.create({ data: {
+        action: 'APPROVE_FINANCIAL_INVOICE', actorId: invoice.financiallyApprovedBy!, contractId: invoice.contractId,
+        recordId: invoice.id, entityType: 'AccountingFinancialRecord', entityId: invoice.id,
+        afterState: { id: invoice.id, contractId: invoice.contractId, customerId: invoice.customerId,
+          sourceKind: invoice.sourceKind, sourceId: invoice.sourceId, status: invoice.status,
+          systemInvoiceNumber: invoice.systemInvoiceNumber, financiallyApprovedBy: invoice.financiallyApprovedBy,
+          financiallyApprovedAt: invoice.financiallyApprovedAt!.toISOString() },
+      } });
+
     const actor = await db.user.create({ data: {
       email: 'project-return-506@example.invalid', username: 'project-return-506',
       firstName: 'آزمون', lastName: 'مرجوعی', password: 'non-login-fixture', role: 'ADMIN', mustChangePassword: false,
@@ -81,12 +94,14 @@ test('Logistics records and reopens exact multi-project receipt quantities and h
       contractData: { projectId: extraProject.id, products: [
         { rowId: 'shared', productId: product.id, unit: 'squareMeter' },
         { rowId: 'piece', productId: product.id, unit: 'count' },
-        { rowId: 'length', productId: lengthProduct.id, unit: 'meter' },
+        { rowId: 'length', productId: lengthProduct.id, unit: 'meter', width: '40', widthUnit: 'cm' },
+        { rowId: 'length-2', productId: lengthProduct.id, unit: 'meter', width: '0.4', widthUnit: 'm' },
       ] },
       items: { create: [
         { productId: product.id, productRowId: 'shared', quantity: 1, unitPrice: 1, totalPrice: 1 },
         { productId: product.id, productRowId: 'piece', quantity: 1, unitPrice: 1, totalPrice: 1 },
-        { productId: lengthProduct.id, productRowId: 'length', quantity: 1, unitPrice: 1, totalPrice: 1 },
+        { productId: lengthProduct.id, productRowId: 'length', quantity: 9, unitPrice: 100, totalPrice: 900 },
+        { productId: lengthProduct.id, productRowId: 'length-2', quantity: 9, unitPrice: 100, totalPrice: 900 },
       ] },
     } });
     const session = await createAuthoritativeSession(db, actor.id, { ipAddress: '127.0.0.1', userAgent: 'project-return-receipt-qa' });
@@ -100,9 +115,9 @@ test('Logistics records and reopens exact multi-project receipt quantities and h
     server = app.listen(0, '127.0.0.1');
     await new Promise<void>((resolve, reject) => server!.once('listening', resolve).once('error', reject));
     const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-    const call = async (route: string, body?: unknown) => {
+    const call = async (route: string, body?: unknown, method = body === undefined ? 'GET' : 'POST') => {
       const response = await fetch(origin + route, {
-        method: body === undefined ? 'GET' : 'POST',
+        method,
         headers: { 'Content-Type': 'application/json', Cookie: `${SESSION_COOKIE}=${session.token}` },
         body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(15_000),
       });
@@ -155,6 +170,9 @@ test('Logistics records and reopens exact multi-project receipt quantities and h
     assert.equal(reopened.data.version.items[0].unit, 'squareMeter');
     assert.equal(reopened.data.version.items[0].healthyQuantity, '35');
     assert.equal(reopened.data.version.items[0].damagedQuantity, '5');
+    assert.equal(reopened.data.version.items[0].healthyAreaSquareMeters, '35');
+    assert.equal(reopened.data.version.items[0].damagedAreaSquareMeters, '5');
+    assert.equal(reopened.data.version.items[0].effectiveWidthMeters, null);
     assert.equal(reopened.data.visit.projectReturnStatus, 'RECEIVED');
     const personalVisit = `${guard}/${admitted.data.id}`;
     assert.equal((await call(`${personalVisit}/project-return-transfer`, {})).status, 409);
@@ -222,6 +240,9 @@ test('Logistics records and reopens exact multi-project receipt quantities and h
     assert.equal(directItem.damagedQuantity, '5');
     assert.equal(linearItem.healthyQuantity, '0');
     assert.equal(linearItem.damagedQuantity, '0.800000000000000000000000000003');
+    assert.equal(linearItem.effectiveWidthMeters, '0.4');
+    assert.equal(linearItem.healthyAreaSquareMeters, '0');
+    assert.equal(linearItem.damagedAreaSquareMeters, '0.320000000000000000000000000001');
     assert.deepEqual(linearItem.damagedCalculation, linear.damagedCalculation);
     assert.equal(linearItem.inventoryIdentityId, null);
     assert.ok(directItem.inventoryIdentityId);
@@ -406,6 +427,83 @@ test('Logistics records and reopens exact multi-project receipt quantities and h
     const matching = (await call(receipts)).data.items.filter((item: typeof reopened.data) => item.visit.id === secondVisit.data.id);
     assert.equal(matching.length, recorded.status === 201 ? 1 : 0);
 
+    const { id: _lengthId, createdAt: _lengthCreated, updatedAt: _lengthUpdated, ...lengthFields } = lengthProduct;
+    const manualWidthProduct = await db.product.create({
+      data: { ...lengthFields, widthValue: 0, code: 'LINEAR-514-MANUAL', namePersian: 'سنگ با عرض دستی' },
+    });
+    await db.salesContract.create({ data: {
+      customerId: customer.id, departmentId: department.id, createdBy: actor.id, responsibleSellerId: actor.id,
+      contractNumber: 'RETURN-514-MANUAL', title: 'Return width fixture', titlePersian: 'آزمون عرض سنگ', content: 'fixture', status: 'APPROVED',
+      contractData: { projectId: extraProject.id, products: [{ rowId: 'manual-width', productId: manualWidthProduct.id, unit: 'meter' }] },
+      items: { create: { productId: manualWidthProduct.id, productRowId: 'manual-width', quantity: 40, unitPrice: 1, totalPrice: 40 } },
+    } });
+    assert.equal((await products(extraProject.id, lengthProduct.code)).data[0].suggestedWidthMeters, '0.4');
+    assert.equal((await products(extraProject.id, manualWidthProduct.code)).data[0].suggestedWidthMeters, null);
+    const areaVisit = await call(guard, { source: 'PERSONAL_PICKUP', plate: '58 ب 345 ایران 67', purpose: 'PROJECT_RETURN' });
+    assert.equal(areaVisit.status, 201);
+    const areaItems = [lengthProduct, manualWidthProduct].map(({ id }) => ({
+      productId: id, unit: 'meter', healthyQuantity: '13.5',
+      damagedCalculation: { khatRas: '1.2', pieceCount: '3', plus: '0.3', minus: '0.1' },
+    }));
+    const areaCommand = { ...command, visitId: areaVisit.data.id, projectIds: [extraProject.id], items: areaItems };
+
+    assert.equal((await call(receipts, { ...areaCommand, items: [{ ...areaItems[0], effectiveWidthMeters: '0.9' }] })).status, 400);
+    assert.equal((await call(receipts, { ...areaCommand, items: [{ ...areaItems[1], effectiveWidthMeters: '0' }] })).status, 400);
+    const unmeasuredVisit = await call(guard, { source: 'PERSONAL_PICKUP', plate: '59 ب 345 ایران 67', purpose: 'PROJECT_RETURN' });
+    const unmeasured = await call(receipts, { ...areaCommand, visitId: unmeasuredVisit.data.id, items: [areaItems[1]] });
+    assert.equal(unmeasured.status, 201, JSON.stringify(unmeasured));
+    assert.equal(unmeasured.data.version.items[0].effectiveWidthMeters, null);
+    assert.equal(unmeasured.data.version.items[0].healthyAreaSquareMeters, null);
+    assert.equal(unmeasured.data.version.items[0].damagedAreaSquareMeters, null);
+    const measured = await call(receipts, { ...areaCommand, items: [areaItems[0], { ...areaItems[1], effectiveWidthMeters: '0.25' }] });
+    assert.equal(measured.status, 201, JSON.stringify(measured));
+    const readArea = async () => {
+      const logistics = await call(`${receipts}/${measured.data.id}`);
+      const accounting = await call(`/api/accounting/project-returns/${measured.data.id}`);
+      assert.equal(logistics.status, 200);
+      assert.equal(accounting.status, 200, JSON.stringify(accounting));
+      for (const [productId, effectiveWidthMeters, healthyAreaSquareMeters, damagedAreaSquareMeters] of [
+        [lengthProduct.id, '0.4', '5.4', '1.52'],
+        [manualWidthProduct.id, '0.25', '3.375', '0.95'],
+      ]) {
+        const matchesProduct = (item: { productId: string }) => item.productId === productId;
+        for (const items of [logistics.data.version.items, accounting.data.items]) {
+          const row = items.find(matchesProduct);
+          assert.equal(row.healthyQuantity, '13.5');
+          assert.equal(row.damagedQuantity, '3.8');
+          assert.equal(row.effectiveWidthMeters, effectiveWidthMeters);
+          assert.equal(row.healthyAreaSquareMeters, healthyAreaSquareMeters);
+          assert.equal(row.damagedAreaSquareMeters, damagedAreaSquareMeters);
+        }
+      }
+    };
+    await readArea();
+    await db.product.update({ where: { id: manualWidthProduct.id }, data: { widthValue: 50 } });
+    await readArea();
+    const correctedWidth = await call(`${receipts}/${measured.data.id}/edit`, {
+      ...areaCommand, expectedVersionId: measured.data.version.id,
+      items: [areaItems[0], { ...areaItems[1], effectiveWidthMeters: '0.3' }],
+    });
+    assert.equal(correctedWidth.status, 200, JSON.stringify(correctedWidth));
+    const correctedManual = correctedWidth.data.version.items.find((item: { productId: string }) => item.productId === manualWidthProduct.id);
+    assert.equal(correctedManual.effectiveWidthMeters, '0.3');
+    assert.equal(correctedManual.healthyAreaSquareMeters, '4.05');
+    const firstWidthVersion = await call(`${receipts}/${measured.data.id}/versions/${measured.data.version.id}`);
+    assert.equal(firstWidthVersion.data.version.items.find((item: { productId: string }) => item.productId === manualWidthProduct.id)
+      .effectiveWidthMeters, '0.25');
+    await db.salesContract.create({ data: {
+      customerId: customer.id, departmentId: department.id, createdBy: actor.id, responsibleSellerId: actor.id,
+      contractNumber: 'RETURN-514-60CM', title: 'Return width fixture', titlePersian: 'آزمون عرض سنگ', content: 'fixture', status: 'APPROVED',
+      contractData: { projectId: project.id, products: [{ rowId: 'wider', productId: lengthProduct.id, unit: 'meter', widthMeters: '0.6' }] },
+      items: { create: { productId: lengthProduct.id, productRowId: 'wider', quantity: 40, unitPrice: 1, totalPrice: 40 } },
+    } });
+    const movedWidth = await call(`${receipts}/${measured.data.id}/edit`, {
+      ...areaCommand, projectIds: [project.id], expectedVersionId: correctedWidth.data.version.id,
+      items: [{ ...areaItems[0], effectiveWidthMeters: '0.6' }],
+    });
+    assert.equal(movedWidth.status, 200, JSON.stringify(movedWidth));
+    assert.equal(movedWidth.data.version.items[0].healthyAreaSquareMeters, '8.1');
+
     for (const [plate, disposition] of [
       ['46 ب 345 ایران 67', 'transfer'],
       ['47 ب 345 ایران 67', 'exit'],
@@ -422,6 +520,248 @@ test('Logistics records and reopens exact multi-project receipt quantities and h
       assert.equal(transitioned.data.status, disposition === 'transfer' ? 'AVAILABLE_FOR_LOADING' : 'EXIT_RECORDED');
       assert.equal(Boolean(transitioned.data.exitedAt), disposition === 'exit');
     }
+    const financialContract = await db.salesContract.findUniqueOrThrow({
+      where: { contractNumber: 'SECRET-RETURN-506' }, include: { items: true },
+    });
+    const [financialStone] = financialContract.items;
+    const financialVisit = await call(guard, { source: 'PERSONAL_PICKUP', plate: '50 ب 345 ایران 67', purpose: 'PROJECT_RETURN' });
+    const financialCase = await call(receipts, { ...command, visitId: financialVisit.data.id,
+      items: [{ ...command.items[0], healthyQuantity: '6' }] });
+    assert.equal(financialCase.status, 201, JSON.stringify(financialCase));
+    const financialPath = `/api/accounting/project-returns/${financialCase.data.id}`;
+    assert.equal((await call(financialPath)).data.items[0].candidates.length, 0);
+    const approvedAt = new Date();
+    const financialRecord = await db.accountingFinancialRecord.create({ data: {
+      kind: 'INVOICE_CANDIDATE', status: 'ISSUED', sourceKind: 'SALES_CONTRACT',
+      contractId: financialContract.id, sourceId: financialContract.id, customerId: customer.id,
+      systemInvoiceNumber: 'RETURN-515-ISSUED', amount: '48000000', createdBy: actor.id,
+      financiallyApprovedBy: actor.id, financiallyApprovedAt: approvedAt, postedAt: approvedAt,
+      sourceSnapshot: { id: financialContract.id, customerId: customer.id, contractData: financialContract.contractData! },
+      invoiceItems: { create: { contractItemId: financialStone.id, productId: product.id, description: product.namePersian!,
+        quantity: '8', unitPrice: '6000000', totalPrice: '48000000' } },
+    }, include: { invoiceItems: true } });
+    const issueFixture = {
+      kind: 'INVOICE_CANDIDATE' as const, sourceKind: 'SALES_CONTRACT' as const,
+      contractId: financialContract.id, sourceId: financialContract.id, customerId: customer.id,
+      amount: '48000000', createdBy: actor.id, financiallyApprovedBy: actor.id, postedAt: approvedAt,
+      financiallyApprovedAt: new Date(approvedAt.getTime() + 1),
+      sourceSnapshot: { id: financialContract.id, customerId: customer.id, contractData: financialContract.contractData! },
+      invoiceItems: { create: { contractItemId: financialStone.id, productId: product.id, description: product.namePersian!,
+        quantity: '8', unitPrice: '6000000', totalPrice: '48000000' } },
+    };
+    await db.accountingFinancialRecord.create({ data: { ...issueFixture, status: 'DRAFT', systemInvoiceNumber: 'RETURN-515-DRAFT' } });
+    await db.accountingFinancialRecord.create({ data: { ...issueFixture, status: 'VOIDED', systemInvoiceNumber: 'RETURN-515-VOID' } });
+    await db.accountingFinancialRecord.create({ data: { ...issueFixture, status: 'ISSUED', systemInvoiceNumber: 'RETURN-515-WRONG-PARTY',
+      customerId: otherCustomer.id } });
+    await db.accountingFinancialRecord.create({ data: { ...issueFixture, status: 'ISSUED', systemInvoiceNumber: 'RETURN-515-WRONG-PROJECT',
+      sourceSnapshot: { ...issueFixture.sourceSnapshot, contractData: { ...(financialContract.contractData as object), projectId: extraProject.id } } } });
+    await db.accountingFinancialRecord.create({ data: { ...issueFixture, status: 'ISSUED', systemInvoiceNumber: 'RETURN-515-WRONG-UNIT',
+      sourceSnapshot: { ...issueFixture.sourceSnapshot, contractData: { projectId: project.id,
+        products: [{ rowId: financialStone.productRowId, productId: product.id, unit: 'count' }] } } } });
+    await db.accountingFinancialRecord.create({ data: { ...issueFixture, status: 'ISSUED', systemInvoiceNumber: 'RETURN-515-WRONG-PRODUCT',
+      invoiceItems: { create: { ...issueFixture.invoiceItems.create, productId: lengthProduct.id } } } });
+    await db.accountingFinancialRecord.create({ data: { ...issueFixture, status: 'ISSUED', systemInvoiceNumber: 'RETURN-515-WRONG-RELATION',
+      metadata: { partnerCaseId: 'unrelated-partner-case' } } });
+    await approveOrdinaryFixture(financialRecord);
+    const financialReview = await call(financialPath);
+    assert.equal(financialReview.status, 200, JSON.stringify(financialReview));
+    const [financialItem] = financialReview.data.items;
+    assert.equal(financialItem.candidates.length, 1, JSON.stringify(financialItem));
+    const [candidate] = financialItem.candidates;
+    assert.equal(candidate.financialRecordId, financialRecord.id);
+    assert.equal(candidate.financialLineId, financialRecord.invoiceItems[0].id);
+    assert.equal(candidate.dispatchEvidenceId, null);
+    assert.equal(candidate.remainingQuantity, '8.000');
+    const profile = await db.accountingCustomerProfile.create({ data: { id: 'return-515-ordinary-profile',
+      legalEntityId: 'return-515-sabalan', accountingPartyId: 'return-515-customer-party', partySourceKind: 'CUSTOMER',
+      partySourceId: customer.id, displayName: 'مشتری آزمون', activeFrom: approvedAt, createdBy: actor.id } });
+    const priorCommercial = await db.accountingCommercialCustomerInvoice.create({ data: {
+      profileId: profile.id, contractId: financialContract.id, contractVersion: 1,
+      number: 'RETURN-515-OLD-COMMERCIAL', ledgerVoucherId: 'return-515-old-voucher',
+      controlPolicyId: 'return-515-policy', controlPolicyVersion: 1, controlEvidenceType: 'GUARD_EXIT',
+      controlEvidenceId: 'return-515-previous-exit', controlEvidenceVersion: 1, controlEvidenceHash: 'fixture',
+      netRials: '48000000', taxRials: '0', grossRials: '48000000', issuedAt: approvedAt, dueAt: approvedAt,
+    } });
+    const priorCredit = await db.accountingCommercialCustomerInvoice.create({ data: {
+      profileId: profile.id, contractId: financialContract.id, contractVersion: 1,
+      number: 'RETURN-515-OLD-CREDIT', ledgerVoucherId: 'return-515-credit-voucher',
+      controlPolicyId: 'return-515-policy', controlPolicyVersion: 1, controlEvidenceType: 'EXCESS_RETURN_FINALIZED',
+      controlEvidenceId: 'return-515-prior-finalization', controlEvidenceVersion: 1, controlEvidenceHash: 'fixture',
+      netRials: '18000000', taxRials: '0', grossRials: '18000000', issuedAt: approvedAt, dueAt: approvedAt,
+      referenceInvoiceId: priorCommercial.id, status: 'CREDIT_NOTE',
+    } });
+    const shipmentRow = { contractId: financialContract.id, contractItemId: financialStone.id,
+      productRowId: financialStone.productRowId!, unit: 'squareMeter', effectiveAt: approvedAt, integrityHash: 'fixture' };
+    const dispatch = await db.shipmentQuantityEvidence.create({ data: {
+      ...shipmentRow, kind: 'PHYSICAL_EXIT', quantity: '8', sourceType: 'GUARD_PHYSICAL_EXIT', sourceId: 'return-515-prior-exit',
+    } });
+    await db.shipmentQuantityEvidence.create({ data: {
+      ...shipmentRow, id: 'return-515-prior-finalization', kind: 'EXCESS_RETURN_FINALIZED', quantity: '3',
+      sourceType: 'STONE_EXCESS_RETURN_ALLOCATION', sourceId: 'return-515-prior-allocation', dispatchEvidenceId: dispatch.id,
+      metadata: { returnCaseId: 'return-515-prior-case', actorId: actor.id },
+    } });
+    await db.accountingReturnEvidenceConsumption.create({ data: {
+      evidenceId: 'return-515-prior-finalization', creditInvoiceId: priorCredit.id,
+      originalInvoiceId: priorCommercial.id, originalLineId: 'return-515-invoice-row',
+      productRowId: financialStone.productRowId!, quantity: '3',
+    } });
+    const withPrevious = await call(financialPath);
+    assert.equal(withPrevious.data.items[0].candidates[0].remainingQuantity, '5.000');
+    const draft = (quantity: string, financialLineId = candidate.financialLineId) => ({
+      expectedVersionId: financialCase.data.version.id, expectedDraftNumber: 0,
+      items: [{ itemId: financialItem.id, agreedUnitRateRials: '6000000',
+        rows: [{ financialRecordId: candidate.financialRecordId, financialLineId, quantity }] }],
+    });
+    assert.equal((await call(`${financialPath}/allocations`, draft('7'), 'PUT')).status, 409);
+    assert.equal((await call(`${financialPath}/allocations`, draft('5.5'), 'PUT')).status, 409);
+    assert.equal((await call(`${financialPath}/allocations`, draft('1', 'unrelated-accounting-row'), 'PUT')).status, 409);
+    assert.equal((await call(`${financialPath}/allocations`, draft('4'), 'PUT')).status, 200);
+    const savedReview = await call(financialPath);
+    assert.equal(savedReview.data.items[0].candidates[0].draftRemainingQuantity, '1.000');
+    assert.equal(savedReview.data.items[0].rows[0].financialRecordId, financialRecord.id);
+    assert.equal(savedReview.data.items[0].rows[0].quantity, '4.000');
+
+    const linearContract = await db.salesContract.findUniqueOrThrow({
+      where: { contractNumber: 'SECRET-RETURN-507' }, include: { items: { where: { productRowId: 'length' } } },
+    });
+    const [linearStone] = linearContract.items;
+    const linearRecord = await db.accountingFinancialRecord.create({ data: {
+      kind: 'INVOICE_CANDIDATE', status: 'ISSUED', sourceKind: 'SALES_CONTRACT', contractId: linearContract.id,
+      sourceId: linearContract.id, customerId: customer.id, systemInvoiceNumber: 'RETURN-515-APPROVED-CAPTURE',
+      amount: '48000000', createdBy: actor.id, financiallyApprovedBy: actor.id, financiallyApprovedAt: approvedAt, postedAt: approvedAt,
+      sourceSnapshot: { id: linearContract.id, customerId: customer.id, contractData: linearContract.contractData! },
+      metadata: { mode: 'FROM_CONTRACT_TOTAL' },
+    } });
+    const witness = {
+      id: 'return-515-capture', contractId: linearContract.id, contractItemId: linearStone.id, productRowId: 'length',
+      unit: 'meter', kind: 'CONTRACTED_SET' as const, quantity: '220.000',
+      effectiveAt: approvedAt.toISOString(), recordedAt: approvedAt.toISOString(),
+      sourceType: 'FINANCIALLY_APPROVED_CONTRACT_QUANTITY_VERSION', sourceId: `${linearRecord.id}:${linearStone.id}`, sourceVersion: 1,
+      metadata: { financialRecordId: linearRecord.id, financiallyApprovedAt: approvedAt.toISOString() },
+    };
+    await db.shipmentQuantityEvidence.create({ data: { ...witness, integrityHash: shipmentQuantityEvidenceIntegrityHash({
+      ...witness, integrityHash: '',
+    }) } });
+    const captureVisit = await call(guard, { source: 'PERSONAL_PICKUP', plate: '51 ب 345 ایران 67', purpose: 'PROJECT_RETURN' });
+    const captureCase = await call(receipts, { ...command, visitId: captureVisit.data.id, projectIds: [extraProject.id],
+      items: [{ productId: lengthProduct.id, unit: 'meter', healthyQuantity: '13.5', damagedQuantity: '0' }] });
+    assert.equal(captureCase.status, 201, JSON.stringify(captureCase));
+    const capturePath = `/api/accounting/project-returns/${captureCase.data.id}`;
+    assert.equal((await call(capturePath)).data.items[0].candidates.length, 0);
+    const versionIdentity = { contractId: linearContract.id, sourceFinancialRecordId: linearRecord.id, versionNumber: 1 };
+    const rowPayload = {
+      ...versionIdentity, versionId: 'return-515-legacy-seal', contractItemId: linearStone.id, productRowId: 'length',
+      ordinal: 1, contractedQuantity: '220.000', unit: 'meter', canonicalAllInTotal: '48000000.000000000000',
+      discountEligible: false, componentEvidence: {},
+    };
+    const rowHash = approvedPricingRowIntegrityHash(rowPayload);
+    const versionPayload = {
+      ...versionIdentity, id: rowPayload.versionId, approvedAt, approvedBy: actor.id, schemaVersion: 1, currency: 'ریال',
+      grossAmount: '48000000.000000000000', netAmount: '48000000.000000000000', discountAmount: '0.000000000000',
+      sourceEvidence: { origin: 'LEGACY_SEAL', customerId: customer.id, projectId: extraProject.id },
+    };
+    await db.contractApprovedPricingVersion.create({ data: {
+      ...versionPayload, origin: 'LEGACY_SEAL', legacySourceReference: versionIdentity,
+      integrityHash: approvedPricingVersionIntegrityHash({ ...versionPayload, rowHashes: [rowHash] }),
+      rows: { create: { id: 'return-515-sealed-row', contractItemId: rowPayload.contractItemId,
+        linkedContractItemId: linearStone.id, productRowId: rowPayload.productRowId, unit: rowPayload.unit, ordinal: rowPayload.ordinal,
+        contractedQuantity: rowPayload.contractedQuantity, canonicalAllInTotal: rowPayload.canonicalAllInTotal,
+        discountEligible: rowPayload.discountEligible, componentEvidence: rowPayload.componentEvidence, integrityHash: rowHash } },
+    } });
+    const sealedReview = await call(capturePath);
+    assert.deepEqual(sealedReview.data.items[0].candidates.map((row: { financialLineId: string; remainingQuantity: string }) =>
+      [row.financialLineId, row.remainingQuantity]), [['return-515-sealed-row', '220.000']]);
+    await db.accountingFinancialRecord.update({ where: { id: linearRecord.id }, data: { status: 'VOIDED' } });
+    assert.equal((await call(capturePath)).data.items[0].candidates.length, 0);
+
+    const pricingContract = await db.salesContract.findUniqueOrThrow({
+      where: { contractNumber: 'SECRET-RETURN-507' },
+      include: { items: { where: { productId: lengthProduct.id } } },
+    });
+    const pricingApprovedAt = new Date();
+    const pricingInvoice = await db.accountingFinancialRecord.create({ data: {
+      kind: 'INVOICE_CANDIDATE', status: 'ISSUED', sourceKind: 'SALES_CONTRACT',
+      contractId: pricingContract.id, sourceId: pricingContract.id, customerId: customer.id,
+      systemInvoiceNumber: 'RETURN-516-ISSUED', amount: '1800', createdBy: actor.id,
+      financiallyApprovedBy: actor.id, financiallyApprovedAt: pricingApprovedAt, postedAt: pricingApprovedAt,
+      sourceSnapshot: { id: pricingContract.id, customerId: customer.id, contractData: pricingContract.contractData! },
+      invoiceItems: { create: pricingContract.items.map(row => ({
+        contractItemId: row.id, productId: lengthProduct.id, description: 'سنگ طولی', quantity: '9', unitPrice: '100', totalPrice: '900',
+      })) },
+    } });
+    await approveOrdinaryFixture(pricingInvoice);
+    const pricingVisit = await call(guard, { source: 'PERSONAL_PICKUP', plate: '52 ب 345 ایران 67', purpose: 'PROJECT_RETURN' });
+    const pricingCase = await call(receipts, { ...command, visitId: pricingVisit.data.id, projectIds: [extraProject.id],
+      items: [{ productId: lengthProduct.id, unit: 'meter', healthyQuantity: '13.5', damagedQuantity: '2' }],
+    });
+    assert.equal(pricingCase.status, 201, JSON.stringify(pricingCase));
+    const pricingVersion = pricingCase.data.version;
+    const pricingItem = pricingVersion.items[0];
+    await db.projectReturnAllocationDraft.create({ data: {
+      versionId: pricingVersion.id, number: 1, createdBy: actor.id,
+      items: [{ itemId: pricingItem.id, agreedUnitRateRials: '24000000', rows: [] }],
+    } });
+    const pricingPath = `/api/accounting/project-returns/${pricingCase.data.id}`;
+    const readLegacyPrice = await call(pricingPath);
+    assert.equal(readLegacyPrice.data.items[0].agreedUnitRateRials, null, 'A legacy rate per linear meter must not be read as a rate per square meter');
+    assert.equal(readLegacyPrice.data.items[0].legacyRateNeedsReview, true);
+    const price = { itemId: pricingItem.id, agreedUnitRateRials: '۲۴۰۰۰۰۰۰', rows: [] };
+    const writePrice = (item: object) => call(`${pricingPath}/allocations`, {
+      expectedVersionId: pricingVersion.id, expectedDraftNumber: 1, items: [item],
+    }, 'PUT');
+    assert.equal((await writePrice(price)).status, 400, 'A new linear rate requires an explicit square-meter basis');
+    const newPrice = await writePrice({ ...price, agreedRateBasis: 'HEALTHY_SQUARE_METER' });
+    assert.equal(newPrice.status, 200, JSON.stringify(newPrice));
+    const rereadPrice = (await call(pricingPath)).data.items[0];
+    assert.equal(rereadPrice.agreedUnitRateRials, '24000000');
+    assert.equal(rereadPrice.agreedRateBasis, 'HEALTHY_SQUARE_METER');
+    assert.equal(rereadPrice.legacyRateNeedsReview, false);
+    assert.equal(rereadPrice.draftAmountRials, null, 'A rate alone is not an allocated amount');
+    assert.equal(rereadPrice.candidates.length, 2, JSON.stringify(rereadPrice));
+    const shares = rereadPrice.candidates.map((row: { financialRecordId: string; financialLineId: string }, index: number) => ({
+      financialRecordId: row.financialRecordId, financialLineId: row.financialLineId, quantity: index === 0 ? '5' : '8.5',
+    }));
+    const writeShares = (expectedDraftNumber: number, rows: typeof shares) => call(`${pricingPath}/allocations`, {
+      expectedVersionId: pricingVersion.id, expectedDraftNumber,
+      items: [{ ...price, agreedRateBasis: 'HEALTHY_SQUARE_METER', rows }],
+    }, 'PUT');
+    const partialPrice = await writeShares(2, [shares[0], { ...shares[1], quantity: '7.5' }]);
+    assert.equal(partialPrice.status, 200, JSON.stringify(partialPrice));
+    assert.equal(partialPrice.data.items[0].draftAmountRials, '120000000');
+    const listPath = '/api/accounting/project-returns';
+    const rowFromList = async () => {
+      const result = await call(listPath);
+      assert.equal(result.status, 200);
+      return result.data.items.find((item: { id: string }) => item.id === pricingCase.data.id);
+    };
+    assert.equal((await rowFromList()).sepidarReference, null);
+    assert.equal((await call(`${pricingPath}/allocations/${partialPrice.data.draft.id}/sepidar-reference`)).status, 409);
+    const allocatedPrice = await writeShares(3, shares);
+    assert.equal(allocatedPrice.status, 200, JSON.stringify(allocatedPrice));
+    assert.equal(allocatedPrice.data.allocationStatus, 'ALLOCATION_COMPLETE');
+    assert.equal(allocatedPrice.data.postingBlock.code, 'FINANCE_CONNECTION_UNAVAILABLE');
+    assert.equal(allocatedPrice.data.items[0].draftAmountRials, '129600000');
+    const savedPrice = (await call(pricingPath)).data.items[0];
+    assert.equal(savedPrice.healthyAreaSquareMeters, '5.4');
+    assert.equal(savedPrice.damagedAreaSquareMeters, '0.8');
+    assert.equal(savedPrice.draftAmountRials, '129600000');
+    const { draftId } = (await rowFromList()).sepidarReference;
+    const referencePath = `${pricingPath}/allocations/${draftId}/sepidar-reference`;
+    assert.deepEqual((await call(referencePath)).data, { expectedVersion: null, invoices: [], totalRial: '129600000' });
+    const invoices = [{ number: '۵۱۳', amountRial: '129600000' }];
+    assert.equal((await call(referencePath, { invoices: [{ ...invoices[0], amountRial: '1' }] })).status, 409);
+    const registration = await call(referencePath, { invoices });
+    assert.equal(registration.status, 200, JSON.stringify(registration));
+    assert.deepEqual((await call(referencePath)).data.invoices, [{ number: '513', amountRial: '129600000' }]);
+    assert.equal((await rowFromList()).sepidarReference.registered, true);
+    assert.equal((await call(referencePath, { invoices })).code, 'SEPIDAR_REFERENCE_STALE');
+    const correction = { invoices: [{ ...invoices[0], number: '514' }], expectedVersion: registration.data.auditEntry.id };
+    assert.equal((await call(referencePath, correction)).status, 400);
+    assert.equal((await call(referencePath, { ...correction, reason: 'اصلاح شماره در آزمون' })).status, 200);
+    assert.equal((await call(`${pricingPath}/finalize`, {})).status, 409);
+    assert.equal((await writeShares(4, shares)).status, 200);
+    assert.equal((await call(referencePath)).code, 'SEPIDAR_REFERENCE_STALE');
+    assert.equal((await rowFromList()).sepidarReference.registered, false);
   } finally {
     try {
       if (server?.listening) await new Promise<void>((resolve, reject) => server!.close(error => error ? reject(error) : resolve()));

@@ -1,13 +1,16 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { FaEye, FaSync } from 'react-icons/fa';
+import { useEffect, useMemo, useState } from 'react';
+import { FaEye, FaFileInvoice, FaSync } from 'react-icons/fa';
 import { ErpButton, ErpEmptyState, ErpInlineState, ErpListPage, ErpStatus } from '@/components/erp';
+import SepidarDispatchInvoices from '@/features/accounting/SepidarDispatchInvoices';
 import { userFacingError } from '@/features/dispatch/userFacingError';
 import {
-  isProjectReturnAllocationEditable, projectReturnAllocationApi, projectReturnAllocationStatuses, projectReturnHistoryHref, projectReturnReviewHref,
+  isProjectReturnAllocationEditable, projectReturnAllocationApi, projectReturnAllocationStatuses, projectReturnHistoryHref, projectReturnReviewHref, projectReturnSepidarApi,
 } from './projectReturnAllocationApi';
 import { displayExactDecimal } from './stoneReturnApi';
+
+const handleSepidarError = () => false;
 
 export function ProjectReturnReviewList() {
   const [page, setPage] = useState<Awaited<ReturnType<typeof projectReturnAllocationApi.list>>>();
@@ -15,6 +18,10 @@ export function ProjectReturnReviewList() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [retry, setRetry] = useState(0);
+  const [sepidar, setSepidar] = useState<{ caseId: string; draftId: string } | null>(null);
+  const [notice, setNotice] = useState('');
+  const sepidarCaseId = sepidar?.caseId;
+  const sepidarApi = useMemo(() => sepidarCaseId ? projectReturnSepidarApi(sepidarCaseId) : null, [sepidarCaseId]);
 
   useEffect(() => {
     let current = true;
@@ -44,10 +51,18 @@ export function ProjectReturnReviewList() {
     mobileLayout="table"
     rows={page?.items ?? []}
     rowKey={row => row.id}
-    rowActions={row => [{
-      label: page?.canAllocate && isProjectReturnAllocationEditable(row.allocationStatus) ? 'رسیدگی' : 'مشاهده پرونده',
-      href: projectReturnReviewHref(row.id), icon: FaEye, tone: 'primary',
-    }]}
+    rowActionMode="menu"
+    rowActions={row => {
+      const reference = row.sepidarReference;
+      return [{
+        label: page?.canAllocate && isProjectReturnAllocationEditable(row.allocationStatus) ? 'رسیدگی' : 'مشاهده پرونده',
+        href: projectReturnReviewHref(row.id), icon: FaEye, tone: 'primary',
+      }, ...(page?.canAllocate && row.allocationStatus === 'ALLOCATION_COMPLETE' && reference ? [{
+        label: reference.registered ? 'اصلاح فاکتور سپیدار' : 'ثبت فاکتور سپیدار',
+        icon: FaFileInvoice, tone: 'neutral' as const,
+        onClick: () => { setNotice(''); setSepidar({ caseId: row.id, draftId: reference.draftId }); },
+      }] : [])];
+    }}
     isLoading={loading && !page?.items.length}
     columns={[
       { id: 'customer', header: 'مشتری', cell: row => <strong className="break-words">{row.customerName}</strong> },
@@ -65,5 +80,16 @@ export function ProjectReturnReviewList() {
       onClick={() => setAfter(page.nextCursor ?? undefined)} /> : null}
   >
     {error && <ErpInlineState kind="error" title={error} action={{ label: 'تلاش دوباره', onClick: () => setRetry(value => value + 1) }} />}
+    {notice && <ErpInlineState kind="success" title={notice} />}
+    {sepidar && sepidarApi && <SepidarDispatchInvoices key={sepidar.draftId} loadingId={sepidar.draftId}
+      subject="return" contracts={[]} api={sepidarApi} blocked={false} onError={handleSepidarError}
+      onClose={() => setSepidar(null)} onSaved={(invoices, _audit, correction) => {
+        setNotice(correction ? 'فاکتورهای سپیدار مرجوعی اصلاح شدند.' : 'فاکتورهای سپیدار مرجوعی ثبت شدند.');
+        setPage(current => current && ({
+          ...current, items: current.items.map(row => row.id === sepidar.caseId && row.sepidarReference?.draftId === sepidar.draftId
+            ? { ...row, sepidarReference: { draftId: sepidar.draftId, registered: invoices.length > 0 } } : row),
+        }));
+        setSepidar(null);
+      }} />}
   </ErpListPage>;
 }

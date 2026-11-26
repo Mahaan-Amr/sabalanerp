@@ -1,7 +1,7 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
 import {
-  findProjectReturnProjects, parseProjectReturnItems, projectLabel, projectReturnId, projectReturnProductKey,
-  ProjectReturnReceiptError, readProjectReturnProducts, readProjectReturnReceipt,
+  findProjectReturnProjects, parseProjectReturnItems, projectLabel, projectReturnId, projectReturnVersionItem,
+  ProjectReturnReceiptError, readProjectReturnIntakeProducts, readProjectReturnReceipt,
 } from './projectReturnReceipts';
 import { readLegacyProjectReturnBase, readCurrentProjectReturnLegacyBase, requireCurrentLegacyProjectReturnBase } from './projectReturnLegacyBase';
 import { lockProjectReturnCase, readLatestProjectReturnAllocationDraft } from './projectReturnDraftState';
@@ -90,13 +90,13 @@ export async function submitProjectReturnCorrection(db: PrismaClient, caseId: st
       throw new ProjectReturnReceiptError(409, 'مشتری مرجوعی قطعی قابل تغییر نیست.');
     }
     const projects = await findProjectReturnProjects(tx, customerId, command.projectIds);
-    const products = await readProjectReturnProducts(tx, customerId, command.projectIds, command.items.map(item => item.productId), base.deliveredBefore);
-    const items = command.items.map(item => {
-      const product = products.get(projectReturnProductKey(item));
+    const products = await readProjectReturnIntakeProducts(tx, customerId, command.projectIds, command.items, base.deliveredBefore);
+    const items = command.items.map((item, index) => {
+      const product = products[index];
       if (!product || item.productId !== base.receipt.productId || item.unit !== base.receipt.unit) {
         throw new ProjectReturnReceiptError(400, 'محصول و واحد مرجوعی اصلی باید در پروژه‌های انتخابی این مشتری وجود داشته باشد.');
       }
-      return { ...product, ...item };
+      return projectReturnVersionItem(product, item);
     });
     await tx.projectReturnVersion.create({
       data: {

@@ -81,7 +81,8 @@ export async function loadStoneReturnCandidates(tx: Tx, receipt: Receipt, scope?
   }
   const deliveredBefore = scope?.deliveredBefore ?? witness?.occurredAt ?? receipt.createdAt;
   const items = await tx.contractItem.findMany({
-    where: { productId: receipt.productId, productRowId: { not: null }, contract: { customerId: receipt.customerId } },
+    where: { productId: receipt.productId, productRowId: { not: null }, contract: { customerId: receipt.customerId,
+      ...(scope && { partnerCaseId: null, partnerKind: null }) } },
     select: { id: true, contractId: true, productRowId: true, productId: true,
       contract: { select: { id: true, contractNumber: true, customerId: true, contractData: true,
         ...(scope && { createdAt: true,

@@ -1,16 +1,18 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
-import { parseCanonicalDecimal } from '@sabalanerp/contract-product-graph';
+import { multiplyContractMonetaryAmounts, parseCanonicalDecimal, roundContractPayableTotal } from '@sabalanerp/contract-product-graph';
 import { formatExactQuantityAtoms, parseExactQuantityAtoms } from './exactQuantity';
 import { listProjectReturnReceipts, projectReturnId, readProjectReturnReceipt } from './projectReturnReceipts';
 import { includePriorProjectReturnCapacity, readCurrentProjectReturnLegacyBase, requireCurrentLegacyProjectReturnBase } from './projectReturnLegacyBase';
-import { stoneReturnEvidenceRecord, type ProjectReturnContractSource } from './projectReturnDispatch';
+import { stoneReturnEvidenceRecord } from './projectReturnDispatch';
+import { loadProjectReturnFinancialCandidates, type CapturedProjectReturnSource } from './projectReturnFinancialCandidates';
 import { loadStoneReturnCandidates } from './stoneReturnCandidates';
 import {
-  StoneReturnAllocationError, validateStoneReturnAllocations, type StoneReturnAllocationInput,
+  StoneReturnAllocationError, stoneReturnDraftBalances, validateStoneReturnAllocations, type AllocationSource,
 } from './stoneReturnAllocationRules';
 
 import {
-  lockProjectReturnCase, presentDraft, readLatestProjectReturnAllocationDraft, withProjectReturnCaseTransaction,
+  lockProjectReturnCase, presentDraft, readLatestProjectReturnAllocationDraft, withProjectReturnCaseTransaction, type ProjectReturnDraftRow,
+  type ProjectReturnRateBasis,
 } from './projectReturnDraftState';
 export { lockProjectReturnCase, readLatestProjectReturnAllocationDraft, projectReturnDraftHasAllocations } from './projectReturnDraftState';
 
@@ -36,44 +38,87 @@ export async function listProjectReturnAllocationReviews(tx: Tx, after?: string)
   const versions = page.items.map(receipt => receipt.version.id);
   const versionDrafts = await tx.projectReturnVersion.findMany({
     where: { id: { in: versions } },
-    select: { id: true, allocationDrafts: { orderBy: { number: 'desc' }, take: 1 } },
+    select: { id: true, allocationDrafts: { orderBy: { number: 'desc' }, take: 1,
+      include: { sepidarRevisions: { orderBy: { number: 'desc' }, take: 1, select: { invoices: true } } } } },
   });
-  const latestDrafts = new Map(versionDrafts.map(({ id, allocationDrafts: [draft] }) => [id, draft ? presentDraft(draft) : null]));
-  return { ...page, items: page.items.map(receipt => ({
-    ...receipt, allocationStatus: allocationStatus(receipt, latestDrafts.get(receipt.version.id) ?? null),
-  })) };
+  const latestDrafts = new Map(versionDrafts.map(({ id, allocationDrafts: [draft] }) => [id, draft]));
+  return { ...page, items: page.items.map(receipt => {
+    const draft = latestDrafts.get(receipt.version.id);
+    const status = allocationStatus(receipt, draft ? presentDraft(draft) : null);
+    const invoices = draft?.sepidarRevisions[0]?.invoices;
+    return { ...receipt, allocationStatus: status,
+      sepidarReference: draft && status === 'ALLOCATION_COMPLETE' && receipt.version.submittedAt
+        ? { draftId: draft.id, registered: Array.isArray(invoices) && invoices.length > 0 } : null };
+  }) };
 }
 
-function readCapturedContractSources(value: Prisma.JsonValue): ProjectReturnContractSource[] | undefined {
+function readCapturedContractSources(value: Prisma.JsonValue): CapturedProjectReturnSource[] | undefined {
   // Earlier versions stored no source snapshot; preserve readback of those receipts.
   if (value === null) return undefined;
   if (!Array.isArray(value)) return [];
-  return value.flatMap(entry => {
-    const { projectId, contractId, contractItemId, productRowId, dispatchEvidenceId } = stoneReturnEvidenceRecord(entry);
-    if (typeof projectId !== 'string' || typeof contractId !== 'string' || typeof contractItemId !== 'string'
-      || (productRowId !== null && typeof productRowId !== 'string')
+  return value.flatMap<CapturedProjectReturnSource>(entry => {
+    const { projectId, contractId, contractItemId, productRowId, dispatchEvidenceId, partnerCaseId, partnerRevision } = stoneReturnEvidenceRecord(entry);
+    if (typeof projectId !== 'string' || typeof contractId !== 'string') return [];
+    if (typeof partnerCaseId === 'string' && typeof partnerRevision === 'number' && typeof productRowId === 'string') {
+      return [{ projectId, contractId, productRowId, partnerCaseId, partnerRevision }];
+    }
+    if (typeof contractItemId !== 'string' || (productRowId !== null && typeof productRowId !== 'string')
       || (dispatchEvidenceId !== undefined && typeof dispatchEvidenceId !== 'string')) return [];
     return [{ projectId, contractId, contractItemId, productRowId, dispatchEvidenceId }];
   });
 }
 
 async function sourcesForReceipt(tx: Tx, receipt: Receipt, base: LegacyBase | null) {
-  const projectIds = receipt.version.projects.map(project => project.projectId);
+  const projectIds = receipt.version.submittedAt ? receipt.version.projects.map(project => project.projectId) : [];
   const snapshots = await tx.projectReturnVersionItem.findMany({
     where: { versionId: receipt.version.id }, select: { id: true, contractSources: true },
   });
   const sourcesByItem = new Map(snapshots.map(item => [item.id, readCapturedContractSources(item.contractSources)]));
+  const reviewedAt = new Date();
   return Promise.all(receipt.version.items.map(async item => {
+    const contractSources = sourcesByItem.get(item.id);
+    const createdAt = base?.receipt.createdAt ?? receipt.createdAt;
+    const deliveredBefore = base?.deliveredBefore ?? receipt.visit?.admittedAt ?? createdAt;
     const sources = await loadStoneReturnCandidates(tx, {
       customerId: receipt.customerId, productId: item.productId, unit: item.unit,
-      acceptedQuantity: item.healthyQuantity, createdAt: base?.receipt.createdAt ?? receipt.createdAt, guardReturnMovementId: null,
-    }, { projectIds: receipt.version.submittedAt ? projectIds : [],
-      deliveredBefore: base?.deliveredBefore ?? receipt.visit?.admittedAt ?? receipt.createdAt, contractSources: sourcesByItem.get(item.id) });
-    return { ...item, ...sources, candidates: base ? includePriorProjectReturnCapacity(sources.candidates, base) : sources.candidates };
+      acceptedQuantity: item.healthyQuantity, createdAt, guardReturnMovementId: null,
+    }, { projectIds, deliveredBefore, contractSources: contractSources?.filter(source => 'contractItemId' in source) });
+    const financial = parseExactQuantityAtoms(item.healthyQuantity) > 0n
+      ? await loadProjectReturnFinancialCandidates(tx, {
+        customerId: receipt.customerId, productId: item.productId, unit: item.unit,
+        projectIds, before: reviewedAt, contractSources,
+      }, sources.candidates)
+      : [];
+    const physical = base ? includePriorProjectReturnCapacity(sources.candidates, base) : sources.candidates;
+    return { ...item, ...sources, candidates: [...physical, ...financial] };
   }));
 }
 
 type ItemsWithSources = Awaited<ReturnType<typeof sourcesForReceipt>>;
+
+function expectedRateBasis(unit: string): ProjectReturnRateBasis {
+  return unit === 'meter' ? 'HEALTHY_SQUARE_METER' : 'RECEIPT_UNIT';
+}
+
+function priceDraftAllocation(
+  item: Pick<Receipt['version']['items'][number], 'unit' | 'effectiveWidthMeters'>,
+  entry: Draft['items'][number] | undefined,
+  allocated: bigint,
+  allocationError: string | null,
+) {
+  const expected = expectedRateBasis(item.unit);
+  const savedRate = entry?.agreedUnitRateRials ?? null;
+  const savedBasis = entry?.agreedRateBasis ?? 'RECEIPT_UNIT';
+  const agreedRateBasis = savedRate !== null && savedBasis === expected ? expected : null;
+  const agreedUnitRateRials = agreedRateBasis === null ? null : savedRate;
+  const legacyRateNeedsReview = item.unit === 'meter' && savedRate !== null && agreedUnitRateRials === null;
+  const width = item.unit === 'meter' ? item.effectiveWidthMeters : '1';
+  const draftAmountRials = agreedUnitRateRials !== null && width && allocated > 0n && !allocationError
+    ? roundContractPayableTotal(multiplyContractMonetaryAmounts(agreedUnitRateRials,
+      multiplyContractMonetaryAmounts(formatExactQuantityAtoms(allocated), width)), 'IRR').roundedAmount
+    : null;
+  return { agreedRateBasis, agreedUnitRateRials, legacyRateNeedsReview, draftAmountRials };
+}
 
 function presentReview(receipt: Receipt, sources: ItemsWithSources, draft: Draft | null, base: LegacyBase | null) {
   const draftByItem = new Map(draft?.items.map(item => [item.itemId, item]));
@@ -91,7 +136,7 @@ function presentReview(receipt: Receipt, sources: ItemsWithSources, draft: Draft
       allocationError = error.message;
     }
     return {
-      ...details, candidates, hasUnlinkedOriginals, rows, agreedUnitRateRials: entry?.agreedUnitRateRials ?? null, allocationError,
+      ...details, candidates: stoneReturnDraftBalances(candidates, rows), hasUnlinkedOriginals, rows, ...priceDraftAllocation(details, entry, allocated, allocationError), allocationError,
       allocatedQuantity: formatExactQuantityAtoms(allocated), unallocatedQuantity: formatExactQuantityAtoms(unallocated),
     };
   });
@@ -106,7 +151,9 @@ function presentReview(receipt: Receipt, sources: ItemsWithSources, draft: Draft
         ? { code: 'ALLOCATION_INCOMPLETE', message: 'برای ثبت قطعی باید تمام مقدار سالم به ردیف‌های معتبر فروش تخصیص یابد.' }
         : items.some(item => item.rows.length && item.agreedUnitRateRials === null)
           ? { code: 'RATE_REQUIRED', message: 'نرخ توافقی هر محصول تخصیص‌یافته را وارد کنید.' }
-          : { code: 'FINANCE_CONNECTION_UNAVAILABLE', message: 'تخصیص کامل است. اتصال ثبت مالی مرجوعی پروژه هنوز فعال نیست.' };
+          : items.some(item => item.rows.length && item.unit === 'meter' && item.draftAmountRials === null)
+            ? { code: 'WIDTH_REQUIRED', message: 'برای محاسبهٔ مبلغ سنگ طولی، عرض مؤثر باید در رسید ثبت شود.' }
+            : { code: 'FINANCE_CONNECTION_UNAVAILABLE', message: 'تخصیص کامل است. اتصال ثبت مالی مرجوعی پروژه هنوز فعال نیست.' };
   const correctionBlocks: Array<{ code: string; message: string }> = [];
   if (base?.sourceChanged) correctionBlocks.push({ code: 'LEGACY_SOURCE_CHANGED', message: 'در مسیر قبلی مرجوعی اصلاح ثبت شده یا سند مرجع تغییر کرده است.' });
   if (status === 'CORRECTION_WITH_LOGISTICS') correctionBlocks.push({ code: 'CORRECTION_WITH_LOGISTICS', message: 'نسخهٔ اصلاحی برای تکمیل نزد لجستیک است.' });
@@ -119,7 +166,7 @@ function presentReview(receipt: Receipt, sources: ItemsWithSources, draft: Draft
   if (base?.inventoryEvents.length) correctionBlocks.push({ code: 'STOCK_MOVED', message: 'پس از دریافت اصلی روی موجودی گردش ثبت شده است.' });
   if (base) correctionBlocks.push({ code: 'FINANCE_CONNECTION_UNAVAILABLE', message: 'اتصال ثبت مالی اصلاح مرجوعی پروژه هنوز فعال نیست.' });
   return {
-    receipt, items, prior: base, correctionBlocks, draft: draft ? { number: draft.number, createdAt: draft.createdAt } : null,
+    receipt, items, prior: base, correctionBlocks, draft: draft ? { id: draft.id, number: draft.number, createdAt: draft.createdAt } : null,
     allocationStatus: status, postingBlock: correctionBlocks[0] ?? allocationBlock,
   };
 }
@@ -151,6 +198,11 @@ function parseRate(rate: unknown) {
   return canonical;
 }
 
+function parseRateBasis(basis: unknown): ProjectReturnRateBasis | undefined {
+  if (basis === undefined || basis === 'RECEIPT_UNIT' || basis === 'HEALTHY_SQUARE_METER') return basis;
+  throw new StoneReturnAllocationError(400, 'واحد نرخ توافقی را بررسی کنید.');
+}
+
 function parseCommand(body: unknown) {
   const { expectedVersionId, expectedDraftNumber, items } = asRecord(body);
   if (typeof expectedDraftNumber !== 'number' || !Number.isSafeInteger(expectedDraftNumber) || expectedDraftNumber < 0
@@ -168,16 +220,23 @@ function parseCommand(body: unknown) {
         throw new StoneReturnAllocationError(400, 'ردیف‌های تخصیص محصول را بررسی کنید.');
       }
       seen.add(itemId);
-      const rows: StoneReturnAllocationInput[] = item.rows.map(rawRow => {
+      const rows: Array<AllocationSource & { quantity: string }> = item.rows.map(rawRow => {
         const row = asRecord(rawRow);
+        const quantity = parseUnsignedDecimal(row.quantity, 'مقدار تخصیص معتبر نیست.');
+        if (row.financialRecordId !== undefined || row.financialLineId !== undefined) {
+          if (row.originalInvoiceId != null || row.originalLineId != null || row.dispatchEvidenceId != null) {
+            throw new StoneReturnAllocationError(400, 'برای هر سهم یک مرجع فروش انتخاب کنید.');
+          }
+          return { financialRecordId: projectReturnId(row.financialRecordId, 'رکورد مالی'),
+            financialLineId: projectReturnId(row.financialLineId, 'ردیف مالی'), quantity };
+        }
         return {
           originalInvoiceId: projectReturnId(row.originalInvoiceId, 'صورتحساب'),
           originalLineId: projectReturnId(row.originalLineId, 'ردیف فروش'),
-          dispatchEvidenceId: projectReturnId(row.dispatchEvidenceId, 'ارسال'),
-          quantity: parseUnsignedDecimal(row.quantity, 'مقدار تخصیص معتبر نیست.'),
+          dispatchEvidenceId: projectReturnId(row.dispatchEvidenceId, 'ارسال'), quantity,
         };
       });
-      return { itemId, agreedUnitRateRials: parseRate(item.agreedUnitRateRials), rows };
+      return { itemId, agreedUnitRateRials: parseRate(item.agreedUnitRateRials), agreedRateBasis: parseRateBasis(item.agreedRateBasis), rows };
     }),
   };
 }
@@ -209,20 +268,34 @@ export async function saveProjectReturnAllocationDraft(db: PrismaClient, caseId:
     // Drafts do not consume invoice or dispatch balances. Revalidate against posted evidence on each save.
     const sources = await sourcesForReceipt(tx, receipt, base);
     const byItemId = new Map(sources.map(item => [item.id, item]));
-    const items = command.items.map(({ itemId, agreedUnitRateRials, rows }) => {
+    const items = command.items.map(({ itemId, agreedUnitRateRials, agreedRateBasis, rows }) => {
       const item = byItemId.get(itemId);
       if (!item || parseExactQuantityAtoms(item.healthyQuantity) === 0n) {
         throw new StoneReturnAllocationError(409, 'یکی از ردیف‌ها مقدار سالم قابل تخصیص در این نسخه ندارد.');
       }
+      const expected = expectedRateBasis(item.unit);
+      if (agreedUnitRateRials !== null && (agreedRateBasis ?? 'RECEIPT_UNIT') !== expected) {
+        throw new StoneReturnAllocationError(400, item.unit === 'meter'
+          ? 'نرخ سنگ طولی را به ریال بر مترمربع سالم وارد کنید.'
+          : 'نرخ توافقی را به ریال بر واحد محصول وارد کنید.');
+      }
       const validated = validateStoneReturnAllocations({ acceptedQuantity: item.healthyQuantity, unit: item.unit }, item, rows, null);
       return {
-        itemId, agreedUnitRateRials,
-        rows: validated.rows.map(({ candidate, quantity }) => ({
-          originalInvoiceId: candidate.originalInvoiceId, originalInvoiceNumber: candidate.originalInvoiceNumber,
-          originalLineId: candidate.originalLineId, originalTaxInvoiceId: candidate.originalTaxInvoiceId, originalTaxLineId: candidate.originalTaxLineId,
-          dispatchEvidenceId: candidate.dispatchEvidenceId, contractId: candidate.contractId, contractNumber: candidate.contractNumber,
-          contractItemId: candidate.contractItemId, productRowId: candidate.productRowId, projectId: candidate.projectId!, quantity,
-        })),
+        itemId, agreedUnitRateRials, agreedRateBasis: agreedUnitRateRials === null ? null : expected,
+        rows: validated.rows.map(({ candidate, quantity }): ProjectReturnDraftRow => {
+          const common = {
+            originalInvoiceNumber: candidate.originalInvoiceNumber, contractId: candidate.contractId,
+            contractNumber: candidate.contractNumber, productRowId: candidate.productRowId, projectId: candidate.projectId!, quantity,
+          };
+          if ('financialRecordId' in candidate) {
+            return { ...common, financialRecordId: candidate.financialRecordId, financialLineId: candidate.financialLineId,
+              financialParty: candidate.financialParty, dispatchEvidenceId: null,
+              contractItemId: candidate.contractItemId, partnerCaseId: candidate.partnerCaseId };
+          }
+          return { ...common, originalInvoiceId: candidate.originalInvoiceId, originalLineId: candidate.originalLineId,
+            originalTaxInvoiceId: candidate.originalTaxInvoiceId, originalTaxLineId: candidate.originalTaxLineId,
+            dispatchEvidenceId: candidate.dispatchEvidenceId, contractItemId: candidate.contractItemId };
+        }),
       };
     });
     const saved = await tx.projectReturnAllocationDraft.create({

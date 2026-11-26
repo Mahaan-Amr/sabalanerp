@@ -9,7 +9,7 @@ test('Logistics records multiple project products with direct and line-based qua
   const linearCalculation = { khatRas: '1.2', pieceCount: '3', plus: '0.3', minus: '0.1' };
   const projects = [{ projectId: 'project-506', projectName: 'پروژه سپید' }, { projectId: 'project-507', projectName: 'پروژه دوم' }];
   const direct = { productId: 'product-506', unit: 'squareMeter', healthyQuantity: '35', damagedQuantity: '5' };
-  const linear = { productId: 'product-507', unit: 'meter', healthyQuantity: '0', damagedCalculation: linearCalculation };
+  const linear = { productId: 'product-507', unit: 'meter', healthyQuantity: '13.5', damagedCalculation: linearCalculation, effectiveWidthMeters: '0.4' };
   const receipt = {
     operationStatus: 'ACTIVE', canManage: true, operational: null, versions: [], operations: [],
     id: 'case-506', customerId: 'customer-506', customerName: 'مشتری آزمون', createdAt: visit.admittedAt,
@@ -18,8 +18,8 @@ test('Logistics records multiple project products with direct and line-based qua
       id: 'version-506', number: 1, submittedAt: visit.admittedAt,
       projects,
       items: [
-        { ...direct, id: 'item-506', productName: 'سنگ گرانیت سپید', productCode: 'RETURN-506' },
-        { ...linear, id: 'item-507', productName: 'سنگ طولی', productCode: 'LINEAR-507', damagedQuantity: '3.8' },
+        { ...direct, id: 'item-506', productName: 'سنگ گرانیت سپید', productCode: 'RETURN-506', healthyAreaSquareMeters: '35', damagedAreaSquareMeters: '5' },
+        { ...linear, id: 'item-507', productName: 'سنگ طولی', productCode: 'LINEAR-507', damagedQuantity: '3.8', healthyAreaSquareMeters: '5.4', damagedAreaSquareMeters: '1.52' },
       ],
     },
   };
@@ -84,22 +84,45 @@ test('Logistics records multiple project products with direct and line-based qua
   await page.getByRole('combobox', { name: 'جست‌وجوی محصول پروژه', exact: true }).click();
   await page.getByRole('textbox', { name: 'جستجوی گزینه‌ها', exact: true }).fill('طولی');
   await page.getByRole('option', { name: /سنگ طولی/ }).click();
+  const width = page.getByRole('textbox', { name: 'عرض واقعی سنگ (متر)', exact: true });
+  const healthy = page.getByRole('group', { name: 'مقدار سالم سنگ طولی' });
+  await healthy.getByRole('textbox', { name: /مقدار سالم/ }).fill('۱۳٫۵');
+  await width.fill('۰٫۴');
+  await expect(healthy.getByText('۵٫۴ مترمربع', { exact: true })).toBeVisible();
   const length = page.getByRole('group', { name: 'مقدار آسیب‌دیده سنگ طولی' });
   await length.getByRole('button', { name: 'خط راس', exact: true }).click();
   await length.getByRole('textbox', { name: 'خط راس', exact: true }).fill('۱٫۲');
   await length.getByRole('textbox', { name: 'تعداد', exact: true }).fill('۳');
   await length.getByRole('textbox', { name: 'اضافه', exact: true }).fill('۰٫۳');
+  await expect(length.getByText('۱٫۵۶ مترمربع', { exact: true })).toBeVisible();
   await length.getByRole('textbox', { name: 'کسر', exact: true }).fill('۰٫۱');
+  await expect(length.getByText('۱٫۵۲ مترمربع', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'مرحله بعد', exact: true }).click();
   await expect(page.getByText('پروژه سپید، پروژه دوم', { exact: true })).toBeVisible();
   await expect(page.getByText(/^۳٫۸.*متر طول/)).toBeVisible();
+  await expect(page.getByText('۵٫۴ مترمربع', { exact: true })).toBeVisible();
+  await expect(page.getByText('۱٫۵۲ مترمربع', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'ثبت نهایی دریافت', exact: true }).click();
   await expect(page).toHaveURL(/\/dashboard\/logistics\/returns\/project\/case-506$/);
   await page.reload();
   await expect(page.getByRole('heading', { name: 'رسید مرجوعی پروژه' })).toBeVisible();
   await expect(page.getByText('سنگ گرانیت سپید', { exact: true })).toBeVisible();
-  await expect(page.getByText(/۳۵.*مترمربع/)).toBeVisible();
-  await expect(page.getByText(/^۵.*مترمربع/)).toBeVisible();
+  await expect(page.getByText('۳۵ مترمربع', { exact: true })).toBeVisible();
+  await expect(page.getByText('۵ مترمربع', { exact: true })).toBeVisible();
   await expect(page.getByText(/^۳٫۸.*متر طول/)).toBeVisible();
+  await expect(page.getByText('۵٫۴ مترمربع', { exact: true })).toBeVisible();
+  await expect(page.getByText('۱٫۵۲ مترمربع', { exact: true })).toBeVisible();
+  await page.route('**/api/accounting/project-returns/case-506', route => route.fulfill({
+    json: { success: true, data: {
+      receipt, allocationStatus: 'RECEIVED', correctionBlocks: [], draft: null, prior: null, canAllocate: false,
+      postingBlock: { code: 'ALLOCATION_INCOMPLETE', message: 'تخصیص ناقص است.' },
+      items: receipt.version.items.map(item => ({ ...item, candidates: [], rows: [], agreedUnitRateRials: null,
+        allocatedQuantity: '0', unallocatedQuantity: item.healthyQuantity, hasUnlinkedOriginals: false })),
+    } },
+  }));
+  await page.goto('/dashboard/accounting/returns/project/case-506');
+  await expect(page.getByRole('heading', { name: 'رسیدگی مرجوعی پروژه' })).toBeVisible();
+  await expect(page.getByText('۵٫۴ مترمربع', { exact: true })).toBeVisible();
+  await expect(page.getByText('۱٫۵۲ مترمربع', { exact: true })).toBeVisible();
   expect(await page.locator('main.sds-workspace').evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
 });

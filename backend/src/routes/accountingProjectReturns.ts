@@ -4,6 +4,7 @@ import { prisma } from '../lib/prisma';
 import { StoneReturnAllocationError } from '../services/stoneReturnAllocationRules';
 import { openProjectReturnCorrection, returnProjectReturnCorrection } from '../services/projectReturnCorrections';
 import { changeProjectReturnOperation, readProjectReturnOperationalState } from '../services/projectReturnOperations';
+import { getProjectReturnSepidarInvoices, saveProjectReturnSepidarInvoices } from '../services/projectReturnSepidarInvoices';
 import { projectReturnId } from '../services/projectReturnReceipts';
 import {
   listProjectReturnAllocationReviews, readProjectReturnAllocationReview, saveProjectReturnAllocationDraft,
@@ -39,6 +40,11 @@ router.put('/:id/allocations', ...accountingStoneReturnsEdit, stoneReturnEndpoin
   ...await saveProjectReturnAllocationDraft(prisma, req.params.id, req.user!.id, req.body),
   canAllocate: true,
 })));
+const sepidarPath = '/:id/allocations/:draftId/sepidar-reference';
+router.get(sepidarPath, ...accountingStoneReturnsEdit, stoneReturnEndpoint(req =>
+  getProjectReturnSepidarInvoices(prisma, req.params.id, projectReturnId(req.params.draftId, 'پیش‌نویس'))));
+router.post(sepidarPath, ...accountingStoneReturnsEdit, stoneReturnEndpoint(req =>
+  saveProjectReturnSepidarInvoices(prisma, req.params.id, projectReturnId(req.params.draftId, 'پیش‌نویس'), req.user!.id, req.body)));
 router.post('/:id/finalize', ...accountingStoneReturnsEdit, stoneReturnEndpoint(async req => {
   const review = await prisma.$transaction(tx => readProjectReturnAllocationReview(tx, req.params.id), readOptions);
   throw new StoneReturnAllocationError(409, review.postingBlock.message);

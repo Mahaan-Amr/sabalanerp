@@ -8,6 +8,8 @@ export type ProjectReturnProduct = {
   productName: string;
   productCode: string;
   unit: string;
+  suggestedWidthMeters?: string | null;
+  partnerContractId?: string | null;
 };
 
 export type ProjectReturnItem = ProjectReturnProduct & {
@@ -17,6 +19,9 @@ export type ProjectReturnItem = ProjectReturnProduct & {
   healthyCalculation?: ProjectReturnLinearCalculation | null;
   damagedCalculation?: ProjectReturnLinearCalculation | null;
   inventoryIdentityId?: string | null;
+  effectiveWidthMeters?: string | null;
+  healthyAreaSquareMeters?: string | null;
+  damagedAreaSquareMeters?: string | null;
 };
 
 export const projectReturnOperationStatuses = {
@@ -66,7 +71,7 @@ export type ProjectReturnIntake = {
   visitId: string;
   customerId: string;
   projectIds: string[];
-  items: Array<Pick<ProjectReturnItem, 'productId' | 'unit'> & (
+  items: Array<Pick<ProjectReturnItem, 'productId' | 'unit' | 'effectiveWidthMeters' | 'partnerContractId'> & (
     { healthyQuantity: string; healthyCalculation?: never } | { healthyCalculation: ProjectReturnLinearCalculation; healthyQuantity?: never }
   ) & (
     { damagedQuantity: string; damagedCalculation?: never } | { damagedCalculation: ProjectReturnLinearCalculation; damagedQuantity?: never }
@@ -89,6 +94,13 @@ type Envelope<T> = { data: T };
 const path = '/logistics/project-returns';
 export const projectReturnListHref = '/dashboard/logistics/returns/project';
 export const projectReturnReceiptHref = (id: string) => `${projectReturnListHref}/${encodeURIComponent(id)}`;
+
+export async function findProjectReturnProduct(
+  customerId: string, projectIds: string[], product: Pick<ProjectReturnProduct, 'productId' | 'productCode' | 'unit' | 'partnerContractId'>,
+) {
+  const rows = await projectReturnReceiptApi.products(customerId, projectIds, product.productCode, product.partnerContractId ?? undefined);
+  return rows.find(row => row.productId === product.productId && row.unit === product.unit);
+}
 
 export const projectReturnReceiptApi = {
   customers: async (search: string) =>

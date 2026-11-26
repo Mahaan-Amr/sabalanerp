@@ -13364,6 +13364,9 @@ model ProjectReturnVersionItem {
   damagedQuantity     Decimal                      @db.Decimal(65, 30)
   healthyCalculation  Json?
   damagedCalculation  Json?
+  effectiveWidthMeters Decimal?                    @db.Decimal(65, 30)
+  healthyAreaSquareMeters Decimal?                 @db.Decimal(65, 30)
+  damagedAreaSquareMeters Decimal?                 @db.Decimal(65, 30)
   contractSources     Json?
   inventoryIdentityId String?                      @unique
   version             ProjectReturnVersion         @relation(fields: [versionId], references: [id], onDelete: Restrict)
@@ -13384,9 +13387,27 @@ model ProjectReturnAllocationDraft {
   createdAt   DateTime             @default(now())
   version     ProjectReturnVersion @relation(fields: [versionId], references: [id], onDelete: Restrict)
 
+  sepidarRevisions ProjectReturnSepidarRevision[]
+
   @@unique([versionId, number])
   @@map("project_return_allocation_drafts")
 }
+
+model ProjectReturnSepidarRevision {
+  id          String                       @id @default(cuid())
+  draftId     String
+  number      Int
+  invoices    Json
+  totalRial   String
+  actorId     String
+  reason      String?
+  createdAt   DateTime                     @default(now())
+  draft       ProjectReturnAllocationDraft @relation(fields: [draftId], references: [id], onDelete: Restrict)
+
+  @@unique([draftId, number])
+  @@map("project_return_sepidar_revisions")
+}
+
 
 model StoneReturnReceipt {
   id                    String                       @id @default(cuid())

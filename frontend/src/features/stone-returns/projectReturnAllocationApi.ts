@@ -19,17 +19,32 @@ export function isProjectReturnAllocationEditable(status: ProjectReturnAllocatio
   return status === 'RECEIVED' || status === 'DRAFT' || status === 'ALLOCATION_COMPLETE';
 }
 
-export type ProjectAllocationCandidate = StoneReturnCandidate & {
+export type ProjectFinancialAllocationSource = { financialRecordId: string; financialLineId: string };
+type ProjectAllocationRow = StoneReturnAllocationInput | ProjectFinancialAllocationSource & { quantity: string };
+type FinancialCandidate = ProjectFinancialAllocationSource & {
+  dispatchEvidenceId: null;
+  originalInvoiceNumber: string;
+  originalNetRateRials: string | null;
+  remainingQuantity: string;
+  lineRemainingQuantity: string;
+  contractNumber: string;
+  financialParty: { kind: 'CUSTOMER' | 'PARTNER'; id: string };
+};
+export type ProjectAllocationCandidate = (StoneReturnCandidate | FinancialCandidate) & {
   projectId: string;
+  draftRemainingQuantity: string;
   contractDate?: string | null;
   contractCreatedAt?: string;
   sellerName?: string | null;
   replacementCapacity?: { ownQuantity: string; lineRemainingQuantity: string; dispatchRemainingQuantity: string };
 };
+export type ProjectReturnRateBasis = 'RECEIPT_UNIT' | 'HEALTHY_SQUARE_METER';
+
 export type ProjectAllocationInput = {
   itemId: string;
   agreedUnitRateRials: string | null;
-  rows: StoneReturnAllocationInput[];
+  agreedRateBasis: ProjectReturnRateBasis;
+  rows: ProjectAllocationRow[];
 };
 
 export type ProjectReturnPriorPosting = {
@@ -53,15 +68,19 @@ export type ProjectReturnAllocationReview = {
   items: Array<ProjectReturnItem & {
     candidates: ProjectAllocationCandidate[];
     hasUnlinkedOriginals: boolean;
+    blockedReason?: string | null;
     agreedUnitRateRials: string | null;
-    rows: Array<StoneReturnAllocationInput & { originalInvoiceNumber: string; contractNumber: string }>;
+    agreedRateBasis: ProjectReturnRateBasis | null;
+    legacyRateNeedsReview: boolean;
+    draftAmountRials: string | null;
+    rows: Array<ProjectAllocationRow & { originalInvoiceNumber: string; contractNumber: string }>;
     allocationError: string | null;
     allocatedQuantity: string;
     unallocatedQuantity: string;
   }>;
   prior: ProjectReturnPriorPosting | null;
   correctionBlocks: Array<{ code: string; message: string }>;
-  draft: { number: number; createdAt: string } | null;
+  draft: { id?: string; number: number; createdAt: string } | null;
   allocationStatus: ProjectReturnAllocationStatus;
   postingBlock: { code: string; message: string };
   canAllocate: boolean;
@@ -69,7 +88,10 @@ export type ProjectReturnAllocationReview = {
 };
 
 type AllocationList = {
-  items: Array<ProjectReturnReceipt & { allocationStatus: ProjectReturnAllocationStatus }>;
+  items: Array<ProjectReturnReceipt & {
+    allocationStatus: ProjectReturnAllocationStatus;
+    sepidarReference?: { draftId: string; registered: boolean } | null;
+  }>;
   nextCursor: string | null;
   canAllocate: boolean;
 };
@@ -79,6 +101,15 @@ const path = '/accounting/project-returns';
 export const projectReturnAccountingHref = '/dashboard/accounting/returns';
 export const projectReturnHistoryHref = `${projectReturnAccountingHref}/history`;
 export const projectReturnReviewHref = (id: string) => `${projectReturnAccountingHref}/project/${encodeURIComponent(id)}`;
+
+export function projectReturnSepidarApi(caseId: string) {
+  const referencePath = (draftId: string) => `${path}/${encodeURIComponent(caseId)}/allocations/${encodeURIComponent(draftId)}/sepidar-reference`;
+  return {
+    getSepidarDispatchInvoices: (draftId: string, signal?: AbortSignal) => api.get(referencePath(draftId), { signal }),
+    saveSepidarDispatchInvoices: (draftId: string, data: { invoices: { number: string; amountRial: string }[];
+      expectedVersion: string | null; reason?: string }) => api.post(referencePath(draftId), data),
+  };
+}
 
 export const projectReturnAllocationApi = {
   list: async (after?: string) =>

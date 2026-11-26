@@ -1,11 +1,21 @@
 import { Prisma, type PrismaClient, type ProjectReturnAllocationDraft } from '@prisma/client';
 import type { StoneReturnCandidate } from './stoneReturnCandidates';
+import type { FinancialProjectReturnCandidate } from './projectReturnFinancialCandidates';
 import type { StoneReturnAllocationInput } from './stoneReturnAllocationRules';
 
 type Tx = Prisma.TransactionClient;
-type DraftRow = StoneReturnAllocationInput & Pick<StoneReturnCandidate,
+type PhysicalDraftRow = StoneReturnAllocationInput & Pick<StoneReturnCandidate,
   'originalInvoiceNumber' | 'contractId' | 'contractNumber' | 'contractItemId' | 'productRowId' | 'originalTaxInvoiceId' | 'originalTaxLineId' | 'projectId'>;
-type DraftItem = { itemId: string; agreedUnitRateRials: string | null; rows: DraftRow[] };
+export type ProjectReturnDraftRow = PhysicalDraftRow | Pick<FinancialProjectReturnCandidate,
+  'financialRecordId' | 'financialLineId' | 'financialParty' | 'originalInvoiceNumber' | 'contractId' | 'contractNumber'
+  | 'contractItemId' | 'productRowId' | 'projectId' | 'partnerCaseId' | 'dispatchEvidenceId'> & { quantity: string };
+export type ProjectReturnRateBasis = 'RECEIPT_UNIT' | 'HEALTHY_SQUARE_METER';
+type DraftItem = {
+  itemId: string;
+  agreedUnitRateRials: string | null;
+  agreedRateBasis?: ProjectReturnRateBasis | null;
+  rows: ProjectReturnDraftRow[];
+};
 type Draft = Omit<ProjectReturnAllocationDraft, 'items'> & { items: DraftItem[] };
 
 export async function lockProjectReturnCase(tx: Tx, caseId: string) {

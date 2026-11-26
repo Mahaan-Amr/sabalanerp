@@ -10,7 +10,7 @@ import { PARTNER_INTERNAL_ACCOUNTING_SOURCE, preparePartnerFinancialSource } fro
 
 /** Fake persistence only: authorization, projection reconstruction, preparation,
  * current plan validation and accounting read scope all execute production code. */
-export type HistoricalAccountingFixtureIdentity = { invoiceId?: string; customerContractNumber?: string;
+export type HistoricalAccountingFixtureIdentity = { invoiceId?: string; customerContractNumber?: string; projectId?: string;
   configureGraph?: (graph: ReturnType<typeof parseCanonicalProductGraph>) => void;
   wholesalePricing?: NonNullable<ReturnType<typeof createPartnerFixtures>['accounting']['products'][number]['wholesalePricing']> };
 export async function historicalAccountingFixture(status = 'DRAFT', identity: HistoricalAccountingFixtureIdentity = {}) {
@@ -32,7 +32,7 @@ export async function historicalAccountingFixture(status = 'DRAFT', identity: Hi
     retailEnvelope: { schemaVersion: 1, products: base.customer.products, totals: base.customer.totals, belowCostConfirmed: false },
     paymentEvidence: { customerPaymentPlan: base.customer.customerPaymentPlan, sabalanPaymentPlan: plan },
     customerContent: { contractDate: base.customer.contractDate, legalText: base.customer.legalText,
-      deliveries: base.customer.deliveries, confirmation: 'NOT_SENT', signatures: [] } };
+      deliveries: base.customer.deliveries, ...(identity.projectId && { projectId: identity.projectId }), confirmation: 'NOT_SENT', signatures: [] } };
   const integrityHash = await canonicalHash({ purpose: 'PARTNER_CASE_REVISION', schemaVersion: 1, ...evidence });
   const projected = await buildCaseProjections({ caseId: 'historical-case', revision: 1, integrityHash,
     caseNumber: 'historical-case-number', internalRecordId: 'historical-internal', internalRecordNumber: 'historical-internal-number',

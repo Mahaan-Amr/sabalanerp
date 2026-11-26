@@ -37,9 +37,12 @@ export type ProjectAllocationCandidate = (StoneReturnCandidate | FinancialCandid
   sellerName?: string | null;
   replacementCapacity?: { ownQuantity: string; lineRemainingQuantity: string; dispatchRemainingQuantity: string };
 };
+export type ProjectReturnRateBasis = 'RECEIPT_UNIT' | 'HEALTHY_SQUARE_METER';
+
 export type ProjectAllocationInput = {
   itemId: string;
   agreedUnitRateRials: string | null;
+  agreedRateBasis: ProjectReturnRateBasis;
   rows: ProjectAllocationRow[];
 };
 
@@ -66,6 +69,9 @@ export type ProjectReturnAllocationReview = {
     hasUnlinkedOriginals: boolean;
     blockedReason?: string | null;
     agreedUnitRateRials: string | null;
+    agreedRateBasis: ProjectReturnRateBasis | null;
+    legacyRateNeedsReview: boolean;
+    draftAmountRials: string | null;
     rows: Array<ProjectAllocationRow & { originalInvoiceNumber: string; contractNumber: string }>;
     allocationError: string | null;
     allocatedQuantity: string;

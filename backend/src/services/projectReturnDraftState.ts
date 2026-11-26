@@ -9,7 +9,13 @@ type PhysicalDraftRow = StoneReturnAllocationInput & Pick<StoneReturnCandidate,
 export type ProjectReturnDraftRow = PhysicalDraftRow | Pick<FinancialProjectReturnCandidate,
   'financialRecordId' | 'financialLineId' | 'financialQuantityEvidenceId' | 'financialParty' | 'originalInvoiceNumber' | 'contractId' | 'contractNumber'
   | 'contractItemId' | 'productRowId' | 'projectId' | 'partnerCaseId' | 'dispatchEvidenceId'> & { quantity: string };
-type DraftItem = { itemId: string; agreedUnitRateRials: string | null; rows: ProjectReturnDraftRow[] };
+export type ProjectReturnRateBasis = 'RECEIPT_UNIT' | 'HEALTHY_SQUARE_METER';
+type DraftItem = {
+  itemId: string;
+  agreedUnitRateRials: string | null;
+  agreedRateBasis?: ProjectReturnRateBasis | null;
+  rows: ProjectReturnDraftRow[];
+};
 type Draft = Omit<ProjectReturnAllocationDraft, 'items'> & { items: DraftItem[] };
 
 export async function lockProjectReturnCase(tx: Tx, caseId: string) {

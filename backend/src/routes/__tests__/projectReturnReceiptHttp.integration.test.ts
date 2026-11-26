@@ -30,6 +30,7 @@ test('Logistics records and reopens exact multi-project receipt quantities and h
     const { default: accountingProjectReturns } = await import('../accountingProjectReturns');
     const { default: inventoryRouter } = await import('../accountingSupplyChain');
     const { hashSupplyChainEvidence } = await import('../../services/accountingSupplyChain');
+    const { shipmentQuantityEvidenceIntegrityHash } = await import('../../services/shipmentQuantityProjectionStore');
     const actor = await db.user.create({ data: {
       email: 'project-return-506@example.invalid', username: 'project-return-506',
       firstName: 'آزمون', lastName: 'مرجوعی', password: 'non-login-fixture', role: 'ADMIN', mustChangePassword: false,
@@ -100,9 +101,9 @@ test('Logistics records and reopens exact multi-project receipt quantities and h
     server = app.listen(0, '127.0.0.1');
     await new Promise<void>((resolve, reject) => server!.once('listening', resolve).once('error', reject));
     const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-    const call = async (route: string, body?: unknown) => {
+    const call = async (route: string, body?: unknown, method = body === undefined ? 'GET' : 'POST') => {
       const response = await fetch(origin + route, {
-        method: body === undefined ? 'GET' : 'POST',
+        method,
         headers: { 'Content-Type': 'application/json', Cookie: `${SESSION_COOKIE}=${session.token}` },
         body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(15_000),
       });
@@ -422,6 +423,131 @@ test('Logistics records and reopens exact multi-project receipt quantities and h
       assert.equal(transitioned.data.status, disposition === 'transfer' ? 'AVAILABLE_FOR_LOADING' : 'EXIT_RECORDED');
       assert.equal(Boolean(transitioned.data.exitedAt), disposition === 'exit');
     }
+    const financialContract = await db.salesContract.findUniqueOrThrow({
+      where: { contractNumber: 'SECRET-RETURN-506' }, include: { items: true },
+    });
+    const [financialStone] = financialContract.items;
+    const approvedAt = new Date();
+    const financialRecord = await db.accountingFinancialRecord.create({ data: {
+      kind: 'INVOICE_CANDIDATE', status: 'ISSUED', sourceKind: 'SALES_CONTRACT',
+      contractId: financialContract.id, sourceId: financialContract.id, customerId: customer.id,
+      systemInvoiceNumber: 'RETURN-515-ISSUED', amount: '48000000', createdBy: actor.id,
+      financiallyApprovedBy: actor.id, financiallyApprovedAt: approvedAt, postedAt: approvedAt,
+      sourceSnapshot: { id: financialContract.id, customerId: customer.id, contractData: financialContract.contractData! },
+      invoiceItems: { create: { contractItemId: financialStone.id, productId: product.id, description: product.namePersian!,
+        quantity: '8', unitPrice: '6000000', totalPrice: '48000000' } },
+    }, include: { invoiceItems: true } });
+    const issueFixture = {
+      kind: 'INVOICE_CANDIDATE' as const, sourceKind: 'SALES_CONTRACT' as const,
+      contractId: financialContract.id, sourceId: financialContract.id, customerId: customer.id,
+      amount: '48000000', createdBy: actor.id, financiallyApprovedBy: actor.id, postedAt: approvedAt,
+      financiallyApprovedAt: new Date(approvedAt.getTime() + 1),
+      sourceSnapshot: { id: financialContract.id, customerId: customer.id, contractData: financialContract.contractData! },
+      invoiceItems: { create: { contractItemId: financialStone.id, productId: product.id, description: product.namePersian!,
+        quantity: '8', unitPrice: '6000000', totalPrice: '48000000' } },
+    };
+    await db.accountingFinancialRecord.create({ data: { ...issueFixture, status: 'DRAFT', systemInvoiceNumber: 'RETURN-515-DRAFT' } });
+    await db.accountingFinancialRecord.create({ data: { ...issueFixture, status: 'VOIDED', systemInvoiceNumber: 'RETURN-515-VOID' } });
+    await db.accountingFinancialRecord.create({ data: { ...issueFixture, status: 'ISSUED', systemInvoiceNumber: 'RETURN-515-WRONG-PARTY',
+      customerId: otherCustomer.id } });
+    await db.accountingFinancialRecord.create({ data: { ...issueFixture, status: 'ISSUED', systemInvoiceNumber: 'RETURN-515-WRONG-PROJECT',
+      sourceSnapshot: { ...issueFixture.sourceSnapshot, contractData: { ...(financialContract.contractData as object), projectId: extraProject.id } } } });
+    await db.accountingFinancialRecord.create({ data: { ...issueFixture, status: 'ISSUED', systemInvoiceNumber: 'RETURN-515-WRONG-UNIT',
+      sourceSnapshot: { ...issueFixture.sourceSnapshot, contractData: { projectId: project.id,
+        products: [{ rowId: financialStone.productRowId, productId: product.id, unit: 'count' }] } } } });
+    await db.accountingFinancialRecord.create({ data: { ...issueFixture, status: 'ISSUED', systemInvoiceNumber: 'RETURN-515-WRONG-PRODUCT',
+      invoiceItems: { create: { ...issueFixture.invoiceItems.create, productId: lengthProduct.id } } } });
+    const financialVisit = await call(guard, { source: 'PERSONAL_PICKUP', plate: '50 ب 345 ایران 67', purpose: 'PROJECT_RETURN' });
+    const financialCase = await call(receipts, { ...command, visitId: financialVisit.data.id,
+      items: [{ ...command.items[0], healthyQuantity: '6' }] });
+    assert.equal(financialCase.status, 201, JSON.stringify(financialCase));
+    const financialPath = `/api/accounting/project-returns/${financialCase.data.id}`;
+    const financialReview = await call(financialPath);
+    assert.equal(financialReview.status, 200, JSON.stringify(financialReview));
+    const [financialItem] = financialReview.data.items;
+    assert.equal(financialItem.candidates.length, 1, JSON.stringify(financialItem));
+    const [candidate] = financialItem.candidates;
+    assert.equal(candidate.financialRecordId, financialRecord.id);
+    assert.equal(candidate.financialLineId, financialRecord.invoiceItems[0].id);
+    assert.equal(candidate.dispatchEvidenceId, null);
+    assert.equal(candidate.remainingQuantity, '8.000');
+    const profile = await db.accountingCustomerProfile.create({ data: { id: 'return-515-ordinary-profile',
+      legalEntityId: 'return-515-sabalan', accountingPartyId: 'return-515-customer-party', partySourceKind: 'CUSTOMER',
+      partySourceId: customer.id, displayName: 'مشتری آزمون', activeFrom: approvedAt, createdBy: actor.id } });
+    const priorCommercial = await db.accountingCommercialCustomerInvoice.create({ data: {
+      profileId: profile.id, contractId: financialContract.id, contractVersion: 1,
+      number: 'RETURN-515-OLD-COMMERCIAL', ledgerVoucherId: 'return-515-old-voucher',
+      controlPolicyId: 'return-515-policy', controlPolicyVersion: 1, controlEvidenceType: 'GUARD_EXIT',
+      controlEvidenceId: 'return-515-previous-exit', controlEvidenceVersion: 1, controlEvidenceHash: 'fixture',
+      netRials: '48000000', taxRials: '0', grossRials: '48000000', issuedAt: approvedAt, dueAt: approvedAt,
+    } });
+    const priorCredit = await db.accountingCommercialCustomerInvoice.create({ data: {
+      profileId: profile.id, contractId: financialContract.id, contractVersion: 1,
+      number: 'RETURN-515-OLD-CREDIT', ledgerVoucherId: 'return-515-credit-voucher',
+      controlPolicyId: 'return-515-policy', controlPolicyVersion: 1, controlEvidenceType: 'EXCESS_RETURN_FINALIZED',
+      controlEvidenceId: 'return-515-prior-finalization', controlEvidenceVersion: 1, controlEvidenceHash: 'fixture',
+      netRials: '18000000', taxRials: '0', grossRials: '18000000', issuedAt: approvedAt, dueAt: approvedAt,
+      referenceInvoiceId: priorCommercial.id, status: 'CREDIT_NOTE',
+    } });
+    const shipmentRow = { contractId: financialContract.id, contractItemId: financialStone.id,
+      productRowId: financialStone.productRowId!, unit: 'squareMeter', effectiveAt: approvedAt, integrityHash: 'fixture' };
+    const dispatch = await db.shipmentQuantityEvidence.create({ data: {
+      ...shipmentRow, kind: 'PHYSICAL_EXIT', quantity: '8', sourceType: 'GUARD_PHYSICAL_EXIT', sourceId: 'return-515-prior-exit',
+    } });
+    await db.shipmentQuantityEvidence.create({ data: {
+      ...shipmentRow, id: 'return-515-prior-finalization', kind: 'EXCESS_RETURN_FINALIZED', quantity: '3',
+      sourceType: 'STONE_EXCESS_RETURN_ALLOCATION', sourceId: 'return-515-prior-allocation', dispatchEvidenceId: dispatch.id,
+      metadata: { returnCaseId: 'return-515-prior-case', actorId: actor.id },
+    } });
+    await db.accountingReturnEvidenceConsumption.create({ data: {
+      evidenceId: 'return-515-prior-finalization', creditInvoiceId: priorCredit.id,
+      originalInvoiceId: priorCommercial.id, originalLineId: 'return-515-invoice-row',
+      productRowId: financialStone.productRowId!, quantity: '3',
+    } });
+    const withPrevious = await call(financialPath);
+    assert.equal(withPrevious.data.items[0].candidates[0].remainingQuantity, '5.000');
+    const draft = (quantity: string, financialLineId = candidate.financialLineId) => ({
+      expectedVersionId: financialCase.data.version.id, expectedDraftNumber: 0,
+      items: [{ itemId: financialItem.id, agreedUnitRateRials: '6000000',
+        rows: [{ financialRecordId: candidate.financialRecordId, financialLineId, quantity }] }],
+    });
+    assert.equal((await call(`${financialPath}/allocations`, draft('7'), 'PUT')).status, 409);
+    assert.equal((await call(`${financialPath}/allocations`, draft('5.5'), 'PUT')).status, 409);
+    assert.equal((await call(`${financialPath}/allocations`, draft('1', 'unrelated-accounting-row'), 'PUT')).status, 409);
+    assert.equal((await call(`${financialPath}/allocations`, draft('4'), 'PUT')).status, 200);
+    const savedReview = await call(financialPath);
+    assert.equal(savedReview.data.items[0].candidates[0].draftRemainingQuantity, '1.000');
+    assert.equal(savedReview.data.items[0].rows[0].financialRecordId, financialRecord.id);
+    assert.equal(savedReview.data.items[0].rows[0].quantity, '4.000');
+
+    const linearContract = await db.salesContract.findUniqueOrThrow({
+      where: { contractNumber: 'SECRET-RETURN-507' }, include: { items: { where: { productRowId: 'length' } } },
+    });
+    const [linearStone] = linearContract.items;
+    const linearRecord = await db.accountingFinancialRecord.create({ data: {
+      kind: 'INVOICE_CANDIDATE', status: 'ISSUED', sourceKind: 'SALES_CONTRACT', contractId: linearContract.id,
+      sourceId: linearContract.id, customerId: customer.id, systemInvoiceNumber: 'RETURN-515-APPROVED-CAPTURE',
+      amount: '48000000', createdBy: actor.id, financiallyApprovedBy: actor.id, financiallyApprovedAt: approvedAt, postedAt: approvedAt,
+      sourceSnapshot: { id: linearContract.id, customerId: customer.id, contractData: linearContract.contractData! },
+      metadata: { mode: 'FROM_CONTRACT_TOTAL' },
+    } });
+    const witness = {
+      id: 'return-515-capture', contractId: linearContract.id, contractItemId: linearStone.id, productRowId: 'length',
+      unit: 'meter', kind: 'CONTRACTED_SET' as const, quantity: '220.000',
+      effectiveAt: approvedAt.toISOString(), recordedAt: approvedAt.toISOString(),
+      sourceType: 'FINANCIALLY_APPROVED_CONTRACT_QUANTITY_VERSION', sourceId: `${linearRecord.id}:${linearStone.id}`, sourceVersion: 1,
+      metadata: { financialRecordId: linearRecord.id, financiallyApprovedAt: approvedAt.toISOString() },
+    };
+    await db.shipmentQuantityEvidence.create({ data: { ...witness, integrityHash: shipmentQuantityEvidenceIntegrityHash({
+      ...witness, integrityHash: '',
+    }) } });
+    const captureVisit = await call(guard, { source: 'PERSONAL_PICKUP', plate: '51 ب 345 ایران 67', purpose: 'PROJECT_RETURN' });
+    const captureCase = await call(receipts, { ...command, visitId: captureVisit.data.id, projectIds: [extraProject.id],
+      items: [{ productId: lengthProduct.id, unit: 'meter', healthyQuantity: '13.5', damagedQuantity: '0' }] });
+    assert.equal(captureCase.status, 201, JSON.stringify(captureCase));
+    const captureReview = await call(`/api/accounting/project-returns/${captureCase.data.id}`);
+    assert.deepEqual(captureReview.data.items[0].candidates.map((row: { financialLineId: string; remainingQuantity: string }) =>
+      [row.financialLineId, row.remainingQuantity]), [['return-515-capture', '220.000']]);
   } finally {
     try {
       if (server?.listening) await new Promise<void>((resolve, reject) => server!.close(error => error ? reject(error) : resolve()));

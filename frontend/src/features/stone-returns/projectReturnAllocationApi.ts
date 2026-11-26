@@ -19,8 +19,19 @@ export function isProjectReturnAllocationEditable(status: ProjectReturnAllocatio
   return status === 'RECEIVED' || status === 'DRAFT' || status === 'ALLOCATION_COMPLETE';
 }
 
-export type ProjectAllocationCandidate = StoneReturnCandidate & {
+export type ProjectFinancialAllocationSource = { financialRecordId: string; financialLineId: string };
+type ProjectAllocationRow = StoneReturnAllocationInput | ProjectFinancialAllocationSource & { quantity: string };
+type FinancialCandidate = ProjectFinancialAllocationSource & {
+  dispatchEvidenceId: null;
+  originalInvoiceNumber: string;
+  originalNetRateRials: string | null;
+  remainingQuantity: string;
+  contractNumber: string;
+  financialParty: { kind: 'CUSTOMER' | 'PARTNER'; id: string };
+};
+export type ProjectAllocationCandidate = (StoneReturnCandidate | FinancialCandidate) & {
   projectId: string;
+  draftRemainingQuantity: string;
   contractDate?: string | null;
   contractCreatedAt?: string;
   sellerName?: string | null;
@@ -29,7 +40,7 @@ export type ProjectAllocationCandidate = StoneReturnCandidate & {
 export type ProjectAllocationInput = {
   itemId: string;
   agreedUnitRateRials: string | null;
-  rows: StoneReturnAllocationInput[];
+  rows: ProjectAllocationRow[];
 };
 
 export type ProjectReturnPriorPosting = {
@@ -53,8 +64,9 @@ export type ProjectReturnAllocationReview = {
   items: Array<ProjectReturnItem & {
     candidates: ProjectAllocationCandidate[];
     hasUnlinkedOriginals: boolean;
+    blockedReason?: string | null;
     agreedUnitRateRials: string | null;
-    rows: Array<StoneReturnAllocationInput & { originalInvoiceNumber: string; contractNumber: string }>;
+    rows: Array<ProjectAllocationRow & { originalInvoiceNumber: string; contractNumber: string }>;
     allocationError: string | null;
     allocatedQuantity: string;
     unallocatedQuantity: string;

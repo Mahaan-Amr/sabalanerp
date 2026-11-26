@@ -35,6 +35,7 @@ import { validatePartnerSharedAccountingEffect, stagePartnerAccountingReplacemen
 import { buildCaseProjections, type CaseRevisionProjectionEvidence } from '../partnerSales/cases/projections';
 import { subtract } from '../partnerSales/reporting/money';
 import { createPartnerLifecycleDatabase } from './partnerCaseLifecycleDatabase';
+import { createTemporaryConcurrencyDatabase } from './shipmentStatementConcurrency/database';
 import { createPrismaPartnerFinancialCorrectionComposition } from '../partnerSales/corrections/prismaFinancialComposition';
 import type { PartnerCorrectionDependencyInput } from '../partnerSales/corrections/dependencyChecks';
 import { prepareRetailSuccessor } from '../partnerSales/corrections/retailSuccessor';
@@ -42,7 +43,9 @@ import { readPartnerOutstandingHistory, readPartnerAccountingTrend } from '../pa
 import { createPartnerCaseLoading, findLoadablePartnerDeliveries, readPartnerCaseLoading } from '../dispatchAllocation';
 import { shipmentQuantityEvidenceIntegrityHash } from '../shipmentQuantityProjectionStore';
 import { dryRunLegacyContractProductGraphMigration } from '../contractProductGraphMigration';
-import { projectReturnCustomerScope, searchProjectReturnPartnerContracts, searchProjectReturnProducts } from '../projectReturnReceipts';
+import { projectReturnCustomerScope, searchProjectReturnPartnerContracts, searchProjectReturnProducts, submitProjectReturnReceipt } from '../projectReturnReceipts';
+import { readProjectReturnAllocationReview } from '../projectReturnAllocations';
+import { admitGuardDriverQueueTurn } from '../guardDriverQueue';
 import { searchStoneReturnCustomers } from '../stoneReturnReceipts';
 
 function databaseUrl(schemaOnly = true) {
@@ -576,8 +579,10 @@ const migrationAuditInFixture = (tx: Prisma.TransactionClient) =>
     $transaction: (read: (snapshot: Prisma.TransactionClient) => Promise<unknown>) => read(tx),
   } as unknown as PrismaClient);
 
-test('project returns search committed Partner contracts and catalog products in the selected project', async () => {
-  const database = new PrismaClient({ datasources: { db: { url: databaseUrl(false) } } });
+test('project returns find a committed Partner sale and require a verified wholesale financial reference', async () => {
+  const isolated = await createTemporaryConcurrencyDatabase({ repositoryRoot: path.resolve(__dirname, '../../../..'),
+    sourceDatabaseUrl: databaseUrl(false), migrateEmptySchema: true });
+  const database = isolated.client();
   const rollback = new Error('rollback Partner project return fixture');
   try {
     await database.$transaction(async tx => {
@@ -609,12 +614,57 @@ test('project returns search committed Partner contracts and catalog products in
       const otherProject = await tx.projectAddress.create({ data: { address: 'Other', customerId: ids.customerId } });
       assert.deepEqual(await searchProjectReturnPartnerContracts(tx, ids.customerId, [otherProject.id], ''), []);
       assert.deepEqual(await searchProjectReturnProducts(tx, ids.customerId, [otherProject.id], '', ids.contractId), []);
+
+      const projections = await readPartnerRevisionProjections(tx, owner);
+      assert.ok(projections?.accounting);
+      const prepared = await preparePartnerFinancialSource({ view: { ...projections.accounting, state: 'COMMITTED' },
+        partnerSellerId: ids.partnerId }, owner);
+      assert.ok(prepared.ok);
+      const { value: preparation } = prepared;
+      const partnerMetadata = { partnerCaseId: ids.caseId };
+      const draftInvoice = await tx.accountingFinancialRecord.create({ data: {
+        sourceId: ids.internalId, sourceKind: PARTNER_INTERNAL_ACCOUNTING_SOURCE, kind: 'INVOICE_CANDIDATE',
+        amount: preparation.amount.amount, currency: preparation.amount.currency, createdBy: ids.partnerId,
+        sourceSnapshot: { partnerPreparation: preparation }, metadata: partnerMetadata,
+      } });
+      const approvedAt = new Date();
+      const recordedAt = approvedAt.toISOString();
+      const pendingApproval = { eventId: `${ids.caseId}-finance-event`, actorId: ids.partnerId, recordedAt,
+        effectiveDate: recordedAt.slice(0, 10), financialApprovalEvidenceId: 'unverified' };
+      await tx.accountingFinancialRecord.update({ where: { id: draftInvoice.id }, data: {
+        status: 'ISSUED', systemInvoiceNumber: `${ids.caseId}-issued`, systemInvoiceDate: approvedAt,
+        financiallyApprovedAt: approvedAt, financiallyApprovedBy: ids.partnerId, postedAt: approvedAt,
+        metadata: { ...partnerMetadata, partnerApproval: pendingApproval, partnerReceivablePending: true },
+      } });
+      const inFixture = { $transaction: <T>(run: (snapshot: Prisma.TransactionClient) => Promise<T>) => run(tx) } as PrismaClient;
+      const visit = await admitGuardDriverQueueTurn(inFixture, { source: 'PERSONAL_PICKUP', purpose: 'PROJECT_RETURN',
+        actorId: ids.partnerId, plate: '55 ب 515 ایران 67' });
+      const { receipt } = await submitProjectReturnReceipt(inFixture, ids.partnerId, {
+        visitId: visit.id, customerId: ids.customerId, projectIds: [projectId],
+        items: [{ productId, unit: 'meter', healthyQuantity: '1', damagedQuantity: '0' }],
+      });
+      assert.deepEqual((await readProjectReturnAllocationReview(tx, receipt.id)).items[0].candidates, [],
+        'Partner retail contract and a broken wholesale seal cannot supply a return reference');
+      const financialApprovalEvidenceId = `partner-financial-approval:${(await canonicalHash({
+        invoiceRecordId: draftInvoice.id, evidenceHash: preparation.evidenceHash,
+        actorId: ids.partnerId, approvedAt: recordedAt,
+      })).slice(10)}`;
+      await tx.accountingFinancialRecord.update({ where: { id: draftInvoice.id }, data: {
+        metadata: { ...partnerMetadata, partnerReceivablePending: true,
+          partnerApproval: { ...pendingApproval, financialApprovalEvidenceId } },
+      } });
+      const [partnerCandidate] = (await readProjectReturnAllocationReview(tx, receipt.id)).items[0].candidates;
+      assert.ok(partnerCandidate && 'financialRecordId' in partnerCandidate);
+      assert.equal(partnerCandidate.financialRecordId, draftInvoice.id);
+      assert.equal(partnerCandidate.contractId, ids.contractId);
+      assert.deepEqual(partnerCandidate.financialParty, { kind: 'PARTNER', id: ids.accountId });
+      assert.equal(partnerCandidate.remainingQuantity, '2.000');
       throw rollback;
     }, { timeout: 30_000 });
   } catch (error) {
     if (error !== rollback) throw error;
   } finally {
-    await database.$disconnect();
+    try { await database.$disconnect(); } finally { await isolated.cleanup(); }
   }
 });
 

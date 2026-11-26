@@ -8,10 +8,10 @@ import {
 import { userFacingError } from '@/features/dispatch/userFacingError';
 import {
   isProjectReturnAllocationEditable, projectReturnAccountingHref, projectReturnAllocationApi, projectReturnAllocationStatuses,
-  type ProjectAllocationInput, type ProjectReturnAllocationReview,
+  type ProjectAllocationInput, type ProjectFinancialAllocationSource, type ProjectReturnAllocationReview,
 } from './projectReturnAllocationApi';
 import { displayExactDecimal, displayStoneReturnQuantity, stoneReturnUnitLabels, type StoneReturnSourceKey } from './stoneReturnApi';
-import { normalizeStoneReturnQuantity, stoneReturnQuantityAtoms, stoneReturnQuantityScale } from './stoneReturnQuantityInput';
+import { normalizeStoneReturnQuantity, stoneReturnQuantityAtoms } from './stoneReturnQuantityInput';
 import { ProjectReturnFacts } from './ProjectReturnFacts';
 import { ProjectReturnPriorPosting } from './ProjectReturnPriorPosting';
 import { rateLabel } from './StoneReturnPosting';
@@ -20,7 +20,9 @@ type DraftFields = { rate: string; quantities: Record<string, string> };
 type FieldErrors = { rate?: string; quantities: Record<string, string> };
 type ReviewItem = ProjectReturnAllocationReview['items'][number];
 
-const sourceKey = (row: StoneReturnSourceKey) => JSON.stringify([row.originalInvoiceId, row.originalLineId, row.dispatchEvidenceId]);
+const sourceKey = (row: StoneReturnSourceKey | ProjectFinancialAllocationSource) => JSON.stringify('financialRecordId' in row
+  ? [row.financialRecordId, row.financialLineId]
+  : [row.originalInvoiceId, row.originalLineId, row.dispatchEvidenceId]);
 const nonzero = (value: string) => !/^0(?:\.0+)?$/.test(value);
 const dateText = (iso: string) => new Date(iso).toLocaleString('fa-IR', { dateStyle: 'short', timeStyle: 'short' });
 const contractDateText = (value: string) => /^\d{4}-\d{2}-\d{2}(?:T|$)/.test(value)
@@ -42,37 +44,6 @@ function unavailableRows(item: ReviewItem, fields: DraftFields) {
   return item.rows.filter(row => !available.has(sourceKey(row)) && fields.quantities[sourceKey(row)]);
 }
 
-function savedDraftBalances(item: ReviewItem, savedRows: ReadonlyMap<string, string>) {
-  const zero = BigInt(0);
-  const atoms = (value: string) => stoneReturnQuantityAtoms(normalizeStoneReturnQuantity(value), item.unit) ?? zero;
-  const invoiceLineKey = (row: StoneReturnSourceKey) => JSON.stringify([row.originalInvoiceId, row.originalLineId]);
-  const usedByLine = new Map<string, bigint>();
-  const usedByDispatch = new Map<string, bigint>();
-  const candidates = item.candidates.map(candidate => {
-    const key = sourceKey(candidate);
-    const line = invoiceLineKey(candidate);
-    const saved = atoms(savedRows.get(key) ?? '0');
-    const replacement = candidate.replacementCapacity;
-    const own = atoms(replacement?.ownQuantity ?? '0');
-    const additional = saved > own ? saved - own : zero;
-    usedByLine.set(line, (usedByLine.get(line) ?? zero) + additional);
-    usedByDispatch.set(candidate.dispatchEvidenceId, (usedByDispatch.get(candidate.dispatchEvidenceId) ?? zero) + additional);
-    return {
-      key, line, dispatch: candidate.dispatchEvidenceId, unusedOwn: own > saved ? own - saved : zero,
-      lineCapacity: atoms(replacement?.lineRemainingQuantity ?? candidate.lineRemainingQuantity),
-      dispatchCapacity: atoms(replacement?.dispatchRemainingQuantity ?? candidate.dispatchRemainingQuantity),
-    };
-  });
-
-  return new Map(candidates.map(({ key, line, dispatch, unusedOwn, lineCapacity, dispatchCapacity }) => {
-    const remainingLine = lineCapacity - (usedByLine.get(line) ?? zero);
-    const remainingDispatch = dispatchCapacity - (usedByDispatch.get(dispatch) ?? zero);
-    const remaining = unusedOwn + (remainingLine < remainingDispatch ? remainingLine : remainingDispatch);
-    const digits = (remaining > zero ? remaining : zero).toString().padStart(stoneReturnQuantityScale + 1, '0');
-    return [key, `${digits.slice(0, -stoneReturnQuantityScale)}.${digits.slice(-stoneReturnQuantityScale)}`];
-  }));
-}
-
 function ItemReview({ item, projects, fields, errors, editable, pending, onChange }: {
   item: ReviewItem;
   projects: Map<string, string>;
@@ -85,7 +56,6 @@ function ItemReview({ item, projects, fields, errors, editable, pending, onChang
   const quantity = (value: string) => displayStoneReturnQuantity(value, item.unit);
   const healthy = nonzero(item.healthyQuantity);
   const savedRows = new Map(item.rows.map(row => [sourceKey(row), row.quantity]));
-  const draftBalances = savedDraftBalances(item, savedRows);
   const changeQuantity = (key: string, value: string) => onChange({ ...fields, quantities: { ...fields.quantities, [key]: value } });
 
   return <div className="min-w-0 space-y-2 py-3 first:pt-0 last:pb-0">
@@ -108,34 +78,39 @@ function ItemReview({ item, projects, fields, errors, editable, pending, onChang
         </ErpField></div> : <ErpFieldView label={rateLabel(item.unit)}
           value={item.agreedUnitRateRials === null ? '—' : displayExactDecimal(item.agreedUnitRateRials)} />}
         {item.allocationError && <ErpInlineState kind="stale" title={item.allocationError} />}
-        {item.candidates.length === 0 ? <p className="text-sm sds-text-secondary">مرجع قابل تخصیص پیدا نشد. صورتحساب ثبت‌شده و شاهد ارسال همین محصول و واحد را در پروژه‌های پرونده بررسی کنید.</p>
-          : item.hasUnlinkedOriginals && <p className="text-sm sds-text-secondary">بعضی از فروش‌ها پیوند معتبر به ارسال فیزیکی ندارند.</p>}
+        {item.candidates.length === 0 && <p className="text-sm sds-text-secondary">{item.blockedReason
+          ?? (item.hasUnlinkedOriginals
+            ? 'برای فروش شناسایی‌شده، ردیف مالی معتبر یا پیوند قابل تأیید به ارسال پیدا نشد.'
+            : 'برای این مشتری، پروژه، محصول و واحد، مرجع فروش دارای پشتوانهٔ مالی معتبر پیدا نشد.')}</p>}
         {item.candidates.length > 0 && <ul aria-label="مراجع فروش"
           className="divide-y divide-[var(--sds-border-subtle)] border-y border-[var(--sds-border-subtle)]">
           {item.candidates.map(candidate => {
             const key = sourceKey(candidate);
             const entered = fields.quantities[key] ?? '';
             const project = projects.size > 1 ? projects.get(candidate.projectId) : undefined;
-            const delivery = candidate.loadingNumber ?? dateText(candidate.deliveredAt);
+            const financial = 'financialRecordId' in candidate;
+            const delivery = financial ? null : candidate.loadingNumber ?? dateText(candidate.deliveredAt);
             return <li key={key} className="grid min-w-0 gap-2 py-3 sm:grid-cols-[minmax(0,1fr)_minmax(9rem,13rem)] sm:items-start sm:gap-4">
               <div className="min-w-0 space-y-0.5 text-sm">
-                <h4 className="break-words font-semibold">صورتحساب <bdi dir="ltr">{candidate.originalInvoiceNumber}</bdi></h4>
+                <h4 className="break-words font-semibold">{financial ? 'رکورد مالی' : 'صورتحساب'} <bdi dir="ltr">{candidate.originalInvoiceNumber}</bdi></h4>
                 <p className="break-words sds-text-secondary">قرارداد <bdi dir="ltr">{candidate.contractNumber}</bdi>
                   {project && <> · {project}</>}
                 </p>
                 <p className="flex flex-wrap items-baseline gap-x-3 text-xs sds-text-secondary">
-                  <span>مانده قابل تخصیص <strong className="font-semibold">{quantity(draftBalances.get(key) ?? candidate.remainingQuantity)}</strong></span>
-                  <span>نرخ خالص فروش هر {stoneReturnUnitLabels[item.unit] ?? item.unit} <strong className="font-semibold">{displayExactDecimal(candidate.originalNetRateRials)} ریال</strong></span>
+                  <span>مانده قابل تخصیص <strong className="font-semibold">{quantity(candidate.draftRemainingQuantity)}</strong></span>
+                  {candidate.originalNetRateRials !== null && <span>نرخ فروش هر {stoneReturnUnitLabels[item.unit] ?? item.unit} <strong className="font-semibold">{displayExactDecimal(candidate.originalNetRateRials)} ریال</strong></span>}
                 </p>
                 <p className="flex flex-wrap items-baseline gap-x-3 text-xs sds-text-secondary">
                   <span>{candidate.contractDate || !candidate.contractCreatedAt ? 'تاریخ قرارداد' : 'تاریخ ثبت قرارداد'} <bdi>{candidate.contractDate
                     ? contractDateText(candidate.contractDate) : candidate.contractCreatedAt ? contractDateText(candidate.contractCreatedAt) : '—'}</bdi></span>
                   <span>فروشنده <bdi>{candidate.sellerName || '—'}</bdi></span>
                 </p>
-                <p className="break-words text-xs sds-text-secondary">{candidate.loadingNumber ? 'بارگیری' : 'تاریخ تحویل'} <bdi>{delivery}</bdi></p>
+                {financial
+                  ? <p className="text-xs sds-text-secondary">{candidate.financialParty.kind === 'PARTNER' ? 'فروش سبلان به همکار' : 'فروش مستقیم'}</p>
+                  : <p className="break-words text-xs sds-text-secondary">{candidate.loadingNumber ? 'بارگیری' : 'تاریخ تحویل'} <bdi>{delivery}</bdi></p>}
               </div>
               {editable && (nonzero(candidate.remainingQuantity) || entered) ? <ErpField label="مقدار تخصیص" error={errors?.quantities[key]}>
-                <ErpInput aria-label={`مقدار تخصیص صورتحساب ${candidate.originalInvoiceNumber} · ${delivery}`}
+                <ErpInput aria-label={`مقدار تخصیص ${financial ? 'رکورد مالی' : 'صورتحساب'} ${candidate.originalInvoiceNumber}${delivery ? ` · ${delivery}` : ''}`}
                   inputMode="decimal" maxLength={100} value={entered} disabled={pending}
                   onChange={event => changeQuantity(key, event.target.value)} />
               </ErpField> : savedRows.has(key) && <ErpFieldView label="مقدار تخصیص‌یافته" value={quantity(savedRows.get(key)!)} />}
@@ -143,7 +118,7 @@ function ItemReview({ item, projects, fields, errors, editable, pending, onChang
           })}
         </ul>}
         {unavailableRows(item, fields).map(row => <ErpCard key={sourceKey(row)} className="min-w-0 space-y-2">
-          <ErpInlineState kind="stale" title={`صورتحساب ${row.originalInvoiceNumber} دیگر مرجع معتبر این محصول نیست.`} />
+          <ErpInlineState kind="stale" title={`مرجع فروش ${row.originalInvoiceNumber} دیگر برای این محصول معتبر نیست.`} />
           <ErpFieldView label="مقدار تخصیص‌یافته" value={quantity(row.quantity)} />
           {editable && <ErpButton type="button" label="حذف این تخصیص" variant="soft" tone="danger" disabled={pending}
             onClick={() => changeQuantity(sourceKey(row), '')} />}
@@ -224,8 +199,12 @@ export function ProjectReturnAllocationPage({ caseId }: { caseId: string }) {
           errors.quantities[key] = 'مقدار تخصیص از ماندهٔ این مرجع بیشتر است.';
           continue;
         }
-        const { originalInvoiceId, originalLineId, dispatchEvidenceId } = candidate;
-        rows.push({ originalInvoiceId, originalLineId, dispatchEvidenceId, quantity });
+        if ('financialRecordId' in candidate) {
+          rows.push({ financialRecordId: candidate.financialRecordId, financialLineId: candidate.financialLineId, quantity });
+        } else {
+          const { originalInvoiceId, originalLineId, dispatchEvidenceId } = candidate;
+          rows.push({ originalInvoiceId, originalLineId, dispatchEvidenceId, quantity });
+        }
       }
       if (errors.rate || Object.keys(errors.quantities).length) invalidFields[item.id] = errors;
       items.push({ itemId: item.id, agreedUnitRateRials: rate || null, rows });

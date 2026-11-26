@@ -4,7 +4,7 @@ import { previewSepidarOpeningCheques, SepidarOpeningChequePlanError, type Sepid
 
 import { hashAccountingEvidence } from '../accountingLedgerFoundation';
 import { applySepidarOpeningBankAndCustomerReturnHistories, applySepidarOpeningBankHistories,
-  applySepidarOpeningHistoricalRecipientHistories, applySepidarOpeningHistoricalSupplierHistories, inspectSepidarOpeningChequeTargets } from '../sepidarOpeningChequeApplication';
+  applySepidarOpeningHistoricalRecipientHistories, applySepidarOpeningHistoricalSupplierHistories, inspectSepidarOpeningChequeTargets, prepareSepidarOpeningChequeVouchers } from '../sepidarOpeningChequeApplication';
 
 const basis = '2026-03-20T20:30:00.000Z';
 const depositAt = '2026-04-01T08:00:00.000Z';
@@ -500,4 +500,23 @@ test('inspecting cheque targets stays read-only and flags a reversed voucher whi
   assert.ok(eventVoucher);
   eventVoucher.reversals.push({ id: 'reversal' });
   await assert.rejects(inspect, { code: 'INVALID_TARGET' });
+});
+
+test('cheque voucher preparation balances custody against the approved clearing and preserves event owners', () => {
+  const evidence = bankHistory();
+  const prepared = prepareSepidarOpeningChequeVouchers(evidence, { clearingAccountId: 'opening-transfer' });
+  assert.equal(prepared.opening.source.type, 'SEPIDAR_CHEQUE_OPENING');
+  assert.equal(prepared.events.length, 2);
+  assert.deepEqual(prepared.opening.lines.map(({ accountId, debitRials, creditRials, partyId }) =>
+    [accountId, debitRials, creditRials, partyId]), [
+    ['custody', 100n, 0n, 'party'], ['opening-transfer', 0n, 100n, undefined],
+  ]);
+  const bankLine = prepared.events[1].lines.find(line => line.financialAccountId === 'bank');
+  assert.equal(bankLine?.debitRials, 100n);
+  assert.equal(bankLine?.partyId, undefined);
+  for (const command of prepared.events) {
+    assert.equal(command.source.hash, hashAccountingEvidence(command.source.payload));
+    assert.equal(command.lines.reduce((net, line) => net + line.debitRials - line.creditRials, 0n), 0n);
+  }
+  assert.throws(() => prepareSepidarOpeningChequeVouchers(evidence, { clearingAccountId: 'custody' }), { code: 'INVALID_TARGET' });
 });

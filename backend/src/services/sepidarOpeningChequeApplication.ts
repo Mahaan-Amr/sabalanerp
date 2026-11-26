@@ -1,5 +1,5 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
-import { hashAccountingEvidence, type AccountingActor } from './accountingLedgerFoundation';
+import { hashAccountingEvidence, IRR_ROUNDING_RULE_V1, type AccountingActor, type LedgerLineInput } from './accountingLedgerFoundation';
 import { SEPIDAR_CHEQUE_SUPPLIER_ENDORSEMENT } from './accountingSupplyChain';
 import { previewSepidarOpeningCheques, type SepidarOpeningChequeEvidence } from './sepidarOpeningChequePlan';
 
@@ -41,6 +41,73 @@ function eventEvidence(plan: Plan, cheque: Cheque, event: Cheque['events'][numbe
     })),
     ...destination,
   };
+}
+
+function voucherSource(type: string, id: string, payload: unknown) {
+  return { type, id, payload, version: 1, hash: hashAccountingEvidence(payload) };
+}
+
+function voucherLine(amount: bigint, line: Omit<LedgerLineInput, 'debitRials' | 'creditRials'>): LedgerLineInput {
+  return { ...line, debitRials: amount > 0n ? amount : 0n, creditRials: amount < 0n ? -amount : 0n,
+    rawAmountBeforeRounding: (amount < 0n ? -amount : amount).toString(), roundingRuleVersion: IRR_ROUNDING_RULE_V1 };
+}
+
+function eventLineOwner(reference: Cheque['events'][number]['targetPosting']['reference'], account: number, customerPartyId: string) {
+  const isBank = account === 105;
+  const recipientCounter = reference.kind === 'PAYMENT_RECIPIENT' && account !== 118;
+  const supplierCounter = reference.kind === 'SUPPLIER' && account === 193;
+  return { recipientCounter,
+    partyId: supplierCounter ? reference.targetId : isBank || recipientCounter ? undefined : customerPartyId,
+    financialAccountId: isBank ? reference.targetId : undefined };
+}
+
+/** Derive balanced ledger commands from the same source evidence used by the application verifier. */
+export function prepareSepidarOpeningChequeVouchers(
+  evidence: SepidarOpeningChequeEvidence,
+  target: { clearingAccountId: string; recipientDimensionTypeId?: string },
+) {
+  const plan = previewSepidarOpeningCheques(evidence);
+  const sourceAccounts = new Map(evidence.ledgerLines.map(line => [line.id, line.accountId]));
+  const chequeByOpeningLine = new Map(plan.instruments.map(cheque => [cheque.opening.sourceLineId, cheque]));
+  const openingPayload = {
+    snapshotSha256: plan.snapshotSha256, sourceOpeningVoucherId: plan.sourceOpeningVoucherId, basisAt: plan.basisAt,
+  };
+  const openingSource = voucherSource('SEPIDAR_CHEQUE_OPENING', plan.sourceOpeningVoucherId, openingPayload);
+  requireValid(target.clearingAccountId.trim() && !evidence.openingLines.some(line => line.targetAccountId === target.clearingAccountId)
+    && !evidence.events.some(event => event.posting.lines.some(line => line.targetAccountId === target.clearingAccountId)), 'INVALID_TARGET');
+  const openingLines = evidence.openingLines.map(row => voucherLine(row.amountRials, {
+    accountId: row.targetAccountId, partyId: chequeByOpeningLine.get(row.id)!.instrument.target.partyId, dimensions: [],
+    evidence: voucherSource('SEPIDAR_ACC_VOUCHER_ITEM', row.id, {
+      snapshotSha256: plan.snapshotSha256, row: { VoucherItemId: row.id, VoucherRef: plan.sourceOpeningVoucherId,
+        AmountRials: row.amountRials.toString() },
+    }),
+  }));
+  const openingTotal = openingLines.reduce((total, line) => total + line.debitRials, 0n);
+  openingLines.push(voucherLine(-openingTotal, { accountId: target.clearingAccountId, dimensions: [],
+    evidence: voucherSource('SEPIDAR_CHEQUE_OPENING', plan.sourceOpeningVoucherId,
+      { ...openingPayload, openingTotalRials: openingTotal.toString() }),
+  }));
+  const events = plan.instruments.flatMap(cheque => cheque.events.map(event => {
+    const { reference } = event.targetPosting;
+    const source = voucherSource('SEPIDAR_CHEQUE_EVENT', event.historyId, eventEvidence(plan, cheque, event));
+    const lines = event.targetPosting.lines.map(line => {
+      const { recipientCounter, partyId, financialAccountId } = eventLineOwner(
+        reference, sourceAccounts.get(line.sourceLineId)!, cheque.instrument.target.partyId,
+      );
+      const dimensionTypeId = target.recipientDimensionTypeId;
+      requireValid(!recipientCounter || dimensionTypeId?.trim(), 'INVALID_TARGET');
+      return voucherLine(line.signedRials, { accountId: line.targetAccountId, partyId, financialAccountId,
+        dimensions: recipientCounter ? [{ typeId: dimensionTypeId!, memberId: reference.targetId }] : [],
+        evidence: voucherSource('SEPIDAR_ACC_VOUCHER_ITEM', line.sourceLineId, {
+          snapshotSha256: plan.snapshotSha256, row: {
+            VoucherItemId: line.sourceLineId, VoucherRef: event.document.voucherId, ...line.tracking,
+          },
+        }),
+      });
+    });
+    return { occurredAt: event.occurredAt, source, lines };
+  }));
+  return { bookId: plan.bookId, opening: { occurredAt: plan.basisAt, source: openingSource, lines: openingLines }, events };
 }
 
 function instrumentEvents(plan: Plan, cheque: Cheque, actorId: string, tillId: string) {
@@ -185,12 +252,11 @@ async function verifyTargets(tx: Prisma.TransactionClient, plan: Plan, evidence:
       for (const allocation of lines) {
         const line = voucherLines.get(allocation.targetLineId);
         const sourceAccount = sourceAccounts.get(allocation.sourceLineId)!;
-        const isBank = sourceAccount === 105;
-        const recipientCounter = recipient && sourceAccount !== 118 ? recipient : null;
+        const owner = eventLineOwner(reference, sourceAccount, partyId);
+        const recipientCounter = owner.recipientCounter ? recipient : null;
         const supplierCounter = supplierEndorsement && sourceAccount === 193;
-        const expectedParty = supplierCounter ? reference.targetId : isBank || recipientCounter ? null : partyId;
         requireValid(line && line.accountId === allocation.targetAccountId
-          && line.partyId === expectedParty && line.financialAccountId === (isBank ? reference.targetId : null)
+          && line.partyId === (owner.partyId ?? null) && line.financialAccountId === (owner.financialAccountId ?? null)
           && BigInt(line.debitRials.toString()) === (allocation.signedRials > 0n ? allocation.signedRials : 0n)
           && BigInt(line.creditRials.toString()) === (allocation.signedRials < 0n ? -allocation.signedRials : 0n), 'INVALID_TARGET');
         if (recipientCounter) {

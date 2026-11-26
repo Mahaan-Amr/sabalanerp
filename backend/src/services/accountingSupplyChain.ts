@@ -1,5 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 
+export const SEPIDAR_CHEQUE_SUPPLIER_ENDORSEMENT = 'SEPIDAR_CHEQUE_SUPPLIER_ENDORSEMENT';
+
 export type SupplyChainActor = Readonly<{
   id: string;
   profile: 'VIEWER' | 'ACCOUNTANT' | 'ACCOUNTING_MANAGER';
@@ -775,11 +777,17 @@ export const createAccountingSupplyChainApplication = (
         allocatedByPayment.set(item.paymentId, (allocatedByPayment.get(item.paymentId) ?? 0n) + item.amountRials);
       }
       const payableRials = openItems.reduce((sum, item) => sum + item.amountRials - (allocatedByOpenItem.get(item.id) ?? 0n), 0n);
+      let historicalPayableEndorsementRials = 0n;
       const advanceRials = payments.reduce((sum, item) => {
+        if (item.kind === 'ASSIGNED_CUSTOMER_CHECK' && item.evidence.type === SEPIDAR_CHEQUE_SUPPLIER_ENDORSEMENT) {
+          historicalPayableEndorsementRials += item.amountRials;
+          return sum;
+        }
         const signedAmount = item.kind === 'PAYABLE_CHECK_REVERSAL' || item.kind === 'ASSIGNED_CUSTOMER_CHECK_REVERSAL' ? -item.amountRials : item.amountRials;
         return sum + signedAmount - (allocatedByPayment.get(item.id) ?? 0n);
       }, 0n);
-      return { payableRials, advanceRials, openItemCount: openItems.filter((item) => item.amountRials > (allocatedByOpenItem.get(item.id) ?? 0n)).length };
+      return { payableRials, advanceRials, openItemCount: openItems.filter((item) => item.amountRials > (allocatedByOpenItem.get(item.id) ?? 0n)).length,
+        ...(historicalPayableEndorsementRials > 0n ? { historicalPayableEndorsementRials } : {}) };
     },
 
     getSupplierAging: async (partyId: string, asOf: Date) => {

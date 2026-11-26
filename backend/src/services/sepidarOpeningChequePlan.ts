@@ -11,6 +11,7 @@ type SourceDocument = Readonly<{
 
 type PostingReference = Readonly<{
   kind: ReferenceKind; sourceId: string; targetId: string; supplierCheckId?: string;
+  historicalSupplierSettlement?: Readonly<{ settlementId: string; sourcePartyId: string; reviewSha256: string }>;
 }>;
 type PostingLine = Readonly<{
   sourceLineId: string; targetLineId: string; targetAccountId: string; signedRials: bigint;
@@ -184,6 +185,7 @@ export function previewSepidarOpeningCheques(evidence: SepidarOpeningChequeEvide
   const targetAccounts = new Map<number, string>();
   const targetReferences = new Map<string, string>();
   const supplierCheckOwners = new Map<string, string>();
+  const historicalSettlementIds = new Set<string>();
   const targetCustomers = new Map<string, SourceInstrument['target']>();
   const eventsByInstrument = new Map<string, Map<string, SourceEvent>>();
   for (const event of [...evidence.events].sort(orderById)) {
@@ -241,9 +243,15 @@ export function previewSepidarOpeningCheques(evidence: SepidarOpeningChequeEvide
         && posting.reference.kind === effect.referenceKind && posting.reference.sourceId === effect.sourceReferenceId
         && present(posting.reference.targetId), 'INVALID_POSTING', event.id);
       const reference = posting.reference;
-      requireEvidence(effect.referenceKind === 'SUPPLIER' ? present(reference.supplierCheckId) && instrument.sayadId !== null
-        : reference.supplierCheckId === undefined,
-        'INVALID_POSTING', event.id);
+      const historicalSettlement = reference.historicalSupplierSettlement;
+      if (historicalSettlement !== undefined) {
+        requireEvidence(effect.referenceKind === 'SUPPLIER' && reference.supplierCheckId === undefined && historicalSettlement
+          && present(historicalSettlement.sourcePartyId) && /^[0-9a-f]{64}$/.test(historicalSettlement.reviewSha256), 'INVALID_POSTING', event.id);
+        addUnique(historicalSettlementIds, historicalSettlement.settlementId, 'INVALID_POSTING', event.id);
+      } else {
+        requireEvidence(effect.referenceKind === 'SUPPLIER' ? present(reference.supplierCheckId) && instrument.sayadId !== null
+          : reference.supplierCheckId === undefined, 'INVALID_POSTING', event.id);
+      }
       const referenceKey = `${reference.kind}:${reference.sourceId}`;
       const reviewedTarget = targetReferences.get(referenceKey);
       requireEvidence(!reviewedTarget || reviewedTarget === reference.targetId, 'INVALID_POSTING', event.id);

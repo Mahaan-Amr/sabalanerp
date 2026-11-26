@@ -3,7 +3,8 @@ import test from 'node:test';
 import { previewSepidarOpeningCheques, SepidarOpeningChequePlanError, type SepidarOpeningChequeEvidence } from '../sepidarOpeningChequePlan';
 
 import { hashAccountingEvidence } from '../accountingLedgerFoundation';
-import { applySepidarOpeningBankAndCustomerReturnHistories, applySepidarOpeningBankHistories, applySepidarOpeningHistoricalRecipientHistories } from '../sepidarOpeningChequeApplication';
+import { applySepidarOpeningBankAndCustomerReturnHistories, applySepidarOpeningBankHistories,
+  applySepidarOpeningHistoricalRecipientHistories, applySepidarOpeningHistoricalSupplierHistories } from '../sepidarOpeningChequeApplication';
 
 const basis = '2026-03-20T20:30:00.000Z';
 const depositAt = '2026-04-01T08:00:00.000Z';
@@ -208,9 +209,9 @@ function bankApplicationFixture(evidence = bankHistory()) {
   const [cheque] = plan.instruments;
   const ledgerLine = (id: string, accountId: string, amount: bigint, bank = false, evidencePayload?: unknown) => {
     const historicalRecipient = accountId === 'partner-current';
-    const codes: Record<string, string> = { custody: '111202', receivable: '111201', 'partner-current': '111303' };
+    const codes: Record<string, string> = { custody: '111202', receivable: '111201', 'partner-current': '111303', payable: '211001' };
     return {
-      id, accountId, partyId: bank || historicalRecipient ? null : 'party', financialAccountId: bank ? 'bank' : null,
+      id, accountId, partyId: accountId === 'payable' ? 'supplier' : bank || historicalRecipient ? null : 'party', financialAccountId: bank ? 'bank' : null,
       dimensions: historicalRecipient ? [{ dimensionTypeId: 'historical-detail', memberId: 'recipient' }] : [],
       account: { bookId: 'book', code: codes[accountId] ?? accountId,
         dimensionRules: historicalRecipient ? [{ dimensionTypeId: 'historical-detail', requirement: 'OPTIONAL' }] : [] },
@@ -223,22 +224,35 @@ function bankApplicationFixture(evidence = bankHistory()) {
     bookId: 'book', status: 'POSTED', documentDate: new Date(at), occurredAt: new Date(at), reversalOfId: null,
     sourceType, sourceId, sourceVersion: 1, sourceHash: hashAccountingEvidence(sourcePayload), lines, reversals: [] as { id: string }[],
   });
+  const voucherSource = (event: typeof cheque.events[number]) => ({
+    snapshotSha256: plan.snapshotSha256, sourceInstrumentId: cheque.instrument.id, historyId: event.historyId,
+    previousHistoryId: event.previousHistoryId, document: event.document,
+    ...(event.targetPosting.reference.historicalSupplierSettlement ? { supplierPartyId: 'supplier', ...event.targetPosting.reference.historicalSupplierSettlement }
+      : event.targetPosting.reference.kind === 'PAYMENT_RECIPIENT' ? { recipientDimensionMemberId: 'recipient' }
+        : event.targetPosting.reference.kind === 'CUSTOMER' ? { customerPartyId: 'party' } : { bankFinancialAccountId: 'bank' }),
+    allocations: event.targetPosting.lines.map(({ sourceLineId, signedRials, targetAccountId, tracking }) =>
+      ({ sourceLineId, signedRials: signedRials.toString(), targetAccountId, ...(tracking ? { tracking } : {}) })),
+  });
   const vouchers = new Map([
     [plan.openingVoucherId, voucher(basis, 'SEPIDAR_CHEQUE_OPENING', plan.sourceOpeningVoucherId, {
       snapshotSha256: plan.snapshotSha256, sourceOpeningVoucherId: plan.sourceOpeningVoucherId, basisAt: plan.basisAt,
     }, [ledgerLine(cheque.opening.targetLineId, cheque.opening.targetAccountId, 100n)])],
-    ...cheque.events.map(event => [event.targetPosting.voucherId, voucher(event.occurredAt, 'SEPIDAR_CHEQUE_EVENT', event.historyId, {
-      snapshotSha256: plan.snapshotSha256, sourceInstrumentId: cheque.instrument.id, historyId: event.historyId,
-      previousHistoryId: event.previousHistoryId, document: event.document,
-      ...(event.targetPosting.reference.kind === 'PAYMENT_RECIPIENT' ? { recipientDimensionMemberId: 'recipient' }
-        : event.targetPosting.reference.kind === 'CUSTOMER' ? { customerPartyId: 'party' } : { bankFinancialAccountId: 'bank' }),
-      allocations: event.targetPosting.lines.map(({ sourceLineId, signedRials, targetAccountId, tracking }) =>
-        ({ sourceLineId, signedRials: signedRials.toString(), targetAccountId, ...(tracking ? { tracking } : {}) })),
-    }, event.targetPosting.lines.map(line => ledgerLine(line.targetLineId, line.targetAccountId,
+    ...cheque.events.map(event => [event.targetPosting.voucherId, voucher(event.occurredAt, 'SEPIDAR_CHEQUE_EVENT', event.historyId, voucherSource(event),
+      event.targetPosting.lines.map(line => ledgerLine(line.targetLineId, line.targetAccountId,
       line.signedRials, line.targetAccountId === 'cash', line.tracking ? { snapshotSha256: plan.snapshotSha256,
         row: { VoucherItemId: line.sourceLineId, VoucherRef: event.document.voucherId, ...line.tracking } } : undefined)))] as const),
   ]);
   const active = { legalEntityId: 'entity', activeFrom: new Date('2020-01-01'), activeTo: null };
+  const supplierEvent = cheque.events.find(event => event.targetPosting.reference.historicalSupplierSettlement);
+  const historical = supplierEvent?.targetPosting.reference.historicalSupplierSettlement;
+  const supplierBinding = { targetId: 'supplier', reviewStatus: 'USER_APPROVED', reviewedBy: 'reviewer', reviewEvidence: historical?.reviewSha256 };
+  const supplierSettlement = supplierEvent && { voucherId: supplierEvent.targetPosting.voucherId,
+    supplierPartyId: 'supplier', kind: 'ASSIGNED_CUSTOMER_CHECK', financialAccountId: null,
+    amountRials: cheque.instrument.amountRials, occurredAt: new Date(supplierEvent.occurredAt),
+    sourceType: 'SEPIDAR_CHEQUE_SUPPLIER_ENDORSEMENT', sourceId: supplierEvent.historyId, sourceVersion: 1,
+    sourcePayload: voucherSource(supplierEvent), sourceHash: hashAccountingEvidence(voucherSource(supplierEvent)),
+    allocations: [] as { id: string }[], payableChecks: [] as { id: string }[],
+  };
   const state = { allowed: true, failOnAnchor: false, rejectDuplicate: false, locks: 0,
     instrument: null as Record<string, unknown> | null, anchor: null as Record<string, unknown> | null };
   const database = {
@@ -252,6 +266,12 @@ function bankApplicationFixture(evidence = bankHistory()) {
         accountingFinancialAccount: { findUnique: async ({ where: { id } }) =>
           ({ ...active, id, kind: id === 'till' ? 'CASH' : 'BANK', currency: 'IRR' }) },
         accountingCustomerProfile: { findUnique: async () => ({ ...active, accountingPartyId: 'party' }) },
+        accountingParty: { findUnique: async ({ where: { id } }) => id === 'supplier' ? {
+          ...active, id, roles: [{ role: 'SUPPLIER', effectiveFrom: active.activeFrom, effectiveTo: null }],
+        } : null },
+        accountingSepidarTargetLink: { findUnique: async ({ where: { bookId_sourceTable_sourceKey_targetKind: ids } }) =>
+          ids.sourceTable === 'GNR.Party' && ids.sourceKey === historical?.sourcePartyId ? supplierBinding : null },
+        accountingSupplierSettlementTransaction: { findUnique: async ({ where: { id } }) => id === historical?.settlementId ? supplierSettlement : null },
         accountingDimensionMember: { findUnique: async ({ where: { id } }) => id === 'recipient' ? ({
           id, sourceId: 'recipient-detail', dimensionTypeId: 'historical-detail', effectiveFrom: active.activeFrom, effectiveTo: null,
           dimensionType: { bookId: 'book', code: 'SEPIDAR_DL', sourceKind: 'SEPIDAR_ACC_DL', effectiveFrom: active.activeFrom, effectiveTo: null },
@@ -290,8 +310,45 @@ function bankApplicationFixture(evidence = bankHistory()) {
       else process.env.DEPLOYMENT_RELEASE_ID = previous;
     }
   };
-  return { run, state, vouchers };
+  return { run, state, vouchers, supplierBinding, supplierSettlement };
 }
+
+test('historical supplier endorsement retains the payable and accepts a source cheque without Sayad', async () => {
+  const original = bankHistory();
+  const [deposit] = original.events;
+  const historicalSupplierSettlement = { settlementId: 'historical-settlement', sourcePartyId: 'supplier-source', reviewSha256: hash };
+  const evidence: SepidarOpeningChequeEvidence = {
+    ...original, instruments: [{ ...original.instruments[0], lastHistoryId: '31', currentState: 32 }],
+    events: [{ ...deposit, state: 32, type: 23, document: { kind: 'PAYMENT', type: 256, chequeId: '1', itemId: '51',
+      headerId: '61', voucherId: '71', recipientDetailId: 'supplier-detail' },
+    posting: { ...deposit.posting, reference: { kind: 'SUPPLIER', sourceId: 'supplier-detail', targetId: 'supplier', historicalSupplierSettlement },
+      lines: deposit.posting.lines.map(line => line.signedRials > 0n ? { ...line, targetAccountId: 'payable' } : line) } }],
+    ledgerLines: original.ledgerLines.slice(0, 2).map(line => ({ ...line, issuerKind: 'PAYMENT', ...(line.signedRials > 0n
+      ? { accountId: 193, detailId: 'supplier-detail' } : {}) })),
+  };
+  const { run, state, supplierSettlement, supplierBinding, vouchers } = bankApplicationFixture(evidence);
+  assert.ok(supplierSettlement);
+  const apply = () => run(applySepidarOpeningHistoricalSupplierHistories);
+  await assert.rejects(() => run(applySepidarOpeningHistoricalRecipientHistories), { code: 'UNSUPPORTED_POSTING_OWNER' });
+  supplierBinding.reviewEvidence = 'wrong-review';
+  await assert.rejects(apply, { code: 'INVALID_TARGET' });
+  supplierBinding.reviewEvidence = hash;
+  supplierSettlement.allocations.push({ id: 'invented-allocation' });
+  await assert.rejects(apply, { code: 'INVALID_TARGET' });
+  supplierSettlement.allocations.pop();
+  const payable = vouchers.get(deposit.posting.voucherId)!.lines.find(line => line.accountId === 'payable')!;
+  payable.account.code = '211002';
+  await assert.rejects(apply, { code: 'INVALID_TARGET' });
+  payable.account.code = '211001';
+  assert.equal(Boolean(state.instrument), false);
+  assert.equal((await apply()).instruments[0].replayed, false);
+  assert.equal(state.instrument?.status, 'ENDORSED');
+  assert.equal(state.instrument?.sayadId, null);
+  assert.equal(state.instrument?.custodianId, null);
+  const events = state.instrument?.events as Array<Record<string, unknown>>;
+  assert.equal((events[1].evidence as { settlementId: string }).settlementId, historicalSupplierSettlement.settlementId);
+  assert.equal((await apply()).instruments[0].replayed, true);
+});
 
 test('direct historical customer return links the exact posted voucher and releases custody', async () => {
   const original = bankHistory();

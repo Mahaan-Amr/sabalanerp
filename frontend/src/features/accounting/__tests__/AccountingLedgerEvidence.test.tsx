@@ -12,11 +12,15 @@ test('evidence presents accounting facts in Persian without raw source JSON or c
     sourceType: 'SEPIDAR_ACC_VOUCHER', sourcePayload: source, sourceVersion: 3, sourceHash: 'technical-hash',
     lines: [{ id: 'line', sequence: 1, evidenceType: 'SEPIDAR_ACC_VOUCHER_ITEM', evidenceVersion: 3,
       account: { code: '111001', titlePersian: 'صندوق' }, debitRials: '121320000', creditRials: '0',
-      evidencePayload: { row: { DLRef: 1099, Debit: '121320000.0000' } } }] }} />);
+      evidencePayload: { row: { DLRef: 1099, Debit: '121320000.0000', TrackingNumber: ' 001234 ', TrackingDate: '2026-03-21T00:00:00.0000000' } } }] }} />);
   assert.match(html, /سند حسابداری سپیدار/);
   assert.match(html, /صندوق/);
   assert.match(html, /۱۲۱٬۳۲۰٬۰۰۰ ریال/);
-  assert.doesNotMatch(html, /SEPIDAR_|IsMerged|DLRef|technical-hash|<pre/);
+  assert.match(html, /شماره پیگیری سپیدار/);
+  assert.match(html, /<bdi>001234<\/bdi>/);
+  assert.match(html, /تاریخ پیگیری سپیدار/);
+  assert.match(html, /۱۴۰۵\/۱\/۱/);
+  assert.doesNotMatch(html, /SEPIDAR_|IsMerged|DLRef|TrackingNumber|TrackingDate|technical-hash|<pre/);
   assert.equal(JSON.stringify(source), before);
 });
 

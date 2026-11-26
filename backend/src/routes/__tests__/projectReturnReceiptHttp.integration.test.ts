@@ -608,6 +608,34 @@ test('Logistics records and reopens exact multi-project receipt quantities and h
     const captureReview = await call(`/api/accounting/project-returns/${captureCase.data.id}`);
     assert.deepEqual(captureReview.data.items[0].candidates.map((row: { financialLineId: string; remainingQuantity: string }) =>
       [row.financialLineId, row.remainingQuantity]), [['return-515-capture', '220.000']]);
+
+    const pricingVisit = await call(guard, { source: 'PERSONAL_PICKUP', plate: '52 ب 345 ایران 67', purpose: 'PROJECT_RETURN' });
+    const pricingCase = await call(receipts, { ...command, visitId: pricingVisit.data.id, projectIds: [extraProject.id],
+      items: [{ productId: lengthProduct.id, unit: 'meter', healthyQuantity: '13.5', damagedQuantity: '2' }],
+    });
+    assert.equal(pricingCase.status, 201, JSON.stringify(pricingCase));
+    const pricingVersion = pricingCase.data.version;
+    const pricingItem = pricingVersion.items[0];
+    await db.projectReturnAllocationDraft.create({ data: {
+      versionId: pricingVersion.id, number: 1, createdBy: actor.id,
+      items: [{ itemId: pricingItem.id, agreedUnitRateRials: '24000000', rows: [] }],
+    } });
+    const pricingPath = `/api/accounting/project-returns/${pricingCase.data.id}`;
+    const readLegacyPrice = await call(pricingPath);
+    assert.equal(readLegacyPrice.data.items[0].agreedUnitRateRials, null, 'A legacy rate per linear meter must not be read as a rate per square meter');
+    assert.equal(readLegacyPrice.data.items[0].legacyRateNeedsReview, true);
+    const price = { itemId: pricingItem.id, agreedUnitRateRials: '۲۴۰۰۰۰۰۰', rows: [] };
+    const writePrice = (item: object) => call(`${pricingPath}/allocations`, {
+      expectedVersionId: pricingVersion.id, expectedDraftNumber: 1, items: [item],
+    }, 'PUT');
+    assert.equal((await writePrice(price)).status, 400, 'A new linear rate requires an explicit square-meter basis');
+    const newPrice = await writePrice({ ...price, agreedRateBasis: 'HEALTHY_SQUARE_METER' });
+    assert.equal(newPrice.status, 200, JSON.stringify(newPrice));
+    const rereadPrice = (await call(pricingPath)).data.items[0];
+    assert.equal(rereadPrice.agreedUnitRateRials, '24000000');
+    assert.equal(rereadPrice.agreedRateBasis, 'HEALTHY_SQUARE_METER');
+    assert.equal(rereadPrice.legacyRateNeedsReview, false);
+    assert.equal(rereadPrice.draftAmountRials, null, 'A rate alone is not an allocated amount');
   } finally {
     try {
       if (server?.listening) await new Promise<void>((resolve, reject) => server!.close(error => error ? reject(error) : resolve()));

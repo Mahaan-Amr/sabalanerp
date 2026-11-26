@@ -1,5 +1,5 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
-import { parseCanonicalDecimal } from '@sabalanerp/contract-product-graph';
+import { multiplyContractMonetaryAmounts, parseCanonicalDecimal, roundContractPayableTotal } from '@sabalanerp/contract-product-graph';
 import { formatExactQuantityAtoms, parseExactQuantityAtoms } from './exactQuantity';
 import { listProjectReturnReceipts, projectReturnId, readProjectReturnReceipt } from './projectReturnReceipts';
 import { includePriorProjectReturnCapacity, readCurrentProjectReturnLegacyBase, requireCurrentLegacyProjectReturnBase } from './projectReturnLegacyBase';
@@ -12,6 +12,7 @@ import {
 
 import {
   lockProjectReturnCase, presentDraft, readLatestProjectReturnAllocationDraft, withProjectReturnCaseTransaction, type ProjectReturnDraftRow,
+  type ProjectReturnRateBasis,
 } from './projectReturnDraftState';
 export { lockProjectReturnCase, readLatestProjectReturnAllocationDraft, projectReturnDraftHasAllocations } from './projectReturnDraftState';
 
@@ -88,6 +89,30 @@ async function sourcesForReceipt(tx: Tx, receipt: Receipt, base: LegacyBase | nu
 
 type ItemsWithSources = Awaited<ReturnType<typeof sourcesForReceipt>>;
 
+function expectedRateBasis(unit: string): ProjectReturnRateBasis {
+  return unit === 'meter' ? 'HEALTHY_SQUARE_METER' : 'RECEIPT_UNIT';
+}
+
+function priceDraftAllocation(
+  item: Pick<Receipt['version']['items'][number], 'unit'> & { effectiveWidthMeters?: string | null },
+  entry: Draft['items'][number] | undefined,
+  allocated: bigint,
+  allocationError: string | null,
+) {
+  const expected = expectedRateBasis(item.unit);
+  const savedRate = entry?.agreedUnitRateRials ?? null;
+  const savedBasis = entry?.agreedRateBasis ?? 'RECEIPT_UNIT';
+  const agreedRateBasis = savedRate !== null && savedBasis === expected ? expected : null;
+  const agreedUnitRateRials = agreedRateBasis === null ? null : savedRate;
+  const legacyRateNeedsReview = item.unit === 'meter' && savedRate !== null && agreedUnitRateRials === null;
+  const width = item.unit === 'meter' ? item.effectiveWidthMeters : '1';
+  const draftAmountRials = agreedUnitRateRials !== null && width && allocated > 0n && !allocationError
+    ? roundContractPayableTotal(multiplyContractMonetaryAmounts(agreedUnitRateRials,
+      multiplyContractMonetaryAmounts(formatExactQuantityAtoms(allocated), width)), 'IRR').roundedAmount
+    : null;
+  return { agreedRateBasis, agreedUnitRateRials, legacyRateNeedsReview, draftAmountRials };
+}
+
 function presentReview(receipt: Receipt, sources: ItemsWithSources, draft: Draft | null, base: LegacyBase | null) {
   const draftByItem = new Map(draft?.items.map(item => [item.itemId, item]));
   const items = sources.map(item => {
@@ -104,7 +129,7 @@ function presentReview(receipt: Receipt, sources: ItemsWithSources, draft: Draft
       allocationError = error.message;
     }
     return {
-      ...details, candidates: stoneReturnDraftBalances(candidates, rows), hasUnlinkedOriginals, rows, agreedUnitRateRials: entry?.agreedUnitRateRials ?? null, allocationError,
+      ...details, candidates: stoneReturnDraftBalances(candidates, rows), hasUnlinkedOriginals, rows, ...priceDraftAllocation(details, entry, allocated, allocationError), allocationError,
       allocatedQuantity: formatExactQuantityAtoms(allocated), unallocatedQuantity: formatExactQuantityAtoms(unallocated),
     };
   });
@@ -119,7 +144,9 @@ function presentReview(receipt: Receipt, sources: ItemsWithSources, draft: Draft
         ? { code: 'ALLOCATION_INCOMPLETE', message: 'برای ثبت قطعی باید تمام مقدار سالم به ردیف‌های معتبر فروش تخصیص یابد.' }
         : items.some(item => item.rows.length && item.agreedUnitRateRials === null)
           ? { code: 'RATE_REQUIRED', message: 'نرخ توافقی هر محصول تخصیص‌یافته را وارد کنید.' }
-          : { code: 'FINANCE_CONNECTION_UNAVAILABLE', message: 'تخصیص کامل است. اتصال ثبت مالی مرجوعی پروژه هنوز فعال نیست.' };
+          : items.some(item => item.rows.length && item.unit === 'meter' && item.draftAmountRials === null)
+            ? { code: 'WIDTH_REQUIRED', message: 'برای محاسبهٔ مبلغ سنگ طولی، عرض مؤثر باید در رسید ثبت شود.' }
+            : { code: 'FINANCE_CONNECTION_UNAVAILABLE', message: 'تخصیص کامل است. اتصال ثبت مالی مرجوعی پروژه هنوز فعال نیست.' };
   const correctionBlocks: Array<{ code: string; message: string }> = [];
   if (base?.sourceChanged) correctionBlocks.push({ code: 'LEGACY_SOURCE_CHANGED', message: 'در مسیر قبلی مرجوعی اصلاح ثبت شده یا سند مرجع تغییر کرده است.' });
   if (status === 'CORRECTION_WITH_LOGISTICS') correctionBlocks.push({ code: 'CORRECTION_WITH_LOGISTICS', message: 'نسخهٔ اصلاحی برای تکمیل نزد لجستیک است.' });
@@ -164,6 +191,11 @@ function parseRate(rate: unknown) {
   return canonical;
 }
 
+function parseRateBasis(basis: unknown): ProjectReturnRateBasis | undefined {
+  if (basis === undefined || basis === 'RECEIPT_UNIT' || basis === 'HEALTHY_SQUARE_METER') return basis;
+  throw new StoneReturnAllocationError(400, 'واحد نرخ توافقی را بررسی کنید.');
+}
+
 function parseCommand(body: unknown) {
   const { expectedVersionId, expectedDraftNumber, items } = asRecord(body);
   if (typeof expectedDraftNumber !== 'number' || !Number.isSafeInteger(expectedDraftNumber) || expectedDraftNumber < 0
@@ -197,7 +229,7 @@ function parseCommand(body: unknown) {
           dispatchEvidenceId: projectReturnId(row.dispatchEvidenceId, 'ارسال'), quantity,
         };
       });
-      return { itemId, agreedUnitRateRials: parseRate(item.agreedUnitRateRials), rows };
+      return { itemId, agreedUnitRateRials: parseRate(item.agreedUnitRateRials), agreedRateBasis: parseRateBasis(item.agreedRateBasis), rows };
     }),
   };
 }
@@ -229,14 +261,20 @@ export async function saveProjectReturnAllocationDraft(db: PrismaClient, caseId:
     // Drafts do not consume invoice or dispatch balances. Revalidate against posted evidence on each save.
     const sources = await sourcesForReceipt(tx, receipt, base);
     const byItemId = new Map(sources.map(item => [item.id, item]));
-    const items = command.items.map(({ itemId, agreedUnitRateRials, rows }) => {
+    const items = command.items.map(({ itemId, agreedUnitRateRials, agreedRateBasis, rows }) => {
       const item = byItemId.get(itemId);
       if (!item || parseExactQuantityAtoms(item.healthyQuantity) === 0n) {
         throw new StoneReturnAllocationError(409, 'یکی از ردیف‌ها مقدار سالم قابل تخصیص در این نسخه ندارد.');
       }
+      const expected = expectedRateBasis(item.unit);
+      if (agreedUnitRateRials !== null && (agreedRateBasis ?? 'RECEIPT_UNIT') !== expected) {
+        throw new StoneReturnAllocationError(400, item.unit === 'meter'
+          ? 'نرخ سنگ طولی را به ریال بر مترمربع سالم وارد کنید.'
+          : 'نرخ توافقی را به ریال بر واحد محصول وارد کنید.');
+      }
       const validated = validateStoneReturnAllocations({ acceptedQuantity: item.healthyQuantity, unit: item.unit }, item, rows, null);
       return {
-        itemId, agreedUnitRateRials,
+        itemId, agreedUnitRateRials, agreedRateBasis: agreedUnitRateRials === null ? null : expected,
         rows: validated.rows.map(({ candidate, quantity }): ProjectReturnDraftRow => {
           const common = {
             originalInvoiceNumber: candidate.originalInvoiceNumber, contractId: candidate.contractId,

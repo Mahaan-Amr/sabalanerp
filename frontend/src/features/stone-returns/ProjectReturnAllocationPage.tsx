@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { multiplyContractMonetaryAmounts, roundContractPayableTotal, sumContractMonetaryAmounts } from '@sabalanerp/contract-product-graph';
 import {
   ErpButton, ErpCard, ErpField, ErpFieldView, ErpInlineState, ErpInput,
   ErpPage, ErpSection, ErpSheet, ErpSkeleton, ErpStatus,
@@ -8,7 +9,7 @@ import {
 import { userFacingError } from '@/features/dispatch/userFacingError';
 import {
   isProjectReturnAllocationEditable, projectReturnAccountingHref, projectReturnAllocationApi, projectReturnAllocationStatuses,
-  type ProjectAllocationInput, type ProjectFinancialAllocationSource, type ProjectReturnAllocationReview,
+  type ProjectAllocationInput, type ProjectFinancialAllocationSource, type ProjectReturnAllocationReview, type ProjectReturnRateBasis,
 } from './projectReturnAllocationApi';
 import { displayExactDecimal, displayStoneReturnQuantity, stoneReturnUnitLabels, type StoneReturnSourceKey } from './stoneReturnApi';
 import { normalizeStoneReturnQuantity, stoneReturnQuantityAtoms } from './stoneReturnQuantityInput';
@@ -30,6 +31,24 @@ const contractDateText = (value: string) => /^\d{4}-\d{2}-\d{2}(?:T|$)/.test(val
   ? new Date(value).toLocaleDateString('fa-IR', { dateStyle: 'short', timeZone: 'Asia/Tehran' })
   : value;
 const blankFields: DraftFields = { rate: '', quantities: {} };
+const agreedRateBasis = (unit: string): ProjectReturnRateBasis => unit === 'meter' ? 'HEALTHY_SQUARE_METER' : 'RECEIPT_UNIT';
+const isPositiveRate = (rate: string) => /^\d+(?:\.\d+)?$/.test(rate) && nonzero(rate);
+
+function previewDraftAmount(item: ReviewItem & { effectiveWidthMeters?: string | null }, fields: DraftFields) {
+  const rate = normalizeStoneReturnQuantity(fields.rate, true);
+  const width = item.unit === 'meter' ? item.effectiveWidthMeters : '1';
+  if (!isPositiveRate(rate) || !width || unavailableRows(item, fields).length) return null;
+
+  const quantities = Object.values(fields.quantities).filter(value => value.trim()).map(value => normalizeStoneReturnQuantity(value));
+  if (quantities.some(value => stoneReturnQuantityAtoms(value, item.unit) === null)) return null;
+  const allocated = sumContractMonetaryAmounts(quantities);
+  const allocatedAtoms = stoneReturnQuantityAtoms(allocated, item.unit);
+  const healthyAtoms = stoneReturnQuantityAtoms(normalizeStoneReturnQuantity(item.healthyQuantity), item.unit);
+  if (allocatedAtoms === null || allocatedAtoms === BigInt(0) || healthyAtoms === null || allocatedAtoms > healthyAtoms) return null;
+
+  const billable = multiplyContractMonetaryAmounts(allocated, width);
+  return roundContractPayableTotal(multiplyContractMonetaryAmounts(billable, rate), 'IRR').roundedAmount;
+}
 
 function fieldsFromReview(review: ProjectReturnAllocationReview) {
   return Object.fromEntries(review.items.map(item => [
@@ -56,6 +75,9 @@ function ItemReview({ item, projects, fields, errors, editable, pending, onChang
 }) {
   const quantity = (value: string) => displayStoneReturnQuantity(value, item.unit);
   const healthy = nonzero(item.healthyQuantity);
+  const linear = agreedRateBasis(item.unit) === 'HEALTHY_SQUARE_METER';
+  const rateFieldLabel = linear ? 'نرخ توافقی هر مترمربع سالم (ریال)' : rateLabel(item.unit);
+  const draftAmount = editable ? previewDraftAmount(item, fields) : item.draftAmountRials;
   const savedRows = new Map(item.rows.map(row => [sourceKey(row), row.quantity]));
   const changeQuantity = (key: string, value: string) => onChange({ ...fields, quantities: { ...fields.quantities, [key]: value } });
 
@@ -72,11 +94,17 @@ function ItemReview({ item, projects, fields, errors, editable, pending, onChang
         ] : []),
       ]} />
       {healthy && <>
-        {editable ? <div className="max-w-xs"><ErpField label={rateLabel(item.unit)} error={errors?.rate}>
-          <ErpInput numberFormat="money" value={fields.rate} disabled={pending}
-            onChange={event => onChange({ ...fields, rate: event.target.value })} />
-        </ErpField></div> : <ErpFieldView label={rateLabel(item.unit)}
-          value={item.agreedUnitRateRials === null ? '—' : displayExactDecimal(item.agreedUnitRateRials)} />}
+        <div className="grid gap-2 sm:grid-cols-2">
+          {editable ? <ErpField label={rateFieldLabel} error={errors?.rate}>
+            <ErpInput numberFormat="money" maxLength={100} value={fields.rate} disabled={pending}
+              onChange={event => onChange({ ...fields, rate: event.target.value })} />
+          </ErpField> : <ErpFieldView label={rateFieldLabel}
+            value={item.agreedUnitRateRials === null ? '—' : displayExactDecimal(item.agreedUnitRateRials)} />}
+          <ErpFieldView label="مبلغ پیش‌نویس تخصیص"
+            value={draftAmount == null ? '—' : `${displayExactDecimal(draftAmount)} ریال`} />
+        </div>
+        {item.legacyRateNeedsReview && !fields.rate && <ErpInlineState kind="stale"
+          title="نرخ قبلی بر مبنای متر طول است. نرخ توافقی مترمربع سالم را دوباره وارد کنید." />}
         {item.allocationError && <ErpInlineState kind="stale" title={item.allocationError} />}
         {item.candidates.length === 0 && <p className="text-sm sds-text-secondary">{item.blockedReason
           ?? (item.hasUnlinkedOriginals
@@ -179,7 +207,7 @@ export function ProjectReturnAllocationPage({ caseId }: { caseId: string }) {
       if (unavailableRows(item, input).length) unavailable = true;
       const errors: FieldErrors = { quantities: {} };
       const rate = normalizeStoneReturnQuantity(input.rate, true);
-      if (input.rate.trim() && (!/^\d+(?:\.\d+)?$/.test(rate) || !nonzero(rate))) {
+      if (input.rate.trim() && !isPositiveRate(rate)) {
         errors.rate = 'نرخ توافقی را به ریال و بزرگ‌تر از صفر وارد کنید.';
       }
       const rows: ProjectAllocationInput['rows'] = [];
@@ -207,7 +235,7 @@ export function ProjectReturnAllocationPage({ caseId }: { caseId: string }) {
         }
       }
       if (errors.rate || Object.keys(errors.quantities).length) invalidFields[item.id] = errors;
-      items.push({ itemId: item.id, agreedUnitRateRials: rate || null, rows });
+      items.push({ itemId: item.id, agreedUnitRateRials: rate || null, agreedRateBasis: agreedRateBasis(item.unit), rows });
     }
     setFieldErrors(invalidFields);
     if (unavailable) setError('تخصیص‌های فاقد مرجع معتبر را حذف کنید.');

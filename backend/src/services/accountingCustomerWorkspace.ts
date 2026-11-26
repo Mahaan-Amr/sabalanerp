@@ -104,6 +104,12 @@ export async function readCustomerWorkspace(database: PrismaClient, input: { id:
         createdAt: true, commercialFlowVersion: true, commercialRevision: true, salesApprovalRevision: true, customerAcceptanceRevision: true,
         customerCreditAmountRials: true, customerCreditPromisedDate: true }, orderBy: [{ createdAt: 'desc' }, { id: 'asc' }] });
     const contractIds = contracts.map(row => row.id);
+    const chequeSelect = {
+      id: true, serialNumber: true, sayadId: true, bankName: true, amountRials: true, clearedRials: true,
+      unpaidRials: true, receipt: { select: { id: true } }, dueAt: true, status: true, direction: true,
+      sepidarOpening: { select: { instrumentId: true } }, events: { select: { sequence: true, eventType: true } },
+    } satisfies Prisma.AccountingCheckInstrumentSelect;
+    type WorkspaceCheque = Prisma.AccountingCheckInstrumentGetPayload<{ select: typeof chequeSelect }>;
     const [financialRecords, receivables, payments, treasuryChecks] = await Promise.all([
       tx.accountingFinancialRecord.findMany({ where: scope.financial({ OR: [{ customerId: resolved.customerId }, { contractId: { in: contractIds } }], createdAt: { lte: input.asOf } }),
         select: { id: true, contractId: true, kind: true, status: true, amount: true, currency: true, systemInvoiceNumber: true,
@@ -112,8 +118,17 @@ export async function readCustomerWorkspace(database: PrismaClient, input: { id:
         select: { id: true, contractId: true, originalAmount: true, remainingAmount: true, paidAmount: true, currency: true, dueDate: true, status: true }, orderBy: { dueDate: 'asc' } }),
       tx.accountingPaymentStatus.findMany({ where: scope.payment({ OR: [{ contractId: { in: contractIds } }, { receivable: { customerId: resolved.customerId } }], createdAt: { lte: input.asOf } }),
         select: { id: true, contractId: true, method: true, amount: true, currency: true, status: true, checkStatus: true, checkNumber: true, checkDueDate: true, occurredAt: true }, orderBy: { createdAt: 'desc' } }),
-      resolved.profile ? tx.accountingCheckInstrument.findMany({ where: { profileId: resolved.profile.id, createdAt: { lte: input.asOf } }, select: { id: true, serialNumber: true, sayadId: true, bankName: true, amountRials: true, clearedRials: true, unpaidRials: true, receipt: { select: { id: true } },
-        dueAt: true, status: true, direction: true, events: { select: { sequence: true }, orderBy: { sequence: 'desc' }, take: 1 } }, orderBy: { dueAt: 'asc' } }) : Promise.resolve([]),
+      resolved.profile ? tx.accountingCheckInstrument.findMany({
+        where: { profileId: resolved.profile.id, OR: [
+          { sepidarOpening: null, createdAt: { lte: input.asOf } },
+          { sepidarOpening: { openingEvent: { occurredAt: { lte: input.asOf } } } },
+        ] },
+        select: { ...chequeSelect,
+          events: { ...chequeSelect.events, where: { OR: [
+            { occurredAt: { lte: input.asOf } }, { checkInstrument: { sepidarOpening: null } },
+          ] }, orderBy: { sequence: 'desc' }, take: 1 },
+        }, orderBy: { dueAt: 'asc' },
+      }) : Promise.resolve<WorkspaceCheque[]>([]),
     ]);
     const receivableRials = projection?.receivableRials ?? 0n;
     const unallocatedCreditRials = projection?.unallocatedCreditRials ?? 0n;
@@ -126,7 +141,15 @@ export async function readCustomerWorkspace(database: PrismaClient, input: { id:
       customer: resolved.customer, bookId: resolved.book?.id ?? null, receivableRials, unallocatedCreditRials,
       debitOpenRials: projection?.debitOpenRials ?? 0n, standaloneCreditRials: projection?.standaloneCreditRials ?? 0n,
       refundableRials: (projection?.receipts ?? []).reduce((sum, receipt) => sum + receipt.refundableRials, 0n) + (projection?.standaloneCreditRials ?? 0n),
-      netBalanceRials: receivableRials - unallocatedCreditRials, contracts, financialRecords, receivables, payments, treasuryChecks,
+      netBalanceRials: receivableRials - unallocatedCreditRials, contracts, financialRecords, receivables, payments,
+      treasuryChecks: treasuryChecks.flatMap(({ sepidarOpening, events, ...check }: WorkspaceCheque) => {
+        const sequence = events.map(({ sequence }) => ({ sequence }));
+        if (!sepidarOpening) return [{ ...check, events: sequence }];
+        const eventType = events[0]?.eventType;
+        if (!eventType) return [];
+        const status = eventType === 'RECIPIENT_RETURNED' ? 'RECEIVED' : eventType;
+        return [{ ...check, status, clearedRials: status === 'CLEARED' ? check.amountRials : new Prisma.Decimal(0), events: sequence }];
+      }),
       openingReview, openingAttributions, openingSnapshotHash: opening?.snapshotHash, openingSources: opening?.sources ?? [], creditAllocations: projection?.creditAllocations ?? [],
       openItems: projection?.openItems ?? [], activityItems: projection?.activityItems ?? [], receipts: projection?.receipts ?? [], receiptHistory: projection?.receiptHistory ?? [], refunds: projection?.refunds ?? [] };
   }, { ordinaryOnly: true });

@@ -185,9 +185,10 @@ test('a nontrade assignment returns to custody before the separate return to the
 function bankApplicationFixture(evidence = bankHistory()) {
   const plan = previewSepidarOpeningCheques(evidence);
   const [cheque] = plan.instruments;
-  const ledgerLine = (id: string, accountId: string, amount: bigint, bank = false) => ({
+  const ledgerLine = (id: string, accountId: string, amount: bigint, bank = false, evidencePayload?: unknown) => ({
     id, accountId, partyId: bank ? null : 'party', financialAccountId: bank ? 'bank' : null, dimensions: [],
     debitRials: amount > 0n ? amount : 0n, creditRials: amount < 0n ? -amount : 0n,
+    evidenceType: 'SEPIDAR_ACC_VOUCHER_ITEM', evidencePayload, evidenceHash: evidencePayload ? hashAccountingEvidence(evidencePayload) : null,
   });
   const voucher = (at: string, sourceType: string, sourceId: string, sourcePayload: unknown,
     lines: ReturnType<typeof ledgerLine>[]) => ({
@@ -201,10 +202,11 @@ function bankApplicationFixture(evidence = bankHistory()) {
     ...cheque.events.map(event => [event.targetPosting.voucherId, voucher(event.occurredAt, 'SEPIDAR_CHEQUE_EVENT', event.historyId, {
       snapshotSha256: plan.snapshotSha256, sourceInstrumentId: cheque.instrument.id, historyId: event.historyId,
       previousHistoryId: event.previousHistoryId, document: event.document, bankFinancialAccountId: 'bank',
-      allocations: event.targetPosting.lines.map(({ sourceLineId, signedRials, targetAccountId }) =>
-        ({ sourceLineId, signedRials: signedRials.toString(), targetAccountId })),
+      allocations: event.targetPosting.lines.map(({ sourceLineId, signedRials, targetAccountId, tracking }) =>
+        ({ sourceLineId, signedRials: signedRials.toString(), targetAccountId, ...(tracking ? { tracking } : {}) })),
     }, event.targetPosting.lines.map(line => ledgerLine(line.targetLineId, line.targetAccountId,
-      line.signedRials, line.targetAccountId === 'cash')))] as const),
+      line.signedRials, line.targetAccountId === 'cash', line.tracking ? { snapshotSha256: plan.snapshotSha256,
+        row: { VoucherItemId: line.sourceLineId, VoucherRef: event.document.voucherId, ...line.tracking } } : undefined)))] as const),
   ]);
   const active = { legalEntityId: 'entity', activeFrom: new Date('2020-01-01'), activeTo: null };
   const state = { allowed: true, failOnAnchor: false, rejectDuplicate: false, locks: 0,
@@ -256,6 +258,31 @@ function bankApplicationFixture(evidence = bankHistory()) {
   };
   return { run, state, vouchers };
 }
+
+test('review and application bind original tracking to its allocated ledger row', async () => {
+  const original = bankHistory();
+  const tracking = { TrackingNumber: ' 001234 ', TrackingDate: '2026-04-03T00:00:00.0000000' };
+  const evidence = { ...original, ledgerLines: original.ledgerLines.map(line =>
+    line.id === '84' ? { ...line, tracking } : line) };
+  const [cheque] = previewSepidarOpeningCheques(evidence).instruments;
+  assert.deepEqual(cheque.events[1].targetPosting.lines.find(line => line.sourceLineId === '84')?.tracking, tracking);
+  const eventsWithTargetTracking = original.events.map(event => ({ ...event, posting: {
+    ...event.posting, lines: event.posting.lines.map(line => ({ ...line, tracking })),
+  } }));
+  assert.deepEqual(previewSepidarOpeningCheques({ ...original, events: eventsWithTargetTracking }),
+    previewSepidarOpeningCheques(original));
+  assert.throws(() => previewSepidarOpeningCheques({ ...original, ledgerLines: original.ledgerLines.map(line =>
+    line.id === '84' ? { ...line, tracking: { ...tracking, TrackingDate: '2026-02-30' } } : line) }), { code: 'INVALID_POSTING' });
+
+  const fixture = bankApplicationFixture(evidence);
+  const trackedLine = fixture.vouchers.get('collect-voucher')!.lines.find(line => line.id === 'collect-debit')!;
+  const originalPayload = trackedLine.evidencePayload;
+  trackedLine.evidencePayload = { row: { ...tracking, TrackingNumber: '999999' } };
+  await assert.rejects(fixture.run, { code: 'INVALID_TARGET' });
+  assert.equal(fixture.state.instrument, null);
+  trackedLine.evidencePayload = originalPayload;
+  assert.equal((await fixture.run()).instruments[0].replayed, false);
+});
 
 test('bank history application closes admission before locking or writing', async () => {
   const { run, state } = bankApplicationFixture();

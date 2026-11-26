@@ -15,6 +15,7 @@ type PostingReference = Readonly<{
 type PostingLine = Readonly<{
   sourceLineId: string; targetLineId: string; targetAccountId: string; signedRials: bigint;
 }>;
+type SourceTracking = Readonly<{ TrackingNumber: string | null; TrackingDate: string | null }>;
 type ReviewedPosting = Readonly<{
   voucherId: string; bookId: string; reference: PostingReference; lines: readonly PostingLine[];
 }>;
@@ -33,8 +34,14 @@ type SourceInstrument = Readonly<{
 
 type SourceLedgerLine = Readonly<{
   id: string; voucherId: string; issuerKind: DocumentKind; issuerHeaderId: string;
-  accountId: number; detailId: string | null; signedRials: bigint; description: string;
+  accountId: number; detailId: string | null; signedRials: bigint; description: string; tracking?: SourceTracking;
 }>;
+
+function validTrackingDate(value: unknown) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?Z?)?$/.test(value)) return false;
+  const parsed = new Date(value.includes('T') && !value.endsWith('Z') ? `${value}Z` : value);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().startsWith(value.slice(0, 10));
+}
 
 export type SepidarOpeningChequeEvidence = Readonly<{
   snapshotSha256: string; bookId: string; openingVoucherId: string; sourceOpeningVoucherId: string; basisAt: string; throughAt: string;
@@ -58,7 +65,7 @@ type PlannedChequeEvent = {
   status: ChequeStatus;
   occurredAt: string;
   document: SourceDocument;
-  targetPosting: ReviewedPosting;
+  targetPosting: Omit<ReviewedPosting, 'lines'> & { lines: readonly (PostingLine & { tracking?: SourceTracking })[] };
 };
 
 type ErrorCode = 'INVALID_SCOPE' | 'INVALID_INSTRUMENT' | 'INVALID_OPENING_LINE' | 'INVALID_HISTORY'
@@ -256,8 +263,8 @@ export function previewSepidarOpeningCheques(evidence: SepidarOpeningChequeEvide
       let assets = 0n;
       let counterparts = 0n;
       const sourceLineIds = new Set<string>();
-      const lines = [...posting.lines].sort((a, b) => orderById({ id: a.sourceLineId }, { id: b.sourceLineId }));
-      for (const allocation of lines) {
+      const allocations = [...posting.lines].sort((a, b) => orderById({ id: a.sourceLineId }, { id: b.sourceLineId }));
+      const lines = allocations.map(allocation => {
         const source = ledgerLines.get(allocation.sourceLineId);
         requireEvidence(source && source.voucherId === document.voucherId && source.issuerKind === document.kind
           && source.issuerHeaderId === document.headerId && allocation.signedRials !== 0n
@@ -284,7 +291,18 @@ export function previewSepidarOpeningCheques(evidence: SepidarOpeningChequeEvide
             && (effect.counterDetailId === undefined || source.detailId === effect.counterDetailId), 'INVALID_POSTING', event.id);
           counterparts += allocation.signedRials;
         }
-      }
+        const tracking = source.tracking;
+        const { sourceLineId, targetLineId, targetAccountId, signedRials } = allocation;
+        const plannedLine = { sourceLineId, targetLineId, targetAccountId, signedRials };
+        if (tracking === undefined) return plannedLine;
+        requireEvidence(tracking, 'INVALID_POSTING', source.id);
+        const { TrackingNumber, TrackingDate } = tracking;
+        const hasNumber = typeof TrackingNumber === 'string' && TrackingNumber.trim().length > 0;
+        const hasDate = validTrackingDate(TrackingDate);
+        requireEvidence((hasNumber || TrackingNumber === null) && (hasDate || TrackingDate === null)
+          && (hasNumber || hasDate), 'INVALID_POSTING', source.id);
+        return { ...plannedLine, tracking: { TrackingNumber, TrackingDate } };
+      });
       requireEvidence(assets === amountRials * effect.assetSign && assets + counterparts === 0n, 'INVALID_POSTING', event.id);
       status = effect.status;
       events.push({ historyId: event.id, previousHistoryId: event.previousHistoryId, sequence: index + 2,

@@ -28,6 +28,7 @@ function bankEventEvidence(plan: Plan, cheque: Cheque, event: Cheque['events'][n
       sourceLineId: line.sourceLineId,
       targetAccountId: line.targetAccountId,
       signedRials: line.signedRials.toString(),
+      ...(line.tracking ? { tracking: line.tracking } : {}),
     })),
     bankFinancialAccountId: event.targetPosting.reference.targetId,
   };
@@ -119,6 +120,14 @@ async function verifyTargets(tx: Prisma.TransactionClient, plan: Plan, evidence:
           && line.partyId === (isBank ? null : partyId) && line.financialAccountId === (isBank ? bank.id : null)
           && BigInt(line.debitRials.toString()) === (allocation.signedRials > 0n ? allocation.signedRials : 0n)
           && BigInt(line.creditRials.toString()) === (allocation.signedRials < 0n ? -allocation.signedRials : 0n), 'INVALID_TARGET');
+        if (allocation.tracking) {
+          const payload = { snapshotSha256: plan.snapshotSha256, row: {
+            VoucherItemId: allocation.sourceLineId, VoucherRef: event.document.voucherId, ...allocation.tracking,
+          } };
+          const expectedHash = hashAccountingEvidence(payload);
+          requireValid(line.evidenceType === 'SEPIDAR_ACC_VOUCHER_ITEM' && line.evidenceHash === expectedHash
+            && hashAccountingEvidence(line.evidencePayload) === expectedHash, 'INVALID_TARGET');
+        }
       }
     }
   }

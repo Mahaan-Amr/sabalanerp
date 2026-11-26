@@ -13339,6 +13339,9 @@ model ProjectReturnVersionItem {
   damagedQuantity     Decimal                      @db.Decimal(65, 30)
   healthyCalculation  Json?
   damagedCalculation  Json?
+  effectiveWidthMeters Decimal?                    @db.Decimal(65, 30)
+  healthyAreaSquareMeters Decimal?                 @db.Decimal(65, 30)
+  damagedAreaSquareMeters Decimal?                 @db.Decimal(65, 30)
   contractSources     Json?
   inventoryIdentityId String?                      @unique
   version             ProjectReturnVersion         @relation(fields: [versionId], references: [id], onDelete: Restrict)

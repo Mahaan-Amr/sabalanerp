@@ -5,6 +5,7 @@ import { ExactQuantityDecimal, parseExactQuantityAtoms } from './exactQuantity';
 import { calculateLogisticsLinearQuantity } from './logisticsLineQuantity';
 import { readVerifiedProjectDispatch, stoneReturnEvidenceRecord, type ProjectReturnContractSource } from './projectReturnDispatch';
 import { recordProjectReturnStock } from './projectReturnStock';
+import { projectReturnItemArea, projectReturnWidth } from './projectReturnArea';
 import { inferLogisticsContractUnit, resolveLogisticsContractRow } from './logisticsContractRow';
 import { lockProjectReturnVisit, presentProjectReturnVisit, receiveProjectReturnVisit } from './projectReturnGuardVisits';
 import { readCurrentPartnerCaseViews } from './partnerSales/cases/lifecycle';
@@ -75,7 +76,7 @@ export function parseProjectReturnItems(body: Record<string, unknown>) {
   type Calculation = NonNullable<ReturnType<typeof receiptQuantity>['calculation']>;
   type Item = {
     productId: string; unit: ReturnUnit; healthyQuantity: string; damagedQuantity: string;
-    healthyCalculation?: Calculation; damagedCalculation?: Calculation;
+    healthyCalculation?: Calculation; damagedCalculation?: Calculation; effectiveWidthMeters?: string; partnerContractId?: string;
   };
   const items = new Map<string, Item>();
   for (const input of body.items) {
@@ -89,11 +90,21 @@ export function parseProjectReturnItems(body: Record<string, unknown>) {
     if (healthy.quantity === '0' && damaged.quantity === '0') {
       throw new ProjectReturnReceiptError(400, 'مقدار سالم یا آسیب‌دیده را وارد کنید.');
     }
+    let effectiveWidthMeters: string | null = null;
+    if (input.effectiveWidthMeters !== undefined) {
+      if (unit === 'meter' && typeof input.effectiveWidthMeters === 'string' && input.effectiveWidthMeters.length <= 100
+        && /^\d+(?:\.\d+)?$/.test(input.effectiveWidthMeters.trim())) {
+        effectiveWidthMeters = projectReturnWidth(input.effectiveWidthMeters, 'm');
+      }
+      if (!effectiveWidthMeters) throw new ProjectReturnReceiptError(400, 'عرض سنگ به متر باید بزرگ‌تر از صفر باشد.');
+    }
     const item = {
       productId: projectReturnId(input.productId, 'محصول'), unit,
       healthyQuantity: healthy.quantity, damagedQuantity: damaged.quantity,
       ...(healthy.calculation && { healthyCalculation: healthy.calculation }),
       ...(damaged.calculation && { damagedCalculation: damaged.calculation }),
+      ...(effectiveWidthMeters && { effectiveWidthMeters }),
+      ...(input.partnerContractId !== undefined && { partnerContractId: projectReturnId(input.partnerContractId, 'قرارداد فروش همکار') }),
     };
     const key = projectReturnProductKey(item);
     if (items.has(key)) throw new ProjectReturnReceiptError(400, 'محصول با این واحد تکراری است.');
@@ -178,7 +189,32 @@ export async function findProjectReturnProjects(db: Prisma.TransactionClient, cu
 
 type PartnerReturnSource = { projectId: string; contractId: string; partnerCaseId: string; partnerRevision: number; productRowId: string };
 
-type ReturnProduct = { productId: string; productName: string; productCode: string; unit: ReturnUnit; contractSources: Array<ProjectReturnContractSource | PartnerReturnSource> };
+type ReturnProduct = {
+  productId: string; productName: string; productCode: string; unit: ReturnUnit;
+  suggestedWidthMeters: string | null;
+  contractSources: Array<ProjectReturnContractSource | PartnerReturnSource>;
+};
+
+export function projectReturnVersionItem(
+  product: ReturnProduct,
+  item: ReturnType<typeof parseProjectReturnItems>['items'][number],
+  priorWidthMeters?: string | null,
+) {
+  const { suggestedWidthMeters, ...productFacts } = product;
+  const recordedWidth = priorWidthMeters ?? suggestedWidthMeters;
+  if (recordedWidth && item.effectiveWidthMeters && item.effectiveWidthMeters !== recordedWidth) {
+    throw new ProjectReturnReceiptError(400, 'عرض ثبت‌شدهٔ محصول تغییر کرده است. دوباره عرض محصول را بررسی کنید.');
+  }
+  const effectiveWidthMeters = recordedWidth ?? item.effectiveWidthMeters ?? null;
+  let area: ReturnType<typeof projectReturnItemArea>;
+  try {
+    area = projectReturnItemArea(item, effectiveWidthMeters);
+  } catch {
+    throw new ProjectReturnReceiptError(400, 'مساحت بازگشت از محدودهٔ قابل ثبت بیشتر است.');
+  }
+  const { partnerContractId: _partnerContractId, ...quantityFacts } = item;
+  return { ...productFacts, ...quantityFacts, ...area };
+}
 
 export async function readProjectReturnProducts(
   db: Prisma.TransactionClient, customerId: string, projectIds: string[], productIds?: string[], deliveredBefore = new Date(), partnerContractId?: string,
@@ -215,12 +251,14 @@ export async function readProjectReturnProducts(
     readProjectReturnPartnerContracts(db, customerId, projectIds, partnerContractId),
   ]);
   const products = new Map<string, ReturnProduct>();
+  const ordinaryWidths = new Map<string, string | null>();
   function addSource(productId: string, productData: { code: string; name: string; namePersian: string | null },
-    unit: ReturnUnit, source: ProjectReturnContractSource | PartnerReturnSource) {
+    unit: ReturnUnit, source: ProjectReturnContractSource | PartnerReturnSource, width: string | null) {
     const key = projectReturnProductKey({ productId, unit });
     const product = products.get(key) ?? {
-      productId, productName: productData.namePersian || productData.name, productCode: productData.code, unit, contractSources: [],
+      productId, productName: productData.namePersian || productData.name, productCode: productData.code, unit, contractSources: [], suggestedWidthMeters: width,
     };
+    if (product.suggestedWidthMeters !== width) product.suggestedWidthMeters = null;
     product.contractSources.push(source);
     products.set(key, product);
   }
@@ -236,17 +274,23 @@ export async function readProjectReturnProducts(
     const unit = units.find(candidate => candidate === contractUnit);
     if (!unit) continue;
     const { projectId } = item.contract.contractData as { projectId: string };
+    const width = unit === 'meter'
+      ? projectReturnWidth(snapshot.widthMeters, 'm') ?? projectReturnWidth(snapshot.width, snapshot.widthUnit)
+      : null;
+    ordinaryWidths.set(item.id, width);
     addSource(item.productId, item.product, unit, { projectId, contractId: item.contractId,
-      contractItemId: item.id, productRowId: item.productRowId });
+      contractItemId: item.id, productRowId: item.productRowId }, width);
   }
   const partnerRows = partnerContracts.flatMap(({ id, projectId, caseId, revision, products, graph: snapshot }) => {
     const graph = stoneReturnEvidenceRecord(snapshot);
     const rows = Array.isArray(graph.rows) ? graph.rows.map(stoneReturnEvidenceRecord) : [];
     return products.flatMap(row => {
       const unit = units.find(candidate => candidate === row.unit || (candidate === 'meter' && row.unit === 'm'));
-      const productId = rows.find(item => item.productRowId === row.productRowId)?.catalogProductId;
+      const graphRow = rows.find(item => item.productRowId === row.productRowId);
+      const productId = graphRow?.catalogProductId;
       if (!unit || typeof productId !== 'string' || (productIds && !productIds.includes(productId))) return [];
-      return [{ productId, unit, source: { projectId, contractId: id, productRowId: row.productRowId,
+      const rowWidth = stoneReturnEvidenceRecord(graphRow?.commercial).requestedWidthMeters;
+      return [{ productId, unit, rowWidth, source: { projectId, contractId: id, productRowId: row.productRowId,
         partnerCaseId: caseId, partnerRevision: revision } }];
     });
   });
@@ -256,9 +300,11 @@ export async function readProjectReturnProducts(
       select: { id: true, code: true, name: true, namePersian: true },
     });
     const byId = new Map(catalog.map(product => [product.id, product]));
-    for (const { productId, unit, source } of partnerRows) {
+    for (const { productId, unit, rowWidth, source } of partnerRows) {
       const product = byId.get(productId);
-      if (product) addSource(productId, product, unit, source);
+      if (product) addSource(productId, product, unit, source, unit === 'meter'
+        ? projectReturnWidth(rowWidth, 'm')
+        : null);
     }
   }
   const exits = revisions.flatMap(revision => [revision.physicalExit, revision.manualOutageExit]
@@ -280,19 +326,40 @@ export async function readProjectReturnProducts(
       const source = await readVerifiedProjectDispatch(db, dispatch, customerId, item.productId);
       if (!source || !projectIds.includes(source.projectId)) continue;
       const { projectName: _projectName, ...contractSource } = source;
-      addSource(item.productId, item.product, unit, contractSource);
+      addSource(item.productId, item.product, unit, contractSource, ordinaryWidths.get(contractSource.contractItemId) ?? null);
     }
   }
   return products;
+}
+
+
+type IntakeItems = ReturnType<typeof parseProjectReturnItems>['items'];
+
+export async function readProjectReturnIntakeProducts(
+  tx: Prisma.TransactionClient, customerId: string, projectIds: string[], items: IntakeItems, deliveredBefore: Date,
+) {
+  const productIdsByContract = new Map<string | undefined, string[]>();
+  for (const item of items) {
+    const productIds = productIdsByContract.get(item.partnerContractId) ?? [];
+    productIds.push(item.productId);
+    productIdsByContract.set(item.partnerContractId, productIds);
+  }
+  const scopes = await Promise.all([...productIdsByContract].map(async ([partnerContractId, productIds]) => [
+    partnerContractId,
+    await readProjectReturnProducts(tx, customerId, projectIds, productIds, deliveredBefore, partnerContractId),
+  ] as const));
+  const products = new Map(scopes);
+  return items.map(item => products.get(item.partnerContractId)?.get(projectReturnProductKey(item)));
 }
 
 export async function searchProjectReturnProducts(db: Prisma.TransactionClient, customerId: string, projectIds: string[], search: string, partnerContractId?: string) {
   await findProjectReturnProjects(db, customerId, projectIds);
   const terms = normalizePersianSearchTokens(search);
   const products = await readProjectReturnProducts(db, customerId, projectIds, undefined, new Date(), partnerContractId);
-  return [...products.values()].flatMap(({ contractSources: _sources, ...product }) => {
+  return [...products.values()].flatMap(({ contractSources: _sources, suggestedWidthMeters, ...product }) => {
     const keys = normalizePersianSearchTokens(`${product.productName} ${product.productCode}`);
-    return terms.every(term => keys.some(key => key.includes(term))) ? [product] : [];
+    return terms.every(term => keys.some(key => key.includes(term)))
+      ? [{ ...product, ...(product.unit === 'meter' && { suggestedWidthMeters }) }] : [];
   }).slice(0, 50);
 }
 
@@ -309,6 +376,14 @@ const latestCaseInclude = {
   versions: { take: 1, orderBy: { number: 'desc' }, include: initialCaseInclude.versions.include },
 } satisfies Prisma.ProjectReturnCaseInclude;
 
+function projectReturnPartnerScope(value: Prisma.JsonValue) {
+  if (!Array.isArray(value) || !value.length) return null;
+  const sources = value.map(stoneReturnEvidenceRecord);
+  const contractId = sources[0].contractId;
+  return typeof contractId === 'string' && sources.every(source =>
+    typeof source.partnerCaseId === 'string' && source.contractId === contractId) ? contractId : null;
+}
+
 function presentReceipt(receipt: Prisma.ProjectReturnCaseGetPayload<{ include: typeof initialCaseInclude }>) {
   const { guardVisit, versions: [version], id, createdAt, operationStatus } = receipt;
   return {
@@ -320,9 +395,13 @@ function presentReceipt(receipt: Prisma.ProjectReturnCaseGetPayload<{ include: t
       submittedAt: version.submittedAt, submittedBy: version.submittedBy, assignedAt: version.assignedAt, assignedBy: version.assignedBy,
       projects: version.projects.map(({ projectId, projectName }) => ({ projectId, projectName })),
       items: version.items.map(({ id, productId, productName, productCode, unit, healthyQuantity, damagedQuantity,
-        healthyCalculation, damagedCalculation, inventoryIdentityId }) => ({
+        healthyCalculation, damagedCalculation, inventoryIdentityId, effectiveWidthMeters, healthyAreaSquareMeters, damagedAreaSquareMeters, contractSources }) => ({
         id, productId, productName, productCode, unit, healthyQuantity: healthyQuantity.toFixed(), damagedQuantity: damagedQuantity.toFixed(),
         healthyCalculation, damagedCalculation, inventoryIdentityId,
+        partnerContractId: projectReturnPartnerScope(contractSources),
+        effectiveWidthMeters: effectiveWidthMeters?.toFixed() ?? null,
+        healthyAreaSquareMeters: healthyAreaSquareMeters?.toFixed() ?? (unit === 'squareMeter' ? healthyQuantity.toFixed() : null),
+        damagedAreaSquareMeters: damagedAreaSquareMeters?.toFixed() ?? (unit === 'squareMeter' ? damagedQuantity.toFixed() : null),
       })),
     },
   };
@@ -362,24 +441,29 @@ function parseIntake(body: Record<string, unknown>) {
 
 export async function prepareProjectReturnVersion(tx: Prisma.TransactionClient, input: {
   caseId: string; actorId: string; body: Record<string, unknown>; deliveredBefore: Date;
+  previousReceipt?: Awaited<ReturnType<typeof readProjectReturnReceipt>>;
 }) {
   const command = parseIntake(input.body);
   const projects = await findProjectReturnProjects(tx, command.customerId, command.projectIds);
   const { customer } = projects[0];
-  const products = await readProjectReturnProducts(tx, command.customerId, command.projectIds, command.items.map(item => item.productId), input.deliveredBefore);
+  const products = await readProjectReturnIntakeProducts(tx, command.customerId, command.projectIds, command.items, input.deliveredBefore);
   const id = randomUUID();
   const submittedAt = new Date();
   const items: Prisma.ProjectReturnVersionItemUncheckedCreateWithoutVersionInput[] = [];
-  for (const row of command.items) {
-    const product = products.get(projectReturnProductKey(row));
+  for (const [index, row] of command.items.entries()) {
+    const product = products[index];
     if (!product) throw new ProjectReturnReceiptError(400, 'محصول با این واحد در قراردادهای پروژه پیدا نشد.');
+    const prior = input.previousReceipt?.customerId === customer.id
+      ? input.previousReceipt.version.items.find(item => projectReturnProductKey(item) === projectReturnProductKey(row))
+      : undefined;
+    const versionItem = projectReturnVersionItem(product, row, prior?.effectiveWidthMeters);
     const itemId = randomUUID();
     const inventoryIdentityId = await recordProjectReturnStock(tx, {
       caseId: input.caseId, versionId: id, guardVisitId: command.visitId, customerId: customer.id,
       actorId: input.actorId, occurredAt: submittedAt, itemId, productId: row.productId,
       unit: row.unit, healthyQuantity: row.healthyQuantity,
     });
-    items.push({ ...product, ...row, id: itemId, inventoryIdentityId });
+    items.push({ ...versionItem, id: itemId, inventoryIdentityId });
   }
   return {
     customer,

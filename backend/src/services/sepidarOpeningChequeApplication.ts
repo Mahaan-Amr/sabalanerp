@@ -279,6 +279,29 @@ type ApplyOpeningHistoriesInput = {
   evidence: SepidarOpeningChequeEvidence; custodyFinancialAccountId: string; actor: AccountingActor;
 };
 
+/** Validate posted cheque vouchers on a consistent snapshot without opening the write admission. */
+export async function inspectSepidarOpeningChequeTargets(
+  database: Pick<PrismaClient, '$transaction'>,
+  input: Omit<ApplyOpeningHistoriesInput, 'actor'>,
+) {
+  const evidence = structuredClone(input.evidence);
+  const { custodyFinancialAccountId } = input;
+  const plan = previewSepidarOpeningCheques(evidence);
+  await database.$transaction(async tx => {
+    await tx.$executeRaw`SET TRANSACTION READ ONLY`;
+    const book = await tx.accountingBook.findUnique({ where: { id: plan.bookId } });
+    requireValid(book, 'INVALID_TARGET');
+    await verifyTargets(tx, plan, evidence, book.legalEntityId, custodyFinancialAccountId);
+  }, { isolationLevel: 'RepeatableRead', timeout: 30_000 });
+  return {
+    bookId: plan.bookId,
+    basisAt: plan.basisAt,
+    snapshotSha256: plan.snapshotSha256,
+    instruments: plan.instruments.length,
+    subsequentEvents: plan.instruments.reduce((count, cheque) => count + cheque.events.length, 0),
+  };
+}
+
 async function applyOpeningHistories(database: Pick<PrismaClient, '$transaction'>, input: ApplyOpeningHistoriesInput,
   lane: HistoryLane) {
   const releaseId = process.env.DEPLOYMENT_RELEASE_ID;

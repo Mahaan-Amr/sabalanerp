@@ -4,7 +4,7 @@ import { previewSepidarOpeningCheques, SepidarOpeningChequePlanError, type Sepid
 
 import { hashAccountingEvidence } from '../accountingLedgerFoundation';
 import { applySepidarOpeningBankAndCustomerReturnHistories, applySepidarOpeningBankHistories,
-  applySepidarOpeningHistoricalRecipientHistories, applySepidarOpeningHistoricalSupplierHistories } from '../sepidarOpeningChequeApplication';
+  applySepidarOpeningHistoricalRecipientHistories, applySepidarOpeningHistoricalSupplierHistories, inspectSepidarOpeningChequeTargets } from '../sepidarOpeningChequeApplication';
 
 const basis = '2026-03-20T20:30:00.000Z';
 const depositAt = '2026-04-01T08:00:00.000Z';
@@ -253,15 +253,25 @@ function bankApplicationFixture(evidence = bankHistory()) {
     sourcePayload: voucherSource(supplierEvent), sourceHash: hashAccountingEvidence(voucherSource(supplierEvent)),
     allocations: [] as { id: string }[], payableChecks: [] as { id: string }[],
   };
-  const state = { allowed: true, failOnAnchor: false, rejectDuplicate: false, locks: 0,
+  const state = { allowed: true, failOnAnchor: false, rejectDuplicate: false, locks: 0, readOnlyTransactions: 0,
     instrument: null as Record<string, unknown> | null, anchor: null as Record<string, unknown> | null };
   const database = {
     $transaction: async (operation: (tx: unknown) => unknown, options: { isolationLevel: string }) => {
-      assert.equal(options.isolationLevel, 'Serializable');
+      assert.ok(['Serializable', 'RepeatableRead'].includes(options.isolationLevel));
       const txState = structuredClone(state);
       const tx = {
-        $queryRaw: async () => [{ admitted: txState.allowed }],
-        $executeRaw: async () => { txState.locks++; },
+        $queryRaw: async () => {
+          assert.equal(options.isolationLevel, 'Serializable');
+          return [{ admitted: txState.allowed }];
+        },
+        $executeRaw: async (sql: TemplateStringsArray) => {
+          if (options.isolationLevel === 'RepeatableRead') {
+            assert.equal(sql[0], 'SET TRANSACTION READ ONLY');
+            txState.readOnlyTransactions++;
+          } else {
+            txState.locks++;
+          }
+        },
         accountingBook: { findUnique: async () => ({ legalEntityId: 'entity' }) },
         accountingFinancialAccount: { findUnique: async ({ where: { id } }) =>
           ({ ...active, id, kind: id === 'till' ? 'CASH' : 'BANK', currency: 'IRR' }) },
@@ -310,7 +320,7 @@ function bankApplicationFixture(evidence = bankHistory()) {
       else process.env.DEPLOYMENT_RELEASE_ID = previous;
     }
   };
-  return { run, state, vouchers, supplierBinding, supplierSettlement };
+  return { run, inspect: () => inspectSepidarOpeningChequeTargets(database, input), state, vouchers, supplierBinding, supplierSettlement };
 }
 
 test('historical supplier endorsement retains the payable and accepts a source cheque without Sayad', async () => {
@@ -474,4 +484,20 @@ test('bank history fails on existing instruments and rolls back its canonical ro
   assert.equal(state.anchor, null);
   state.failOnAnchor = false;
   assert.equal((await run()).instruments[0].replayed, false);
+});
+
+test('inspecting cheque targets stays read-only and flags a reversed voucher while admission is closed', async () => {
+  const { inspect, state, vouchers } = bankApplicationFixture();
+  state.allowed = false;
+  const inspected = await inspect();
+  assert.equal(inspected.instruments, 1);
+  assert.equal(inspected.subsequentEvents, 2);
+  assert.equal(state.readOnlyTransactions, 1);
+  assert.equal(state.locks, 0);
+  assert.equal(state.anchor, null);
+  assert.equal(state.instrument, null);
+  const eventVoucher = [...vouchers.values()].find(voucher => voucher.sourceType === 'SEPIDAR_CHEQUE_EVENT');
+  assert.ok(eventVoucher);
+  eventVoucher.reversals.push({ id: 'reversal' });
+  await assert.rejects(inspect, { code: 'INVALID_TARGET' });
 });

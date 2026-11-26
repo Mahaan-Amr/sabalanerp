@@ -2,24 +2,14 @@ import { readFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
 import { disconnectDatabase, prisma } from '../lib/prisma';
 import { inspectSepidarOpeningChequeTargets, SepidarOpeningChequeApplicationError } from '../services/sepidarOpeningChequeApplication';
-import { SepidarOpeningChequePlanError, type SepidarOpeningChequeEvidence } from '../services/sepidarOpeningChequePlan';
-
-function readEvidence(text: string): SepidarOpeningChequeEvidence {
-  return JSON.parse(text.replace(/^\uFEFF/, ''), (key, value: unknown) => {
-    if (key !== 'amountRials' && key !== 'signedRials') return value;
-    if (typeof value !== 'string' || !/^(0|-?[1-9][0-9]{0,19})$/.test(value)) {
-      throw new Error('INVALID_RIAL_AMOUNT');
-    }
-    return BigInt(value);
-  }) as SepidarOpeningChequeEvidence;
-}
+import { readSepidarOpeningChequeEvidence, SepidarOpeningChequePlanError } from '../services/sepidarOpeningChequePlan';
 
 async function main() {
   const { values } = parseArgs({ options: {
     evidence: { type: 'string' }, custody: { type: 'string' },
   } });
   if (!values.evidence || !values.custody) throw new Error('REQUIRED_OPTIONS: --evidence --custody');
-  const evidence = readEvidence(await readFile(values.evidence, 'utf8'));
+  const evidence = readSepidarOpeningChequeEvidence(await readFile(values.evidence, 'utf8'));
   const result = await inspectSepidarOpeningChequeTargets(prisma, {
     evidence, custodyFinancialAccountId: values.custody,
   });

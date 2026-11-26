@@ -52,6 +52,16 @@ export type SepidarOpeningChequeEvidence = Readonly<{
   ledgerLines: readonly SourceLedgerLine[];
 }>;
 
+export function readSepidarOpeningChequeEvidence(text: string): SepidarOpeningChequeEvidence {
+  return JSON.parse(text.replace(/^\uFEFF/, ''), (key, value: unknown) => {
+    if (key !== 'amountRials' && key !== 'signedRials') return value;
+    if (typeof value !== 'string' || !/^(0|-?[1-9][0-9]{0,19})$/.test(value)) {
+      throw new Error('INVALID_RIAL_AMOUNT');
+    }
+    return BigInt(value);
+  }) as SepidarOpeningChequeEvidence;
+}
+
 type Effect = Readonly<{
   eventType: 'DEPOSITED' | 'CLEARED' | 'ENDORSED' | 'RECIPIENT_RETURNED' | 'RETURNED';
   status: ChequeStatus; referenceKind: ReferenceKind; sourceReferenceId: string;

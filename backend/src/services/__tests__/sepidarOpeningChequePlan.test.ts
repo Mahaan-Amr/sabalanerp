@@ -4,7 +4,8 @@ import { previewSepidarOpeningCheques, SepidarOpeningChequePlanError, type Sepid
 
 import { hashAccountingEvidence } from '../accountingLedgerFoundation';
 import { applySepidarOpeningBankAndCustomerReturnHistories, applySepidarOpeningBankHistories,
-  applySepidarOpeningHistoricalRecipientHistories, applySepidarOpeningHistoricalSupplierHistories, inspectSepidarOpeningChequeTargets, prepareSepidarOpeningChequeVouchers } from '../sepidarOpeningChequeApplication';
+  applySepidarOpeningHistoricalRecipientHistories, applySepidarOpeningHistoricalSupplierHistories, inspectSepidarOpeningChequeTargets, prepareSepidarOpeningChequeVouchers,
+  applySepidarOpeningChequeBatch, sepidarOpeningChequeBatchDigest } from '../sepidarOpeningChequeApplication';
 
 const basis = '2026-03-20T20:30:00.000Z';
 const depositAt = '2026-04-01T08:00:00.000Z';
@@ -519,4 +520,19 @@ test('cheque voucher preparation balances custody against the approved clearing 
     assert.equal(command.lines.reduce((net, line) => net + line.debitRials - line.creditRials, 0n), 0n);
   }
   assert.throws(() => prepareSepidarOpeningChequeVouchers(evidence, { clearingAccountId: 'custody' }), { code: 'INVALID_TARGET' });
+});
+
+test('the combined cheque batch binds the prepared ledger period and closes before acquiring write locks', async () => {
+  const fixture = bankApplicationFixture();
+  const actor = { id: 'accountant', profile: 'ACCOUNTANT' as const };
+  const evidence = bankHistory();
+  const target = { evidence, custodyFinancialAccountId: 'till', clearingAccountId: 'opening-transfer',
+    fiscalYearId: 'fiscal-year', periodId: 'opening-period' };
+  assert.notEqual(sepidarOpeningChequeBatchDigest(target),
+    sepidarOpeningChequeBatchDigest({ ...target, periodId: 'different-period' }));
+  fixture.state.allowed = false;
+  await assert.rejects(fixture.run(database => applySepidarOpeningChequeBatch(database, { ...target, actor })),
+    { code: 'ADMISSION_CLOSED' });
+  assert.equal(fixture.state.locks, 0);
+  assert.equal(fixture.state.instrument, null);
 });

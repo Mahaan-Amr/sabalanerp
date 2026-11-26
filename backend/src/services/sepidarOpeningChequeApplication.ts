@@ -1,5 +1,7 @@
+import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
-import { hashAccountingEvidence, IRR_ROUNDING_RULE_V1, type AccountingActor, type LedgerLineInput } from './accountingLedgerFoundation';
+import { createAccountingLedgerApplication, hashAccountingEvidence, IRR_ROUNDING_RULE_V1, type AccountingActor, type LedgerLineInput } from './accountingLedgerFoundation';
+import { createAccountingLedgerPrismaRepository } from './accountingLedgerPrismaRepository';
 import { SEPIDAR_CHEQUE_SUPPLIER_ENDORSEMENT } from './accountingSupplyChain';
 import { previewSepidarOpeningCheques, type SepidarOpeningChequeEvidence } from './sepidarOpeningChequePlan';
 
@@ -368,6 +370,120 @@ export async function inspectSepidarOpeningChequeTargets(
   };
 }
 
+type ApplyOpeningBatchInput = ApplyOpeningHistoriesInput & {
+  clearingAccountId: string;
+  recipientDimensionTypeId?: string;
+  fiscalYearId: string;
+  periodId: string;
+};
+
+function openingBatchPreparation(input: Omit<ApplyOpeningBatchInput, 'actor'>) {
+  const { evidence, custodyFinancialAccountId, clearingAccountId, recipientDimensionTypeId, fiscalYearId, periodId } = input;
+  const prepared = prepareSepidarOpeningChequeVouchers(evidence, { clearingAccountId, recipientDimensionTypeId });
+  const planSha256 = hashAccountingEvidence({
+    purpose: 'SEPIDAR_OPENING_CHEQUE_VOUCHERS_AND_HISTORY', evidence, prepared, custodyFinancialAccountId,
+    clearingAccountId, recipientDimensionTypeId, fiscalYearId, periodId,
+  });
+  return { prepared, planSha256 };
+}
+
+export function sepidarOpeningChequeBatchDigest(input: Omit<ApplyOpeningBatchInput, 'actor'>) {
+  return openingBatchPreparation(input).planSha256;
+}
+
+async function requireOpeningAdmission(tx: Prisma.TransactionClient, releaseId: string, bookId: string, actorId: string, digest: string) {
+  const admission = await tx.$queryRaw<Array<{ admitted: boolean }>>`
+    SELECT public.sepidar_opening_cheques_runtime_admitted(
+      ${releaseId}, ${bookId}, ${actorId}, ${digest}
+    ) AS admitted`.catch(() => []);
+  requireValid(admission[0]?.admitted === true, 'ADMISSION_CLOSED');
+}
+
+async function lockOpeningBook(tx: Prisma.TransactionClient, bookId: string) {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'sepidar-opening-cheques:' + bookId}))`;
+}
+
+/** Used by a protected cheque importer after admission for the exact voucher and history plan. */
+export async function applySepidarOpeningChequeBatch(database: Pick<PrismaClient, '$transaction'>, input: ApplyOpeningBatchInput) {
+  const releaseId = process.env.DEPLOYMENT_RELEASE_ID;
+  const batch = structuredClone(input);
+  const { actor, evidence, custodyFinancialAccountId, clearingAccountId, fiscalYearId, periodId } = batch;
+  requireValid(releaseId && actor.id.trim() && actor.profile === 'ACCOUNTANT', 'ADMISSION_CLOSED');
+  const { prepared, planSha256 } = openingBatchPreparation(batch);
+  return database.$transaction(async tx => {
+    const bookId = prepared.bookId;
+    await requireOpeningAdmission(tx, releaseId, bookId, actor.id, planSha256);
+    await lockOpeningBook(tx, bookId);
+    const book = await tx.accountingBook.findUnique({ where: { id: bookId } });
+    const clearing = await tx.accountingLedgerAccount.findUnique({ where: { id: clearingAccountId }, include: { dimensionRules: true } });
+    requireValid(book && clearing && clearing.bookId === bookId && clearing.code === '119901' && clearing.level === 'MOIN'
+      && clearing.statementRole === 'ASSET' && clearing.currencyBehavior === 'BASE_ONLY'
+      && clearing.partyRequirement === 'FORBIDDEN' && clearing.financialAccountRequirement === 'FORBIDDEN'
+      && !clearing.dimensionRules.some(rule => rule.requirement === 'REQUIRED') && !clearing.retiredAt
+      && activeAt({ activeFrom: clearing.effectiveFrom, activeTo: clearing.effectiveTo }, prepared.opening.occurredAt), 'INVALID_TARGET');
+
+    const ledger = createAccountingLedgerApplication(createAccountingLedgerPrismaRepository(tx, true),
+      { now: () => new Date(), nextReference: randomUUID });
+    const post = async (command: typeof prepared.opening | typeof prepared.events[number]) => {
+      const key = 'sepidar-cheque-batch:' + hashAccountingEvidence({ bookId, type: command.source.type, id: command.source.id });
+      const at = new Date(command.occurredAt);
+      const draft = await ledger.createManualDraft({
+        bookId, fiscalYearId, periodId, documentDate: at, occurredAt: at, idempotencyKey: key, correlationId: key,
+        description: 'انتقال گردش مستند چک از سپیدار', source: command.source, lines: command.lines, actor,
+      });
+      const posted = await ledger.postVoucher({ voucherId: draft.id, actor, reason: 'انتقال گردش مستند چک از سپیدار' });
+      requireValid(posted.status === 'POSTED', 'INVALID_TARGET');
+      const savedLines = await tx.accountingLedgerLine.findMany({
+        where: { voucherId: posted.id }, select: { id: true, evidenceId: true, evidenceType: true },
+      });
+      const lines = new Map(savedLines.filter(line => line.evidenceType === 'SEPIDAR_ACC_VOUCHER_ITEM')
+        .map(line => [line.evidenceId, line.id]));
+      requireValid(lines.size === savedLines.length - (command.source.type === 'SEPIDAR_CHEQUE_OPENING' ? 1 : 0), 'INVALID_TARGET');
+      return { voucherId: posted.id, lines };
+    };
+
+    const opening = await post(prepared.opening);
+    const postedEvents = new Map<string, Awaited<ReturnType<typeof post>>>();
+    const instrumentById = new Map(evidence.instruments.map(item => [item.id, item]));
+    const eventsById = new Map(evidence.events.map(event => [event.id, event]));
+    const commands = [...prepared.events].sort((left, right) => left.occurredAt.localeCompare(right.occurredAt)
+      || left.source.id.localeCompare(right.source.id, 'en', { numeric: true }));
+    for (const command of commands) {
+      const event = eventsById.get(command.source.id)!;
+      const posted = await post(command);
+      postedEvents.set(event.id, posted);
+      const historical = event.posting.reference.historicalSupplierSettlement;
+      if (!historical) continue;
+      const existing = await tx.accountingSupplierSettlementTransaction.findUnique({ where: { id: historical.settlementId }, select: { id: true } });
+      if (!existing) await tx.accountingSupplierSettlementTransaction.create({ data: {
+        id: historical.settlementId, supplierPartyId: event.posting.reference.targetId, voucherId: posted.voucherId,
+        kind: 'ASSIGNED_CUSTOMER_CHECK', amountRials: instrumentById.get(event.chequeId)!.amountRials.toString(),
+        occurredAt: new Date(event.occurredAt), sourceType: SEPIDAR_CHEQUE_SUPPLIER_ENDORSEMENT, sourceId: event.id,
+        sourceVersion: command.source.version, sourceHash: command.source.hash, sourcePayload: command.source.payload as Prisma.InputJsonValue,
+        createdBy: actor.id,
+      } });
+    }
+    const boundEvidence: SepidarOpeningChequeEvidence = {
+      ...evidence,
+      openingVoucherId: opening.voucherId,
+      instruments: evidence.instruments.map(item => ({ ...item, target: { ...item.target,
+        openingPostingLineId: opening.lines.get(item.sourceOpeningLineId)! } })),
+      events: evidence.events.map(event => {
+        const posted = postedEvents.get(event.id)!;
+        return { ...event, posting: { ...event.posting, voucherId: posted.voucherId,
+          lines: event.posting.lines.map(line => ({ ...line, targetLineId: posted.lines.get(line.sourceLineId)! })) } };
+      }),
+    };
+    const plan = previewSepidarOpeningCheques(boundEvidence);
+    await verifyTargets(tx, plan, boundEvidence, book.legalEntityId, custodyFinancialAccountId);
+    const instruments: Array<Awaited<ReturnType<typeof recordInstrument>>> = [];
+    for (const cheque of plan.instruments) {
+      instruments.push(await recordInstrument(tx, plan, cheque, book.legalEntityId, actor.id, planSha256, custodyFinancialAccountId));
+    }
+    return { planSha256, instruments, openingVoucherId: opening.voucherId, eventVouchers: postedEvents.size };
+  }, { isolationLevel: 'Serializable', timeout: 60_000 });
+}
+
 async function applyOpeningHistories(database: Pick<PrismaClient, '$transaction'>, input: ApplyOpeningHistoriesInput,
   lane: HistoryLane) {
   const releaseId = process.env.DEPLOYMENT_RELEASE_ID;
@@ -378,11 +494,7 @@ async function applyOpeningHistories(database: Pick<PrismaClient, '$transaction'
   const plan = previewSepidarOpeningCheques(evidence);
   const planSha256 = hashAccountingEvidence({ plan, custodyFinancialAccountId, ...(lane === 'BANK' ? {} : { lane }) });
   return database.$transaction(async tx => {
-    const admission = await tx.$queryRaw<Array<{ admitted: boolean }>>`
-      SELECT public.sepidar_opening_cheques_runtime_admitted(
-        ${releaseId}, ${plan.bookId}, ${actorId}, ${planSha256}
-      ) AS admitted`.catch(() => []);
-    requireValid(admission[0]?.admitted === true, 'ADMISSION_CLOSED');
+    await requireOpeningAdmission(tx, releaseId, plan.bookId, actorId, planSha256);
     requireValid(plan.instruments.every(cheque => {
       let events = cheque.events;
       if ((lane === 'HISTORICAL_RECIPIENT' || lane === 'HISTORICAL_SUPPLIER_PAYABLE') && events[0]?.eventType === 'ENDORSED'
@@ -397,7 +509,7 @@ async function applyOpeningHistories(database: Pick<PrismaClient, '$transaction'
       return cheque.finalStatus === 'CLEARED' && events.length === 2
         && events[0].eventType === 'DEPOSITED' && events[1].eventType === 'CLEARED';
     }), 'UNSUPPORTED_POSTING_OWNER');
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'sepidar-opening-cheques:' + plan.bookId}))`;
+    await lockOpeningBook(tx, plan.bookId);
     const voucherIds = [plan.openingVoucherId, ...plan.instruments.flatMap(cheque =>
       cheque.events.map(event => event.targetPosting.voucherId))];
     await tx.$queryRaw`SELECT id FROM public.accounting_ledger_vouchers

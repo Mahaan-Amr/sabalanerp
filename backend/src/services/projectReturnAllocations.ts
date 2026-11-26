@@ -38,12 +38,18 @@ export async function listProjectReturnAllocationReviews(tx: Tx, after?: string)
   const versions = page.items.map(receipt => receipt.version.id);
   const versionDrafts = await tx.projectReturnVersion.findMany({
     where: { id: { in: versions } },
-    select: { id: true, allocationDrafts: { orderBy: { number: 'desc' }, take: 1 } },
+    select: { id: true, allocationDrafts: { orderBy: { number: 'desc' }, take: 1,
+      include: { sepidarRevisions: { orderBy: { number: 'desc' }, take: 1, select: { invoices: true } } } } },
   });
-  const latestDrafts = new Map(versionDrafts.map(({ id, allocationDrafts: [draft] }) => [id, draft ? presentDraft(draft) : null]));
-  return { ...page, items: page.items.map(receipt => ({
-    ...receipt, allocationStatus: allocationStatus(receipt, latestDrafts.get(receipt.version.id) ?? null),
-  })) };
+  const latestDrafts = new Map(versionDrafts.map(({ id, allocationDrafts: [draft] }) => [id, draft]));
+  return { ...page, items: page.items.map(receipt => {
+    const draft = latestDrafts.get(receipt.version.id);
+    const status = allocationStatus(receipt, draft ? presentDraft(draft) : null);
+    const invoices = draft?.sepidarRevisions[0]?.invoices;
+    return { ...receipt, allocationStatus: status,
+      sepidarReference: draft && status === 'ALLOCATION_COMPLETE' && receipt.version.submittedAt
+        ? { draftId: draft.id, registered: Array.isArray(invoices) && invoices.length > 0 } : null };
+  }) };
 }
 
 function readCapturedContractSources(value: Prisma.JsonValue): CapturedProjectReturnSource[] | undefined {
@@ -160,7 +166,7 @@ function presentReview(receipt: Receipt, sources: ItemsWithSources, draft: Draft
   if (base?.inventoryEvents.length) correctionBlocks.push({ code: 'STOCK_MOVED', message: 'پس از دریافت اصلی روی موجودی گردش ثبت شده است.' });
   if (base) correctionBlocks.push({ code: 'FINANCE_CONNECTION_UNAVAILABLE', message: 'اتصال ثبت مالی اصلاح مرجوعی پروژه هنوز فعال نیست.' });
   return {
-    receipt, items, prior: base, correctionBlocks, draft: draft ? { number: draft.number, createdAt: draft.createdAt } : null,
+    receipt, items, prior: base, correctionBlocks, draft: draft ? { id: draft.id, number: draft.number, createdAt: draft.createdAt } : null,
     allocationStatus: status, postingBlock: correctionBlocks[0] ?? allocationBlock,
   };
 }

@@ -1,7 +1,7 @@
 import { formatExactQuantityAtoms, parseExactQuantityAtoms } from './exactQuantity';
 
 export class StoneReturnAllocationError extends Error {
-  constructor(readonly status: 400 | 404 | 409, message: string) {
+  constructor(readonly status: 400 | 404 | 409, message: string, readonly code?: string) {
     super(message);
   }
 }

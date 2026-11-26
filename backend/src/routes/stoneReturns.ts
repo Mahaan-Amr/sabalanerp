@@ -32,7 +32,7 @@ export function stoneReturnEndpoint(action: (req: AuthRequest & FeatureRequest &
       if (error instanceof ProjectReturnReceiptError || error instanceof StoneReturnReceiptError || error instanceof StoneReturnAllocationError || error instanceof SupplyChainAccountingError
         || error instanceof AccountingCustomerTreasuryError || error instanceof AccountingLedgerError) {
         res.status(error.status).json({ success: false, error: error.message, ...(error instanceof StoneReturnIntakeRejected
-          ? { code: 'STONE_RETURN_INTAKE_REJECTED', requestId: error.requestId } : {}) });
+          ? { code: 'STONE_RETURN_INTAKE_REJECTED', requestId: error.requestId } : error instanceof StoneReturnAllocationError && error.code ? { code: error.code } : {}) });
         return;
       }
       console.error('Stone return request failed:', error);

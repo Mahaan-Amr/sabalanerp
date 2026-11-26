@@ -61,17 +61,19 @@ const formatAtoms = (value: bigint) => {
 };
 
 type Draft = { key: number; number: string; amountRial: string };
-type InvoiceState = { invoices: SepidarInvoice[]; expectedVersion: string | null; totalRial: string | null };
+type InvoiceState = { invoices: SepidarInvoice[]; expectedVersion: string | null; totalRial: string | null; unavailableReason?: string };
 
-export default function SepidarDispatchInvoices({ loadingId, contracts, api, blocked, onClose, onSaved, onError }: {
+export default function SepidarDispatchInvoices({ loadingId, contracts, api, blocked, onClose, onSaved, onError, subject = "loading" }: {
   loadingId: string;
   contracts: string[];
+  subject?: "loading" | "return";
   api: Pick<ReturnType<typeof createAccountingAPI>, "getSepidarDispatchInvoices" | "saveSepidarDispatchInvoices">;
   blocked: boolean;
   onClose: () => void;
   onSaved: (invoices: SepidarInvoice[], auditEntry: SepidarAuditEntry, correction: boolean) => void;
   onError: (error: unknown, loadingId: string) => boolean;
 }) {
+  const subjectLabel = subject === "return" ? "مرجوعی" : "بارگیری";
   const [state, setState] = useState<InvoiceState | null>(null);
   const [rows, setRows] = useState<Draft[]>([]);
   const [loading, setLoading] = useState(true);
@@ -163,10 +165,10 @@ export default function SepidarDispatchInvoices({ loadingId, contracts, api, blo
     <div className="space-y-4">
       {loading && <ErpLoading />}
       {error && <ErpInlineState kind="error" title={error.text} />}
-      {error?.reload && <ErpButton label="دریافت دوباره اطلاعات بارگیری" variant="outline" disabled={loading || pending} onClick={() => void load()} />}
+      {error?.reload && <ErpButton label={`دریافت دوباره اطلاعات ${subjectLabel}`} variant="outline" disabled={loading || pending} onClick={() => void load()} />}
       {state && <>
         <dl className="grid gap-2 text-sm sm:grid-cols-3">
-          <div><dt className="sds-text-secondary">جمع این بارگیری</dt>
+          <div><dt className="sds-text-secondary">جمع این {subjectLabel}</dt>
             <dd>{expected === null ? "در دسترس نیست" : <><bdi>{formatAtoms(expected)}</bdi> ریال</>}</dd></div>
           <div><dt className="sds-text-secondary">جمع مبلغ فاکتورها</dt>
             <dd><bdi>{formatAtoms(invoiceTotal)}</bdi> ریال</dd></div>
@@ -175,12 +177,12 @@ export default function SepidarDispatchInvoices({ loadingId, contracts, api, blo
             <dd><bdi>{formatAtoms(hasExcess ? -balance : balance)}</bdi> ریال</dd>
           </div>}
           {contracts.length > 0 && <div className="sm:col-span-3">
-            <dt className="sds-text-secondary">قراردادهای بارگیری</dt><dd>{contracts.join("، ")}</dd>
+            <dt className="sds-text-secondary">قراردادهای {subjectLabel}</dt><dd>{contracts.join("، ")}</dd>
           </div>}
         </dl>
-        {!clear && expected === null && <ErpInlineState kind="stale" title="جمع معتبر بارگیری در دسترس نیست." />}
+        {!clear && expected === null && <ErpInlineState kind="stale" title={state.unavailableReason || `جمع معتبر ${subjectLabel} در دسترس نیست.`} />}
         {rows.length > 0 && everyAmountEntered && expected !== null && !matches &&
-          <ErpInlineState kind="error" title="جمع فاکتورها باید دقیقاً با جمع این بارگیری برابر باشد." />}
+          <ErpInlineState kind="error" title={`جمع فاکتورها باید دقیقاً با جمع این ${subjectLabel} برابر باشد.`} />}
         {rows.map((row, index) => {
           const number = normalizeDigits(row.number).trim();
           const duplicate = number && invoices.filter(invoice => invoice.number === number).length > 1;

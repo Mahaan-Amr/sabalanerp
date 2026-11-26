@@ -80,7 +80,7 @@ export type ProjectReturnAllocationReview = {
   }>;
   prior: ProjectReturnPriorPosting | null;
   correctionBlocks: Array<{ code: string; message: string }>;
-  draft: { number: number; createdAt: string } | null;
+  draft: { id?: string; number: number; createdAt: string } | null;
   allocationStatus: ProjectReturnAllocationStatus;
   postingBlock: { code: string; message: string };
   canAllocate: boolean;
@@ -88,7 +88,10 @@ export type ProjectReturnAllocationReview = {
 };
 
 type AllocationList = {
-  items: Array<ProjectReturnReceipt & { allocationStatus: ProjectReturnAllocationStatus }>;
+  items: Array<ProjectReturnReceipt & {
+    allocationStatus: ProjectReturnAllocationStatus;
+    sepidarReference?: { draftId: string; registered: boolean } | null;
+  }>;
   nextCursor: string | null;
   canAllocate: boolean;
 };
@@ -98,6 +101,15 @@ const path = '/accounting/project-returns';
 export const projectReturnAccountingHref = '/dashboard/accounting/returns';
 export const projectReturnHistoryHref = `${projectReturnAccountingHref}/history`;
 export const projectReturnReviewHref = (id: string) => `${projectReturnAccountingHref}/project/${encodeURIComponent(id)}`;
+
+export function projectReturnSepidarApi(caseId: string) {
+  const referencePath = (draftId: string) => `${path}/${encodeURIComponent(caseId)}/allocations/${encodeURIComponent(draftId)}/sepidar-reference`;
+  return {
+    getSepidarDispatchInvoices: (draftId: string, signal?: AbortSignal) => api.get(referencePath(draftId), { signal }),
+    saveSepidarDispatchInvoices: (draftId: string, data: { invoices: { number: string; amountRial: string }[];
+      expectedVersion: string | null; reason?: string }) => api.post(referencePath(draftId), data),
+  };
+}
 
 export const projectReturnAllocationApi = {
   list: async (after?: string) =>

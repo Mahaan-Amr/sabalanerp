@@ -728,6 +728,14 @@ test('Logistics records and reopens exact multi-project receipt quantities and h
     const partialPrice = await writeShares(2, [shares[0], { ...shares[1], quantity: '7.5' }]);
     assert.equal(partialPrice.status, 200, JSON.stringify(partialPrice));
     assert.equal(partialPrice.data.items[0].draftAmountRials, '120000000');
+    const listPath = '/api/accounting/project-returns';
+    const rowFromList = async () => {
+      const result = await call(listPath);
+      assert.equal(result.status, 200);
+      return result.data.items.find((item: { id: string }) => item.id === pricingCase.data.id);
+    };
+    assert.equal((await rowFromList()).sepidarReference, null);
+    assert.equal((await call(`${pricingPath}/allocations/${partialPrice.data.draft.id}/sepidar-reference`)).status, 409);
     const allocatedPrice = await writeShares(3, shares);
     assert.equal(allocatedPrice.status, 200, JSON.stringify(allocatedPrice));
     assert.equal(allocatedPrice.data.allocationStatus, 'ALLOCATION_COMPLETE');
@@ -737,7 +745,23 @@ test('Logistics records and reopens exact multi-project receipt quantities and h
     assert.equal(savedPrice.healthyAreaSquareMeters, '5.4');
     assert.equal(savedPrice.damagedAreaSquareMeters, '0.8');
     assert.equal(savedPrice.draftAmountRials, '129600000');
+    const { draftId } = (await rowFromList()).sepidarReference;
+    const referencePath = `${pricingPath}/allocations/${draftId}/sepidar-reference`;
+    assert.deepEqual((await call(referencePath)).data, { expectedVersion: null, invoices: [], totalRial: '129600000' });
+    const invoices = [{ number: '۵۱۳', amountRial: '129600000' }];
+    assert.equal((await call(referencePath, { invoices: [{ ...invoices[0], amountRial: '1' }] })).status, 409);
+    const registration = await call(referencePath, { invoices });
+    assert.equal(registration.status, 200, JSON.stringify(registration));
+    assert.deepEqual((await call(referencePath)).data.invoices, [{ number: '513', amountRial: '129600000' }]);
+    assert.equal((await rowFromList()).sepidarReference.registered, true);
+    assert.equal((await call(referencePath, { invoices })).code, 'SEPIDAR_REFERENCE_STALE');
+    const correction = { invoices: [{ ...invoices[0], number: '514' }], expectedVersion: registration.data.auditEntry.id };
+    assert.equal((await call(referencePath, correction)).status, 400);
+    assert.equal((await call(referencePath, { ...correction, reason: 'اصلاح شماره در آزمون' })).status, 200);
     assert.equal((await call(`${pricingPath}/finalize`, {})).status, 409);
+    assert.equal((await writeShares(4, shares)).status, 200);
+    assert.equal((await call(referencePath)).code, 'SEPIDAR_REFERENCE_STALE');
+    assert.equal((await rowFromList()).sepidarReference.registered, false);
   } finally {
     try {
       if (server?.listening) await new Promise<void>((resolve, reject) => server!.close(error => error ? reject(error) : resolve()));

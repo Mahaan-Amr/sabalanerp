@@ -4,6 +4,8 @@ import { previewSepidarOpeningCheques, type SepidarOpeningChequeEvidence } from 
 
 type Plan = ReturnType<typeof previewSepidarOpeningCheques>;
 type Cheque = Plan['instruments'][number];
+type HistoryLane = 'BANK' | 'BANK_AND_CUSTOMER_RETURN' | 'HISTORICAL_RECIPIENT';
+const historicalRecipientAccounts = new Map([[103, '111003'], [124, '111303']]);
 type Code = 'ADMISSION_CLOSED' | 'UNSUPPORTED_POSTING_OWNER' | 'INVALID_TARGET' | 'OPENING_AMOUNT_CONFLICT'
   | 'IDENTITY_CONFLICT' | 'REPLAY_CONFLICT';
 
@@ -19,6 +21,8 @@ function requireValid(condition: unknown, code: Code): asserts condition {
 
 function eventEvidence(plan: Plan, cheque: Cheque, event: Cheque['events'][number]) {
   const reference = event.targetPosting.reference;
+  const destination = reference.kind === 'PAYMENT_RECIPIENT' ? { recipientDimensionMemberId: reference.targetId }
+    : reference.kind === 'CUSTOMER' ? { customerPartyId: reference.targetId } : { bankFinancialAccountId: reference.targetId };
   return {
     snapshotSha256: plan.snapshotSha256,
     sourceInstrumentId: cheque.instrument.id,
@@ -31,7 +35,7 @@ function eventEvidence(plan: Plan, cheque: Cheque, event: Cheque['events'][numbe
       signedRials: line.signedRials.toString(),
       ...(line.tracking ? { tracking: line.tracking } : {}),
     })),
-    ...(reference.kind === 'CUSTOMER' ? { customerPartyId: reference.targetId } : { bankFinancialAccountId: reference.targetId }),
+    ...destination,
   };
 }
 
@@ -55,8 +59,11 @@ function instrumentEvents(plan: Plan, cheque: Cheque, actorId: string, tillId: s
   }, null, tillId, null);
   const later = cheque.events.map(event => {
     const evidence = eventEvidence(plan, cheque, event);
-    if (event.eventType === 'RETURNED') {
+    if (event.eventType === 'RETURNED' || event.eventType === 'ENDORSED') {
       return makeEvent(event.sequence, event.eventType, event.occurredAt, evidence, tillId, null, event.targetPosting.voucherId);
+    }
+    if (event.eventType === 'RECIPIENT_RETURNED') {
+      return makeEvent(event.sequence, event.eventType, event.occurredAt, evidence, null, tillId, event.targetPosting.voucherId);
     }
     const bank = event.targetPosting.reference.targetId;
     const deposited = event.eventType === 'DEPOSITED';
@@ -72,6 +79,17 @@ function activeAt(record: { activeFrom: Date; activeTo: Date | null }, at: strin
 }
 
 const postedReversals = { where: { status: 'POSTED' }, select: { id: true }, take: 1 } as const;
+
+async function verifyHistoricalRecipient(tx: Prisma.TransactionClient, bookId: string, event: Cheque['events'][number]) {
+  const { sourceId, targetId } = event.targetPosting.reference;
+  const member = await tx.accountingDimensionMember.findUnique({ where: { id: targetId }, include: { dimensionType: true } });
+  requireValid(member && member.sourceId === sourceId && member.dimensionType.bookId === bookId
+    && member.dimensionType.code === 'SEPIDAR_DL' && member.dimensionType.sourceKind === 'SEPIDAR_ACC_DL', 'INVALID_TARGET');
+  for (const entity of [member, member.dimensionType]) {
+    requireValid(activeAt({ activeFrom: entity.effectiveFrom, activeTo: entity.effectiveTo }, event.occurredAt), 'INVALID_TARGET');
+  }
+  return member;
+}
 
 function matchesVoucher(voucher: { bookId: string; status: string; documentDate: Date; occurredAt: Date;
   reversalOfId: string | null; reversals: readonly { id: string }[] },
@@ -113,15 +131,16 @@ async function verifyTargets(tx: Prisma.TransactionClient, plan: Plan, evidence:
     for (const event of cheque.events) {
       const { voucherId, reference, lines } = event.targetPosting;
       const returned = event.eventType === 'RETURNED';
+      const recipient = reference.kind === 'PAYMENT_RECIPIENT' ? await verifyHistoricalRecipient(tx, plan.bookId, event) : null;
       if (returned) {
         requireValid(reference.kind === 'CUSTOMER' && reference.targetId === partyId && activeAt(profile, event.occurredAt), 'INVALID_TARGET');
-      } else {
+      } else if (!recipient) {
         const bank = await tx.accountingFinancialAccount.findUnique({ where: { id: reference.targetId } });
         requireValid(bank && bank.kind === 'BANK' && bank.legalEntityId === legalEntityId && bank.currency === 'IRR'
           && activeAt(bank, event.occurredAt), 'INVALID_TARGET');
       }
       const voucher = await tx.accountingLedgerVoucher.findUnique({ where: { id: voucherId }, include: {
-        lines: { include: { dimensions: true, account: { select: { code: true, bookId: true } } } }, reversals: postedReversals,
+        lines: { include: { dimensions: true, account: { select: { code: true, bookId: true, dimensionRules: true } } } }, reversals: postedReversals,
       } });
       requireValid(voucher && matchesVoucher(voucher, plan.bookId, event.occurredAt)
         && voucher.sourceType === 'SEPIDAR_CHEQUE_EVENT' && voucher.sourceId === event.historyId && voucher.sourceVersion === 1
@@ -131,11 +150,22 @@ async function verifyTargets(tx: Prisma.TransactionClient, plan: Plan, evidence:
       const voucherLines = new Map(voucher.lines.map(line => [line.id, line]));
       for (const allocation of lines) {
         const line = voucherLines.get(allocation.targetLineId);
-        const isBank = sourceAccounts.get(allocation.sourceLineId) === 105;
-        requireValid(line && line.accountId === allocation.targetAccountId && line.dimensions.length === 0
-          && line.partyId === (isBank ? null : partyId) && line.financialAccountId === (isBank ? reference.targetId : null)
+        const sourceAccount = sourceAccounts.get(allocation.sourceLineId)!;
+        const isBank = sourceAccount === 105;
+        const recipientCounter = recipient && sourceAccount !== 118 ? recipient : null;
+        requireValid(line && line.accountId === allocation.targetAccountId
+          && line.partyId === (isBank || recipientCounter ? null : partyId) && line.financialAccountId === (isBank ? reference.targetId : null)
           && BigInt(line.debitRials.toString()) === (allocation.signedRials > 0n ? allocation.signedRials : 0n)
           && BigInt(line.creditRials.toString()) === (allocation.signedRials < 0n ? -allocation.signedRials : 0n), 'INVALID_TARGET');
+        if (recipientCounter) {
+          requireValid(line.account.bookId === plan.bookId && line.account.code === historicalRecipientAccounts.get(sourceAccount)
+            && line.dimensions.length === 1 && line.dimensions[0].dimensionTypeId === recipientCounter.dimensionTypeId
+            && line.dimensions[0].memberId === recipientCounter.id && line.account.dimensionRules.some(rule =>
+              rule.dimensionTypeId === recipientCounter.dimensionTypeId && rule.requirement === 'OPTIONAL'), 'INVALID_TARGET');
+        } else {
+          requireValid(line.dimensions.length === 0, 'INVALID_TARGET');
+          if (recipient) requireValid(line.account.bookId === plan.bookId && line.account.code === '111202', 'INVALID_TARGET');
+        }
         if (returned) {
           requireValid(line.account.bookId === plan.bookId
             && line.account.code === (allocation.signedRials > 0n ? '111201' : '111202'), 'INVALID_TARGET');
@@ -210,7 +240,7 @@ type ApplyOpeningHistoriesInput = {
 };
 
 async function applyOpeningHistories(database: Pick<PrismaClient, '$transaction'>, input: ApplyOpeningHistoriesInput,
-  lane: 'BANK' | 'BANK_AND_CUSTOMER_RETURN') {
+  lane: HistoryLane) {
   const releaseId = process.env.DEPLOYMENT_RELEASE_ID;
   requireValid(releaseId && input.actor.id.trim() && input.actor.profile === 'ACCOUNTANT', 'ADMISSION_CLOSED');
   const { custodyFinancialAccountId } = input;
@@ -225,11 +255,14 @@ async function applyOpeningHistories(database: Pick<PrismaClient, '$transaction'
       ) AS admitted`.catch(() => []);
     requireValid(admission[0]?.admitted === true, 'ADMISSION_CLOSED');
     requireValid(plan.instruments.every(cheque => {
-      if (cheque.finalStatus === 'RETURNED') {
-        return lane === 'BANK_AND_CUSTOMER_RETURN' && cheque.events.length === 1 && cheque.events[0].eventType === 'RETURNED';
+      let events = cheque.events;
+      if (lane === 'HISTORICAL_RECIPIENT' && events[0]?.eventType === 'ENDORSED'
+        && events[0].targetPosting.reference.kind === 'PAYMENT_RECIPIENT' && events[1]?.eventType === 'RECIPIENT_RETURNED') {
+        events = events.slice(2);
       }
-      return cheque.finalStatus === 'CLEARED' && cheque.events.length === 2
-        && cheque.events[0].eventType === 'DEPOSITED' && cheque.events[1].eventType === 'CLEARED';
+      if (cheque.finalStatus === 'RETURNED') return lane !== 'BANK' && events.length === 1 && events[0].eventType === 'RETURNED';
+      return cheque.finalStatus === 'CLEARED' && events.length === 2
+        && events[0].eventType === 'DEPOSITED' && events[1].eventType === 'CLEARED';
     }), 'UNSUPPORTED_POSTING_OWNER');
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'sepidar-opening-cheques:' + plan.bookId}))`;
     const voucherIds = [plan.openingVoucherId, ...plan.instruments.flatMap(cheque =>
@@ -254,4 +287,8 @@ export function applySepidarOpeningBankHistories(database: Pick<PrismaClient, '$
 /** Link reviewed bank and direct customer-return histories under their own protected plan digest. */
 export function applySepidarOpeningBankAndCustomerReturnHistories(database: Pick<PrismaClient, '$transaction'>, input: ApplyOpeningHistoriesInput) {
   return applyOpeningHistories(database, input, 'BANK_AND_CUSTOMER_RETURN');
+}
+
+export function applySepidarOpeningHistoricalRecipientHistories(database: Pick<PrismaClient, '$transaction'>, input: ApplyOpeningHistoriesInput) {
+  return applyOpeningHistories(database, input, 'HISTORICAL_RECIPIENT');
 }

@@ -3,7 +3,7 @@ import test from 'node:test';
 import { previewSepidarOpeningCheques, SepidarOpeningChequePlanError, type SepidarOpeningChequeEvidence } from '../sepidarOpeningChequePlan';
 
 import { hashAccountingEvidence } from '../accountingLedgerFoundation';
-import { applySepidarOpeningBankAndCustomerReturnHistories, applySepidarOpeningBankHistories } from '../sepidarOpeningChequeApplication';
+import { applySepidarOpeningBankAndCustomerReturnHistories, applySepidarOpeningBankHistories, applySepidarOpeningHistoricalRecipientHistories } from '../sepidarOpeningChequeApplication';
 
 const basis = '2026-03-20T20:30:00.000Z';
 const depositAt = '2026-04-01T08:00:00.000Z';
@@ -179,6 +179,25 @@ test('a nontrade assignment returns to custody before the separate return to the
   await assert.rejects(bankApplicationFixture(trade).run, { code: 'UNSUPPORTED_POSTING_OWNER' });
   await assert.rejects(() => bankApplicationFixture(evidence).run(applySepidarOpeningBankAndCustomerReturnHistories),
     { code: 'UNSUPPORTED_POSTING_OWNER' });
+  const recipientFixture = bankApplicationFixture(evidence);
+  const apply = () => recipientFixture.run(applySepidarOpeningHistoricalRecipientHistories);
+  const counter = recipientFixture.vouchers.get('assignment-voucher')!.lines.find(line => line.accountId === 'partner-current')!;
+  counter.dimensions[0].memberId = 'another-recipient';
+  await assert.rejects(apply, { code: 'INVALID_TARGET' });
+  counter.dimensions[0].memberId = 'recipient';
+  const [rule] = counter.account.dimensionRules.splice(0);
+  await assert.rejects(apply, { code: 'INVALID_TARGET' });
+  counter.account.dimensionRules.push(rule);
+  assert.equal(Boolean(recipientFixture.state.instrument), false);
+  const migrated = await apply();
+  const events = recipientFixture.state.instrument?.events as Array<Record<string, unknown>>;
+  assert.deepEqual(events.map(event => [event.eventType, event.fromCustodianId, event.toCustodianId]), [
+    ['RECEIVED', null, 'till'], ['ENDORSED', 'till', null], ['RECIPIENT_RETURNED', null, 'till'], ['RETURNED', 'till', null],
+  ]);
+  assert.equal((events[1].evidence as { recipientDimensionMemberId: string }).recipientDimensionMemberId, 'recipient');
+  assert.equal(migrated.planSha256, hashAccountingEvidence({ plan: previewSepidarOpeningCheques(evidence),
+    custodyFinancialAccountId: 'till', lane: 'HISTORICAL_RECIPIENT' }));
+  assert.equal((await apply()).instruments[0].replayed, true);
   assert.throws(() => previewSepidarOpeningCheques({ ...trade,
     instruments: [{ ...trade.instruments[0], sayadId: null }],
   }), (error: unknown) => error instanceof SepidarOpeningChequePlanError && error.code === 'INVALID_POSTING');
@@ -187,12 +206,18 @@ test('a nontrade assignment returns to custody before the separate return to the
 function bankApplicationFixture(evidence = bankHistory()) {
   const plan = previewSepidarOpeningCheques(evidence);
   const [cheque] = plan.instruments;
-  const ledgerLine = (id: string, accountId: string, amount: bigint, bank = false, evidencePayload?: unknown) => ({
-    id, accountId, partyId: bank ? null : 'party', financialAccountId: bank ? 'bank' : null, dimensions: [],
-    account: { bookId: 'book', code: accountId === 'custody' ? '111202' : accountId === 'receivable' ? '111201' : accountId },
-    debitRials: amount > 0n ? amount : 0n, creditRials: amount < 0n ? -amount : 0n,
-    evidenceType: 'SEPIDAR_ACC_VOUCHER_ITEM', evidencePayload, evidenceHash: evidencePayload ? hashAccountingEvidence(evidencePayload) : null,
-  });
+  const ledgerLine = (id: string, accountId: string, amount: bigint, bank = false, evidencePayload?: unknown) => {
+    const historicalRecipient = accountId === 'partner-current';
+    const codes: Record<string, string> = { custody: '111202', receivable: '111201', 'partner-current': '111303' };
+    return {
+      id, accountId, partyId: bank || historicalRecipient ? null : 'party', financialAccountId: bank ? 'bank' : null,
+      dimensions: historicalRecipient ? [{ dimensionTypeId: 'historical-detail', memberId: 'recipient' }] : [],
+      account: { bookId: 'book', code: codes[accountId] ?? accountId,
+        dimensionRules: historicalRecipient ? [{ dimensionTypeId: 'historical-detail', requirement: 'OPTIONAL' }] : [] },
+      debitRials: amount > 0n ? amount : 0n, creditRials: amount < 0n ? -amount : 0n,
+      evidenceType: 'SEPIDAR_ACC_VOUCHER_ITEM', evidencePayload, evidenceHash: evidencePayload ? hashAccountingEvidence(evidencePayload) : null,
+    };
+  };
   const voucher = (at: string, sourceType: string, sourceId: string, sourcePayload: unknown,
     lines: ReturnType<typeof ledgerLine>[]) => ({
     bookId: 'book', status: 'POSTED', documentDate: new Date(at), occurredAt: new Date(at), reversalOfId: null,
@@ -205,7 +230,8 @@ function bankApplicationFixture(evidence = bankHistory()) {
     ...cheque.events.map(event => [event.targetPosting.voucherId, voucher(event.occurredAt, 'SEPIDAR_CHEQUE_EVENT', event.historyId, {
       snapshotSha256: plan.snapshotSha256, sourceInstrumentId: cheque.instrument.id, historyId: event.historyId,
       previousHistoryId: event.previousHistoryId, document: event.document,
-      ...(event.targetPosting.reference.kind === 'CUSTOMER' ? { customerPartyId: 'party' } : { bankFinancialAccountId: 'bank' }),
+      ...(event.targetPosting.reference.kind === 'PAYMENT_RECIPIENT' ? { recipientDimensionMemberId: 'recipient' }
+        : event.targetPosting.reference.kind === 'CUSTOMER' ? { customerPartyId: 'party' } : { bankFinancialAccountId: 'bank' }),
       allocations: event.targetPosting.lines.map(({ sourceLineId, signedRials, targetAccountId, tracking }) =>
         ({ sourceLineId, signedRials: signedRials.toString(), targetAccountId, ...(tracking ? { tracking } : {}) })),
     }, event.targetPosting.lines.map(line => ledgerLine(line.targetLineId, line.targetAccountId,
@@ -226,6 +252,10 @@ function bankApplicationFixture(evidence = bankHistory()) {
         accountingFinancialAccount: { findUnique: async ({ where: { id } }) =>
           ({ ...active, id, kind: id === 'till' ? 'CASH' : 'BANK', currency: 'IRR' }) },
         accountingCustomerProfile: { findUnique: async () => ({ ...active, accountingPartyId: 'party' }) },
+        accountingDimensionMember: { findUnique: async ({ where: { id } }) => id === 'recipient' ? ({
+          id, sourceId: 'recipient-detail', dimensionTypeId: 'historical-detail', effectiveFrom: active.activeFrom, effectiveTo: null,
+          dimensionType: { bookId: 'book', code: 'SEPIDAR_DL', sourceKind: 'SEPIDAR_ACC_DL', effectiveFrom: active.activeFrom, effectiveTo: null },
+        }) : null },
         accountingLedgerVoucher: { findUnique: async ({ where: { id } }) => vouchers.get(id) },
         accountingSepidarOpeningCheque: {
           findMany: async () => txState.anchor ? [txState.anchor] : [],

@@ -9,6 +9,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useParams, useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import {
+  FaBoxOpen,
   FaEdit,
   FaTrash,
   FaPhone,
@@ -592,7 +593,10 @@ export default function CustomerDetailPage() {
       title={`${customer.firstName} ${customer.lastName}`}
       description={<>{customer.companyName && `${customer.companyName} • `}{getCustomerTypeLabel(customer.customerType)}</>}
       backHref={ownerPortal ? '/dashboard/sales/partner-customers' : '/dashboard/crm/customers'}
-      actions={hasPermission('crm' as any, 'edit' as any) ? [{ label: 'ویرایش', icon: FaEdit, href: `/dashboard/crm/customers/${customer.id}/edit` }] : []}
+      actions={[
+        { label: 'اقلام خریدار', icon: FaBoxOpen, href: `/dashboard/crm/customers/${customer.id}/buyer-items`, tone: 'primary', variant: 'soft' },
+        ...(hasPermission('crm' as any, 'edit' as any) ? [{ label: 'ویرایش', icon: FaEdit, href: `/dashboard/crm/customers/${customer.id}/edit` }] : []),
+      ]}
     >
       <DirectCustomerTransfer customerId={customer.id} onTransferred={() => void fetchCustomer()} />
       <div className="flex flex-wrap items-center gap-3">

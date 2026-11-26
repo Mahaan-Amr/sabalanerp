@@ -2,7 +2,7 @@
 
 import { CustomerActivityCategoryBadge } from './CustomerActivityCategory';
 import { useState } from 'react';
-import { FaEdit, FaEye, FaPlus, FaTrash, FaBan, FaLock } from 'react-icons/fa';
+import { FaBoxOpen, FaEdit, FaEye, FaPlus, FaTrash, FaBan, FaLock } from 'react-icons/fa';
 import { ErpBadge, ErpButton, ErpCheckbox, ErpEmptyState, ErpField, ErpFieldView, ErpInlineState, ErpInput, ErpSelect, ErpSheet, ErpTextarea } from '@/components/erp';
 import api from '@/lib/api';
 import { normalizeDigits } from '@/lib/numberFormat';
@@ -108,7 +108,11 @@ export function PartnerCustomerSections({ customer, onRefresh }: { customer: Par
     </div>
   </CustomerWorkflowSection>;
   return <CustomerWorkflowPage title={`${customer.firstName} ${customer.lastName}`} backHref={base}
-    actions={customer.canManageCustomerCard ? [{ label: 'ویرایش', icon: FaEdit, href: `${base}/${customer.id}/edit` }] : []}>
+    actions={[
+      ...(customer.crmCapabilities.contracts_view ? [{ label: 'اقلام خریدار', icon: FaBoxOpen,
+        href: `${base}/${customer.id}/buyer-items`, tone: 'primary' as const, variant: 'soft' as const }] : []),
+      ...(customer.canManageCustomerCard ? [{ label: 'ویرایش', icon: FaEdit, href: `${base}/${customer.id}/edit` }] : []),
+    ]}>
     {!customer.partnerOwnerView && <DirectCustomerTransfer customerId={customer.id} onTransferred={() => void onRefresh()} />}
     {(customer.crmCapabilities.customers_blacklist || customer.crmCapabilities.customers_lock) && <CustomerWorkflowSection title="مدیریت مشتری">
       {cardError && <ErpInlineState kind="error" title={cardError} />}

@@ -1,5 +1,7 @@
 import { customerActivityCategorySchema, recordCustomerActivityCategory } from '../services/customerActivityCategory';
-import { readPartnerCustomerCrm, mutatePartnerCustomerCrm, readPartnerCustomerContractFinance } from '../services/partnerCustomerCrm';
+import { readPartnerCustomerCrm, mutatePartnerCustomerCrm, readPartnerCustomerContractFinance, authorizePartnerCrmContractsRead } from '../services/partnerCustomerCrm';
+import { readCustomerBuyerItems } from '../services/customerBuyerItems';
+import { getEffectiveUserAccess } from '../services/effectiveAccessService';
 import { customerCardVersion, updateAdminPartnerCustomerCard } from '../services/adminPartnerCustomerCard';
 import { canManageCustomerCredit, customerCreditBalance, updateCustomerCreditPolicy, CustomerCreditError } from '../services/specialCustomerCredit';
 import { customerManagementCapabilities, CustomerManagementError, previewCustomerDeletion, deleteCustomerInTransaction } from '../services/crmCustomerManagement';
@@ -754,6 +756,44 @@ router.get('/partner/customers/:id/full-card', protect, partnerCrmEndpoint(async
   const data = await prisma.$transaction(tx => readPartnerCustomerCrm(tx, req.user.id, req.params.id), { timeout: 30000 });
   res.json({ success: true, data });
 }));
+
+const buyerItemsEndpoint = (partnerPortal: boolean) => partnerCrmEndpoint(async (req, res) => {
+  const scope = partnerPortal ? {} : await buildCustomerScope(req, true);
+  const canReadManagedCard = !partnerPortal && (req.user.role === 'ADMIN' || await canAssignCustomerOwner(req));
+  const correlationId = partnerCorrelationId(req);
+  const data = await prisma.$transaction(async tx => {
+    const customer = await tx.crmCustomer.findFirst({ where: { AND: [scope, { id: req.params.id, cardDeletedAt: null }] },
+      select: { id: true, firstName: true, lastName: true, companyName: true, ownerUserId: true, partnerOwnerProfileId: true } });
+    if (!customer || (partnerPortal && !customer.partnerOwnerProfileId)) {
+      throw new CustomerManagementError(404, 'CUSTOMER_NOT_FOUND', 'مشتری یافت نشد.');
+    }
+    const actor = await tx.user.findUniqueOrThrow({ where: { id: req.user.id },
+      select: { id: true, role: true, departmentId: true, partnerProfile: { select: { id: true } } } });
+    if (partnerPortal && !actor.partnerProfile) {
+      throw new CustomerManagementError(403, 'CRM_CONTRACTS_FORBIDDEN', 'این مسیر مخصوص فروشنده همکار است.');
+    }
+    if (customer.partnerOwnerProfileId) {
+      await authorizePartnerCrmContractsRead(tx, actor.id, customer.id);
+    } else if (!canReadManagedCard && customer.ownerUserId !== actor.id) {
+      throw new CustomerManagementError(403, 'CRM_CONTRACTS_FORBIDDEN', 'مجوز مشاهده قراردادهای این مشتری فعال نیست.');
+    }
+    const effective = await getEffectiveUserAccess(tx, { userId: actor.id, userRole: actor.role });
+    const viewLevels = ['view', 'edit', 'admin'];
+    const canReadSales = effective.workspaces.some(grant => grant.workspace === WORKSPACES.SALES && viewLevels.includes(grant.permission))
+      && effective.features.some(grant => grant.feature === FEATURES.SALES_CONTRACTS_VIEW && viewLevels.includes(grant.permission));
+    if (!canReadSales && !actor.partnerProfile) {
+      throw new CustomerManagementError(403, 'CRM_CONTRACTS_FORBIDDEN', 'مجوز مشاهده قراردادهای فروش فعال نیست.');
+    }
+    const rows = await readCustomerBuyerItems(tx, { customerId: customer.id, actor, correlationId,
+      includeOrdinary: !partnerPortal && canReadSales && (!actor.partnerProfile || actor.role === 'ADMIN') });
+    if (customer.partnerOwnerProfileId) await authorizePartnerCrmContractsRead(tx, actor.id, customer.id);
+    return { customerName: [customer.firstName, customer.lastName].filter(Boolean).join(' ') || customer.companyName, rows };
+  }, { timeout: 30000 });
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.json({ success: true, data });
+});
+
+router.get('/partner/customers/:id/buyer-items', protect, buyerItemsEndpoint(true));
 router.put('/partner/customers/:id/full-card', protect, partnerCrmEndpoint(async (req: any, res: Response) => {
   await updateAdminPartnerCustomerCard(prisma, req.user.id, req.params.id, 'EDIT', req.body, 'owner');
   res.json({ success: true });
@@ -1095,6 +1135,7 @@ const customerCreditEndpoint = (write: boolean) => async (req: any, res: Respons
   }
 };
 router.get('/customers/:id/credit', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOMERS_VIEW, FEATURES.CRM_CUSTOMERS_VIEW_ALL, FEATURES.SALES_CUSTOMERS_VIEW], FEATURE_PERMISSIONS.VIEW), customerCreditEndpoint(false));
+router.get('/customers/:id/buyer-items', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOMERS_VIEW, FEATURES.CRM_CUSTOMERS_VIEW_ALL, FEATURES.SALES_CUSTOMERS_VIEW], FEATURE_PERMISSIONS.VIEW), buyerItemsEndpoint(false));
 router.put('/customers/:id/credit', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOMERS_VIEW, FEATURES.CRM_CUSTOMERS_VIEW_ALL], FEATURE_PERMISSIONS.VIEW), customerCreditEndpoint(true));
 
 router.get('/customers/:id', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOMERS_VIEW, FEATURES.CRM_CUSTOMERS_VIEW_ALL, FEATURES.SALES_CUSTOMERS_VIEW], FEATURE_PERMISSIONS.VIEW), async (req: any, res: Response): Promise<void> => {

@@ -48,6 +48,14 @@ async function customerOperations(tx: Prisma.TransactionClient, actorId: string,
     } };
 }
 
+export async function authorizePartnerCrmContractsRead(tx: Prisma.TransactionClient, actorId: string, customerId: string) {
+  await authorize(tx, actorId, customerId, 'CUSTOMER_READ');
+  const access = await customerOperations(tx, actorId, customerId);
+  if (!await access.has('sales_contracts_view', 'sales', 'view')) {
+    throw new CustomerManagementError(403, 'CRM_CONTRACTS_FORBIDDEN', 'مجوز مشاهده قراردادهای مشتری فعال نیست.');
+  }
+}
+
 export async function readPartnerCustomerCrm(tx: Prisma.TransactionClient, actorId: string, customerId: string) {
   await authorize(tx, actorId, customerId, 'CUSTOMER_READ');
   const customer = await tx.crmCustomer.findUnique({ where: { id: customerId }, include });

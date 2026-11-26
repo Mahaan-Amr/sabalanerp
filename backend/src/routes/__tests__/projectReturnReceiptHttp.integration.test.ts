@@ -83,11 +83,13 @@ test('Logistics records and reopens exact multi-project receipt quantities and h
         { rowId: 'shared', productId: product.id, unit: 'squareMeter' },
         { rowId: 'piece', productId: product.id, unit: 'count' },
         { rowId: 'length', productId: lengthProduct.id, unit: 'meter', width: '40', widthUnit: 'cm' },
+        { rowId: 'length-2', productId: lengthProduct.id, unit: 'meter', width: '0.4', widthUnit: 'm' },
       ] },
       items: { create: [
         { productId: product.id, productRowId: 'shared', quantity: 1, unitPrice: 1, totalPrice: 1 },
         { productId: product.id, productRowId: 'piece', quantity: 1, unitPrice: 1, totalPrice: 1 },
-        { productId: lengthProduct.id, productRowId: 'length', quantity: 1, unitPrice: 1, totalPrice: 1 },
+        { productId: lengthProduct.id, productRowId: 'length', quantity: 9, unitPrice: 100, totalPrice: 900 },
+        { productId: lengthProduct.id, productRowId: 'length-2', quantity: 9, unitPrice: 100, totalPrice: 900 },
       ] },
     } });
     const session = await createAuthoritativeSession(db, actor.id, { ipAddress: '127.0.0.1', userAgent: 'project-return-receipt-qa' });
@@ -609,6 +611,21 @@ test('Logistics records and reopens exact multi-project receipt quantities and h
     assert.deepEqual(captureReview.data.items[0].candidates.map((row: { financialLineId: string; remainingQuantity: string }) =>
       [row.financialLineId, row.remainingQuantity]), [['return-515-capture', '220.000']]);
 
+    const pricingContract = await db.salesContract.findUniqueOrThrow({
+      where: { contractNumber: 'SECRET-RETURN-507' },
+      include: { items: { where: { productId: lengthProduct.id } } },
+    });
+    const pricingApprovedAt = new Date();
+    await db.accountingFinancialRecord.create({ data: {
+      kind: 'INVOICE_CANDIDATE', status: 'ISSUED', sourceKind: 'SALES_CONTRACT',
+      contractId: pricingContract.id, sourceId: pricingContract.id, customerId: customer.id,
+      systemInvoiceNumber: 'RETURN-516-ISSUED', amount: '1800', createdBy: actor.id,
+      financiallyApprovedBy: actor.id, financiallyApprovedAt: pricingApprovedAt, postedAt: pricingApprovedAt,
+      sourceSnapshot: { id: pricingContract.id, customerId: customer.id, contractData: pricingContract.contractData! },
+      invoiceItems: { create: pricingContract.items.map(row => ({
+        contractItemId: row.id, productId: lengthProduct.id, description: 'سنگ طولی', quantity: '9', unitPrice: '100', totalPrice: '900',
+      })) },
+    } });
     const pricingVisit = await call(guard, { source: 'PERSONAL_PICKUP', plate: '52 ب 345 ایران 67', purpose: 'PROJECT_RETURN' });
     const pricingCase = await call(receipts, { ...command, visitId: pricingVisit.data.id, projectIds: [extraProject.id],
       items: [{ productId: lengthProduct.id, unit: 'meter', healthyQuantity: '13.5', damagedQuantity: '2' }],
@@ -636,6 +653,27 @@ test('Logistics records and reopens exact multi-project receipt quantities and h
     assert.equal(rereadPrice.agreedRateBasis, 'HEALTHY_SQUARE_METER');
     assert.equal(rereadPrice.legacyRateNeedsReview, false);
     assert.equal(rereadPrice.draftAmountRials, null, 'A rate alone is not an allocated amount');
+    assert.equal(rereadPrice.candidates.length, 2, JSON.stringify(rereadPrice));
+    const shares = rereadPrice.candidates.map((row: { financialRecordId: string; financialLineId: string }, index: number) => ({
+      financialRecordId: row.financialRecordId, financialLineId: row.financialLineId, quantity: index === 0 ? '5' : '8.5',
+    }));
+    const writeShares = (expectedDraftNumber: number, rows: typeof shares) => call(`${pricingPath}/allocations`, {
+      expectedVersionId: pricingVersion.id, expectedDraftNumber,
+      items: [{ ...price, agreedRateBasis: 'HEALTHY_SQUARE_METER', rows }],
+    }, 'PUT');
+    const partialPrice = await writeShares(2, [shares[0], { ...shares[1], quantity: '7.5' }]);
+    assert.equal(partialPrice.status, 200, JSON.stringify(partialPrice));
+    assert.equal(partialPrice.data.items[0].draftAmountRials, '120000000');
+    const allocatedPrice = await writeShares(3, shares);
+    assert.equal(allocatedPrice.status, 200, JSON.stringify(allocatedPrice));
+    assert.equal(allocatedPrice.data.allocationStatus, 'ALLOCATION_COMPLETE');
+    assert.equal(allocatedPrice.data.postingBlock.code, 'FINANCE_CONNECTION_UNAVAILABLE');
+    assert.equal(allocatedPrice.data.items[0].draftAmountRials, '129600000');
+    const savedPrice = (await call(pricingPath)).data.items[0];
+    assert.equal(savedPrice.healthyAreaSquareMeters, '5.4');
+    assert.equal(savedPrice.damagedAreaSquareMeters, '0.8');
+    assert.equal(savedPrice.draftAmountRials, '129600000');
+    assert.equal((await call(`${pricingPath}/finalize`, {})).status, 409);
   } finally {
     try {
       if (server?.listening) await new Promise<void>((resolve, reject) => server!.close(error => error ? reject(error) : resolve()));

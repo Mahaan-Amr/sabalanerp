@@ -51,6 +51,7 @@ export function readSepidarOpeningEvidence(read, { approvalKeySha256, qualificat
   if (publicKey.asymmetricKeyType !== 'ed25519') rejectedEvidence();
   return {
     approver: { publicKey, keyId: key.keyId },
+    preparedRows: prepared.prepared,
     ...(prepareOnly ? {} : { envelope: JSON.parse(read('decision.json', limit)) }),
     qualification: {
       buildCommit, migrationSha256, candidateImage, retainedImage, qualificationHash,

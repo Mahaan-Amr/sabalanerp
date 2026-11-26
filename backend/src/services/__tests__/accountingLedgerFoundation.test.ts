@@ -250,15 +250,18 @@ test('foreign-currency evidence must be supported, positive, reproducible and ro
   }), (error: unknown) => error instanceof AccountingLedgerError && error.code === 'INVALID_EXCHANGE_RATE');
 });
 
-test('customer settlement vouchers require their coupled domain correction', async () => {
-  for (const type of ['CUSTOMER_ACCOUNT_OPERATION', 'CUSTOMER_ACCOUNT_RECEIPT', 'CUSTOMER_RECEIPT_RESOLUTION', 'TREASURY_CUSTOMER_CHECK_ENDORSEMENT', 'TREASURY_CHECK_STATUS', 'SETTLEMENT_ALLOCATION', 'SETTLEMENT_ALLOCATION_REVERSAL']) {
+test('customer settlement and Sepidar cheque vouchers require their coupled domain correction', async () => {
+  const customerTypes = ['CUSTOMER_ACCOUNT_OPERATION', 'CUSTOMER_ACCOUNT_RECEIPT', 'CUSTOMER_RECEIPT_RESOLUTION', 'TREASURY_CUSTOMER_CHECK_ENDORSEMENT', 'TREASURY_CHECK_STATUS', 'SETTLEMENT_ALLOCATION', 'SETTLEMENT_ALLOCATION_REVERSAL'];
+  const protectedTypes = [...customerTypes.map(type => ({ type, code: 'CUSTOMER_ACCOUNT_CORRECTION_REQUIRED' })),
+    ...['SEPIDAR_CHEQUE_OPENING', 'SEPIDAR_CHEQUE_EVENT'].map(type => ({ type, code: 'SEPIDAR_CHEQUE_CORRECTION_REQUIRED' }))];
+  for (const { type, code } of protectedTypes) {
     const repository = createRepository();
     const ledger = createAccountingLedgerApplication(repository, { now: () => now, nextReference: () => 'customer-source' });
     const draft = await ledger.createManualDraft({ ...balancedDraft, source: { ...balancedDraft.source, type } });
     const posted = await ledger.postVoucher({ voucherId: draft.id, actor: balancedDraft.actor, reason: 'تأیید ثبت اولیه' });
     await assert.rejects(ledger.reverseVoucher({ voucherId: posted.id, actor: { id: 'manager-1', profile: 'ACCOUNTING_MANAGER' },
       idempotencyKey: `reverse-${type}`, reason: 'اصلاح ثبت اولیه اشتباه', targetFiscalYearId: 'year-1', targetPeriodId: 'period-1', documentDate: balancedDraft.documentDate }),
-      (error: unknown) => error instanceof AccountingLedgerError && error.code === 'CUSTOMER_ACCOUNT_CORRECTION_REQUIRED');
+      (error: unknown) => error instanceof AccountingLedgerError && error.code === code);
     assert.equal(repository.vouchers.size, 1);
     assert.equal(repository.vouchers.get(posted.id)?.status, 'POSTED');
   }

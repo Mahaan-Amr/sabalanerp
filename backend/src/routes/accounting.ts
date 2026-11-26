@@ -106,7 +106,7 @@ import { createAuditedPartnerAuthorization } from '../services/partnerSales/auth
 import { createHash, randomUUID } from 'node:crypto';
 import { projectAccountingDispatchCandidateSummary, projectAccountingDispatchLines } from '../services/accountingDispatchCandidatePresentation';
 import { parseSepidarInvoices, presentSepidarInvoices, readSepidarLoadingTotal,
-  sepidarInvoiceFields, sumSepidarInvoiceAmounts } from '../services/sepidarDispatchInvoices';
+  sepidarInvoiceFields, sepidarInvoiceTotalsMatch } from '../services/sepidarDispatchInvoices';
 import { readPartnerDispatchAccountingCapability, readPartnerDispatchAccountingViewCapability } from '../services/partnerSales/accounting/capabilities';
 import accountingLedgerRouter from './accountingLedger';
 import accountingPeriodEndRouter from './accountingPeriodEnd';
@@ -933,7 +933,7 @@ router.post(sepidarInvoicePath, accountingDispatchEdit, async (req: WorkspaceReq
       const unchanged = before.length === invoices.length && before.every(entry => amountsByNumber.get(entry.number) === entry.amountRial);
       if (unchanged) return 'unchanged' as const;
       const totalRial = invoices.length ? await readSepidarLoadingTotal(tx, loadingId) : null;
-      if (invoices.length && (totalRial === null || sumSepidarInvoiceAmounts(invoices) !== totalRial)) return 'amount' as const;
+      if (invoices.length && !sepidarInvoiceTotalsMatch(invoices, totalRial)) return 'amount' as const;
       await tx.sepidarDispatchInvoice.deleteMany({ where: { loadingId } });
       if (invoices.length) {
         await tx.sepidarDispatchInvoice.createMany({ data: invoices.map(invoice => ({ ...invoice, loadingId })) });

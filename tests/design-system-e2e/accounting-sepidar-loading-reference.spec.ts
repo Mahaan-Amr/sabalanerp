@@ -29,6 +29,7 @@ const rows = [
 
 async function mockAccounting(page: Page, state: {
   invoices: Invoice[]; history: AuditEntry[]; canManage?: boolean; canView?: boolean; cancelled?: boolean; conflict?: boolean;
+  totalRial?: string;
 }) {
   await page.route('**/api/dispatch-confirmation/capabilities', route => route.fulfill({ json: { success: true,
     data: { canManageAccountingCandidates: true, canManageAccountingConfirmation: true } } }));
@@ -51,7 +52,7 @@ async function mockAccounting(page: Page, state: {
   await page.route('**/api/accounting/loadings/loading-1/sepidar-reference', async route => {
     if (route.request().method() === 'GET') {
       await route.fulfill({ json: { success: true, data: { invoices: state.invoices,
-        expectedVersion: state.history[0]?.id ?? null, totalRial: '100000000' } } });
+        expectedVersion: state.history[0]?.id ?? null, totalRial: state.totalRial ?? '100000000' } } });
       return;
     }
 
@@ -74,7 +75,8 @@ async function mockAccounting(page: Page, state: {
 
 test('registers several Sepidar invoices for the whole loading and finds all driver rows by them', async ({ page }) => {
   await signIn(page);
-  const state = { invoices: [] as Invoice[], history: [] as AuditEntry[], canManage: true, canView: true };
+  const state = { invoices: [] as Invoice[], history: [] as AuditEntry[], canManage: true, canView: true,
+    totalRial: '100000000.1156194219' };
   await mockAccounting(page, state);
   await page.goto('/dashboard/accounting/dispatch');
   const search = page.getByRole('searchbox', { name: 'جست‌وجو در ردیف‌ها' });
@@ -82,20 +84,37 @@ test('registers several Sepidar invoices for the whole loading and finds all dri
   await issuingRow.getByRole('button', { name: 'ثبت فاکتور سپیدار' }).click();
 
   const dialog = page.getByRole('dialog');
-  await expect(dialog.getByText('100,000,000', { exact: true })).toBeVisible();
+  const balance = dialog.getByRole('status');
+  await expect(dialog.locator('dl').getByText('100,000,000.116', { exact: true })).toHaveCount(2);
+  await expect(balance).toContainText('مبلغ باقی‌مانده');
+  await expect(balance).toContainText('100,000,000.116');
   await expect(dialog.getByText('C-100، C-101')).toBeVisible();
   await dialog.getByRole('textbox', { name: 'شماره فاکتور سپیدار' }).fill('۰۰۱۲۳');
   await dialog.getByRole('textbox', { name: 'مبلغ فاکتور (ریال)' }).fill('۶۰٬۰۰۰٬۰۰۰');
   const save = dialog.getByRole('button', { name: 'ذخیره فاکتورها' });
   await expect(save).toBeDisabled();
+  await expect(balance).toContainText('40,000,000.116');
+  await dialog.getByRole('textbox', { name: 'مبلغ فاکتور (ریال)' }).fill('۶۰٬۰۰۰٬۰۰۰٫');
+  await expect(balance).toContainText('40,000,000.116');
   await dialog.getByRole('button', { name: 'افزودن فاکتور' }).click();
   await dialog.getByRole('textbox', { name: 'شماره فاکتور سپیدار' }).nth(1).fill('۰۰۱۲۳');
-  await dialog.getByRole('textbox', { name: 'مبلغ فاکتور (ریال)' }).nth(1).fill('۴۰٬۰۰۰٬۰۰۰');
+  const amounts = dialog.getByRole('textbox', { name: 'مبلغ فاکتور (ریال)' });
+  await amounts.nth(1).fill('۴۰٬۰۰۰٬۰۰۰٫۱۱۶');
   await expect(save).toBeDisabled();
   await dialog.getByRole('textbox', { name: 'شماره فاکتور سپیدار' }).nth(1).fill('۰۰۵۶۷');
+  await expect(save).toBeEnabled();
+
+  await dialog.getByRole('button', { name: 'افزودن فاکتور' }).click();
+  await amounts.nth(2).fill('0.001');
+  await expect(balance).toContainText('مبلغ مازاد');
+  await expect(balance).toContainText('0.001');
+  await expect(save).toBeDisabled();
+  await dialog.getByRole('button', { name: 'حذف فاکتور 3' }).click();
+  await expect(balance).toContainText('مبلغ باقی‌مانده');
+  await expect(balance.getByText('0', { exact: true })).toBeVisible();
   await save.click();
   await expect(dialog).toHaveCount(0);
-  expect(state.invoices).toEqual([{ number: '00123', amountRial: '60000000' }, { number: '00567', amountRial: '40000000' }]);
+  expect(state.invoices).toEqual([{ number: '00123', amountRial: '60000000' }, { number: '00567', amountRial: '40000000.116' }]);
   await search.fill('۰۰۵۶۷');
   await expect(page.getByRole('row').filter({ hasText: /راننده [الفب]+/ })).toHaveCount(2);
   await expect(page.getByRole('row').filter({ hasText: 'راننده ج' })).toHaveCount(0);

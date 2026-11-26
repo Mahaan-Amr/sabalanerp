@@ -46,6 +46,9 @@ export function SepidarInvoiceNumbers({ invoices, showAmounts = false }: { invoi
 
 const formatRial = (value: string) => formatNumericInputText(value).displayText;
 const rialScale = BigInt("1000000000000");
+const threeDecimalStep = rialScale / BigInt(1000);
+const roundRialAtoms = (value: bigint) =>
+  ((value + threeDecimalStep / BigInt(2)) / threeDecimalStep) * threeDecimalStep;
 const zero = BigInt(0);
 const rialAtoms = (value: string) => {
   const match = /^(\d{1,38})(?:\.(\d{1,12}))?$/.exec(value);
@@ -107,15 +110,21 @@ export default function SepidarDispatchInvoices({ loadingId, contracts, api, blo
   }, [load]);
 
   const correction = Boolean(state?.invoices.length || state?.expectedVersion);
-  const invoices = rows.map(({ number, amountRial }) => ({ number: normalizeDigits(number).trim(), amountRial }));
+  const invoices = rows.map(({ number, amountRial }) => ({
+    number: normalizeDigits(number).trim(),
+    amountRial: amountRial.replace(/\.$/, ""),
+  }));
   const parsedAmounts = invoices.map(invoice => rialAtoms(invoice.amountRial));
   const everyAmountEntered = parsedAmounts.every(amount => amount !== null);
-  const invoiceTotal = parsedAmounts.reduce<bigint>((total, amount) => total + (amount ?? zero), zero);
-  const expected = state?.totalRial == null ? null : rialAtoms(state.totalRial);
+  const invoiceTotal = roundRialAtoms(parsedAmounts.reduce<bigint>((total, amount) => total + (amount ?? zero), zero));
+  const loadingTotal = state?.totalRial == null ? null : rialAtoms(state.totalRial);
+  const expected = loadingTotal === null ? null : roundRialAtoms(loadingTotal);
+  const balance = expected === null ? null : expected - invoiceTotal;
+  const hasExcess = balance !== null && balance < zero;
   const numbersValid = invoices.every(invoice => /^\d{1,64}$/.test(invoice.number)) &&
     new Set(invoices.map(invoice => invoice.number)).size === invoices.length;
   const clear = rows.length === 0 && Boolean(state?.invoices.length);
-  const matches = expected !== null && everyAmountEntered && invoiceTotal === expected;
+  const matches = everyAmountEntered && balance === zero;
   const canSave = Boolean(state && !loading && !pending && !blocked && !error?.reload &&
     (!correction || reason.trim()) && (clear || (invoices.length && numbersValid && matches)));
 
@@ -156,12 +165,16 @@ export default function SepidarDispatchInvoices({ loadingId, contracts, api, blo
       {error && <ErpInlineState kind="error" title={error.text} />}
       {error?.reload && <ErpButton label="دریافت دوباره اطلاعات بارگیری" variant="outline" disabled={loading || pending} onClick={() => void load()} />}
       {state && <>
-        <dl className="grid gap-2 text-sm sm:grid-cols-2">
+        <dl className="grid gap-2 text-sm sm:grid-cols-3">
           <div><dt className="sds-text-secondary">جمع این بارگیری</dt>
-            <dd>{state.totalRial === null ? "در دسترس نیست" : <><bdi>{formatRial(state.totalRial)}</bdi> ریال</>}</dd></div>
+            <dd>{expected === null ? "در دسترس نیست" : <><bdi>{formatAtoms(expected)}</bdi> ریال</>}</dd></div>
           <div><dt className="sds-text-secondary">جمع مبلغ فاکتورها</dt>
             <dd><bdi>{formatAtoms(invoiceTotal)}</bdi> ریال</dd></div>
-          {contracts.length > 0 && <div className="sm:col-span-2">
+          {balance !== null && <div role="status" aria-atomic="true">
+            <dt className="sds-text-secondary">{hasExcess ? "مبلغ مازاد" : "مبلغ باقی‌مانده"}</dt>
+            <dd><bdi>{formatAtoms(hasExcess ? -balance : balance)}</bdi> ریال</dd>
+          </div>}
+          {contracts.length > 0 && <div className="sm:col-span-3">
             <dt className="sds-text-secondary">قراردادهای بارگیری</dt><dd>{contracts.join("، ")}</dd>
           </div>}
         </dl>

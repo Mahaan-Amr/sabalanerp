@@ -29,6 +29,15 @@ export function parseSepidarInvoices(input: unknown) {
 export const sumSepidarInvoiceAmounts = (invoices: { amountRial: string }[]) =>
   invoices.reduce((total, invoice) => total.plus(invoice.amountRial), new Decimal(0)).toFixed();
 
+export function sepidarInvoiceTotalsMatch(invoices: { amountRial: string }[], loadingTotalRial: string | null) {
+  if (loadingTotalRial === null) return false;
+  const loadingTotal = new Decimal(loadingTotalRial);
+  if (loadingTotal.isNegative()) return false;
+  const invoiceTotal = new Decimal(sumSepidarInvoiceAmounts(invoices));
+  return invoiceTotal.toDecimalPlaces(3, Decimal.ROUND_HALF_UP)
+    .equals(loadingTotal.toDecimalPlaces(3, Decimal.ROUND_HALF_UP));
+}
+
 /** The net approved amount of each current finalized allocation, in rials. */
 export async function readSepidarLoadingTotal(tx: Prisma.TransactionClient, loadingId: string) {
   const revisions = await tx.logisticsAllocationRevision.findMany({

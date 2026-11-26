@@ -2774,6 +2774,9 @@ _Avoid_: treating بارگیری as the customer-facing برنامه تحویل,
 The external Sepidar invoice number recorded by Accounting for a whole بارگیری, with its invoice amount in rials. A loading can have multiple Sepidar invoice numbers shared by all its drivers, and each invoice can be recorded without assigning it to an individual contract.
 _Avoid_: شماره بارگیری سپیدار, assigning invoices to individual drivers, or using the Sabalan loading number, waybill number, numbered sales dispatch invoice, or financial record's system invoice number as a Sepidar invoice number
 
+**مبلغ باقی‌مانده فاکتورهای سپیدار**:
+The rounded approved net loading total in rials minus the rounded sum of entered Sepidar invoice amounts. A positive difference is مبلغ باقی‌مانده and an amount above the loading total is مبلغ مازاد. Each total is rounded to three decimal places after its amounts are added.
+
 **محدوده بارگیری**:
 Each بارگیری belongs to exactly one customer project and may include deliverable rows from multiple sales contracts for that same project.
 _Avoid_: mixing multiple customer projects in one بارگیری, even when the same driver or vehicle carries them together

@@ -229,6 +229,10 @@ test('foreign-currency evidence must be supported, positive, reproducible and ro
   });
   assert.equal(created.debitTotalRials, 1_000_000n);
   await assert.rejects(() => ledger.createManualDraft({
+    ...balancedDraft, idempotencyKey: 'base-only-account-fx', source: immutableSource('base-only-account-fx'),
+    lines: [{ ...fxLine, accountId: 'cash' }, balancingLine],
+  }), (error: unknown) => error instanceof AccountingLedgerError && error.code === 'FOREIGN_AMOUNT_FORBIDDEN');
+  await assert.rejects(() => ledger.createManualDraft({
     ...balancedDraft, idempotencyKey: 'unsupported-fx-evidence', source: immutableSource('unsupported-fx-evidence'),
     lines: [{ ...fxLine, originalCurrency: 'XYZ' }, balancingLine],
   }), (error: unknown) => error instanceof AccountingLedgerError && error.code === 'UNSUPPORTED_CURRENCY');

@@ -5029,6 +5029,7 @@ model AccountingBook {
   legacyArchiveRecords       AccountingLegacyArchiveRecord[]
   sepidarSourceSnapshots     AccountingSepidarSourceSnapshot[]
   sepidarTargetLinks         AccountingSepidarTargetLink[]
+  sepidarOpeningCheques      AccountingSepidarOpeningCheque[]
   sepidarBackupUploads       AccountingSepidarBackupUpload[]
   replacementParallelRuns    AccountingReplacementParallelRun[]
   replacementRecoveryProofs  AccountingReplacementRecoveryProof[]
@@ -5348,6 +5349,7 @@ model AccountingLedgerLine {
   party                   AccountingParty?                @relation(fields: [partyId], references: [id], onDelete: Restrict)
   financialAccount        AccountingFinancialAccount?     @relation(fields: [financialAccountId], references: [id], onDelete: Restrict)
   dimensions              AccountingLedgerLineDimension[]
+  sepidarOpeningCheques   AccountingSepidarOpeningCheque[]
 
   @@unique([voucherId, sequence])
   @@index([accountId, voucherId])
@@ -6987,6 +6989,7 @@ model AccountingCheckInstrument {
   createdAt     DateTime                         @default(now())
   events        AccountingCheckInstrumentEvent[]
   receipt       AccountingTreasuryTransaction?
+  sepidarOpening AccountingSepidarOpeningCheque?
 
   @@unique([legalEntityId, sayadId])
   @@index([profileId, dueAt, status])
@@ -7009,9 +7012,30 @@ model AccountingCheckInstrumentEvent {
   evidenceHash       String
   createdAt          DateTime                  @default(now())
   checkInstrument    AccountingCheckInstrument @relation(fields: [checkInstrumentId], references: [id], onDelete: Restrict)
+  sepidarOpening     AccountingSepidarOpeningCheque?
 
   @@unique([checkInstrumentId, sequence])
   @@map("accounting_check_instrument_events")
+}
+
+model AccountingSepidarOpeningCheque {
+  bookId              String
+  sourceInstrumentId  String
+  sourceOpeningLineId String
+  snapshotSha256      String
+  planSha256          String
+  instrumentId        String                        @unique
+  openingEventId      String                        @unique
+  openingLedgerLineId String
+  amountRials         Decimal                       @db.Decimal(20, 0)
+  book                AccountingBook                @relation(fields: [bookId], references: [id], onDelete: Restrict)
+  instrument          AccountingCheckInstrument     @relation(fields: [instrumentId], references: [id], onDelete: Restrict)
+  openingEvent        AccountingCheckInstrumentEvent @relation(fields: [openingEventId], references: [id], onDelete: Restrict)
+  openingLedgerLine   AccountingLedgerLine          @relation(fields: [openingLedgerLineId], references: [id], onDelete: Restrict)
+
+  @@id([bookId, sourceInstrumentId])
+  @@index([openingLedgerLineId])
+  @@map("accounting_sepidar_opening_cheques")
 }
 
 model AccountingCashCount {
@@ -8058,6 +8082,7 @@ enum AccountingLedgerAccountLevel {
 enum AccountingNormalSide {
   DEBIT
   CREDIT
+  NEUTRAL
 }
 
 enum AccountingStatementRole {

@@ -103,6 +103,41 @@ test('کنترل‌های سه سطح صریح برای مدیر سراسری ن
   await expect(page.getByRole('button', { name: 'ایجاد دفترکل ریالی' })).toBeVisible();
 });
 
+test('مدیر حسابداری ارز حساب معین را هنگام ایجاد انتخاب می‌کند و در کدینگ می‌بیند', async ({ page }) => {
+  await login(page);
+  await mockLedger(page, 'ACCOUNTING_MANAGER');
+  const ledgerContext = context('ACCOUNTING_MANAGER');
+  const accounts = ledgerContext.data.books[0].accounts;
+  accounts.push({ ...accounts[0], id: 'assets', code: '101', titlePersian: 'وجوه نقد', level: 'KOL' });
+  await page.route('**/api/accounting/ledger/context', (route) => json(route, 200, ledgerContext));
+  await page.route('**/api/accounting/ledger/accounts', (route) => {
+    const account = route.request().postDataJSON();
+    accounts.push({ ...account, id: 'new-fx-account' });
+    return json(route, 201, { success: true, data: account });
+  });
+  await page.goto('/dashboard/accounting/ledger');
+  await page.getByRole('button', { name: 'کدینگ حساب‌ها' }).click();
+  const level = page.locator('label').filter({ has: page.getByText('سطح', { exact: true }) }).getByRole('combobox');
+  const currency = page.getByRole('combobox', { name: 'ارز حساب' });
+  await expect(currency).toHaveCount(0);
+  await level.click();
+  await page.getByRole('option', { name: 'معین', exact: true }).click();
+  await expect(currency).toHaveText('فقط ریال');
+  await currency.click();
+  await page.getByRole('option', { name: 'ریال و ارز خارجی' }).click();
+  await page.locator('label').filter({ has: page.getByText('والد مستقیم', { exact: true }) }).getByRole('combobox').click();
+  await page.getByRole('option', { name: '101 · وجوه نقد' }).click();
+  await page.getByLabel('کد حساب', { exact: true }).fill('101099');
+  await page.getByLabel('عنوان فارسی', { exact: true }).fill('حساب ارزی آزمایشی');
+  await page.getByRole('button', { name: 'تاریخ اثر', exact: true }).click();
+  await page.getByRole('dialog', { name: 'انتخاب تاریخ شمسی' }).getByRole('button', { name: 'امروز' }).click();
+  const submit = page.waitForRequest((request) => request.method() === 'POST' && new URL(request.url()).pathname.endsWith('/accounts'));
+  await page.getByRole('button', { name: 'افزودن حساب', exact: true }).click();
+  expect((await submit).postDataJSON()).toMatchObject({ level: 'MOIN', currencyBehavior: 'MULTI_CURRENCY' });
+  const createdAccount = page.getByText('101099 · حساب ارزی آزمایشی', { exact: true }).locator('../..');
+  await expect(createdAccount.getByText('ارز حساب ریال و ارز خارجی', { exact: true })).toBeVisible();
+});
+
 test('شواهد حساس برای مشاهده‌گر پنهان و برای مدیر با مسیر حسابرسی‌شده قابل بازبینی است', async ({ page }) => {
   await login(page);
   await mockLedger(page, 'VIEWER', true, false, true);

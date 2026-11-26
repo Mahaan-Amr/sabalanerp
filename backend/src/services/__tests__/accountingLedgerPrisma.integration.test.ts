@@ -103,6 +103,26 @@ test('دفترکل واقعی در رقابت شماره یکتا، توازن �
       assert.equal('evidenceHash' in projection.lines[0], false);
       assert.equal('evidenceId' in projection.lines[0], false);
     }
+
+    const neutral = await administration.createAccount({
+      bookId: book.id, codeSchemeId: scheme.id, code: '101002', titlePersian: 'حساب با ماهیت بدون جهت',
+      level: 'MOIN', parentId: kol.id, normalSide: 'NEUTRAL', statementRole: 'ASSET',
+      currencyBehavior: 'BASE_ONLY', effectiveFrom: fiscal.startsAt, actorId,
+    });
+    const chart = (await administration.getContext())?.books[0].accounts;
+    assert.equal(chart?.find((account) => account.id === neutral.id)?.normalSide, 'NEUTRAL');
+    for (const [index, side] of ['debit', 'credit'].entries()) {
+      const input = command(`ثبت-ماهیت-بدون-جهت-${side}`);
+      input.lines[index].accountId = neutral.id;
+      const draft = await ledger.createManualDraft(input);
+      const posted = await ledger.postVoucher({ voucherId: draft.id, actor: input.actor, reason: 'تأیید ثبت حساب با ماهیت بدون جهت' });
+      assert.equal(posted.status, 'POSTED');
+    }
+    const neutralRow = (await listPostedTrialBalance(database, { bookId: book.id, fiscalYearId: fiscal.id }))
+      .find((row) => row.accountId === neutral.id);
+    assert.equal(neutralRow?.debitRials.toFixed(0), '1000');
+    assert.equal(neutralRow?.creditRials.toFixed(0), '1000');
+
     const evidence = await readLedgerVoucherEvidence(database, {
       voucherId: postedA.id,
       actorId,

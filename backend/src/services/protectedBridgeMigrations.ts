@@ -213,10 +213,12 @@ const currentRelease = {
   '20261125160000_project_return_operational_rework': ['fe2004b04ac269cd139c89f6ecb0f441fda7c61ab56b771976136be545234f84', 5],
   '20261125170000_project_return_finalized_correction': ['18a57ef4b04b5f102cf3fce199a9f4e1551f958b8e57b5427219042d43f64285', 3],
   [projectReturnVersionImmutabilityName]: ['7f4969f2669c87e127b0604b09a4a2cad0623335abfab9649283b35eface7176', 10],
+  '20261126090000_project_return_item_area': ['0d56e8b36ca807c5d07cc65ad10aded838c0a20aa47d0ab352e5624c62a9bc96', 1],
+  '20261126100000_project_return_sepidar_revisions': ['085560fc59159493457236ac7822a70880fc08ccf99ccb31dac3456003e8a8a3', 2],
 } as const;
 export const protectedCurrentReleaseNames: readonly string[] = Object.freeze(Object.keys(currentRelease));
 // Each release extends the ledger while preserving the prior release-set hashes.
-const protectedReleaseEpochEnds = Object.freeze([12, 22, 24, 25, 35, 36, 37, 38, 41, 42, 43, 44, 45, 46, 47, 48, 49, 54, 65]);
+const protectedReleaseEpochEnds = Object.freeze([12, 22, 24, 25, 35, 36, 37, 38, 41, 42, 43, 44, 45, 46, 47, 48, 49, 54, 65, 67]);
 const wrappedCurrentReleaseMigrations = new Set([
   '20261108000100_start_new_waybill_numbers_at_one', retireAttachmentScanStatusName,
   protectPartnerNumberReservationName, sepidarInvoiceName, projectReturnGuardAdmissionName,

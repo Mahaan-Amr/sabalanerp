@@ -3,8 +3,9 @@
 import { useCallback, useRef, useState, type FormEvent } from 'react';
 import { ErpButton, ErpInlineState, ErpSection } from '@/components/erp';
 import { userFacingError } from '@/features/dispatch/userFacingError';
-import { ProjectReturnMeasurement } from './ProjectReturnMeasurement';
-import { emptyProjectReturnQuantity, resolveProjectReturnQuantity, type ProjectReturnLinearCalculation } from './projectReturnQuantity';
+import { ProjectReturnMeasurement, ProjectReturnWidth } from './ProjectReturnMeasurement';
+import { damagedProjectReturnAreaLabel, healthyProjectReturnAreaLabel } from './projectReturnAreaFacts';
+import { emptyProjectReturnQuantity, resolveProjectReturnQuantity, resolveProjectReturnWidth, type ProjectReturnLinearCalculation } from './projectReturnQuantity';
 import { projectReturnReceiptApi, type ProjectReturnReceipt } from './projectReturnReceiptApi';
 import { StoneReturnLookup } from './StoneReturnLookup';
 import type { StoneReturnOption } from './stoneReturnApi';
@@ -23,6 +24,8 @@ export function ProjectReturnCorrectionForm({ receipt, onSubmitted }: {
     receipt.version.projects.map(project => ({ id: project.projectId, label: project.projectName })));
   const [healthy, setHealthy] = useState(() => quantityDraft(item.healthyQuantity, item.healthyCalculation));
   const [damaged, setDamaged] = useState(() => quantityDraft(item.damagedQuantity, item.damagedCalculation));
+  const [manualWidth, setManualWidth] = useState('');
+  const widthMeters = item.effectiveWidthMeters ?? resolveProjectReturnWidth(manualWidth);
   const [pending, setPending] = useState(false);
   const [validate, setValidate] = useState(false);
   const [error, setError] = useState('');
@@ -43,6 +46,7 @@ export function ProjectReturnCorrectionForm({ receipt, onSubmitted }: {
     if (!accepted || !rejected || [accepted.value, rejected.value].every(value => /^0(?:\.0+)?$/.test(value))) {
       return setError('مقدار سالم یا آسیب‌دیده را وارد کنید.');
     }
+    if (manualWidth.trim() && !widthMeters) return setError('عرض واقعی سنگ باید بزرگ‌تر از صفر باشد.');
     busy.current = true;
     setPending(true);
     try {
@@ -50,6 +54,8 @@ export function ProjectReturnCorrectionForm({ receipt, onSubmitted }: {
         expectedVersionId: receipt.version.id, projectIds: projects.map(project => project.id),
         items: [{
           productId: item.productId, unit: item.unit,
+          ...(widthMeters && { effectiveWidthMeters: widthMeters }),
+          ...(item.partnerContractId && { partnerContractId: item.partnerContractId }),
           ...(accepted.calculation ? { healthyCalculation: accepted.calculation } : { healthyQuantity: accepted.value }),
           ...(rejected.calculation ? { damagedCalculation: rejected.calculation } : { damagedQuantity: rejected.value }),
         }],
@@ -75,10 +81,14 @@ export function ProjectReturnCorrectionForm({ receipt, onSubmitted }: {
             onClick={() => setProjects(previous => previous.filter(option => option.id !== project.id))} />
         </li>)}
       </ul>}
+      {item.unit === 'meter' && <ProjectReturnWidth recorded={item.effectiveWidthMeters} manual={manualWidth}
+        onChange={setManualWidth} validate={validate} />}
       <div className="grid gap-4 md:grid-cols-2">
         <ProjectReturnMeasurement label="مقدار سالم" productName={item.productName} unit={item.unit} draft={healthy}
+          widthMeters={widthMeters} areaLabel={healthyProjectReturnAreaLabel}
           onChange={setHealthy} validate={validate} />
         <ProjectReturnMeasurement label="مقدار آسیب‌دیده" productName={item.productName} unit={item.unit} draft={damaged}
+          widthMeters={widthMeters} areaLabel={damagedProjectReturnAreaLabel}
           onChange={setDamaged} validate={validate} />
       </div>
       {error && <ErpInlineState kind="error" title={error} />}

@@ -13,6 +13,7 @@ import {
 import { displayExactDecimal, displayStoneReturnQuantity, stoneReturnUnitLabels, type StoneReturnSourceKey } from './stoneReturnApi';
 import { normalizeStoneReturnQuantity, stoneReturnQuantityAtoms, stoneReturnQuantityScale } from './stoneReturnQuantityInput';
 import { ProjectReturnFacts } from './ProjectReturnFacts';
+import { projectReturnQuantityFacts } from './projectReturnAreaFacts';
 import { ProjectReturnPriorPosting } from './ProjectReturnPriorPosting';
 import { rateLabel } from './StoneReturnPosting';
 
@@ -94,8 +95,7 @@ function ItemReview({ item, projects, fields, errors, editable, pending, onChang
         <p className="text-xs sds-text-secondary"><bdi dir="ltr">{item.productCode}</bdi> · {stoneReturnUnitLabels[item.unit] ?? item.unit}</p>
       </div>
       <ProjectReturnFacts className="grid-cols-2 md:grid-cols-4" items={[
-        { label: 'مقدار سالم', value: quantity(item.healthyQuantity) },
-        { label: 'مقدار آسیب‌دیده', value: quantity(item.damagedQuantity) },
+        ...projectReturnQuantityFacts(item),
         ...(healthy ? [
           { label: 'تخصیص ذخیره‌شده', value: quantity(item.allocatedQuantity) },
           { label: item.candidates.length ? 'تخصیص‌نیافته' : 'فاقد مرجع', value: quantity(item.unallocatedQuantity) },

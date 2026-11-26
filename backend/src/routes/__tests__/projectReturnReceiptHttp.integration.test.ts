@@ -81,7 +81,7 @@ test('Logistics records and reopens exact multi-project receipt quantities and h
       contractData: { projectId: extraProject.id, products: [
         { rowId: 'shared', productId: product.id, unit: 'squareMeter' },
         { rowId: 'piece', productId: product.id, unit: 'count' },
-        { rowId: 'length', productId: lengthProduct.id, unit: 'meter' },
+        { rowId: 'length', productId: lengthProduct.id, unit: 'meter', width: '40', widthUnit: 'cm' },
       ] },
       items: { create: [
         { productId: product.id, productRowId: 'shared', quantity: 1, unitPrice: 1, totalPrice: 1 },
@@ -155,6 +155,9 @@ test('Logistics records and reopens exact multi-project receipt quantities and h
     assert.equal(reopened.data.version.items[0].unit, 'squareMeter');
     assert.equal(reopened.data.version.items[0].healthyQuantity, '35');
     assert.equal(reopened.data.version.items[0].damagedQuantity, '5');
+    assert.equal(reopened.data.version.items[0].healthyAreaSquareMeters, '35');
+    assert.equal(reopened.data.version.items[0].damagedAreaSquareMeters, '5');
+    assert.equal(reopened.data.version.items[0].effectiveWidthMeters, null);
     assert.equal(reopened.data.visit.projectReturnStatus, 'RECEIVED');
     const personalVisit = `${guard}/${admitted.data.id}`;
     assert.equal((await call(`${personalVisit}/project-return-transfer`, {})).status, 409);
@@ -222,6 +225,9 @@ test('Logistics records and reopens exact multi-project receipt quantities and h
     assert.equal(directItem.damagedQuantity, '5');
     assert.equal(linearItem.healthyQuantity, '0');
     assert.equal(linearItem.damagedQuantity, '0.800000000000000000000000000003');
+    assert.equal(linearItem.effectiveWidthMeters, '0.4');
+    assert.equal(linearItem.healthyAreaSquareMeters, '0');
+    assert.equal(linearItem.damagedAreaSquareMeters, '0.320000000000000000000000000001');
     assert.deepEqual(linearItem.damagedCalculation, linear.damagedCalculation);
     assert.equal(linearItem.inventoryIdentityId, null);
     assert.ok(directItem.inventoryIdentityId);
@@ -405,6 +411,60 @@ test('Logistics records and reopens exact multi-project receipt quantities and h
       (recorded.status === 409 && cancelled.status === 200), JSON.stringify({ recorded, cancelled }));
     const matching = (await call(receipts)).data.items.filter((item: typeof reopened.data) => item.visit.id === secondVisit.data.id);
     assert.equal(matching.length, recorded.status === 201 ? 1 : 0);
+
+    const { id: _lengthId, createdAt: _lengthCreated, updatedAt: _lengthUpdated, ...lengthFields } = lengthProduct;
+    const manualWidthProduct = await db.product.create({
+      data: { ...lengthFields, widthValue: 0, code: 'LINEAR-514-MANUAL', namePersian: 'سنگ با عرض دستی' },
+    });
+    await db.salesContract.create({ data: {
+      customerId: customer.id, departmentId: department.id, createdBy: actor.id, responsibleSellerId: actor.id,
+      contractNumber: 'RETURN-514-MANUAL', title: 'Return width fixture', titlePersian: 'آزمون عرض سنگ', content: 'fixture', status: 'APPROVED',
+      contractData: { projectId: extraProject.id, products: [{ rowId: 'manual-width', productId: manualWidthProduct.id, unit: 'meter' }] },
+      items: { create: { productId: manualWidthProduct.id, productRowId: 'manual-width', quantity: 40, unitPrice: 1, totalPrice: 40 } },
+    } });
+    assert.equal((await products(extraProject.id, lengthProduct.code)).data[0].suggestedWidthMeters, '0.4');
+    assert.equal((await products(extraProject.id, manualWidthProduct.code)).data[0].suggestedWidthMeters, null);
+    const areaVisit = await call(guard, { source: 'PERSONAL_PICKUP', plate: '58 ب 345 ایران 67', purpose: 'PROJECT_RETURN' });
+    assert.equal(areaVisit.status, 201);
+    const areaItems = [lengthProduct, manualWidthProduct].map(({ id }) => ({
+      productId: id, unit: 'meter', healthyQuantity: '13.5',
+      damagedCalculation: { khatRas: '1.2', pieceCount: '3', plus: '0.3', minus: '0.1' },
+    }));
+    const areaCommand = { ...command, visitId: areaVisit.data.id, projectIds: [extraProject.id], items: areaItems };
+
+    assert.equal((await call(receipts, { ...areaCommand, items: [{ ...areaItems[0], effectiveWidthMeters: '0.9' }] })).status, 400);
+    assert.equal((await call(receipts, { ...areaCommand, items: [{ ...areaItems[1], effectiveWidthMeters: '0' }] })).status, 400);
+    const unmeasuredVisit = await call(guard, { source: 'PERSONAL_PICKUP', plate: '59 ب 345 ایران 67', purpose: 'PROJECT_RETURN' });
+    const unmeasured = await call(receipts, { ...areaCommand, visitId: unmeasuredVisit.data.id, items: [areaItems[1]] });
+    assert.equal(unmeasured.status, 201, JSON.stringify(unmeasured));
+    assert.equal(unmeasured.data.version.items[0].effectiveWidthMeters, null);
+    assert.equal(unmeasured.data.version.items[0].healthyAreaSquareMeters, null);
+    assert.equal(unmeasured.data.version.items[0].damagedAreaSquareMeters, null);
+    const measured = await call(receipts, { ...areaCommand, items: [areaItems[0], { ...areaItems[1], effectiveWidthMeters: '0.25' }] });
+    assert.equal(measured.status, 201, JSON.stringify(measured));
+    const readArea = async () => {
+      const logistics = await call(`${receipts}/${measured.data.id}`);
+      const accounting = await call(`/api/accounting/project-returns/${measured.data.id}`);
+      assert.equal(logistics.status, 200);
+      assert.equal(accounting.status, 200, JSON.stringify(accounting));
+      for (const [productId, effectiveWidthMeters, healthyAreaSquareMeters, damagedAreaSquareMeters] of [
+        [lengthProduct.id, '0.4', '5.4', '1.52'],
+        [manualWidthProduct.id, '0.25', '3.375', '0.95'],
+      ]) {
+        const matchesProduct = (item: { productId: string }) => item.productId === productId;
+        for (const items of [logistics.data.version.items, accounting.data.items]) {
+          const row = items.find(matchesProduct);
+          assert.equal(row.healthyQuantity, '13.5');
+          assert.equal(row.damagedQuantity, '3.8');
+          assert.equal(row.effectiveWidthMeters, effectiveWidthMeters);
+          assert.equal(row.healthyAreaSquareMeters, healthyAreaSquareMeters);
+          assert.equal(row.damagedAreaSquareMeters, damagedAreaSquareMeters);
+        }
+      }
+    };
+    await readArea();
+    await db.product.update({ where: { id: manualWidthProduct.id }, data: { widthValue: 50 } });
+    await readArea();
 
     for (const [plate, disposition] of [
       ['46 ب 345 ایران 67', 'transfer'],

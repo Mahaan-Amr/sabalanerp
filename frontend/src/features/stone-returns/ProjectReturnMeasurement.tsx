@@ -1,10 +1,10 @@
 'use client';
 
 import { useId } from 'react';
-import { ErpField, ErpInput, ErpSegmentedControl } from '@/components/erp';
+import { ErpField, ErpFieldView, ErpInput, ErpSegmentedControl } from '@/components/erp';
 import { displayStoneReturnQuantity, stoneReturnUnitLabels } from './stoneReturnApi';
 import {
-  resolveProjectReturnQuantity, type ProjectReturnLinearCalculation, type ProjectReturnQuantityDraft,
+  resolveProjectReturnArea, resolveProjectReturnQuantity, resolveProjectReturnWidth, type ProjectReturnLinearCalculation, type ProjectReturnQuantityDraft,
 } from './projectReturnQuantity';
 
 export const projectReturnLinearFields = [
@@ -14,16 +14,35 @@ export const projectReturnLinearFields = [
   { key: 'minus', label: 'کسر', inputMode: 'decimal' },
 ] as const;
 
-export function ProjectReturnMeasurement({ label, productName, unit, draft, onChange, validate }: {
+export function ProjectReturnWidth({ recorded, manual, onChange, validate }: {
+  recorded?: string | null;
+  manual: string;
+  onChange: (width: string) => void;
+  validate: boolean;
+}) {
+  return <div className="max-w-xs">
+    {recorded
+      ? <ErpFieldView label="عرض سنگ" value={displayStoneReturnQuantity(recorded, 'متر')} />
+      : <ErpField label="عرض واقعی سنگ (متر)"
+          error={validate && manual.trim() && !resolveProjectReturnWidth(manual) ? 'عرض بزرگ‌تر از صفر وارد کنید.' : undefined}>
+        <ErpInput inputMode="decimal" maxLength={100} value={manual} onChange={event => onChange(event.target.value)} />
+      </ErpField>}
+  </div>;
+}
+
+export function ProjectReturnMeasurement({ label, productName, unit, draft, widthMeters, areaLabel, onChange, validate }: {
   label: string;
   productName: string;
   unit: string;
   draft: ProjectReturnQuantityDraft;
+  widthMeters: string | null;
+  areaLabel: string;
   onChange: (draft: ProjectReturnQuantityDraft) => void;
   validate: boolean;
 }) {
   const errorId = useId();
   const resolved = resolveProjectReturnQuantity(draft, unit);
+  const area = resolved ? resolveProjectReturnArea(resolved.value, unit, widthMeters) : null;
   const invalid = validate && !resolved;
   const changeLinear = (key: keyof ProjectReturnLinearCalculation, value: string) =>
     onChange({ ...draft, linear: { ...draft.linear, [key]: value } });
@@ -52,5 +71,7 @@ export function ProjectReturnMeasurement({ label, productName, unit, draft, onCh
       <ErpInput inputMode={unit === 'count' ? 'numeric' : 'decimal'} maxLength={100} value={draft.direct} placeholder="۰"
         onChange={event => onChange({ ...draft, direct: event.target.value })} />
     </ErpField>}
+    {(unit === 'meter' || unit === 'squareMeter') && <ErpFieldView label={areaLabel}
+      value={area === null ? '—' : displayStoneReturnQuantity(area, 'squareMeter')} />}
   </div>;
 }

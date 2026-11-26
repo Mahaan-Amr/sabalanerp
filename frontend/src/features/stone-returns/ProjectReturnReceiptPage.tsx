@@ -9,9 +9,10 @@ import {
   type ProjectReturnReceipt, type ProjectReturnReceiptDetails,
 } from './projectReturnReceiptApi';
 import { ProjectReturnFacts } from './ProjectReturnFacts';
+import { projectReturnQuantityFacts } from './projectReturnAreaFacts';
 import { ProjectReturnIntake } from './ProjectReturnIntake';
 import { projectReturnDriverLabel } from './projectReturnVisitApi';
-import { displayExactDecimal, displayStoneReturnQuantity } from './stoneReturnApi';
+import { displayExactDecimal } from './stoneReturnApi';
 import { ProjectReturnCorrectionForm } from './ProjectReturnCorrectionForm';
 import { projectReturnLinearFields } from './ProjectReturnMeasurement';
 import type { ProjectReturnLinearCalculation } from './projectReturnQuantity';
@@ -144,8 +145,7 @@ export function ProjectReturnReceiptPage({ receiptId }: { receiptId: string }) {
                   <bdi className="break-all text-xs sds-text-secondary" dir="ltr">{item.productCode}</bdi>
                 </div>
                 <ProjectReturnFacts className="grid-cols-2" items={[
-                  { label: 'مقدار سالم', value: displayStoneReturnQuantity(item.healthyQuantity, item.unit) },
-                  { label: 'مقدار آسیب‌دیده', value: displayStoneReturnQuantity(item.damagedQuantity, item.unit) },
+                  ...projectReturnQuantityFacts(item),
                 ]} />
               </div>
               {item.healthyCalculation && <ProjectReturnRecordedCalculation label="خط راس مقدار سالم" calculation={item.healthyCalculation} />}

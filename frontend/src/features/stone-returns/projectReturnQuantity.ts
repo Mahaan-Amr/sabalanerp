@@ -17,6 +17,29 @@ export function emptyProjectReturnQuantity(): ProjectReturnQuantityDraft {
   return { mode: 'direct', direct: '', linear: { khatRas: '', pieceCount: '', plus: '', minus: '' } };
 }
 
+const quantityScale = BigInt(`1${'0'.repeat(stoneReturnQuantityScale)}`);
+
+function formatQuantityAtoms(atoms: bigint) {
+  const fraction = (atoms % quantityScale).toString().padStart(stoneReturnQuantityScale, '0').replace(/0+$/, '');
+  return `${atoms / quantityScale}${fraction ? '.' + fraction : ''}`;
+}
+
+export function resolveProjectReturnWidth(value: string) {
+  const width = normalizeStoneReturnQuantity(value, true);
+  const atoms = stoneReturnQuantityAtoms(width, 'meter');
+  return atoms !== null && atoms > BigInt(0) ? width : null;
+}
+
+export function resolveProjectReturnArea(quantity: string, unit: string, widthMeters: string | null) {
+  if (unit === 'squareMeter') return quantity;
+  if (unit !== 'meter' || widthMeters === null) return null;
+  const length = stoneReturnQuantityAtoms(quantity, unit);
+  const width = stoneReturnQuantityAtoms(widthMeters, unit);
+  if (length === null || width === null) return null;
+  const result = formatQuantityAtoms((length * width + quantityScale / BigInt(2)) / quantityScale);
+  return stoneReturnQuantityAtoms(result, 'squareMeter') === null ? null : result;
+}
+
 export function resolveProjectReturnQuantity(draft: ProjectReturnQuantityDraft, unit: string) {
   const normalize = (value: string, fallback = '') => normalizeStoneReturnQuantity(value.trim() || fallback, true);
   if (draft.mode === 'direct') {
@@ -37,10 +60,8 @@ export function resolveProjectReturnQuantity(draft: ProjectReturnQuantityDraft, 
   if (length === null || length === BigInt(0) || pieces === null || pieces === BigInt(0) || plus === null || minus === null) return null;
 
   // A whole piece count keeps the loading formula on the exact quantity scale.
-  const scale = BigInt(`1${'0'.repeat(stoneReturnQuantityScale)}`);
-  const calculated = length * (pieces / scale) + plus - minus;
+  const calculated = length * (pieces / quantityScale) + plus - minus;
   if (calculated < BigInt(0)) return null;
-  const fraction = (calculated % scale).toString().padStart(stoneReturnQuantityScale, '0').replace(/0+$/, '');
-  const value = `${calculated / scale}${fraction ? '.' + fraction : ''}`;
+  const value = formatQuantityAtoms(calculated);
   return stoneReturnQuantityAtoms(value, unit) === null ? null : { value, calculation };
 }

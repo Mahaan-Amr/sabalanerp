@@ -12,9 +12,10 @@ import { LogisticsPage } from '@/features/logistics/LogisticsWorkspace';
 import { projectReturnDriverLabel, projectReturnVisitApi, type ProjectReturnVisit } from './projectReturnVisitApi';
 import { projectReturnReceiptApi, projectReturnReceiptHref, type ProjectReturnProduct, type ProjectReturnReceiptDetails } from './projectReturnReceiptApi';
 import { StoneReturnLookup } from './StoneReturnLookup';
-import { ProjectReturnMeasurement } from './ProjectReturnMeasurement';
-import { emptyProjectReturnQuantity, resolveProjectReturnQuantity, type ProjectReturnQuantityDraft, type ProjectReturnLinearCalculation } from './projectReturnQuantity';
-import { displayStoneReturnQuantity, stoneReturnUnitLabels, type StoneReturnOption } from './stoneReturnApi';
+import { ProjectReturnMeasurement, ProjectReturnWidth } from './ProjectReturnMeasurement';
+import { damagedProjectReturnAreaLabel, healthyProjectReturnAreaLabel, projectReturnQuantityFacts } from './projectReturnAreaFacts';
+import { emptyProjectReturnQuantity, resolveProjectReturnArea, resolveProjectReturnQuantity, resolveProjectReturnWidth, type ProjectReturnQuantityDraft, type ProjectReturnLinearCalculation } from './projectReturnQuantity';
+import { stoneReturnUnitLabels, type StoneReturnOption } from './stoneReturnApi';
 
 const listHref = '/dashboard/logistics/returns';
 const steps = [
@@ -27,7 +28,7 @@ const steps = [
 type ProductOption = StoneReturnOption & ProjectReturnProduct;
 type Condition = 'healthy' | 'damaged';
 type SelectionChange = { kind: 'customer'; customer: StoneReturnOption | null } | { kind: 'project'; id: string };
-type Item = { product: ProductOption; healthy: ProjectReturnQuantityDraft; damaged: ProjectReturnQuantityDraft };
+type Item = { product: ProductOption; healthy: ProjectReturnQuantityDraft; damaged: ProjectReturnQuantityDraft; manualWidth: string };
 
 const priorQuantity = (direct: string, linear?: ProjectReturnLinearCalculation | null): ProjectReturnQuantityDraft =>
   linear ? { mode: 'linear', direct, linear } : { ...emptyProjectReturnQuantity(), direct };
@@ -46,10 +47,11 @@ export function ProjectReturnIntake({ visitId, revision, onRevised, onClose }: {
   const [customer, setCustomer] = useState<StoneReturnOption | null>(revision ? { id: revision.customerId, label: revision.customerName } : null);
   const [projects, setProjects] = useState<StoneReturnOption[]>(revision?.version.projects.map(project => ({ id: project.projectId, label: project.projectName })) ?? []);
   const [items, setItems] = useState<Item[]>(revision?.version.items.map(item => ({
-    product: { ...item, id: JSON.stringify([item.productId, item.unit]), label: item.productName,
+    product: { ...item, suggestedWidthMeters: item.effectiveWidthMeters, id: JSON.stringify([item.productId, item.unit]), label: item.productName,
       description: `${item.productCode} · ${stoneReturnUnitLabels[item.unit] ?? item.unit}` },
     healthy: priorQuantity(item.healthyQuantity, item.healthyCalculation),
     damaged: priorQuantity(item.damagedQuantity, item.damagedCalculation),
+    manualWidth: '',
   })) ?? []);
   const [partnerContract, setPartnerContract] = useState<StoneReturnOption | null>(null);
   const [showPartnerContracts, setShowPartnerContracts] = useState(false);
@@ -83,13 +85,15 @@ export function ProjectReturnIntake({ visitId, revision, onRevised, onClose }: {
     if (!customer || !projects.length) return [];
     const rows = await projectReturnReceiptApi.products(customer.id, projects.map(project => project.id), search, partnerContract?.id);
     return rows.map(row => ({
-      ...row, id: JSON.stringify([row.productId, row.unit]), label: row.productName,
+      ...row, partnerContractId: partnerContract?.id, id: JSON.stringify([row.productId, row.unit]), label: row.productName,
       description: `${row.productCode} · ${stoneReturnUnitLabels[row.unit] ?? row.unit}`,
     }));
   }, [customer, projects, partnerContract]);
 
   const resolvedItems = items.map(item => ({
     product: item.product,
+    widthMeters: item.product.suggestedWidthMeters ?? resolveProjectReturnWidth(item.manualWidth),
+    manualWidth: item.manualWidth,
     healthy: resolveProjectReturnQuantity(item.healthy, item.product.unit),
     damaged: resolveProjectReturnQuantity(item.damaged, item.product.unit),
   }));
@@ -148,7 +152,7 @@ export function ProjectReturnIntake({ visitId, revision, onRevised, onClose }: {
   function addProduct(product: ProductOption | null) {
     if (!product) return;
     setItems(rows => rows.some(row => row.product.id === product.id) ? rows : [
-      ...rows, { product, healthy: emptyProjectReturnQuantity(), damaged: emptyProjectReturnQuantity() },
+      ...rows, { product, healthy: emptyProjectReturnQuantity(), damaged: emptyProjectReturnQuantity(), manualWidth: '' },
     ]);
     setValidationError('');
   }
@@ -168,6 +172,20 @@ export function ProjectReturnIntake({ visitId, revision, onRevised, onClose }: {
         return;
       }
     }
+    if (step >= 3) {
+      const invalidWidth = resolvedItems.find(item => item.manualWidth.trim() && item.widthMeters === null);
+      if (invalidWidth) {
+        setValidationError(`عرض واقعی «${invalidWidth.product.productName}» باید بزرگ‌تر از صفر باشد.`);
+        return;
+      }
+      const invalidArea = resolvedItems.find(({ product, widthMeters, healthy, damaged }) =>
+        product.unit === 'meter' && widthMeters !== null && [healthy, damaged].some(quantity =>
+          quantity && resolveProjectReturnArea(quantity.value, product.unit, widthMeters) === null));
+      if (invalidArea) {
+        setValidationError(`مساحت «${invalidArea.product.productName}» از محدودهٔ قابل ثبت بیشتر است.`);
+        return;
+      }
+    }
     if (step < 4) {
       setStep(step + 1);
       return;
@@ -178,8 +196,10 @@ export function ProjectReturnIntake({ visitId, revision, onRevised, onClose }: {
     try {
       const input: Parameters<typeof projectReturnReceiptApi.submit>[0] = {
         visitId: visit.id, customerId: customer.id, projectIds: projects.map(project => project.id),
-        items: resolvedItems.flatMap(({ product, healthy, damaged }) => healthy && damaged ? [{
+        items: resolvedItems.flatMap(({ product, widthMeters, healthy, damaged }) => healthy && damaged ? [{
           productId: product.productId, unit: product.unit,
+          ...(widthMeters && { effectiveWidthMeters: widthMeters }),
+          ...(product.partnerContractId && { partnerContractId: product.partnerContractId }),
           ...(healthy.calculation ? { healthyCalculation: healthy.calculation } : { healthyQuantity: healthy.value }),
           ...(damaged.calculation ? { damagedCalculation: damaged.calculation } : { damagedQuantity: damaged.value }),
         }] : []),
@@ -241,16 +261,20 @@ export function ProjectReturnIntake({ visitId, revision, onRevised, onClose }: {
               fetchOptions={onProducts} excludedIds={items.map(item => item.product.id)} disabled={items.length >= 100} />
             {items.map(item => {
               const { product } = item;
+              const widthMeters = product.suggestedWidthMeters ?? resolveProjectReturnWidth(item.manualWidth);
               return <ErpSection key={product.id} title={product.productName} description={product.description}
                 actions={[{ label: 'حذف محصول', tone: 'danger', onClick: () => {
                   setItems(rows => rows.filter(row => row.product.id !== product.id));
                   setValidationError('');
                 } }]}>
-                <div className="grid min-w-0 gap-4 sm:grid-cols-2">
+                {product.unit === 'meter' && <ProjectReturnWidth recorded={product.suggestedWidthMeters}
+                  manual={item.manualWidth} validate={Boolean(validationError)} onChange={manualWidth =>
+                    setItems(rows => rows.map(row => row.product.id === product.id ? { ...row, manualWidth } : row))} />}
+                <div className="mt-3 grid min-w-0 gap-4 sm:grid-cols-2">
                   <ProjectReturnMeasurement label="مقدار سالم" productName={product.productName} unit={product.unit}
-                    draft={item.healthy} onChange={draft => updateQuantity(product.id, 'healthy', draft)} validate={Boolean(validationError)} />
+                    draft={item.healthy} widthMeters={widthMeters} areaLabel={healthyProjectReturnAreaLabel} onChange={draft => updateQuantity(product.id, 'healthy', draft)} validate={Boolean(validationError)} />
                   <ProjectReturnMeasurement label="مقدار آسیب‌دیده" productName={product.productName} unit={product.unit}
-                    draft={item.damaged} onChange={draft => updateQuantity(product.id, 'damaged', draft)} validate={Boolean(validationError)} />
+                    draft={item.damaged} widthMeters={widthMeters} areaLabel={damagedProjectReturnAreaLabel} onChange={draft => updateQuantity(product.id, 'damaged', draft)} validate={Boolean(validationError)} />
                 </div>
               </ErpSection>;
             })}
@@ -262,11 +286,14 @@ export function ProjectReturnIntake({ visitId, revision, onRevised, onClose }: {
               { label: 'مشتری', value: customer.label },
               { label: 'پروژه‌ها', value: projects.map(project => project.label).join('، ') },
             ]} />
-            {resolvedItems.map(({ product, healthy, damaged }) => healthy && damaged && <ErpSection key={product.id}
+            {resolvedItems.map(({ product, widthMeters, healthy, damaged }) => healthy && damaged && <ErpSection key={product.id}
               title={product.productName} description={product.description}>
               <ErpSummaryGrid columns={2} items={[
-                { label: 'مقدار سالم', value: displayStoneReturnQuantity(healthy.value, product.unit) },
-                { label: 'مقدار آسیب‌دیده', value: displayStoneReturnQuantity(damaged.value, product.unit) },
+                ...projectReturnQuantityFacts({
+                  unit: product.unit, healthyQuantity: healthy.value, damagedQuantity: damaged.value,
+                  healthyAreaSquareMeters: resolveProjectReturnArea(healthy.value, product.unit, widthMeters),
+                  damagedAreaSquareMeters: resolveProjectReturnArea(damaged.value, product.unit, widthMeters),
+                }),
               ]} />
             </ErpSection>)}
           </div>}

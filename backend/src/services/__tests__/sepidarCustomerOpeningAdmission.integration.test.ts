@@ -6,12 +6,25 @@ import { createAccountingLedgerAdministration } from '../accountingLedgerAdminis
 import { ensureCustomerWorkspaceProfile } from '../accountingCustomerWorkspace';
 import { readSepidarCustomerOpeningPreparation } from '../prepareSepidarCustomerOpening';
 import { customerFinanceFixture } from './customerFinanceFixture';
+import { protectedSepidarOpeningProof } from '../protectedBridgeMigrations';
 
 const url = process.env.ACCOUNTING_LEDGER_TEST_DATABASE_URL;
 
 test('the protected opening manifest admits only one exact customer command after reopening', { skip: !url, timeout: 240_000 }, async () => {
   const f = await customerFinanceFixture(url!);
   try {
+    const oldRelease = new Set<string>();
+    const openingRelease = new Set(['20261125110000_accounting_neutral_normal_side', '20261125112000_sepidar_customer_opening_admission']);
+    assert.deepEqual(await protectedSepidarOpeningProof(f.db, oldRelease), {});
+    assert.deepEqual((await protectedSepidarOpeningProof(f.db, openingRelease)).normalSides, ['DEBIT', 'CREDIT', 'NEUTRAL']);
+    await f.db.$transaction(async tx => {
+      await tx.$executeRawUnsafe('GRANT SELECT ON public.sepidar_customer_opening_admissions TO sabalan_application_runtime');
+      await assert.rejects(protectedSepidarOpeningProof(tx, openingRelease), { code: 'PROTECTED_SEPIDAR_OPENING_ACL_DRIFT' });
+      await tx.$executeRawUnsafe('REVOKE SELECT ON public.sepidar_customer_opening_admissions FROM sabalan_application_runtime');
+      await tx.$executeRawUnsafe('GRANT SELECT (source_customer_id) ON public.sepidar_customer_opening_admissions TO sabalan_application_runtime');
+      await assert.rejects(protectedSepidarOpeningProof(tx, openingRelease), { code: 'PROTECTED_SEPIDAR_OPENING_ACL_DRIFT' });
+      await tx.$executeRawUnsafe('REVOKE SELECT (source_customer_id) ON public.sepidar_customer_opening_admissions FROM sabalan_application_runtime');
+    });
     const profile = await ensureCustomerWorkspaceProfile(f.db, await f.customer(), f.actor, f.common.occurredAt);
     const account = await f.db.accountingLedgerAccount.findUniqueOrThrow({ where: { id: f.counter.id } });
     const clearing = await createAccountingLedgerAdministration(f.db).createAccount({

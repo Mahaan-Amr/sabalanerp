@@ -4,6 +4,7 @@ import test from 'node:test';
 import { canonicalGoPayload } from './customer-allocation-go-manifest.mjs';
 import { verifySepidarOpeningApproval } from './sepidar-opening-approval.mjs';
 import { enrollSepidarOpening, readSepidarOpeningEvidence } from './sepidar-opening-controller.mjs';
+import { sepidarControllerConnection, sepidarOpeningTarget } from '../sepidar-opening-release.mjs';
 
 test('a protected approval includes exactly the signed accounting commands and release evidence', async () => {
   const { publicKey, privateKey } = generateKeyPairSync('ed25519');
@@ -102,4 +103,24 @@ test('enrollment evidence binds source rows, zero exclusions, clearing totals an
   file('accounting-approval.json', { ...approval, preparationSha256: file('preparation.json',
     { ...preparation, prepared: [{ manifestLine: unrelatedCommand }] }) });
   assert.throws(() => readSepidarOpeningEvidence(read, pins), /SEPIDAR_OPENING_EVIDENCE_REJECTED/);
+});
+
+test('the release runner targets only the protected Compose database and its dedicated login', () => {
+  const postgres = { environment: { POSTGRES_DB: 'sabalanerp' }, networks: { default: {} } };
+  const service = database => ({
+    environment: { DATABASE_URL: `postgresql://runtime:fixture@postgres:5432/${database}` },
+    networks: { default: {} },
+  });
+  const rendered = { name: 'sabalanerp', services: { postgres, backend: service('sabalanerp'), deployment: service('sabalanerp') },
+    networks: { default: { name: 'sabalanerp_default' } } };
+  assert.deepEqual(sepidarOpeningTarget(rendered), { network: 'sabalanerp_default', database: 'sabalanerp' });
+  assert.throws(() => sepidarOpeningTarget({ ...rendered, name: 'sabalanerp-local' }));
+  assert.throws(() => sepidarOpeningTarget({ ...rendered,
+    services: { ...rendered.services, deployment: service('another_database') } }));
+  const controller = 'postgresql://sabalan_sepidar_opening_controller:fixture@postgres:5432/sabalanerp';
+  assert.equal(sepidarControllerConnection(controller, 'sabalanerp'), controller);
+  for (const wrong of [controller.replace('postgres:5432', 'another:5432'),
+    controller.replace('sabalan_sepidar_opening_controller', 'postgres'), controller + '?options=fixture']) {
+    assert.throws(() => sepidarControllerConnection(wrong, 'sabalanerp'));
+  }
 });

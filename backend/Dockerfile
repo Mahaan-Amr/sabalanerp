@@ -137,7 +137,9 @@ COPY --from=builder /app/dist-cutover ./dist-cutover
 COPY backend/public ./public
 COPY backend/scripts ./scripts
 COPY deploy/scripts/customer-allocation-release.mjs ./operations/deploy/scripts/
+COPY deploy/scripts/sepidar-opening-release.mjs ./operations/deploy/scripts/
 COPY deploy/scripts/lib/customer-allocation-controller.mjs deploy/scripts/lib/customer-allocation-go-manifest.mjs ./operations/deploy/scripts/lib/
+COPY deploy/scripts/lib/sepidar-opening-controller.mjs deploy/scripts/lib/sepidar-opening-approval.mjs ./operations/deploy/scripts/lib/
 COPY scripts/production-database-role-boundary.mjs ./operations/scripts/
 COPY deploy/scripts/with-backend-control-ownership.sh ./scripts/with-backend-control-ownership.sh
 COPY deploy/scripts/protected-bootstrap-owner.py deploy/scripts/protected-bootstrap-state.py ./scripts/

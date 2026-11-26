@@ -1,5 +1,4 @@
 import { createHash, createPublicKey } from 'node:crypto';
-import { privateDirectoryReader } from './customer-allocation-controller.mjs';
 import { verifySepidarOpeningApproval } from './sepidar-opening-approval.mjs';
 
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -8,7 +7,7 @@ const limit = 4 * 1024 * 1024;
 const canonicalRials = /^(0|-?[1-9][0-9]{0,19})$/;
 
 /** Resolve the verified preparation and signed decision without exposing any customer data. */
-export function readSepidarOpeningEvidence(read, { approvalKeySha256, qualificationSha256 }) {
+export function readSepidarOpeningEvidence(read, { approvalKeySha256, qualificationSha256, prepareOnly }, readAuthority = read) {
   const source = read('source.json', limit);
   const preparationBytes = read('preparation.json', limit);
   const accountingBytes = read('accounting-approval.json', limit);
@@ -46,23 +45,18 @@ export function readSepidarOpeningEvidence(read, { approvalKeySha256, qualificat
   if (prepared.preparedNetRials !== total.toString() || prepared.clearingNetRials !== (-total).toString()
     || accounting.clearingNetRials !== prepared.clearingNetRials) rejectedEvidence();
 
-  const key = JSON.parse(read('approver.json', 16 * 1024));
+  const key = JSON.parse(readAuthority('approver.json', 16 * 1024));
   if (typeof key.publicKeyPem !== 'string' || sha256(key.publicKeyPem) !== approvalKeySha256) rejectedEvidence();
   const publicKey = createPublicKey(key.publicKeyPem);
   if (publicKey.asymmetricKeyType !== 'ed25519') rejectedEvidence();
   return {
     approver: { publicKey, keyId: key.keyId },
-    envelope: JSON.parse(read('decision.json', limit)),
+    ...(prepareOnly ? {} : { envelope: JSON.parse(read('decision.json', limit)) }),
     qualification: {
       buildCommit, migrationSha256, candidateImage, retainedImage, qualificationHash,
       bookId, counterAccountId, basisAt, sourcePackageHash, accountingApprovalHash: sha256(accountingBytes), commands,
     },
   };
-}
-
-export function enrollSepidarOpeningFromDirectory({ evidenceDirectory, approvalKeySha256, qualificationSha256, ...session }) {
-  const evidence = readSepidarOpeningEvidence(privateDirectoryReader(evidenceDirectory), { approvalKeySha256, qualificationSha256 });
-  return enrollSepidarOpening({ ...session, ...evidence });
 }
 
 /**

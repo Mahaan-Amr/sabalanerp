@@ -5,7 +5,7 @@ import { previewSepidarOpeningCheques, SepidarOpeningChequePlanError, type Sepid
 import { hashAccountingEvidence } from '../accountingLedgerFoundation';
 import { applySepidarOpeningBankAndCustomerReturnHistories, applySepidarOpeningBankHistories,
   applySepidarOpeningHistoricalRecipientHistories, applySepidarOpeningHistoricalSupplierHistories, inspectSepidarOpeningChequeTargets, prepareSepidarOpeningChequeVouchers,
-  applySepidarOpeningChequeBatch, sepidarOpeningChequeBatchDigest } from '../sepidarOpeningChequeApplication';
+  applySepidarOpeningChequeBatch, inspectSepidarOpeningChequeBatchAdmission, sepidarOpeningChequeBatchDigest } from '../sepidarOpeningChequeApplication';
 
 const basis = '2026-03-20T20:30:00.000Z';
 const depositAt = '2026-04-01T08:00:00.000Z';
@@ -261,8 +261,8 @@ function bankApplicationFixture(evidence = bankHistory()) {
       assert.ok(['Serializable', 'RepeatableRead'].includes(options.isolationLevel));
       const txState = structuredClone(state);
       const tx = {
-        $queryRaw: async () => {
-          assert.equal(options.isolationLevel, 'Serializable');
+        $queryRaw: async (sql: TemplateStringsArray) => {
+          if (options.isolationLevel === 'RepeatableRead') assert.match(sql.join(' '), /sepidar_opening_cheques_runtime_admitted/);
           return [{ admitted: txState.allowed }];
         },
         $executeRaw: async (sql: TemplateStringsArray) => {
@@ -535,4 +535,23 @@ test('the combined cheque batch binds the prepared ledger period and closes befo
     { code: 'ADMISSION_CLOSED' });
   assert.equal(fixture.state.locks, 0);
   assert.equal(fixture.state.instrument, null);
+});
+
+test('combined cheque admission preview reads the exact batch without posting', async () => {
+  const fixture = bankApplicationFixture();
+  const target = { evidence: bankHistory(), custodyFinancialAccountId: 'till', clearingAccountId: 'opening-transfer',
+    fiscalYearId: 'fiscal-year', periodId: 'opening-period' };
+  const actor = { id: 'accountant', profile: 'ACCOUNTANT' as const };
+  const inspect = () => fixture.run(async database => {
+    const preview = await inspectSepidarOpeningChequeBatchAdmission(database, { ...target, actor });
+    assert.deepEqual(preview, { planSha256: sepidarOpeningChequeBatchDigest(target), instrumentCount: 1, eventCount: 2 });
+    // Match the fixture's application runner result type.
+    return { planSha256: preview.planSha256, instruments: [] };
+  });
+  await inspect();
+  assert.equal(fixture.state.readOnlyTransactions, 1);
+  assert.equal(fixture.state.locks, 0);
+  assert.equal(fixture.state.instrument, null);
+  fixture.state.allowed = false;
+  await assert.rejects(inspect, { code: 'ADMISSION_CLOSED' });
 });

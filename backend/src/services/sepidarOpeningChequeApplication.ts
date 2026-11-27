@@ -418,6 +418,21 @@ async function lockOpeningBook(tx: Prisma.TransactionClient, bookId: string) {
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'sepidar-opening-cheques:' + bookId}))`;
 }
 
+export async function inspectSepidarOpeningChequeBatchAdmission(
+  database: Pick<PrismaClient, '$transaction'>, input: ApplyOpeningBatchInput,
+) {
+  const releaseId = process.env.DEPLOYMENT_RELEASE_ID;
+  const batch = structuredClone(input);
+  const { actor } = batch;
+  requireValid(releaseId && actor.id.trim() && actor.profile === 'ACCOUNTANT', 'ADMISSION_CLOSED');
+  const { prepared, planSha256 } = openingBatchPreparation(batch);
+  await database.$transaction(async tx => {
+    await tx.$executeRaw`SET TRANSACTION READ ONLY`;
+    await requireOpeningAdmission(tx, releaseId, prepared.bookId, actor.id, planSha256);
+  }, { isolationLevel: 'RepeatableRead', timeout: 10_000 });
+  return { planSha256, instrumentCount: batch.evidence.instruments.length, eventCount: prepared.events.length };
+}
+
 /** Used by a protected cheque importer after admission for the exact voucher and history plan. */
 export async function applySepidarOpeningChequeBatch(database: Pick<PrismaClient, '$transaction'>, input: ApplyOpeningBatchInput) {
   const releaseId = process.env.DEPLOYMENT_RELEASE_ID;

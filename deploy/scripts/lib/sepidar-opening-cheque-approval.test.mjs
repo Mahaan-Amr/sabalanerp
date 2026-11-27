@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
-import { generateKeyPairSync, sign } from 'node:crypto';
+import { createHash, generateKeyPairSync, sign } from 'node:crypto';
 import test from 'node:test';
 import { canonicalGoPayload } from './customer-allocation-go-manifest.mjs';
-import { verifySepidarOpeningChequeBatchApproval } from './sepidar-opening-cheque-approval.mjs';
+import { readSepidarOpeningChequeBatchEvidence, verifySepidarOpeningChequeBatchApproval } from './sepidar-opening-cheque-approval.mjs';
 
 test('cheque approval binds an exact plan and evidence to the owned deployment', () => {
   const { publicKey, privateKey } = generateKeyPairSync('ed25519');
@@ -46,4 +46,33 @@ test('cheque approval binds an exact plan and evidence to the owned deployment',
   }, observed, approver), rejected);
   assert.throws(() => verifySepidarOpeningChequeBatchApproval(envelope, observed,
     { ...approver, publicKey: generateKeyPairSync('ed25519').publicKey }), rejected);
+});
+
+test('cheque evidence rejects stale preparation, replaced source and a review of other bytes', () => {
+  const json = value => Buffer.from(JSON.stringify(value) + '\n');
+  const sha = bytes => createHash('sha256').update(bytes).digest('hex');
+  const source = json({ source: 'reviewed fixture' });
+  const prepared = {
+    format: 'sepidar-opening-cheque-batch-preparation-v1', bookId: 'book', actorId: 'accountant',
+    fiscalYearId: 'year', periodId: 'period', clearingAccountId: 'transfer', custodyFinancialAccountId: 'till',
+    basisAt: '2026-03-21T00:00:00.000Z', sourceSha256: sha(source), planSha256: '7'.repeat(64),
+    instrumentCount: 37, eventCount: 58, openingRials: '71454000000',
+  };
+  const preparation = json(prepared);
+  const accounting = { format: 'sepidar-opening-cheque-accounting-review-v1', decision: 'APPROVED',
+    reviewReference: 'review-37', preparationSha256: sha(preparation) };
+  const evidence = { source, preparation, reproducedPreparation: Buffer.from(preparation), accountingApproval: json(accounting) };
+  const observed = readSepidarOpeningChequeBatchEvidence(evidence);
+  assert.equal(observed.planSha256, prepared.planSha256);
+  assert.equal(observed.preparationSha256, sha(preparation));
+  assert.equal(observed.accountingApprovalSha256, sha(evidence.accountingApproval));
+  for (const changed of [
+    { source: json({ source: 'different fixture' }) },
+    { reproducedPreparation: json({ ...prepared, eventCount: 57 }) },
+    { accountingApproval: json({ ...accounting, preparationSha256: '0'.repeat(64) }) },
+    { accountingApproval: json({ ...accounting, format: 'sepidar-opening-accounting-review-v1' }) },
+  ]) {
+    assert.throws(() => readSepidarOpeningChequeBatchEvidence({ ...evidence, ...changed }),
+      { message: 'SEPIDAR_CHEQUE_BATCH_APPROVAL_REJECTED' });
+  }
 });

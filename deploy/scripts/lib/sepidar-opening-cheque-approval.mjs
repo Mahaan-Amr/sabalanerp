@@ -12,10 +12,39 @@ const exact = (value, fields) => value !== null && typeof value === 'object' && 
 
 const deploymentFields = ['releaseId', 'deploymentId', 'buildCommit', 'migrationSha256', 'candidateImage',
   'retainedImage', 'checkpointHash', 'qualificationHash'];
-const batchFields = ['bookId', 'actorId', 'fiscalYearId', 'periodId', 'clearingAccountId', 'custodyFinancialAccountId',
-  'basisAt', 'sourceSha256', 'planSha256', 'preparationSha256', 'accountingApprovalSha256',
-  'instrumentCount', 'eventCount', 'openingRials'];
-const identityFields = [...deploymentFields, ...batchFields];
+const reviewedFields = ['bookId', 'actorId', 'fiscalYearId', 'periodId', 'clearingAccountId', 'custodyFinancialAccountId',
+  'basisAt', 'sourceSha256', 'planSha256', 'instrumentCount', 'eventCount', 'openingRials'];
+const identityFields = [...deploymentFields, ...reviewedFields, 'preparationSha256', 'accountingApprovalSha256'];
+const preparationFields = ['format', ...reviewedFields];
+
+function readJson(bytes) {
+  if (!Buffer.isBuffer(bytes)) reject();
+  try {
+    return JSON.parse(bytes.toString('utf8'));
+  } catch {
+    return reject();
+  }
+}
+
+/** Accept only the accounting review of the exact preparation reproduced by the candidate. */
+export function readSepidarOpeningChequeBatchEvidence({ source, preparation, reproducedPreparation, accountingApproval }) {
+  if (!Buffer.isBuffer(source) || !Buffer.isBuffer(preparation) || !Buffer.isBuffer(reproducedPreparation)
+    || !preparation.equals(reproducedPreparation)) reject();
+  const prepared = readJson(preparation);
+  const accounting = readJson(accountingApproval);
+  const preparationSha256 = sha256(preparation);
+  if ((!exact(prepared, preparationFields) && !exact(prepared, [...preparationFields, 'recipientDimensionTypeId']))
+    || prepared.format !== 'sepidar-opening-cheque-batch-preparation-v1' || prepared.sourceSha256 !== sha256(source)
+    || (Object.hasOwn(prepared, 'recipientDimensionTypeId') && !text(prepared.recipientDimensionTypeId))
+    || !exact(accounting, ['format', 'decision', 'reviewReference', 'preparationSha256'])
+    || accounting.format !== 'sepidar-opening-cheque-accounting-review-v1' || accounting.decision !== 'APPROVED'
+    || !text(accounting.reviewReference) || accounting.preparationSha256 !== preparationSha256) reject();
+  return {
+    ...Object.fromEntries(reviewedFields.map(field => [field, prepared[field]])),
+    preparationSha256,
+    accountingApprovalSha256: sha256(accountingApproval),
+  };
+}
 
 /** Validate a cheque-specific decision against a separately read batch and the owned release. */
 export function verifySepidarOpeningChequeBatchApproval(envelope, observed, approver) {

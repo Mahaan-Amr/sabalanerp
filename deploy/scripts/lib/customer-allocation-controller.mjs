@@ -57,7 +57,7 @@ export function customerAllocationControllerDatabase(client, runtimeClient, role
               WHERE c.relnamespace = 'public'::pg_catalog.regnamespace
                 AND c.relname IN ('_prisma_migrations', 'deployment_operations',
                   'customer_allocation_release_control', 'customer_allocation_release_audit',
-                  'sepidar_customer_opening_manifests', 'sepidar_customer_opening_admissions')
+                  'sepidar_customer_opening_manifests', 'sepidar_customer_opening_admissions', 'sepidar_cheque_batch_admissions')
                 AND (c.relowner = r.oid
                   OR pg_catalog.has_table_privilege(r.oid, c.oid, 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER')
                   OR pg_catalog.has_any_column_privilege(r.oid, c.oid, 'SELECT, INSERT, UPDATE, REFERENCES'))

@@ -34,12 +34,16 @@ const excessShipmentName = '20261123130000_stone_excess_shipment_return';
 const stoneFinalizationName = '20261123140000_stone_return_finalizations';
 const accountingNeutralName = '20261125110000_accounting_neutral_normal_side';
 const sepidarOpeningAdmissionName = '20261125112000_sepidar_customer_opening_admission';
+const sepidarChequeBatchName = '20261127120000_sepidar_cheque_batch_admission';
 const sepidarChequeAnchorsName = '20261125142000_sepidar_opening_cheque_anchors';
 const sepidarAdmissionTables = ['sepidar_customer_opening_manifests', 'sepidar_customer_opening_admissions'];
 const sepidarAdmissionFunctions = ['protect_sepidar_customer_opening_admission', 'sepidar_customer_opening_lock',
   'sepidar_customer_opening_register_manifest', 'sepidar_customer_opening_runtime_admitted',
   'verify_sepidar_customer_opening_review'];
+const sepidarChequeBatchTables = ['sepidar_cheque_batch_admissions'];
+const sepidarChequeBatchFunctions = ['sepidar_cheque_batch_register', 'sepidar_opening_cheques_runtime_admitted'];
 const nextReleaseCatalog = {
+  [sepidarChequeBatchName]: { tables: sepidarChequeBatchTables, functions: sepidarChequeBatchFunctions },
   [stoneReceiptName]: { tables: ['stone_return_receipts'], functions: ['accounting_guard_supply_chain_append_only'] },
   [stoneDraftName]: { tables: ['stone_return_allocation_drafts', 'stone_return_allocation_draft_rows'], functions: [] },
   [sepidarInvoiceName]: { tables: ['sepidar_dispatch_invoices', 'logistics_loadings'], functions: [] },
@@ -197,10 +201,11 @@ const currentRelease = {
   [accountingNeutralName]: ['34bceddc44844c0d9fafd04283443b8760eff45b04352c6cb541b2412f43017c', 1],
   [sepidarOpeningAdmissionName]: ['70db589f5bf8892879c76ed95cb57e3f680dfd27a773b241f79faabf1b045834', 22],
   [sepidarChequeAnchorsName]: ['22df33edac5450c16418e9cb172ba2dda02a30cf6d80af99b98ee6f15431c0f5', 5],
+  [sepidarChequeBatchName]: ['ea8f9800bb8d102b2d0ad3e1fa0c00a14fb9b281ac8ed043ede85f5a7b8229db', 10],
 } as const;
 export const protectedCurrentReleaseNames: readonly string[] = Object.freeze(Object.keys(currentRelease));
 // Each release extends the ledger while preserving the prior release-set hashes.
-const protectedReleaseEpochEnds = Object.freeze([12, 22, 24, 25, 35, 36, 37, 38, 41, 42, 43, 44, 45, 46, 47, 48, 49, 54, 57]);
+const protectedReleaseEpochEnds = Object.freeze([12, 22, 24, 25, 35, 36, 37, 38, 41, 42, 43, 44, 45, 46, 47, 48, 49, 54, 57, 58]);
 const releaseSetSha256 = (files: CurrentFile[], index: number) => sha(files.slice(0,
   protectedReleaseEpochEnds.find(end => index < end)!).map(file => file.sha256).join('\n'));
 
@@ -413,16 +418,20 @@ export async function protectedSepidarOpeningProof(tx: Prisma.TransactionClient,
     WHERE r.rolname = 'sabalan_sepidar_opening_controller'
   `;
   if (!role?.admitted) failure('PROTECTED_SEPIDAR_OPENING_CONTROLLER_UNPROVEN');
+  const chequeBatchApplied = applied.has(sepidarChequeBatchName);
+  const admissionTables = chequeBatchApplied ? [...sepidarAdmissionTables, ...sepidarChequeBatchTables] : sepidarAdmissionTables;
+  const admissionFunctions = chequeBatchApplied ? [...sepidarAdmissionFunctions, ...sepidarChequeBatchFunctions] : sepidarAdmissionFunctions;
+
   const objects = await tx.$queryRaw<Array<{ name: string; owner: string; columnAcl: boolean; grants: CatalogGrant[] }>>(Prisma.sql`
     WITH scoped AS (
       SELECT c.relname AS name, c.relowner AS owner, c.relacl AS acl, 'r'::"char" AS code,
         EXISTS (SELECT FROM pg_catalog.pg_attribute a WHERE a.attrelid = c.oid AND a.attacl IS NOT NULL) AS column_acl
       FROM pg_catalog.pg_class c WHERE c.relnamespace = 'public'::regnamespace
-        AND c.relname IN (${Prisma.join(sepidarAdmissionTables)})
+        AND c.relname IN (${Prisma.join(admissionTables)})
       UNION ALL
       SELECT p.proname, p.proowner, p.proacl, 'f'::"char", false
       FROM pg_catalog.pg_proc p WHERE p.pronamespace = 'public'::regnamespace
-        AND p.proname IN (${Prisma.join(sepidarAdmissionFunctions)})
+        AND p.proname IN (${Prisma.join(admissionFunctions)})
     )
     SELECT s.name, pg_catalog.pg_get_userbyid(s.owner) AS owner, s.column_acl AS "columnAcl",
       COALESCE((SELECT jsonb_agg(jsonb_build_object('grantee', CASE WHEN a.grantee = 0 THEN '' ELSE pg_catalog.pg_get_userbyid(a.grantee) END,
@@ -434,9 +443,11 @@ export async function protectedSepidarOpeningProof(tx: Prisma.TransactionClient,
     sepidar_customer_opening_lock: 'sabalan_sepidar_opening_controller',
     sepidar_customer_opening_register_manifest: 'sabalan_sepidar_opening_controller',
     sepidar_customer_opening_runtime_admitted: 'sabalan_application_runtime',
+    ...(chequeBatchApplied ? { sepidar_cheque_batch_register: 'sabalan_sepidar_opening_controller',
+      sepidar_opening_cheques_runtime_admitted: 'sabalan_application_runtime' } : {}),
   };
   const [identity] = await tx.$queryRaw<Array<{ owner: string }>>`SELECT current_user AS owner`;
-  if (objects.length !== sepidarAdmissionTables.length + sepidarAdmissionFunctions.length
+  if (objects.length !== admissionTables.length + admissionFunctions.length
     || new Set(objects.map(object => object.name)).size !== objects.length
     || objects.some(object => object.columnAcl || object.owner !== identity?.owner
       || JSON.stringify(canonical(object.grants)) !== JSON.stringify(canonical(allowed[object.name]

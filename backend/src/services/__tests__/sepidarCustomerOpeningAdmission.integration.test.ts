@@ -84,6 +84,24 @@ test('the protected opening manifest admits and posts only the exact customer co
       accountingApprovalHash: 'e'.repeat(64), basisAt: basis, expiresAt: new Date(Date.now() + 240_000).toISOString(),
       commands: [credit.manifestLine, prepared.manifestLine],
     });
+    const chequePlan = 'f'.repeat(64);
+    const chequeManifest = JSON.stringify({
+      format: 'sepidar-opening-cheque-batch-approval-v1', decision: 'GO', releaseId: release,
+      deploymentId: id, buildCommit: commit, checkpointHash: 'd'.repeat(64), bookId: f.book.id, actorId: f.actor.id,
+      basisAt: '2026-03-21T00:00:00.000Z', planSha256: chequePlan, preparationSha256: '1'.repeat(64),
+      accountingApprovalSha256: '2'.repeat(64), expiresAt: new Date(Date.now() + 240_000).toISOString(),
+    });
+    const chequeManifestHash = createHash('sha256').update(chequeManifest).digest('hex');
+    const chequeRelease = new Set([...openingRelease, '20261127120000_sepidar_cheque_batch_admission']);
+    assert.equal((await protectedSepidarOpeningProof(f.db, chequeRelease)).sepidarOpeningGrants?.sepidar_cheque_batch_register,
+      'sabalan_sepidar_opening_controller');
+    async function chequeAdmitted(tx: Prisma.TransactionClient, digest = chequePlan) {
+      const [result] = await tx.$queryRaw<Array<{ admitted: boolean }>>`
+        SELECT public.sepidar_opening_cheques_runtime_admitted(${release}, ${f.book.id}, ${f.actor.id}, ${digest}) AS admitted
+      `;
+      return result.admitted;
+    }
+
     const manifestHash = createHash('sha256').update(manifest).digest('hex');
     async function admitted(tx: Prisma.TransactionClient, command = hash, item = '91') {
       const [result] = await tx.$queryRaw<Array<{ admitted: boolean }>>`
@@ -100,12 +118,15 @@ test('the protected opening manifest admits and posts only the exact customer co
         SELECT * FROM public.sepidar_customer_opening_lock(${id}, ${release}, ${lease})
       `;
       assert.equal(locked.checkpoint_hash, 'd'.repeat(64));
+      await tx.$queryRaw`SELECT public.sepidar_cheque_batch_register(${id}, ${release}, ${lease}, ${chequeManifest}, ${chequeManifestHash})::text`;
+      await tx.$queryRaw`SELECT public.sepidar_cheque_batch_register(${id}, ${release}, ${lease}, ${chequeManifest}, ${chequeManifestHash})::text`;
       assert.equal(locked.phase, 'MIGRATIONS_APPLIED');
       await tx.$queryRaw`SELECT public.sepidar_customer_opening_register_manifest(${id}, ${release}, ${lease}, ${manifest}, ${manifestHash})::text`;
       await tx.$queryRaw`SELECT public.sepidar_customer_opening_register_manifest(${id}, ${release}, ${lease}, ${manifest}, ${manifestHash})::text`;
     });
     await f.db.$transaction(async tx => {
       await tx.$executeRawUnsafe('SET LOCAL SESSION AUTHORIZATION sabalan_application_runtime');
+      assert.equal(await chequeAdmitted(tx), false);
       assert.equal(await admitted(tx), false);
     });
     await f.db.deploymentOperation.update({ where: { id }, data: { phase: 'COMPLETED', activeKey: null } });
@@ -117,6 +138,8 @@ test('the protected opening manifest admits and posts only the exact customer co
     assert.deepEqual(reopened.manifestLine, prepared.manifestLine);
     await f.db.$transaction(async tx => {
       await tx.$executeRawUnsafe('SET LOCAL SESSION AUTHORIZATION sabalan_application_runtime');
+      assert.equal(await chequeAdmitted(tx), true);
+      assert.equal(await chequeAdmitted(tx, '2'.repeat(64)), false);
       assert.equal(await admitted(tx), true);
       assert.equal(await admitted(tx, 'f'.repeat(64)), false);
       assert.equal(await admitted(tx, hash, '92'), false);
@@ -193,6 +216,7 @@ test('the protected opening manifest admits and posts only the exact customer co
     }});
     await f.db.$transaction(async tx => {
       await tx.$executeRawUnsafe('SET LOCAL SESSION AUTHORIZATION sabalan_application_runtime');
+      assert.equal(await chequeAdmitted(tx), false);
       assert.equal(await admitted(tx), false);
     });
   } finally {

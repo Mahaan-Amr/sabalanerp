@@ -12,7 +12,8 @@ const { Client } = require('pg') as { Client: new (config: { connectionString: s
 
 const localUrl = process.env.SABALAN_ROLE_RECOVERY_TEST_DATABASE_URL;
 
-for (const withSepidar of [false, true]) test(`protected staging recovers exact ACLs ${withSepidar ? 'with' : 'without'} Sepidar opening`, { skip: !localUrl }, async () => {
+for (const scope of ['none', 'customers', 'cheques']) test(`protected staging recovers exact ACLs ${scope} Sepidar opening`, { skip: !localUrl }, async () => {
+  const withSepidar = scope !== 'none';
   const base = new URL(localUrl!);
   assert.equal(base.hostname, '127.0.0.1');
   assert.equal(base.port, '55432');
@@ -78,6 +79,18 @@ for (const withSepidar of [false, true]) test(`protected staging recovers exact 
           GRANT USAGE ON SCHEMA public TO ${sepidar};
         `);
       }
+      if (scope === 'cheques') {
+        const register = 'public.sepidar_cheque_batch_register(text, text, text, text, text)';
+        const read = 'public.sepidar_opening_cheques_runtime_admitted(text, text, text, text)';
+        await sourceClient.query(`
+          CREATE TABLE public.sepidar_cheque_batch_admissions (id text PRIMARY KEY);
+          CREATE FUNCTION ${register} RETURNS boolean LANGUAGE sql SECURITY DEFINER AS 'SELECT true';
+          CREATE FUNCTION ${read} RETURNS boolean LANGUAGE sql SECURITY DEFINER AS 'SELECT false';
+          REVOKE EXECUTE ON FUNCTION ${register}, ${read} FROM PUBLIC;
+          GRANT EXECUTE ON FUNCTION ${register} TO ${sepidar};
+          GRANT EXECUTE ON FUNCTION ${read} TO ${roles.runtime};
+        `);
+      }
     } finally { await sourceClient.end(); }
     const compose = ['compose', '-f', 'docker-compose.local.yml'];
     const services = execFileSync('docker', [...compose, 'ps'], { encoding: 'utf8' });
@@ -105,6 +118,12 @@ for (const withSepidar of [false, true]) test(`protected staging recovers exact 
     if (withSepidar) {
       const broadened = structuredClone(captured);
       const gate = broadened.objects.find(object => object.name === 'sepidar_customer_opening_register_manifest')!;
+      gate.grants.push({ grantee: roles.runtime, privilege: 'EXECUTE', grantable: false, grantor: captured.control });
+      await assert.rejects(applyProtectedDatabaseRoles(urlFor(stage), roles, broadened, source), /grants differ/);
+    }
+    if (scope === 'cheques') {
+      const broadened = structuredClone(captured);
+      const gate = broadened.objects.find(object => object.name === 'sepidar_cheque_batch_register')!;
       gate.grants.push({ grantee: roles.runtime, privilege: 'EXECUTE', grantable: false, grantor: captured.control });
       await assert.rejects(applyProtectedDatabaseRoles(urlFor(stage), roles, broadened, source), /grants differ/);
     }

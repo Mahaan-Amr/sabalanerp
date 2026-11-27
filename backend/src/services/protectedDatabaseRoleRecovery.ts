@@ -11,11 +11,16 @@ const sepidarRoutines = new Map([
   ['sepidar_customer_opening_register_manifest', 'text, text, text, text, text'],
   ['sepidar_customer_opening_runtime_admitted', 'text, text, text, text, text, timestamp with time zone, text, text, text, text, text, text'],
 ]);
-const sepidarRuntimeRoutine = 'sepidar_customer_opening_runtime_admitted';
+const chequeRoutines = new Map([
+  ['sepidar_cheque_batch_register', 'text, text, text, text, text'],
+  ['sepidar_opening_cheques_runtime_admitted', 'text, text, text, text'],
+]);
+const sepidarRuntimeRoutines = new Set(['sepidar_customer_opening_runtime_admitted', 'sepidar_opening_cheques_runtime_admitted']);
+const sepidarRoutineArguments = (name: string) => sepidarRoutines.get(name) ?? chequeRoutines.get(name);
 const sepidarRolePrivileges = (kind: string, name: string, args: string, securityDefiner: boolean) => {
   if (kind === 'DATABASE' && name === '') return ['CONNECT'];
   if (kind === 'SCHEMA' && name === 'public') return ['USAGE'];
-  if (kind === 'FUNCTION' && name !== sepidarRuntimeRoutine && sepidarRoutines.get(name) === args && securityDefiner) return ['EXECUTE'];
+  if (kind === 'FUNCTION' && !sepidarRuntimeRoutines.has(name) && sepidarRoutineArguments(name) === args && securityDefiner) return ['EXECUTE'];
   return [];
 };
 type Client = {
@@ -192,15 +197,21 @@ function canonicalObjects(objects: ObjectAcl[], control: string, roles: RoleSpli
 function assertRestrictedAccess(catalog: CatalogAcl[], roles: RoleSplit) {
   const protectedTables = new Set(['_prisma_migrations', 'deployment_operations',
     'customer_allocation_release_control', 'customer_allocation_release_audit',
-    'sepidar_customer_opening_manifests', 'sepidar_customer_opening_admissions']);
+    'sepidar_customer_opening_manifests', 'sepidar_customer_opening_admissions', 'sepidar_cheque_batch_admissions']);
   const openingRoutines = catalog.filter(object => sepidarRoutines.has(object.name));
   if (openingRoutines.length && (openingRoutines.length !== sepidarRoutines.size
     || new Set(openingRoutines.map(object => object.name)).size !== sepidarRoutines.size)) {
     fail('The protected Sepidar opening routine set is incomplete.');
   }
+  const chequeBatch = catalog.some(object => object.kind === 'TABLE' && object.name === 'sepidar_cheque_batch_admissions');
+  const chequeFunctions = catalog.filter(object => chequeRoutines.has(object.name) && object.securityDefiner);
+  if ((chequeBatch && (chequeFunctions.length !== chequeRoutines.size
+    || new Set(chequeFunctions.map(object => object.name)).size !== chequeRoutines.size)) || (!chequeBatch && chequeFunctions.length)) {
+    fail('The protected Sepidar cheque routine set is incomplete.');
+  }
   for (const object of catalog) {
-    const sepidarRoutine = sepidarRoutines.get(object.name);
-    const openingRuntimeCheck = object.name === sepidarRuntimeRoutine;
+    const sepidarRoutine = chequeBatch ? sepidarRoutineArguments(object.name) : sepidarRoutines.get(object.name);
+    const openingRuntimeCheck = sepidarRuntimeRoutines.has(object.name);
     if (sepidarRoutine) {
       const external = object.grants.filter(grant => grant.grantee !== object.owner);
       const principal = openingRuntimeCheck ? roles.runtime : sepidarController;

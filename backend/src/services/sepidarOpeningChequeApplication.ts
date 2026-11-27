@@ -429,6 +429,26 @@ const chequeAccountCodes = new Map([
   [103, '111003'], [105, '111005'], [117, '111201'], [118, '111202'], [119, '111203'], [124, '111303'], [193, '211001'],
 ]);
 
+function chequeDestinationAccounts(evidence: SepidarOpeningChequeEvidence, clearingAccountId: string) {
+  const sourceAccounts = new Map(evidence.ledgerLines.map(line => [line.id, line.accountId]));
+  const accounts = new Map([[clearingAccountId, '119901']]);
+  const bind = (targetId: string, code?: string) => {
+    requireValid(code && (!accounts.has(targetId) || accounts.get(targetId) === code), 'INVALID_TARGET');
+    accounts.set(targetId, code);
+  };
+  for (const opening of evidence.openingLines) bind(opening.targetAccountId, '111202');
+  for (const event of evidence.events) {
+    for (const line of event.posting.lines) bind(line.targetAccountId, chequeAccountCodes.get(sourceAccounts.get(line.sourceLineId)!));
+  }
+  return accounts;
+}
+
+async function verifyChequeDestinationAccounts(tx: Prisma.TransactionClient, bookId: string, accounts: ReadonlyMap<string, string>) {
+  const rows = await tx.accountingLedgerAccount.findMany({ where: { id: { in: [...accounts.keys()] } } });
+  requireValid(rows.length === accounts.size && rows.every(account =>
+    account.bookId === bookId && account.level === 'MOIN' && account.code === accounts.get(account.id) && !account.retiredAt), 'INVALID_TARGET');
+}
+
 /** Validate production destinations before enrollment without posting or locking rows. */
 export async function inspectSepidarOpeningChequeBatchDestinations(
   database: Pick<PrismaClient, '$transaction'>, input: Omit<ApplyOpeningBatchInput, 'actor'>,
@@ -437,32 +457,19 @@ export async function inspectSepidarOpeningChequeBatchDestinations(
   const { evidence, custodyFinancialAccountId, fiscalYearId, periodId, clearingAccountId, recipientDimensionTypeId } = batch;
   const plan = previewSepidarOpeningCheques(evidence);
   const { planSha256 } = openingBatchPreparation(batch);
-  const sourceAccounts = new Map(evidence.ledgerLines.map(line => [line.id, line.accountId]));
-  const accounts = new Map([[clearingAccountId, '119901']]);
-  for (const cheque of plan.instruments) {
-    accounts.set(cheque.opening.targetAccountId, '111202');
-    for (const event of cheque.events) {
-      for (const line of event.targetPosting.lines) {
-        const code = chequeAccountCodes.get(sourceAccounts.get(line.sourceLineId)!);
-        requireValid(code && (!accounts.has(line.targetAccountId) || accounts.get(line.targetAccountId) === code), 'INVALID_TARGET');
-        accounts.set(line.targetAccountId, code);
-      }
-    }
-  }
+  const accounts = chequeDestinationAccounts(evidence, clearingAccountId);
   return database.$transaction(async tx => {
     await tx.$executeRaw`SET TRANSACTION READ ONLY`;
-    const [book, period, destinationAccounts, till] = await Promise.all([
+    const [book, period, till] = await Promise.all([
       tx.accountingBook.findUnique({ where: { id: plan.bookId } }),
       tx.accountingPostingPeriod.findUnique({ where: { id: periodId }, include: { fiscalYear: true } }),
-      tx.accountingLedgerAccount.findMany({ where: { id: { in: [...accounts.keys()] } } }),
       tx.accountingFinancialAccount.findUnique({ where: { id: custodyFinancialAccountId } }),
+      verifyChequeDestinationAccounts(tx, plan.bookId, accounts),
     ]);
     requireValid(book && period && period.fiscalYearId === fiscalYearId && period.fiscalYear.bookId === book.id
       && period.fiscalYear.status === 'ACTIVE' && period.status === 'OPEN'
       && period.startsAt <= new Date(plan.basisAt)
       && plan.instruments.every(cheque => cheque.events.every(event => new Date(event.occurredAt) <= period.endsAt)), 'INVALID_TARGET');
-    requireValid(destinationAccounts.length === accounts.size && destinationAccounts.every(account =>
-      account.bookId === plan.bookId && account.level === 'MOIN' && account.code === accounts.get(account.id) && !account.retiredAt), 'INVALID_TARGET');
     requireValid(till && till.kind === 'CASH' && till.legalEntityId === book.legalEntityId && till.currency === 'IRR'
       && activeAt(till, plan.basisAt), 'INVALID_TARGET');
     for (const cheque of plan.instruments) {
@@ -486,7 +493,7 @@ export async function inspectSepidarOpeningChequeBatchDestinations(
         }
       }
     }
-    return { planSha256, instrumentCount: plan.instruments.length, accountCount: destinationAccounts.length };
+    return { planSha256, instrumentCount: plan.instruments.length, accountCount: accounts.size };
   }, { isolationLevel: 'RepeatableRead', timeout: 30_000 });
 }
 
@@ -516,6 +523,7 @@ export async function applySepidarOpeningChequeBatch(database: Pick<PrismaClient
     const bookId = prepared.bookId;
     await requireOpeningAdmission(tx, releaseId, bookId, actor.id, planSha256);
     await lockOpeningBook(tx, bookId);
+    await verifyChequeDestinationAccounts(tx, bookId, chequeDestinationAccounts(evidence, clearingAccountId));
     const book = await tx.accountingBook.findUnique({ where: { id: bookId } });
     const clearing = await tx.accountingLedgerAccount.findUnique({ where: { id: clearingAccountId }, include: { dimensionRules: true } });
     requireValid(book && clearing && clearing.bookId === bookId && clearing.code === '119901' && clearing.level === 'MOIN'

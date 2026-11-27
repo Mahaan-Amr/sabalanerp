@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { createHash, generateKeyPairSync, sign } from 'node:crypto';
 import test from 'node:test';
+import { enrollSepidarOpening, readSepidarChequeOpeningEvidence } from './sepidar-opening-controller.mjs';
 import { canonicalGoPayload } from './customer-allocation-go-manifest.mjs';
 import { readSepidarOpeningChequeBatchEvidence, verifySepidarOpeningChequeBatchApproval } from './sepidar-opening-cheque-approval.mjs';
 
-test('cheque approval binds an exact plan and evidence to the owned deployment', () => {
+test('cheque approval binds an exact plan and evidence to the owned deployment', async () => {
   const { publicKey, privateKey } = generateKeyPairSync('ed25519');
   const digest = digit => digit.repeat(64);
   const identity = {
@@ -29,6 +30,27 @@ test('cheque approval binds an exact plan and evidence to the owned deployment',
   const accepted = verifySepidarOpeningChequeBatchApproval(envelope, observed, approver);
   assert.deepEqual(JSON.parse(accepted.manifestText), payload);
   assert.match(accepted.manifestSha256, /^[a-f0-9]{64}$/);
+  const queries = [];
+  const client = { query: async (sql, args) => {
+    queries.push({ sql, args });
+    if (sql.includes('sepidar_customer_opening_lock')) return { rows: [{
+      build_commit: identity.buildCommit, checkpoint_hash: identity.checkpointHash,
+      phase: observed.phase, active_key: observed.activeKey,
+      database_clock: new Date(observed.dbClock), lease_expiry: new Date(observed.leaseExpiresAt),
+    }] };
+    return { rows: [] };
+  } };
+  const input = { client, scope: 'cheques', deploymentId: identity.deploymentId, releaseId: identity.releaseId,
+    leaseToken: 'owned-lease', qualification: observed, envelope, approver };
+  assert.deepEqual(await enrollSepidarOpening(input), { manifestSha256: accepted.manifestSha256 });
+  assert.match(queries[2].sql, /sepidar_cheque_batch_register/);
+  assert.deepEqual(queries[2].args, [identity.deploymentId, identity.releaseId, 'owned-lease',
+    accepted.manifestText, accepted.manifestSha256]);
+  assert.equal(queries.at(-1).sql, 'COMMIT');
+  queries.length = 0;
+  await assert.rejects(enrollSepidarOpening({ ...input, qualification: { ...observed, bookId: 'wrong' } }));
+  assert.equal(queries.length, 3);
+  assert.equal(queries.at(-1).sql, 'ROLLBACK');
   const rejected = { message: 'SEPIDAR_CHEQUE_BATCH_APPROVAL_REJECTED' };
   for (const [field, value] of Object.entries({
     actorId: 'other-actor', periodId: 'other-period', planSha256: digest('0'), openingRials: '1',
@@ -49,7 +71,7 @@ test('cheque approval binds an exact plan and evidence to the owned deployment',
 });
 
 test('cheque evidence rejects stale preparation, replaced source and a review of other bytes', () => {
-  const json = value => Buffer.from(JSON.stringify(value) + '\n');
+  const json = value => Buffer.from(JSON.stringify(value, null, 2) + '\n');
   const sha = bytes => createHash('sha256').update(bytes).digest('hex');
   const source = json({ source: 'reviewed fixture' });
   const prepared = {
@@ -62,6 +84,20 @@ test('cheque evidence rejects stale preparation, replaced source and a review of
   const accounting = { format: 'sepidar-opening-cheque-accounting-review-v1', decision: 'APPROVED',
     reviewReference: 'review-37', preparationSha256: sha(preparation) };
   const evidence = { source, preparation, reproducedPreparation: Buffer.from(preparation), accountingApproval: json(accounting) };
+  const { publicKey } = generateKeyPairSync('ed25519');
+  const pem = publicKey.export({ type: 'spki', format: 'pem' });
+  const qualification = json({});
+  const files = { 'source.json': source, 'preparation.json': preparation, 'qualification.json': qualification,
+    'accounting-approval.json': evidence.accountingApproval };
+  const read = name => files[name];
+  const authority = () => json({ keyId: 'reviewer', publicKeyPem: pem });
+  const opts = { approvalKeySha256: sha(pem), qualificationSha256: sha(qualification) };
+  assert.throws(() => readSepidarChequeOpeningEvidence(read, opts, authority));
+  assert.throws(() => readSepidarChequeOpeningEvidence(read, {
+    ...opts, describe: () => ({ ...prepared, eventCount: 57 }),
+  }, authority));
+  const controller = readSepidarChequeOpeningEvidence(read, { ...opts, prepareOnly: true, describe: () => prepared }, authority);
+  assert.equal(controller.qualification.planSha256, prepared.planSha256);
   const observed = readSepidarOpeningChequeBatchEvidence(evidence);
   assert.equal(observed.planSha256, prepared.planSha256);
   assert.equal(observed.preparationSha256, sha(preparation));

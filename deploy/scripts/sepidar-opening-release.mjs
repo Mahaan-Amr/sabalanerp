@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { migrationCatalogSha256 } from './customer-allocation-release.mjs';
 import { privateDirectoryReader } from './lib/customer-allocation-controller.mjs';
-import { enrollSepidarOpening, readSepidarOpeningEvidence } from './lib/sepidar-opening-controller.mjs';
+import { enrollSepidarOpening, readSepidarChequeOpeningEvidence, readSepidarOpeningEvidence } from './lib/sepidar-opening-controller.mjs';
 
 const sha256 = /^[a-f0-9]{64}$/;
 const imageId = /^sha256:[a-f0-9]{64}$/;
@@ -38,7 +38,7 @@ export function sepidarControllerConnection(connectionString, database) {
 
 async function runController(input, prepareOnly) {
   const { deploymentId, releaseId, leaseToken, approvalKeySha256, qualificationSha256,
-    candidateImage, retainedImage, database } = input;
+    candidateImage, retainedImage, database, scope = 'customers' } = input;
   requireRelease([deploymentId, releaseId, leaseToken].every(value => typeof value === 'string' && value.length)
     && approvalKeySha256?.match(sha256) && qualificationSha256?.match(sha256)
     && candidateImage?.match(imageId) && retainedImage?.match(imageId));
@@ -46,7 +46,12 @@ async function runController(input, prepareOnly) {
   const read = privateDirectoryReader('/sepidar-opening-evidence');
   const { controllerUrl } = JSON.parse(authority('database.json', 16 * 1024));
   const connectionString = sepidarControllerConnection(controllerUrl, database);
-  const evidence = readSepidarOpeningEvidence(read, { approvalKeySha256, qualificationSha256, prepareOnly },
+  requireRelease(['customers', 'cheques'].includes(scope));
+  const reader = scope === 'cheques' ? readSepidarChequeOpeningEvidence : readSepidarOpeningEvidence;
+  const describe = scope === 'cheques'
+    ? (await import('/app/dist/services/sepidarOpeningChequeApplication.js')).describeSepidarOpeningChequeBatch : undefined;
+  if (scope === 'cheques') requireRelease(typeof describe === 'function');
+  const evidence = reader(read, { approvalKeySha256, qualificationSha256, prepareOnly, describe },
     name => authority(name, 16 * 1024));
   const { qualification } = evidence;
   requireRelease(qualification.candidateImage === candidateImage && qualification.retainedImage === retainedImage
@@ -68,10 +73,10 @@ async function runController(input, prepareOnly) {
       const { rows: releases } = await client.query('SELECT * FROM public.sepidar_customer_opening_lock($1, $2, $3)',
         [deploymentId, releaseId, leaseToken]);
       requireRelease(releases.length === 1 && releases[0].build_commit === qualification.buildCommit);
-      return JSON.stringify({ format: 'sepidar-customer-opening-approval-v1', decision: 'GO',
+      return JSON.stringify({ format: scope === 'cheques' ? 'sepidar-opening-cheque-batch-approval-v1' : 'sepidar-customer-opening-approval-v1', decision: 'GO',
         ...qualification, deploymentId, releaseId, keyId: evidence.approver.keyId, checkpointHash: releases[0].checkpoint_hash });
     }
-    return (await enrollSepidarOpening({ client, deploymentId, releaseId, leaseToken, ...evidence })).manifestSha256;
+    return (await enrollSepidarOpening({ client, deploymentId, releaseId, leaseToken, scope, ...evidence })).manifestSha256;
   } finally {
     await client.end();
   }
@@ -81,23 +86,25 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   try {
     const [mode, ...args] = process.argv.slice(2);
     const input = JSON.parse(readFileSync(0, 'utf8'));
-    if (mode === 'preflight' && args.length === 4) {
-      const [evidenceDirectory, authorityDirectory, approvalKeySha256, qualificationSha256] = args;
+    if (mode === 'preflight' && (args.length === 4 || args.length === 5)) {
+      const [evidenceDirectory, authorityDirectory, approvalKeySha256, qualificationSha256, scope = 'customers'] = args;
       requireRelease([evidenceDirectory, authorityDirectory].every(directory => !/[,\r\n]/.test(directory))
         && evidenceDirectory !== authorityDirectory && sha256.test(approvalKeySha256) && sha256.test(qualificationSha256));
       const read = privateDirectoryReader(evidenceDirectory);
       const authority = privateDirectoryReader(authorityDirectory);
       const { network, database } = sepidarOpeningTarget(input);
       sepidarControllerConnection(JSON.parse(authority('database.json', 16 * 1024)).controllerUrl, database);
-      readSepidarOpeningEvidence(read, { approvalKeySha256, qualificationSha256, prepareOnly: true },
+      requireRelease(['customers', 'cheques'].includes(scope));
+      const reader = scope === 'cheques' ? readSepidarChequeOpeningEvidence : readSepidarOpeningEvidence;
+      reader(read, { approvalKeySha256, qualificationSha256, prepareOnly: true },
         name => authority(name, 16 * 1024));
       process.stdout.write(network);
-    } else if (mode === 'input' && args.length === 4) {
-      const [approvalKeySha256, qualificationSha256, candidateImage, retainedImage] = args;
+    } else if (mode === 'input' && (args.length === 4 || args.length === 5)) {
+      const [approvalKeySha256, qualificationSha256, candidateImage, retainedImage, scope = 'customers'] = args;
       const { DEPLOYMENT_ID: deploymentId, DEPLOYMENT_RELEASE_ID: releaseId,
         DEPLOYMENT_LEASE_TOKEN: leaseToken } = process.env;
       process.stdout.write(JSON.stringify({ deploymentId, releaseId, leaseToken, approvalKeySha256,
-        qualificationSha256, candidateImage, retainedImage, database: sepidarOpeningTarget(input).database }));
+        qualificationSha256, candidateImage, retainedImage, scope, database: sepidarOpeningTarget(input).database }));
     } else if ((mode === 'request' || mode === 'activate') && args.length === 0) {
       process.stdout.write(await runController(input, mode === 'request'));
     } else if (mode === 'publish-request' && args.length === 1) {

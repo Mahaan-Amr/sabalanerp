@@ -176,6 +176,8 @@ ALLOCATION_EVIDENCE_DIR="${DEPLOYMENT_CUSTOMER_ALLOCATION_EVIDENCE_DIR:-}"
 ALLOCATION_AUTHORITY_DIR="${DEPLOYMENT_CUSTOMER_ALLOCATION_AUTHORITY_DIR:-}"
 ALLOCATION_APPROVER_SHA256="${DEPLOYMENT_CUSTOMER_ALLOCATION_APPROVER_SHA256:-}"
 ALLOCATION_RELEASE_SCRIPT="${OPERATIONS_ROOT}/deploy/scripts/customer-allocation-release.mjs"
+SEPIDAR_OPENING_SCOPE="${DEPLOYMENT_SEPIDAR_OPENING_SCOPE:-customers}"
+case "${SEPIDAR_OPENING_SCOPE}" in customers|cheques) ;; *) echo 'Invalid Sepidar opening scope.' >&2; exit 1 ;; esac
 SEPIDAR_OPENING_RELEASE_SCRIPT="${OPERATIONS_ROOT}/deploy/scripts/sepidar-opening-release.mjs"
 SEPIDAR_OPENING_EVIDENCE_DIR="${DEPLOYMENT_SEPIDAR_OPENING_EVIDENCE_DIR:-}"
 SEPIDAR_OPENING_AUTHORITY_DIR="${DEPLOYMENT_SEPIDAR_OPENING_AUTHORITY_DIR:-}"
@@ -631,7 +633,7 @@ run_sepidar_opening_controller() {
   sepidar_candidate_id="$(docker image inspect --format '{{.Id}}' "${DEPLOYMENT_TARGET_BACKEND_IMAGE}")" || return 1
   protected_compose_config | node "${SEPIDAR_OPENING_RELEASE_SCRIPT}" input \
     "${SEPIDAR_OPENING_APPROVER_SHA256}" "${SEPIDAR_OPENING_QUALIFICATION_SHA256}" \
-    "${sepidar_candidate_id}" "${DEPLOYMENT_PREVIOUS_BACKEND_IMAGE}" \
+    "${sepidar_candidate_id}" "${DEPLOYMENT_PREVIOUS_BACKEND_IMAGE}" "${SEPIDAR_OPENING_SCOPE}" \
     | docker run --rm -i --pull never --network "${sepidar_opening_network}" \
       --user "$(id -u):$(id -g)" --read-only --cap-drop ALL --security-opt no-new-privileges \
       --label "io.sabalan.deployment.id=${DEPLOYMENT_ID}" \
@@ -1781,7 +1783,7 @@ if [ -n "${SEPIDAR_OPENING_EVIDENCE_DIR}${SEPIDAR_OPENING_AUTHORITY_DIR}${SEPIDA
     }
   sepidar_opening_network="$(protected_compose_config | node "${SEPIDAR_OPENING_RELEASE_SCRIPT}" preflight \
     "${SEPIDAR_OPENING_EVIDENCE_DIR}" "${SEPIDAR_OPENING_AUTHORITY_DIR}" \
-    "${SEPIDAR_OPENING_APPROVER_SHA256}" "${SEPIDAR_OPENING_QUALIFICATION_SHA256}")" || exit 1
+    "${SEPIDAR_OPENING_APPROVER_SHA256}" "${SEPIDAR_OPENING_QUALIFICATION_SHA256}" "${SEPIDAR_OPENING_SCOPE}")" || exit 1
 fi
 
 if [ -n "${ALLOCATION_EVIDENCE_DIR}" ]; then

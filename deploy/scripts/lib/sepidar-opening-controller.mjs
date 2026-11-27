@@ -1,3 +1,4 @@
+import { readSepidarOpeningChequeBatchEvidence, verifySepidarOpeningChequeBatchApproval } from './sepidar-opening-cheque-approval.mjs';
 import { createHash, createPublicKey } from 'node:crypto';
 import { verifySepidarOpeningApproval } from './sepidar-opening-approval.mjs';
 
@@ -5,6 +6,31 @@ const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const rejectedEvidence = () => { throw new Error('SEPIDAR_OPENING_EVIDENCE_REJECTED'); };
 const limit = 4 * 1024 * 1024;
 const canonicalRials = /^(0|-?[1-9][0-9]{0,19})$/;
+
+export function readSepidarChequeOpeningEvidence(read, { approvalKeySha256, qualificationSha256, prepareOnly, describe }, readAuthority) {
+  const source = read('source.json', limit);
+  const preparation = read('preparation.json', limit);
+  const qualificationBytes = read('qualification.json', limit);
+  const qualificationHash = sha256(qualificationBytes);
+  if (qualificationHash !== qualificationSha256) rejectedEvidence();
+  const { buildCommit, migrationSha256, candidateImage, retainedImage } = JSON.parse(qualificationBytes);
+  if (!prepareOnly && typeof describe !== 'function') rejectedEvidence();
+  const target = JSON.parse(preparation);
+  const reproducedPreparation = describe
+    ? Buffer.from(JSON.stringify(describe(source, target), null, 2) + '\n') : preparation;
+  const batch = readSepidarOpeningChequeBatchEvidence({
+    source, preparation, reproducedPreparation, accountingApproval: read('accounting-approval.json', limit),
+  });
+  const key = JSON.parse(readAuthority('approver.json', 16 * 1024));
+  if (typeof key.publicKeyPem !== 'string' || sha256(key.publicKeyPem) !== approvalKeySha256) rejectedEvidence();
+  const publicKey = createPublicKey(key.publicKeyPem);
+  if (publicKey.asymmetricKeyType !== 'ed25519') rejectedEvidence();
+  return {
+    approver: { publicKey, keyId: key.keyId },
+    ...(prepareOnly ? {} : { envelope: JSON.parse(read('decision.json', limit)) }),
+    qualification: { ...batch, buildCommit, migrationSha256, candidateImage, retainedImage, qualificationHash },
+  };
+}
 
 /** Resolve the verified preparation and signed decision without exposing any customer data. */
 export function readSepidarOpeningEvidence(read, { approvalKeySha256, qualificationSha256, prepareOnly }, readAuthority = read) {
@@ -65,7 +91,7 @@ export function readSepidarOpeningEvidence(read, { approvalKeySha256, qualificat
  * protected release controller. Qualification is independently measured by
  * the caller before entering this transaction.
  */
-export async function enrollSepidarOpening({ client, deploymentId, releaseId, leaseToken, qualification, envelope, approver }) {
+export async function enrollSepidarOpening({ client, deploymentId, releaseId, leaseToken, qualification, envelope, approver, scope = 'customers' }) {
   await client.query('BEGIN');
   try {
     const { rows } = await client.query(
@@ -76,7 +102,9 @@ export async function enrollSepidarOpening({ client, deploymentId, releaseId, le
 
     const deployment = rows[0];
     if (qualification.buildCommit !== deployment.build_commit) throw new Error('SEPIDAR_OPENING_DEPLOYMENT_NOT_QUALIFIED');
-    const approval = verifySepidarOpeningApproval(envelope, {
+    const isChequeBatch = scope === 'cheques';
+    const verifyApproval = isChequeBatch ? verifySepidarOpeningChequeBatchApproval : verifySepidarOpeningApproval;
+    const approval = verifyApproval(envelope, {
       ...qualification,
       deploymentId,
       releaseId,
@@ -89,7 +117,9 @@ export async function enrollSepidarOpening({ client, deploymentId, releaseId, le
     }, approver);
 
     await client.query(
-      'SELECT public.sepidar_customer_opening_register_manifest($1, $2, $3, $4, $5)',
+      isChequeBatch
+        ? 'SELECT public.sepidar_cheque_batch_register($1, $2, $3, $4, $5)'
+        : 'SELECT public.sepidar_customer_opening_register_manifest($1, $2, $3, $4, $5)',
       [deploymentId, releaseId, leaseToken, approval.manifestText, approval.manifestSha256],
     );
     await client.query('COMMIT');

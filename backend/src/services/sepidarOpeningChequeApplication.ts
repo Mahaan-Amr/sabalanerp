@@ -1,9 +1,9 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { createAccountingLedgerApplication, hashAccountingEvidence, IRR_ROUNDING_RULE_V1, type AccountingActor, type LedgerLineInput } from './accountingLedgerFoundation';
 import { createAccountingLedgerPrismaRepository } from './accountingLedgerPrismaRepository';
 import { SEPIDAR_CHEQUE_SUPPLIER_ENDORSEMENT } from './accountingSupplyChain';
-import { previewSepidarOpeningCheques, type SepidarOpeningChequeEvidence } from './sepidarOpeningChequePlan';
+import { previewSepidarOpeningCheques, readSepidarOpeningChequeEvidence, type SepidarOpeningChequeEvidence } from './sepidarOpeningChequePlan';
 
 type Plan = ReturnType<typeof previewSepidarOpeningCheques>;
 type Cheque = Plan['instruments'][number];
@@ -389,6 +389,21 @@ function openingBatchPreparation(input: Omit<ApplyOpeningBatchInput, 'actor'>) {
 
 export function sepidarOpeningChequeBatchDigest(input: Omit<ApplyOpeningBatchInput, 'actor'>) {
   return openingBatchPreparation(input).planSha256;
+}
+
+export function describeSepidarOpeningChequeBatch(bytes: Buffer, target: Omit<ApplyOpeningBatchInput, 'evidence' | 'actor'>
+  & { actorId: string }) {
+  const evidence = readSepidarOpeningChequeEvidence(bytes.toString('utf8'));
+  const { actorId, custodyFinancialAccountId, clearingAccountId, fiscalYearId, periodId, recipientDimensionTypeId } = target;
+  const planSha256 = sepidarOpeningChequeBatchDigest({ evidence, custodyFinancialAccountId, clearingAccountId,
+    fiscalYearId, periodId, recipientDimensionTypeId });
+  return {
+    format: 'sepidar-opening-cheque-batch-preparation-v1', bookId: evidence.bookId, basisAt: evidence.basisAt,
+    sourceSha256: createHash('sha256').update(bytes).digest('hex'), planSha256,
+    actorId, custodyFinancialAccountId, clearingAccountId, fiscalYearId, periodId, recipientDimensionTypeId,
+    instrumentCount: evidence.instruments.length, eventCount: evidence.events.length,
+    openingRials: evidence.openingLines.reduce((sum, line) => sum + line.amountRials, 0n).toString(),
+  };
 }
 
 async function requireOpeningAdmission(tx: Prisma.TransactionClient, releaseId: string, bookId: string, actorId: string, digest: string) {

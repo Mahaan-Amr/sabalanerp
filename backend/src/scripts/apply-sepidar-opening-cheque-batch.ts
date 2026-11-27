@@ -1,16 +1,17 @@
 import { open, readFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
 import { disconnectDatabase, prisma } from '../lib/prisma';
-import { applySepidarOpeningChequeBatch, describeSepidarOpeningChequeBatch, inspectSepidarOpeningChequeBatchAdmission,
+import { applySepidarOpeningChequeBatch, describeSepidarOpeningChequeBatch, inspectSepidarOpeningChequeBatchAdmission, inspectSepidarOpeningChequeBatchDestinations,
   SepidarOpeningChequeApplicationError } from '../services/sepidarOpeningChequeApplication';
 import { readSepidarOpeningChequeEvidence, SepidarOpeningChequePlanError } from '../services/sepidarOpeningChequePlan';
 
 async function main() {
   const { values: options } = parseArgs({ options: {
-    source: { type: 'string' }, preparation: { type: 'string' }, receipt: { type: 'string' }, apply: { type: 'boolean' },
+    source: { type: 'string' }, preparation: { type: 'string' }, receipt: { type: 'string' }, apply: { type: 'boolean' }, 'validate-destinations': { type: 'boolean' },
   } });
   const { source, preparation, receipt, apply = false } = options;
-  if (!source || !preparation || (apply && !receipt) || (!apply && receipt)) {
+  const validateDestinations = options['validate-destinations'];
+  if (!source || !preparation || (apply && (!receipt || validateDestinations)) || (!apply && receipt)) {
     throw new Error('INVALID_OPTIONS');
   }
   const [bytes, reviewed] = await Promise.all([readFile(source), readFile(preparation)]);
@@ -26,6 +27,11 @@ async function main() {
     fiscalYearId: manifest.fiscalYearId,
     periodId: manifest.periodId,
   };
+  if (validateDestinations) {
+    const verified = await inspectSepidarOpeningChequeBatchDestinations(prisma, input);
+    process.stdout.write(JSON.stringify({ ...verified, destinationsChecked: true, applied: false }) + '\n');
+    return;
+  }
   const admitted = await inspectSepidarOpeningChequeBatchAdmission(prisma, input);
   if (!apply) {
     process.stdout.write(JSON.stringify({ ...admitted, applied: false }) + '\n');

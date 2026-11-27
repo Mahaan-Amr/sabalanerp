@@ -85,6 +85,7 @@ test('the complete current release is admitted only with its reviewed ordered SQ
     '20261125112000_sepidar_customer_opening_admission',
     '20261125142000_sepidar_opening_cheque_anchors',
     '20261127120000_sepidar_cheque_batch_admission',
+    '20261127121000_sepidar_cheque_anchor_runtime_permissions',
   ];
   const files = names.map(name => [name, fs.readFileSync(path.join(directory, name, 'migration.sql'))] as const);
   const release = compileProtectedCurrentRelease(files);

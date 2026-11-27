@@ -34,6 +34,7 @@ const excessShipmentName = '20261123130000_stone_excess_shipment_return';
 const stoneFinalizationName = '20261123140000_stone_return_finalizations';
 const accountingNeutralName = '20261125110000_accounting_neutral_normal_side';
 const sepidarOpeningAdmissionName = '20261125112000_sepidar_customer_opening_admission';
+const sepidarChequeRuntimeName = '20261127121000_sepidar_cheque_anchor_runtime_permissions';
 const sepidarChequeBatchName = '20261127120000_sepidar_cheque_batch_admission';
 const sepidarChequeAnchorsName = '20261125142000_sepidar_opening_cheque_anchors';
 const sepidarAdmissionTables = ['sepidar_customer_opening_manifests', 'sepidar_customer_opening_admissions'];
@@ -43,6 +44,7 @@ const sepidarAdmissionFunctions = ['protect_sepidar_customer_opening_admission',
 const sepidarChequeBatchTables = ['sepidar_cheque_batch_admissions'];
 const sepidarChequeBatchFunctions = ['sepidar_cheque_batch_register', 'sepidar_opening_cheques_runtime_admitted'];
 const nextReleaseCatalog = {
+  [sepidarChequeRuntimeName]: { tables: ['accounting_sepidar_opening_cheques'], functions: [] },
   [sepidarChequeBatchName]: { tables: sepidarChequeBatchTables, functions: sepidarChequeBatchFunctions },
   [stoneReceiptName]: { tables: ['stone_return_receipts'], functions: ['accounting_guard_supply_chain_append_only'] },
   [stoneDraftName]: { tables: ['stone_return_allocation_drafts', 'stone_return_allocation_draft_rows'], functions: [] },
@@ -202,10 +204,11 @@ const currentRelease = {
   [sepidarOpeningAdmissionName]: ['70db589f5bf8892879c76ed95cb57e3f680dfd27a773b241f79faabf1b045834', 22],
   [sepidarChequeAnchorsName]: ['22df33edac5450c16418e9cb172ba2dda02a30cf6d80af99b98ee6f15431c0f5', 5],
   [sepidarChequeBatchName]: ['ea8f9800bb8d102b2d0ad3e1fa0c00a14fb9b281ac8ed043ede85f5a7b8229db', 10],
+  [sepidarChequeRuntimeName]: ['4d7ded44bbb6319e9df0fa8bfae431ab8cb13f4f24ab961a1c9efac886b48e5c', 2],
 } as const;
 export const protectedCurrentReleaseNames: readonly string[] = Object.freeze(Object.keys(currentRelease));
 // Each release extends the ledger while preserving the prior release-set hashes.
-const protectedReleaseEpochEnds = Object.freeze([12, 22, 24, 25, 35, 36, 37, 38, 41, 42, 43, 44, 45, 46, 47, 48, 49, 54, 57, 58]);
+const protectedReleaseEpochEnds = Object.freeze([12, 22, 24, 25, 35, 36, 37, 38, 41, 42, 43, 44, 45, 46, 47, 48, 49, 54, 57, 58, 59]);
 const releaseSetSha256 = (files: CurrentFile[], index: number) => sha(files.slice(0,
   protectedReleaseEpochEnds.find(end => index < end)!).map(file => file.sha256).join('\n'));
 
@@ -419,7 +422,10 @@ export async function protectedSepidarOpeningProof(tx: Prisma.TransactionClient,
   `;
   if (!role?.admitted) failure('PROTECTED_SEPIDAR_OPENING_CONTROLLER_UNPROVEN');
   const chequeBatchApplied = applied.has(sepidarChequeBatchName);
-  const admissionTables = chequeBatchApplied ? [...sepidarAdmissionTables, ...sepidarChequeBatchTables] : sepidarAdmissionTables;
+  const chequeAnchorAccessApplied = applied.has(sepidarChequeRuntimeName);
+  const admissionTables = [...sepidarAdmissionTables,
+    ...(chequeBatchApplied ? sepidarChequeBatchTables : []),
+    ...(chequeAnchorAccessApplied ? ['accounting_sepidar_opening_cheques'] : [])];
   const admissionFunctions = chequeBatchApplied ? [...sepidarAdmissionFunctions, ...sepidarChequeBatchFunctions] : sepidarAdmissionFunctions;
 
   const objects = await tx.$queryRaw<Array<{ name: string; owner: string; columnAcl: boolean; grants: CatalogGrant[] }>>(Prisma.sql`
@@ -450,8 +456,9 @@ export async function protectedSepidarOpeningProof(tx: Prisma.TransactionClient,
   if (objects.length !== admissionTables.length + admissionFunctions.length
     || new Set(objects.map(object => object.name)).size !== objects.length
     || objects.some(object => object.columnAcl || object.owner !== identity?.owner
-      || JSON.stringify(canonical(object.grants)) !== JSON.stringify(canonical(allowed[object.name]
-        ? [{ grantee: allowed[object.name], privilege: 'EXECUTE', grantable: false, grantor: identity?.owner }] : [])))) {
+      || JSON.stringify(canonical(object.grants)) !== JSON.stringify(canonical(object.name === 'accounting_sepidar_opening_cheques'
+        ? ['INSERT', 'SELECT'].map(privilege => ({ privilege, grantee: 'sabalan_application_runtime', grantable: false, grantor: identity?.owner }))
+        : allowed[object.name] ? [{ grantee: allowed[object.name], privilege: 'EXECUTE', grantable: false, grantor: identity?.owner }] : [])))) {
     failure('PROTECTED_SEPIDAR_OPENING_ACL_DRIFT');
   }
   return { normalSides, sepidarOpeningGrants: allowed };

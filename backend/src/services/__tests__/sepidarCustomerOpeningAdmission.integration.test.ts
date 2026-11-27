@@ -92,9 +92,21 @@ test('the protected opening manifest admits and posts only the exact customer co
       accountingApprovalSha256: '2'.repeat(64), expiresAt: new Date(Date.now() + 240_000).toISOString(),
     });
     const chequeManifestHash = createHash('sha256').update(chequeManifest).digest('hex');
-    const chequeRelease = new Set([...openingRelease, '20261127120000_sepidar_cheque_batch_admission']);
+    const chequeRelease = new Set([...openingRelease, '20261127120000_sepidar_cheque_batch_admission',
+      '20261127121000_sepidar_cheque_anchor_runtime_permissions']);
     assert.equal((await protectedSepidarOpeningProof(f.db, chequeRelease)).sepidarOpeningGrants?.sepidar_cheque_batch_register,
       'sabalan_sepidar_opening_controller');
+    const [access] = await f.db.$queryRaw<Array<{ readable: boolean; insertable: boolean; writable: boolean }>>`
+      SELECT has_table_privilege('sabalan_application_runtime', 'public.accounting_sepidar_opening_cheques', 'SELECT') AS readable,
+        has_table_privilege('sabalan_application_runtime', 'public.accounting_sepidar_opening_cheques', 'INSERT') AS insertable,
+        has_table_privilege('sabalan_application_runtime', 'public.accounting_sepidar_opening_cheques', 'UPDATE, DELETE, TRUNCATE') AS writable
+    `;
+    assert.deepEqual(access, { readable: true, insertable: true, writable: false });
+    await f.db.$transaction(async tx => {
+      await tx.$executeRawUnsafe('GRANT UPDATE ON public.accounting_sepidar_opening_cheques TO sabalan_application_runtime');
+      await assert.rejects(protectedSepidarOpeningProof(tx, chequeRelease), { code: 'PROTECTED_SEPIDAR_OPENING_ACL_DRIFT' });
+      await tx.$executeRawUnsafe('REVOKE UPDATE ON public.accounting_sepidar_opening_cheques FROM sabalan_application_runtime');
+    });
     async function chequeAdmitted(tx: Prisma.TransactionClient, digest = chequePlan) {
       const [result] = await tx.$queryRaw<Array<{ admitted: boolean }>>`
         SELECT public.sepidar_opening_cheques_runtime_admitted(${release}, ${f.book.id}, ${f.actor.id}, ${digest}) AS admitted

@@ -1,8 +1,14 @@
 import fs from 'node:fs/promises';
+import { createHash, createHmac, pbkdf2Sync, randomBytes, timingSafeEqual } from 'node:crypto';
 import path from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import type { PrismaClient } from '@prisma/client';
 import { readDeploymentMaintenance } from './deploymentMaintenance';
+import { readCanonicalCheckpointMetadata, checkpointMetadataTransport } from './deploymentCheckpointMetadataIdentity';
+import { assertRemoteCheckpointFingerprint } from './deploymentCheckpointStorage';
+import { validateDeploymentHostJournal } from './deploymentHostJournal';
 import { nativePostgresCliConnection } from './nativePostgresCli';
+import { sha256File } from './recoveryCrypto';
 
 type RoleSplit = { runtime: string; controller: string };
 const sepidarController = 'sabalan_sepidar_opening_controller';
@@ -114,7 +120,7 @@ async function withTransaction<T>(databaseUrl: string, mode: 'READ ONLY' | 'READ
   }
 }
 
-async function readIdentity(client: Client, roles: RoleSplit) {
+async function readIdentity(client: Client, roles: RoleSplit, requireRuntimeLogin = true) {
   const { rows: [identity] } = await client.query(`
     SELECT current_database() AS database, session_user AS control,
       current_user = session_user AND r.rolsuper AND r.rolcanlogin AND d.datdba = r.oid AS admitted,
@@ -144,7 +150,7 @@ async function readIdentity(client: Client, roles: RoleSplit) {
     WHERE r.rolname IN ($1, $2) OR (sepidar_schema.present AND r.rolname = $3)
   `, [roles.runtime, roles.controller, sepidarController, [...sepidarRoutines.keys()]]);
   if (attributes.length !== (attributes[0]?.hasSepidar ? 3 : 2) || attributes.some(role => !role.restricted
-    || (role.name === 'sabalan_application_runtime' && !role.login))) {
+    || (role.name === 'sabalan_application_runtime' && requireRuntimeLogin && !role.login))) {
     fail('The protected database roles are missing or have unsupported attributes or memberships.');
   }
   const roleAttributes: RoleAttributes[] = attributes.map(({ name, login, connectionLimit, validUntil }) => ({ name, login, connectionLimit, validUntil }));
@@ -194,7 +200,7 @@ function canonicalObjects(objects: ObjectAcl[], control: string, roles: RoleSpli
   }).sort((a, b) => byText(objectIdentity(a), objectIdentity(b)));
 }
 
-function assertRestrictedAccess(catalog: CatalogAcl[], roles: RoleSplit) {
+function assertRestrictedAccess(catalog: ObjectAcl[], roles: RoleSplit) {
   const protectedTables = new Set(['_prisma_migrations', 'deployment_operations',
     'customer_allocation_release_control', 'customer_allocation_release_audit',
     'sepidar_customer_opening_manifests', 'sepidar_customer_opening_admissions', 'sepidar_cheque_batch_admissions']);
@@ -236,6 +242,314 @@ function assertRestrictedAccess(catalog: CatalogAcl[], roles: RoleSplit) {
       }
     }
   }
+}
+
+const firstSplitRoles = { runtime: 'sabalan_application_runtime', controller: 'sabalan_allocation_controller' };
+const firstSplitForbiddenTables = new Set(['_prisma_migrations', 'deployment_operations',
+  'customer_allocation_release_control', 'customer_allocation_release_audit',
+  'shipment_statement_migration_evidence', 'shipment_statement_migration_manifests', 'shipment_statement_migration_runs',
+  'sepidar_customer_opening_manifests', 'sepidar_customer_opening_admissions', 'sepidar_cheque_batch_admissions']);
+
+function firstSplitPrivilege(object: Pick<ObjectAcl, 'kind' | 'name'>, privilege: string) {
+  switch (object.kind) {
+    case 'DATABASE': return privilege === 'CONNECT';
+    case 'SCHEMA': return object.name === 'public' && privilege === 'USAGE';
+    case 'SEQUENCE': return object.name !== 'customer_allocation_release_audit_id_seq' && privilege === 'USAGE';
+    case 'TABLE': return !firstSplitForbiddenTables.has(object.name) && ['SELECT', 'INSERT', 'UPDATE', 'DELETE'].includes(privilege);
+    default: return false;
+  }
+}
+
+type CutoverCatalogReceipt = { format: string; migrationCount: number; objects: ObjectAcl[]; roleFlags: RoleAttributes[] };
+
+/**
+ * Apply only the exact ACL delta in the transaction owned by the first-split
+ * deployment controller. The caller owns the checkpoint and lease fence.
+ */
+export async function changeDormantFirstSplitRuntimeGrants(
+  client: Client, before: CutoverCatalogReceipt, staged: CutoverCatalogReceipt, action: 'stage' | 'restore',
+  runtimeActivated = false,
+) {
+  const identity = await readIdentity(client, firstSplitRoles, false);
+  const withoutTestLogin = staged.roleFlags.map(role => role.name === firstSplitRoles.runtime ? { ...role, login: false } : role);
+  const expectedRoles = runtimeActivated ? staged.roleFlags : before.roleFlags;
+  if (identity.connectionLimit !== -1 || identity.roles.length !== 3
+    || !isDeepStrictEqual(identity.roles, expectedRoles.map(({ name, login, connectionLimit, validUntil }) =>
+      ({ name, login, connectionLimit, validUntil })))
+    || !isDeepStrictEqual(withoutTestLogin, before.roleFlags)
+    || !staged.roleFlags.some(role => role.name === firstSplitRoles.runtime && role.login)) {
+    return fail('The first split requires its original dormant, restricted database roles.');
+  }
+  const baseFormat = 'sabalan-role-rehearsal-read-only-prod-catalog/v1';
+  if (before.format !== baseFormat || staged.format !== baseFormat
+    || !Number.isSafeInteger(before.migrationCount) || before.migrationCount < 1
+    || before.migrationCount !== staged.migrationCount
+    || !['stage', 'restore'].includes(action)) return fail('Invalid first-split ACL receipts.');
+
+  const catalog = await readCatalog(client);
+  const current = canonicalObjects(catalog, identity.control, firstSplitRoles);
+  const previous = canonicalObjects(before.objects, identity.control, firstSplitRoles);
+  const proposed = canonicalObjects(staged.objects, identity.control, firstSplitRoles);
+  if (previous.length !== catalog.length || proposed.length !== catalog.length) {
+    return fail('The live first-split catalog object count differs from the rehearsal.');
+  }
+  assertRestrictedAccess(previous, firstSplitRoles);
+  assertRestrictedAccess(proposed, firstSplitRoles);
+  const expectedPreimage = action === 'stage' ? previous : proposed;
+  const expectedResult = action === 'stage' ? proposed : previous;
+  const alreadyApplied = isDeepStrictEqual(current, expectedResult);
+  if (!alreadyApplied && !isDeepStrictEqual(current, expectedPreimage)) return fail('The live first-split ACL preimage differs from the rehearsal.');
+
+  const statements: string[] = [];
+  for (let i = 0; i < catalog.length; i++) {
+    const { grants: oldGrants, ...oldObject } = previous[i];
+    const { grants: newGrants, ...newObject } = proposed[i];
+    if (!isDeepStrictEqual(oldObject, newObject) || oldGrants.some(old => !newGrants.some(grant => isDeepStrictEqual(grant, old)))) {
+      return fail('A first-split ACL plan cannot remove grants or change catalog objects.');
+    }
+    const extras = newGrants.filter(grant => !oldGrants.some(old => isDeepStrictEqual(grant, old)));
+    for (const grant of extras) {
+      if (grant.grantee !== firstSplitRoles.runtime || !firstSplitPrivilege(newObject, grant.privilege)) {
+        return fail('A first-split ACL change is outside the runtime capability.');
+      }
+      const command = action === 'stage' ? 'GRANT' : 'REVOKE';
+      const direction = action === 'stage' ? 'TO' : 'FROM';
+      statements.push(`${command} ${grant.privilege} ON ${catalog[i].kind} ${catalog[i].target} ${direction} ${quoteIdentifier(firstSplitRoles.runtime)}`);
+    }
+  }
+  if (!alreadyApplied && statements.length) await client.query(statements.join(';\n'));
+  const verified = canonicalObjects(await readCatalog(client), identity.control, firstSplitRoles);
+  if (!isDeepStrictEqual(verified, expectedResult)) return fail('The first-split ACL result differs from the rehearsal.');
+  return { alreadyApplied, grants: statements.length };
+}
+
+const firstSplitPurpose = 'first-database-role-cutover';
+const sha256Pattern = /^[a-f0-9]{64}$/;
+const sha256 = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
+
+const firstSplitVerifierPattern = /^SCRAM-SHA-256\$4096:([A-Za-z0-9+/]{22}==)\$[A-Za-z0-9+/]{43}=:[A-Za-z0-9+/]{43}=$/;
+
+export function firstSplitCredentialVerifier(password: Buffer, salt: Buffer) {
+  const encoded = password.toString('ascii');
+  if (password.length !== 43 || !/^[A-Za-z0-9_-]{43}$/.test(encoded)
+    || !Buffer.from(Buffer.from(encoded, 'base64url').toString('base64url')).equals(password) || salt.length !== 16) {
+    return fail('The first-split credential is invalid.');
+  }
+  const salted = pbkdf2Sync(password, salt, 4096, 32, 'sha256');
+  const clientKey = createHmac('sha256', salted).update('Client Key').digest();
+  try {
+    const stored = createHash('sha256').update(clientKey).digest('base64');
+    const server = createHmac('sha256', salted).update('Server Key').digest('base64');
+    return `SCRAM-SHA-256$4096:${salt.toString('base64')}$${stored}:${server}`;
+  } finally {
+    salted.fill(0);
+    clientKey.fill(0);
+  }
+}
+
+async function proveFirstSplitCredential(databaseUrl: string, credential: Buffer) {
+  const url = new URL(nativePostgresCliConnection(databaseUrl).url);
+  url.username = firstSplitRoles.runtime;
+  url.searchParams.set('application_name', 'sabalan-first-role-login-proof');
+  url.password = randomBytes(32).toString('base64url');
+  try {
+    await withTransaction(url.toString(), 'READ ONLY', async () => {});
+    return fail('PostgreSQL accepted an unowned first-split credential.');
+  } catch (error: any) {
+    if (error?.code !== '28P01') return fail('PostgreSQL did not deny the unowned runtime credential as expected.');
+  }
+  url.password = credential.toString('ascii');
+  try {
+    await withTransaction(url.toString(), 'READ ONLY', async client => {
+      const { rows: [proof] } = await client.query(`
+        SELECT session_user = $1 AND current_user = session_user
+          AND has_table_privilege('public.accounting_parties', 'SELECT')
+          AND NOT has_table_privilege('public._prisma_migrations', 'SELECT')
+          AND NOT has_table_privilege('public.deployment_operations', 'SELECT')
+          AND NOT has_table_privilege('public.sepidar_customer_opening_admissions', 'SELECT') AS admitted
+      `, [firstSplitRoles.runtime]);
+      if (!proof?.admitted) return fail('The runtime did not pass its committed access proof.');
+    });
+  } catch {
+    return fail('The runtime did not pass its committed access proof.');
+  }
+}
+
+async function verifyFirstSplitMigrations(client: Client, expectedDigest: string, count: number) {
+  const directory = path.resolve(__dirname, '../../prisma/migrations');
+  const names = (await fs.readdir(directory, { withFileTypes: true }))
+    .filter(item => item.isDirectory()).map(item => item.name).sort();
+  if (names.length !== count || names.some(name => !/^\d+_[A-Za-z0-9_]+$/.test(name))) {
+    return fail('The first-split migration source is incomplete.');
+  }
+  const source = Object.fromEntries(await Promise.all(names.map(async name =>
+    [name, sha256(await fs.readFile(path.join(directory, name, 'migration.sql')))])));
+  const { rows } = await client.query(`
+    SELECT migration_name AS name, checksum, finished_at IS NOT NULL AS finished
+    FROM public._prisma_migrations WHERE rolled_back_at IS NULL
+  `);
+  if (sha256(JSON.stringify(source)) !== expectedDigest || rows.length !== count
+    || new Set(rows.map(row => row.name)).size !== count
+    || rows.some(row => !row.finished || source[row.name] !== row.checksum)) {
+    return fail('The first-split migration ledger differs from the pinned source.');
+  }
+}
+
+/** Used only by the dedicated protected cutover owner after a verified checkpoint. */
+export async function changeOwnedFirstSplitRuntimeGrants(input: {
+  action: 'stage' | 'activate' | 'restore'; databaseUrl: string; credential?: Buffer;
+  coordinationDir: string; reportDir: string; remoteRoot?: string;
+  beforeBytes: Buffer; stagedBytes: Buffer;
+}) {
+  const phase = input.action === 'restore' ? 'ROLLBACK_STARTED' : 'MUTATION_STARTED';
+  const reportPath = path.join(input.reportDir, 'active-deployment-session.json');
+  const session = JSON.parse(await fs.readFile(reportPath, 'utf8'));
+  const binding = session.firstRoleCutover;
+  const token = process.env.DEPLOYMENT_LEASE_TOKEN;
+  if (!['stage', 'activate', 'restore'].includes(input.action)
+    || (input.action === 'activate') !== Boolean(input.credential) || process.env.BACKEND_RUNTIME_ROLE !== 'control'
+    || !sha256Pattern.test(token || '') || session.leaseToken !== token
+    || session.deploymentId !== process.env.DEPLOYMENT_ID || session.releaseId !== process.env.DEPLOYMENT_RELEASE_ID
+    || session.controlImage !== process.env.DEPLOYMENT_CONTROL_IMAGE
+    || !/^sha256:[a-f0-9]{64}$/.test(session.controlImage ?? '') || !/^[a-f0-9]{40}$/.test(session.targetCommit ?? '')
+    || session.purpose !== firstSplitPurpose || session.bootstrap !== false || session.phase !== phase
+    || !binding || !sha256Pattern.test(binding.migrationSha256 ?? '')
+    || !isDeepStrictEqual(Object.keys(binding).sort(), ['afterEnvironmentSha256', 'beforeEnvironmentSha256', 'beforeSha256', 'migrationSha256', 'stagedSha256'])
+    || ![binding.beforeEnvironmentSha256, binding.afterEnvironmentSha256].every(hash => sha256Pattern.test(hash ?? ''))
+    || binding.beforeEnvironmentSha256 === binding.afterEnvironmentSha256
+    || binding.beforeSha256 !== sha256(input.beforeBytes) || binding.stagedSha256 !== sha256(input.stagedBytes)) {
+    return fail('The first split requires its dedicated session and rehearsed ACL evidence.');
+  }
+  const assertMarker = async () => {
+    const marker = await readDeploymentMaintenance(input.coordinationDir);
+    if (marker?.deploymentId !== session.deploymentId || marker?.releaseId !== session.releaseId) {
+      return fail('The first-split maintenance marker changed.');
+    }
+  };
+  await assertMarker();
+  const journal = await validateDeploymentHostJournal(path.join(input.reportDir, 'active-deployment.jsonl'));
+  const markerIndex = journal.findIndex(entry => entry.event === 'maintenance-activated');
+  const requiredPhases = ['SERVICES_DRAINED', 'LOCAL_CHECKPOINT_VERIFIED', 'REMOTE_CHECKPOINT_VERIFIED', 'MUTATION_STARTED',
+    ...(input.action === 'restore' ? ['ROLLBACK_STARTED'] : [])];
+  if (markerIndex < 0 || journal.some(entry => entry.deploymentId !== session.deploymentId)
+    || journal[0]?.event !== 'deployment-prepared' || !isDeepStrictEqual(journal[0].details?.firstRoleCutover, binding)
+    || !isDeepStrictEqual(journal.slice(markerIndex + 1)
+      .filter(entry => entry.event === 'phase-transition' && requiredPhases.includes(entry.phase))
+      .map(entry => entry.phase), requiredPhases)) return fail('The first-split journal does not prove the maintenance boundary.');
+
+  try {
+    await fs.lstat(path.join(input.reportDir, 'first-role-cutover-open-intent.json'));
+    return fail('The first split may have reopened public traffic.');
+  } catch (error: any) {
+    if (error?.code !== 'ENOENT') throw error;
+  }
+  const checkpoint = readCanonicalCheckpointMetadata(JSON.parse(await fs.readFile(
+    path.join(input.coordinationDir, 'deployment-checkpoint.json'), 'utf8')));
+  const verified = checkpoint.metadata;
+  if (verified.deploymentId !== session.deploymentId || verified.releaseId !== session.releaseId
+    || verified.targetCommit !== session.targetCommit || verified.captureMethod !== 'PROTECTED_MAINTENANCE_COMPLETE'
+    || verified.localVerified !== true || verified.remoteVerified !== true || verified.localRestoreVerified !== true
+    || verified.manifestReadable !== true || !verified.sourceDatabase || !path.isAbsolute(verified.localPath ?? '')
+    || !sha256Pattern.test(verified.checksum ?? '')) return fail('The first split requires its verified checkpoint.');
+  const archive = await fs.lstat(verified.localPath);
+  if (!archive.isFile() || archive.size !== verified.size || await sha256File(verified.localPath) !== verified.checksum) {
+    return fail('The first-split local checkpoint archive changed.');
+  }
+  if (input.action !== 'restore') {
+    if (!input.remoteRoot || !path.isAbsolute(input.remoteRoot) || !path.isAbsolute(verified.remotePath ?? '')
+      || !path.resolve(verified.remotePath).startsWith(path.resolve(input.remoteRoot) + path.sep)) {
+      return fail('The first-split checkpoint is outside the verified remote mount.');
+    }
+    await assertRemoteCheckpointFingerprint(verified.remotePath, verified.remoteFingerprint);
+    const remote = readCanonicalCheckpointMetadata(JSON.parse(await fs.readFile(verified.remotePath + '.json', 'utf8')));
+    if (remote.sha256 !== checkpoint.sha256) return fail('The first-split remote checkpoint receipt changed.');
+  }
+
+  const before = JSON.parse(input.beforeBytes.toString('utf8')) as CutoverCatalogReceipt;
+  const staged = JSON.parse(input.stagedBytes.toString('utf8')) as CutoverCatalogReceipt;
+  const transition = await withTransaction(input.databaseUrl, 'READ WRITE', async client => {
+    await client.query("SET LOCAL lock_timeout = '5s'; SET LOCAL statement_timeout = '30s'");
+    const { rows } = await client.query(`
+      SELECT "checkpointJson" AS checkpoint, "reportJson"->'firstRoleCutoverAcl' AS receipt
+      FROM public.deployment_operations
+      WHERE "activeKey" = 'production' AND id = $1 AND "releaseId" = $2 AND "targetCommit" = $3
+        AND owner = $4 AND phase = $5 AND "leaseToken" = $6 AND "leaseExpiresAt" > clock_timestamp() AT TIME ZONE 'UTC'
+      FOR UPDATE
+    `, [session.deploymentId, session.releaseId, session.targetCommit, session.owner, phase, token]);
+    if (rows.length !== 1 || !rows[0].checkpoint
+      || checkpointMetadataTransport(rows[0].checkpoint).canonicalMetadataSha256 !== checkpoint.sha256) {
+      return fail('The first-split lease or its bound checkpoint has changed.');
+    }
+    const { rows: [database] } = await client.query(`
+      SELECT current_database() AS name, (SELECT oid::text FROM pg_database WHERE datname = current_database()) AS oid,
+        (SELECT system_identifier::text FROM pg_control_system()) AS "systemIdentifier",
+        NOT EXISTS (SELECT FROM pg_stat_activity WHERE backend_type = 'client backend' AND pid <> pg_backend_pid()
+          AND (datname = current_database() OR usename IN ($1, $2, $3)))
+        AND NOT EXISTS (SELECT FROM pg_prepared_xacts WHERE database = current_database()) AS drained
+    `, [firstSplitRoles.runtime, firstSplitRoles.controller, sepidarController]);
+    if (!database?.drained || database.name !== verified.sourceDatabase.name || database.oid !== verified.sourceDatabase.oid
+      || database.systemIdentifier !== verified.sourceDatabase.systemIdentifier) {
+      return fail('The first-split database is not the drained checkpoint source.');
+    }
+    await verifyFirstSplitMigrations(client, binding.migrationSha256, before.migrationCount);
+    const ownership = { checkpointSha256: verified.checksum, checkpointMetadataSha256: checkpoint.sha256, ...binding };
+    const prior = rows[0].receipt;
+    const owns = (action: 'stage' | 'activate') => prior?.action === action
+      && Object.entries(ownership).every(([key, value]) => prior[key] === value);
+    const { rows: [runtime] } = await client.query(`
+      SELECT rolcanlogin AS login, rolpassword AS verifier FROM pg_authid WHERE rolname = $1
+    `, [firstSplitRoles.runtime]);
+    if (!runtime || (!runtime.login && runtime.verifier !== null)
+      || (runtime.login && (!owns('activate') || !firstSplitVerifierPattern.test(runtime.verifier ?? '')
+        || sha256(runtime.verifier) !== prior.verifierSha256))) return fail('The runtime credential is outside this cutover.');
+    if (input.action === 'restore' && runtime.login) {
+      await client.query(`ALTER ROLE ${quoteIdentifier(firstSplitRoles.runtime)} NOLOGIN PASSWORD NULL`);
+    }
+    const activate = input.credential;
+    if (activate && ((!owns('stage') && !runtime.login)
+      || activate.toString('ascii') === nativePostgresCliConnection(input.databaseUrl).environment.PGPASSWORD)) {
+      return fail('Credential activation requires the staged cutover grants and a separate credential.');
+    }
+    const result = await changeDormantFirstSplitRuntimeGrants(client, before, staged,
+      input.action === 'restore' ? 'restore' : 'stage', input.action === 'activate' && runtime.login);
+    let verifierSha256: string | undefined;
+    if (activate) {
+      if (!result.alreadyApplied || prior.grants !== result.grants) return fail('The staged cutover grants have changed.');
+      const salt = runtime.login ? Buffer.from(firstSplitVerifierPattern.exec(runtime.verifier)![1], 'base64') : randomBytes(16);
+      const verifier = firstSplitCredentialVerifier(activate, salt);
+      if (runtime.login && !timingSafeEqual(Buffer.from(verifier), Buffer.from(runtime.verifier))) {
+        return fail('The runtime credential differs from the owned cutover.');
+      }
+      if (!runtime.login) {
+        try {
+          await client.query(`ALTER ROLE ${quoteIdentifier(firstSplitRoles.runtime)} LOGIN PASSWORD '${verifier}'`);
+        } catch {
+          return fail('PostgreSQL refused the protected runtime credential.');
+        }
+      }
+      const { rows: [stored] } = await client.query(`
+        SELECT rolcanlogin AS login, rolpassword AS verifier FROM pg_authid WHERE rolname = $1
+      `, [firstSplitRoles.runtime]);
+      if (!stored?.login || stored.verifier !== verifier) return fail('The runtime login did not match the cutover result.');
+      verifierSha256 = sha256(verifier);
+    }
+    await assertMarker();
+    const receipt = { action: input.action, grants: result.grants, ...ownership, ...(verifierSha256 ? { verifierSha256 } : {}) };
+    const write = await client.query(`
+      UPDATE public.deployment_operations
+      SET "reportJson" = COALESCE("reportJson", '{}'::jsonb) || jsonb_build_object('firstRoleCutoverAcl', $2::jsonb)
+      WHERE id = $1 AND "leaseExpiresAt" > clock_timestamp() AT TIME ZONE 'UTC'
+      RETURNING id
+    `, [session.deploymentId, JSON.stringify(receipt)]);
+    if (write.rows.length !== 1) return fail('The first-split lease expired before recording the ACL transition.');
+    return { ...result, receipt };
+  });
+  if (input.credential) {
+    await assertMarker();
+    await proveFirstSplitCredential(input.databaseUrl, input.credential);
+    await assertMarker();
+  }
+  return transition;
 }
 
 /** Capture a data-consistent ACL catalog while the caller dumps the exported snapshot. */

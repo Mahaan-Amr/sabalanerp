@@ -77,6 +77,7 @@ const main = async () => {
     ? path.join(process.env.INQUIRY_RECOVERY_SOURCE_DIR, 'inquiry.db')
     : '/app/recovery-sources/inquiry/inquiry.db';
   const checkpointPath = path.join(RECOVERY_COORDINATION_DIR, 'deployment-checkpoint.json');
+  const firstRoleRuntimeAddress = process.env.DEPLOYMENT_FIRST_ROLE_CUTOVER_RUNTIME_ADDRESS;
   const gates = await runMandatoryDeploymentGates([
     {
       name: 'postgres-query-and-isolated-write',
@@ -152,7 +153,35 @@ const main = async () => {
         return { integrity: 'ok', identity };
       },
     },
-    { name: 'backend-readiness', run: httpGate('http://backend:5000/api/ready') },
+    { name: 'backend-readiness', run: async () => {
+      const result = await httpGate('http://backend:5000/api/ready')();
+      if (firstRoleRuntimeAddress === undefined) return result;
+      if (!isIP(firstRoleRuntimeAddress) || !['RELEASE', 'ROLLBACK'].includes(gateMode)
+        || process.env.BACKEND_RUNTIME_ROLE !== 'control' || process.env.DEPLOYMENT_MODE !== 'configuration') {
+        throw new Error('First-role runtime address is unverified.');
+      }
+      const [proof] = await prisma.$queryRaw<Array<{ admitted: boolean }>>`
+        SELECT EXISTS (
+          SELECT 1 FROM public.deployment_operations
+          WHERE id = ${deploymentId} AND "releaseId" = ${process.env.DEPLOYMENT_RELEASE_ID ?? ''}
+            AND "targetCommit" = ${process.env.DEPLOYMENT_TARGET_COMMIT ?? ''}
+            AND "activeKey" = 'production' AND phase = ${rollbackMode ? 'ROLLBACK_STARTED' : 'RELEASE_STARTED'}
+            AND "leaseToken" = ${process.env.DEPLOYMENT_LEASE_TOKEN ?? ''}
+            AND "leaseExpiresAt" > clock_timestamp() AT TIME ZONE 'UTC'
+            AND "reportJson"->'firstRoleCutoverAcl'->>'action' = ${rollbackMode ? 'restore' : 'activate'}
+        ) AND EXISTS (
+          SELECT 1 FROM pg_authid WHERE rolname = 'sabalan_application_runtime'
+            AND rolcanlogin = ${!rollbackMode} AND (rolpassword IS NULL) = ${rollbackMode}
+        ) AND count(*) > 0 AND bool_and(usename = CASE WHEN ${rollbackMode} THEN session_user::text
+          ELSE 'sabalan_application_runtime' END) AS admitted
+        FROM pg_catalog.pg_stat_activity
+        WHERE client_addr = CAST(${firstRoleRuntimeAddress} AS inet)
+          AND datname = current_database() AND backend_type = 'client backend'
+      `;
+      if (!proof?.admitted) throw new Error('First-role runtime database sessions are unverified.');
+      return { ...result, firstRoleRuntime: rollbackMode ? 'restored' : 'restricted', authenticatedRuntimeSessions: true,
+        firstRoleRuntimeAddress };
+    } },
     { name: 'frontend-health', run: httpGate('http://frontend:3000') },
     { name: 'inquiry-health', run: httpGate('http://inquiry:3001') },
     { name: 'nginx-health', run: httpGate('http://nginx/healthz') },
@@ -224,7 +253,24 @@ const main = async () => {
   const serialized = `${JSON.stringify(report, null, 2)}\n`;
   await fs.promises.writeFile(reportPath, serialized, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
   await fs.promises.writeFile(coordinationPath, serialized, { encoding: 'utf8', mode: 0o600 });
-  if (releaseMode) await prisma.deploymentOperation.update({ where: { id: deploymentId }, data: { reportJson: report as any } });
+  if (releaseMode) {
+    // The role owner needs its transaction receipt even after gates have run, including failed gates before rollback.
+    const written = await prisma.$executeRaw`
+      UPDATE public.deployment_operations
+      SET "reportJson" = CASE WHEN "reportJson" ? 'firstRoleCutoverAcl' THEN
+        CAST(${JSON.stringify(report)} AS jsonb) || jsonb_build_object('firstRoleCutoverAcl', "reportJson"->'firstRoleCutoverAcl')
+        ELSE CAST(${JSON.stringify(report)} AS jsonb) END
+      WHERE id = ${deploymentId} AND (
+        NOT COALESCE("reportJson" ? 'firstRoleCutoverAcl', false) OR (
+          "activeKey" = 'production' AND phase = 'RELEASE_STARTED'
+          AND "leaseToken" = ${process.env.DEPLOYMENT_LEASE_TOKEN ?? ''}
+          AND "leaseExpiresAt" > clock_timestamp() AT TIME ZONE 'UTC'
+          AND "reportJson"->'firstRoleCutoverAcl'->>'action' = 'activate'
+        )
+      )
+    `;
+    if (written !== 1) throw new Error('Deployment gate report could not be bound to the active owner.');
+  }
   assertMandatoryDeploymentGates(gates);
   console.log(JSON.stringify({ ok: true, reportPath, gates }));
 };

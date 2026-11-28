@@ -14,17 +14,26 @@ export const mandatoryReleaseDeploymentGateNames = [
   'checkpoint-manifest', 'database-connection-capacity',
 ] as const;
 
-export function completeReleaseDeploymentGateReport(report: unknown) {
+const mandatoryRollbackDeploymentGateNames = mandatoryReleaseDeploymentGateNames.filter(name =>
+  name !== 'migration-history' && name !== 'shipment-statement-runtime-state' && name !== 'contract-financial-evidence');
+
+function completeDeploymentGateReport(report: unknown, mode: 'RELEASE' | 'ROLLBACK', mandatoryNames: readonly string[]) {
   if (!report || typeof report !== 'object' || Array.isArray(report)) return false;
   const row = report as Record<string, unknown>;
-  if (row.format !== 'sabalan-deployment-report' || row.version !== 1 || row.mode !== 'RELEASE'
-      || !Array.isArray(row.gates) || row.gates.length !== mandatoryReleaseDeploymentGateNames.length) return false;
+  if (row.format !== 'sabalan-deployment-report' || row.version !== 1 || row.mode !== mode
+      || !Array.isArray(row.gates) || row.gates.length !== mandatoryNames.length) return false;
   const gates = row.gates.map(gate => gate && typeof gate === 'object' && !Array.isArray(gate)
     ? gate as Record<string, unknown> : null);
   return gates.every(gate => gate?.passed === true && typeof gate.name === 'string')
-    && new Set(gates.map(gate => gate!.name)).size === mandatoryReleaseDeploymentGateNames.length
-    && mandatoryReleaseDeploymentGateNames.every(name => gates.some(gate => gate!.name === name));
+    && new Set(gates.map(gate => gate!.name)).size === mandatoryNames.length
+    && mandatoryNames.every(name => gates.some(gate => gate!.name === name));
 }
+
+export const completeReleaseDeploymentGateReport = (report: unknown) =>
+  completeDeploymentGateReport(report, 'RELEASE', mandatoryReleaseDeploymentGateNames);
+
+export const completeRollbackDeploymentGateReport = (report: unknown) =>
+  completeDeploymentGateReport(report, 'ROLLBACK', mandatoryRollbackDeploymentGateNames);
 
 /** Earlier qualification gates allow private readiness startup only. They do
  * not assert that the later protected deployment passed its production gates. */

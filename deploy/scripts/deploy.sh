@@ -8,7 +8,14 @@ SYSTEM_RECOVERY_BACKUP_HOST="${SCRIPT_DIR}/system-recovery-backup-host.mjs"
 SYSTEM_RECOVERY_BACKUP=0
 SYSTEM_RECOVERY_OWNER_HANDOFF=0
 SYSTEM_RECOVERY_OWNER_ACTION=BACKUP
+FIRST_ROLE_ROLLBACK_RESUME=0
 case "${1:-}" in
+  --resume-first-role-rollback)
+    [ "$#" -eq 2 ] || { echo 'Usage: deploy.sh --resume-first-role-rollback <absolute-env>' >&2; exit 1; }
+    case "$2" in /*) ;; *) exit 1;; esac
+    FIRST_ROLE_ROLLBACK_RESUME=1
+    shift
+    ;;
   --system-recovery-owner)
     [ "$#" -eq 4 ] || exit 1
     exec node "${SYSTEM_RECOVERY_BACKUP_HOST}" launch-owner "${SCRIPT_DIR}/deploy.sh" "$2" "$3" "$4"
@@ -54,6 +61,9 @@ PREBUILT_RELEASE=0
 MAINTENANCE_IMAGE_SELECTION=0
 unset DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX
 unset DEPLOYMENT_MAINTENANCE_IMAGE_BINDING_HEX DEPLOYMENT_MAINTENANCE_UPLOAD_POLICY
+unset DEPLOYMENT_FIRST_ROLE_CUTOVER_BINDING_HEX DEPLOYMENT_FIRST_ROLE_PRIMARY_HOST DEPLOYMENT_FIRST_ROLE_INQUIRY_HOST
+unset DEPLOYMENT_FIRST_ROLE_CUTOVER_RUNTIME_ADDRESS
+unset DEPLOYMENT_FIRST_ROLE_ROLLBACK_RELEASE_ID DEPLOYMENT_FIRST_ROLE_ROLLBACK_BROWSER_BUILD_ID
 PREBUILT_RELEASE_PLAN=""
 PREBUILT_RELEASE_SHA256=""
 if [ "${1:-}" = "--maintenance-images" ]; then
@@ -393,6 +403,12 @@ run_backend() {
       -e "BACKEND_RUNTIME_ROLE=control" \
       -e DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX \
       -e DEPLOYMENT_MAINTENANCE_IMAGE_BINDING_HEX \
+      -e DEPLOYMENT_FIRST_ROLE_CUTOVER_BINDING_HEX \
+      -e DEPLOYMENT_FIRST_ROLE_PRIMARY_HOST \
+      -e DEPLOYMENT_FIRST_ROLE_INQUIRY_HOST \
+      -e DEPLOYMENT_FIRST_ROLE_CUTOVER_RUNTIME_ADDRESS \
+      -e DEPLOYMENT_FIRST_ROLE_ROLLBACK_RELEASE_ID \
+      -e DEPLOYMENT_FIRST_ROLE_ROLLBACK_BROWSER_BUILD_ID \
       -e "DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_SHA256=${DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_SHA256:-}" \
       -e "DEPLOYMENT_CLAMAV_REPAIR=${DEPLOYMENT_CLAMAV_REPAIR}" \
       -e "DEPLOYMENT_CLAMAV_OPERATION=${DEPLOYMENT_CLAMAV_OPERATION}" \
@@ -487,6 +503,8 @@ run_backend_timed() {
       -e "BACKEND_RUNTIME_ROLE=control" \
       -e DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX \
       -e DEPLOYMENT_MAINTENANCE_IMAGE_BINDING_HEX \
+      -e DEPLOYMENT_FIRST_ROLE_CUTOVER_RUNTIME_ADDRESS \
+      -e "DEPLOYMENT_GATE_MODE=${DEPLOYMENT_GATE_MODE:-}" \
       -e "DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_SHA256=${DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_SHA256:-}" \
       -e "DEPLOYMENT_CLAMAV_REPAIR=${DEPLOYMENT_CLAMAV_REPAIR}" \
       -e "DEPLOYMENT_CLAMAV_OPERATION=${DEPLOYMENT_CLAMAV_OPERATION}" \
@@ -723,6 +741,132 @@ verify_public_maintenance() {
     status="$(curl -k -sS -o /dev/null -w '%{http_code}' "https://${public_domain}/" || true)"
     [ "${status}" = "503" ] || { echo "Maintenance boundary was not proven for ${public_domain} (HTTP ${status})." >&2; return 1; }
   done
+}
+
+confirm_first_role_rollback_traffic() {
+  DEPLOYMENT_FIRST_ROLE_PRIMARY_HOST="$(env_value DOMAIN)"
+  DEPLOYMENT_FIRST_ROLE_INQUIRY_HOST="$(env_value INQUIRY_DOMAIN)"
+  export DEPLOYMENT_FIRST_ROLE_PRIMARY_HOST DEPLOYMENT_FIRST_ROLE_INQUIRY_HOST
+  [ "${DEPLOYMENT_PHASE:-}" = ROLLBACK_STARTED ] && [ "${DB_LEASE_ACQUIRED}" -eq 1 ] || return 1
+  verify_database_role_pin "$(compose ps -q backend)" "$(compose ps -q postgres)" || return 1
+  role_report_dir="${SESSION_HOST_PATH%/*}"
+  if [ ! -e "${role_report_dir}/first-role-cutover-open-intent.json" ]; then
+    if [ -f "${role_report_dir}/first-role-cutover-open-intent-${DEPLOYMENT_ID}.json" ]; then
+      control confirm-first-role-rollback
+      return $?
+    fi
+    verify_public_maintenance || return 1
+  fi
+  # A previously verified public readback may have reached the database terminal state before the owner died.
+  if [ -f "${role_report_dir}/first-role-rollback-public-${DEPLOYMENT_ID}.json" ] \
+    && control confirm-first-role-rollback; then return 0; fi
+  control reopen-first-role-rollback || return 1
+  node "${OPERATIONS_ROOT}/deploy/scripts/first-role-cutover-public-readback.mjs" \
+    "${REPO_ROOT}" "${role_report_dir}" "${DEPLOYMENT_FIRST_ROLE_PRIMARY_HOST}" "${DEPLOYMENT_FIRST_ROLE_INQUIRY_HOST}" || return 1
+  control confirm-first-role-rollback
+}
+
+start_first_role_rollback_runtime() (
+  DEPLOYMENT_RELEASE_ID="${role_original_release}" DEPLOYMENT_BROWSER_BUILD_ID="${role_original_browser}"
+  export DEPLOYMENT_RELEASE_ID DEPLOYMENT_BROWSER_BUILD_ID
+  start_release_services "$1"
+)
+
+resume_first_role_rollback() {
+  [ "$(session_value purpose)" = first-database-role-cutover ] && [ "$(session_value bootstrap)" = false ] || return 1
+  DEPLOYMENT_MODE=configuration
+  DEPLOYMENT_ID="$(session_value deploymentId)" || return 1
+  database_role_pin_path >/dev/null || return 1
+  DEPLOYMENT_RELEASE_ID="$(session_value releaseId)" || return 1
+  DEPLOYMENT_OWNER="$(session_value owner)" || return 1
+  DEPLOYMENT_TARGET_COMMIT="$(session_value targetCommit)" || return 1
+  DEPLOYMENT_TARGET_BACKEND_IMAGE="$(session_value controlImage)" || return 1
+  DEPLOYMENT_LEASE_TOKEN="$(session_value leaseToken)" || return 1
+  role_original_release="$(session_value firstRoleRuntime.releaseId)" || return 1
+  role_original_browser="$(session_value firstRoleRuntime.browserBuildId)" || return 1
+  for value in "${role_original_release}" "${role_original_browser}"; do
+    printf '%s\n' "${value}" | grep -Eq '^[A-Za-z0-9_-]{1,160}$' || return 1
+  done
+  DEPLOYMENT_PHASE="$(session_value phase)" || return 1
+  case "${DEPLOYMENT_PHASE}" in MUTATION_STARTED|MIGRATIONS_APPLIED|RELEASE_STARTED|GATES_PASSED|ROLLBACK_STARTED) ;; *) return 1;; esac
+  DEPLOYMENT_FIRST_ROLE_CUTOVER_BINDING_HEX="$(node --input-type=module -e '
+    import path from "node:path";
+    const [operations, root, sessionFile] = process.argv.slice(1);
+    const { assertFirstRoleHostLock, readFirstRolePrivateFile } = await import(path.join(operations, "deploy/scripts/first-role-cutover-host-environment.mjs"));
+    assertFirstRoleHostLock(root);
+    const session = JSON.parse(readFirstRolePrivateFile(sessionFile).bytes);
+    const binding = session.firstRoleCutover;
+    if (session.purpose !== "first-database-role-cutover" || !binding || Object.keys(binding).sort().join(",") !== "afterEnvironmentSha256,beforeEnvironmentSha256,beforeSha256,migrationSha256,stagedSha256"
+        || !Object.values(binding).every(hash => /^[a-f0-9]{64}$/.test(hash)) || !/^[a-f0-9]{64}$/.test(session.leaseToken)
+        || !/^sha256:[a-f0-9]{64}$/.test(session.controlImage) || !/^[a-f0-9]{40}$/.test(session.targetCommit)) process.exit(1);
+    process.stdout.write(Buffer.from(JSON.stringify(binding)).toString("hex"));
+  ' "${OPERATIONS_ROOT}" "${REPO_ROOT}" "${SESSION_HOST_PATH}")" || return 1
+  DEPLOYMENT_PREVIOUS_BACKEND_IMAGE="$(session_value rollbackReleaseSet.backend)" || return 1
+  DEPLOYMENT_PREVIOUS_FRONTEND_IMAGE="$(session_value rollbackReleaseSet.frontend)" || return 1
+  DEPLOYMENT_PREVIOUS_INQUIRY_IMAGE="$(session_value rollbackReleaseSet.inquiry)" || return 1
+  DEPLOYMENT_PREVIOUS_NGINX_IMAGE="$(session_value rollbackReleaseSet.nginx)" || return 1
+  DEPLOYMENT_PREVIOUS_POSTGRES_IMAGE="$(session_value rollbackReleaseSet.postgres)" || return 1
+  export DEPLOYMENT_MODE DEPLOYMENT_ID DEPLOYMENT_RELEASE_ID DEPLOYMENT_OWNER DEPLOYMENT_TARGET_COMMIT
+  export DEPLOYMENT_TARGET_BACKEND_IMAGE DEPLOYMENT_LEASE_TOKEN DEPLOYMENT_PHASE DEPLOYMENT_FIRST_ROLE_CUTOVER_BINDING_HEX
+  export DEPLOYMENT_PREVIOUS_BACKEND_IMAGE DEPLOYMENT_PREVIOUS_FRONTEND_IMAGE DEPLOYMENT_PREVIOUS_INQUIRY_IMAGE
+  export DEPLOYMENT_PREVIOUS_NGINX_IMAGE DEPLOYMENT_PREVIOUS_POSTGRES_IMAGE
+  for image in "${DEPLOYMENT_TARGET_BACKEND_IMAGE}" "${DEPLOYMENT_PREVIOUS_BACKEND_IMAGE}" "${DEPLOYMENT_PREVIOUS_FRONTEND_IMAGE}" \
+    "${DEPLOYMENT_PREVIOUS_INQUIRY_IMAGE}" "${DEPLOYMENT_PREVIOUS_NGINX_IMAGE}" "${DEPLOYMENT_PREVIOUS_POSTGRES_IMAGE}"; do
+    printf '%s\n' "${image}" | grep -Eq '^sha256:[a-f0-9]{64}$' || return 1
+    [ "$(docker image inspect --format '{{.Id}}' "${image}")" = "${image}" ] || return 1
+  done
+  DB_LEASE_ACQUIRED=1
+  switch_to_previous_images || return 1
+  role_report_dir="${SESSION_HOST_PATH%/*}"
+  role_canonical_env="${ENV_FILE}"
+  role_host="${OPERATIONS_ROOT}/deploy/scripts/first-role-cutover-rollback-host.mjs"
+  ENV_FILE="$(node "${role_host}" original-environment "${REPO_ROOT}" "${role_report_dir}" "${role_canonical_env}")" || return 1
+  verify_database_role_pin || return 1
+  [ "$(image_of_service postgres)" = "${DEPLOYMENT_PREVIOUS_POSTGRES_IMAGE}" ] || return 1
+  if [ -z "${ADVISORY_PID}" ]; then
+    try_acquire_advisory || return 1
+  else
+    kill -0 "${ADVISORY_PID}" 2>/dev/null || return 1
+  fi
+  if [ ! -e "${role_report_dir}/first-role-cutover-open-intent.json" ] \
+    && [ ! -e "${role_report_dir}/first-role-cutover-open-intent-${DEPLOYMENT_ID}.json" ]; then
+    verify_public_maintenance && control heartbeat || return 1
+    mutation_started_at="$(date +%s)"
+    drain_release_for_rollback || return 1
+    if [ "${DEPLOYMENT_PHASE}" != ROLLBACK_STARTED ]; then phase ROLLBACK_STARTED || return 1; fi
+    control restore-first-role-grants || return 1
+    node "${role_host}" restore-environment "${REPO_ROOT}" "${role_report_dir}" "${role_canonical_env}" \
+      "$(compose ps -q postgres)" || return 1
+    ENV_FILE="${role_canonical_env}"
+    verify_database_role_pin && control heartbeat || return 1
+    role_wait="$(remaining_mutation_seconds)" || return 1
+    [ "${role_wait}" -le 300 ] || role_wait=300
+    run_original_owned_with_heartbeat start_first_role_rollback_runtime "${role_wait}" || return 1
+    DEPLOYMENT_FIRST_ROLE_CUTOVER_RUNTIME_ADDRESS="$(docker inspect "$(compose ps -q backend)" | node -e '
+      const rows=JSON.parse(require("node:fs").readFileSync(0,"utf8"));
+      const networks=Object.values(rows[0]?.NetworkSettings?.Networks||{});
+      if(rows.length!==1 || networks.length!==1 || !require("node:net").isIP(networks[0].IPAddress))process.exit(1);
+      process.stdout.write(networks[0].IPAddress);
+    ')" || return 1
+    export DEPLOYMENT_FIRST_ROLE_CUTOVER_RUNTIME_ADDRESS
+    role_wait="$(remaining_mutation_seconds)" || return 1
+    DEPLOYMENT_GATE_MODE=ROLLBACK run_backend_timed_with_heartbeat "${role_wait}" node dist/scripts/deployment-gates.js || return 1
+    remaining_mutation_seconds >/dev/null || return 1
+  else
+    # Once publication intent exists this owner may only read back the restored release.
+    [ "${ENV_FILE}" = "${role_canonical_env}" ] && [ "${DEPLOYMENT_PHASE}" = ROLLBACK_STARTED ] || return 1
+  fi
+  for service in backend frontend inquiry nginx postgres; do
+    [ "$(image_of_service "${service}")" = "$(session_value "rollbackReleaseSet.${service}")" ] || return 1
+  done
+  docker inspect "$(compose ps -q backend)" | node -e '
+    const rows=JSON.parse(require("node:fs").readFileSync(0,"utf8"));
+    const [release,browser,commit]=process.argv.slice(1);
+    const env=rows[0]?.Config?.Env;
+    if(rows.length!==1 || !Array.isArray(env) || !["DEPLOYMENT_RELEASE_ID="+release,"SABALAN_BROWSER_BUILD_ID="+browser,
+      "APP_COMMIT="+commit].every(entry=>env.includes(entry)))process.exit(1);
+  ' "${role_original_release}" "${role_original_browser}" "${APP_COMMIT}" || return 1
+  confirm_first_role_rollback_traffic
 }
 
 assert_native_runtime_closed() {
@@ -1053,6 +1197,16 @@ recover_failure() {
     exit "${exit_code}"
   fi
 
+  if [ "$(session_value purpose 2>/dev/null || true)" = first-database-role-cutover ]; then
+    if [ "${MUTATION_STARTED}" -eq 1 ] && [ "${LEGACY_BACKEND_SIGNAL_PENDING}" -eq 0 ] && resume_first_role_rollback; then
+      echo 'The first-role rollback restored and verified the previous release.' >&2
+    else
+      echo 'The first-role cutover retains its checkpoint, ownership journal and public boundary for controlled recovery.' >&2
+    fi
+    cleanup_locks
+    exit "${exit_code}"
+  fi
+
   if [ "${PUBLIC_TRAFFIC_OPEN}" -eq 1 ]; then
     echo "Traffic had opened after all gates; rollback is forbidden because new writes may exist. Returning to maintenance." >&2
     control maintenance-on || true
@@ -1319,11 +1473,22 @@ case "${DEPLOYMENT_REPORT_DIR_HOST}" in
   /*) SESSION_HOST_PATH="${DEPLOYMENT_REPORT_DIR_HOST}/active-deployment-session.json" ;;
   *) SESSION_HOST_PATH="${REPO_ROOT}/${DEPLOYMENT_REPORT_DIR_HOST#./}/active-deployment-session.json" ;;
 esac
-
 if [ -e "${SYSTEM_RECOVERY_BACKUP_INTENT}" ] || [ -L "${SYSTEM_RECOVERY_BACKUP_INTENT}" ]; then
   echo 'An unresolved System Recovery backup owns the protected boundary. Preserve its intent and journal for controlled recovery.' >&2
   exit 1
 fi
+if [ "${FIRST_ROLE_ROLLBACK_RESUME}" -eq 1 ]; then
+  trap 'cleanup_locks' EXIT
+  [ -z "${DEPLOYMENT_QA_REHEARSAL_PLAN_FILE:-}${ALLOCATION_EVIDENCE_DIR}${SEPIDAR_OPENING_EVIDENCE_DIR}" ] \
+    && [ "${DEPLOYMENT_CLAMAV_REPAIR}" = false ] || exit 1
+  if resume_first_role_rollback; then
+    echo 'The exact previous release was verified on both origins and the first-role rollback was finalized.'
+    exit 0
+  fi
+  echo 'First-role rollback was not finalized. The original ownership evidence is retained.' >&2
+  exit 1
+fi
+node "${OPERATIONS_ROOT}/deploy/scripts/first-role-cutover-host-guard.mjs" "${SESSION_HOST_PATH}" || exit 1
 if [ "${SYSTEM_RECOVERY_BACKUP}" -eq 1 ]; then
   # shellcheck source=deploy/scripts/system-recovery-backup-host.sh
   . "${SCRIPT_DIR}/system-recovery-backup-host.sh"

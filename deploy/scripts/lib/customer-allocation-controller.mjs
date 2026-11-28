@@ -56,7 +56,8 @@ export function customerAllocationControllerDatabase(client, runtimeClient, role
               SELECT 1 FROM pg_catalog.pg_class AS c
               WHERE c.relnamespace = 'public'::pg_catalog.regnamespace
                 AND c.relname IN ('_prisma_migrations', 'deployment_operations',
-                  'customer_allocation_release_control', 'customer_allocation_release_audit')
+                  'customer_allocation_release_control', 'customer_allocation_release_audit',
+                  'sepidar_customer_opening_manifests', 'sepidar_customer_opening_admissions', 'sepidar_cheque_batch_admissions')
                 AND (c.relowner = r.oid
                   OR pg_catalog.has_table_privilege(r.oid, c.oid, 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER')
                   OR pg_catalog.has_any_column_privilege(r.oid, c.oid, 'SELECT, INSERT, UPDATE, REFERENCES'))
@@ -67,6 +68,8 @@ export function customerAllocationControllerDatabase(client, runtimeClient, role
                 AND p.prosecdef AND (p.proowner = r.oid OR (
                   pg_catalog.has_function_privilege(r.oid, p.oid, 'EXECUTE')
                   AND p.oid IS DISTINCT FROM pg_catalog.to_regprocedure('public.customer_allocation_runtime_admitted(text,text)')
+                  AND p.oid IS DISTINCT FROM pg_catalog.to_regprocedure(
+                    'public.sepidar_customer_opening_runtime_admitted(text,text,text,text,text,timestamptz,text,text,text,text,text,text)')
                 ))
             )
         ) AS admitted_runtime_session

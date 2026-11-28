@@ -176,6 +176,13 @@ ALLOCATION_EVIDENCE_DIR="${DEPLOYMENT_CUSTOMER_ALLOCATION_EVIDENCE_DIR:-}"
 ALLOCATION_AUTHORITY_DIR="${DEPLOYMENT_CUSTOMER_ALLOCATION_AUTHORITY_DIR:-}"
 ALLOCATION_APPROVER_SHA256="${DEPLOYMENT_CUSTOMER_ALLOCATION_APPROVER_SHA256:-}"
 ALLOCATION_RELEASE_SCRIPT="${OPERATIONS_ROOT}/deploy/scripts/customer-allocation-release.mjs"
+SEPIDAR_OPENING_SCOPE="${DEPLOYMENT_SEPIDAR_OPENING_SCOPE:-customers}"
+case "${SEPIDAR_OPENING_SCOPE}" in customers|cheques) ;; *) echo 'Invalid Sepidar opening scope.' >&2; exit 1 ;; esac
+SEPIDAR_OPENING_RELEASE_SCRIPT="${OPERATIONS_ROOT}/deploy/scripts/sepidar-opening-release.mjs"
+SEPIDAR_OPENING_EVIDENCE_DIR="${DEPLOYMENT_SEPIDAR_OPENING_EVIDENCE_DIR:-}"
+SEPIDAR_OPENING_AUTHORITY_DIR="${DEPLOYMENT_SEPIDAR_OPENING_AUTHORITY_DIR:-}"
+SEPIDAR_OPENING_APPROVER_SHA256="${DEPLOYMENT_SEPIDAR_OPENING_APPROVER_SHA256:-}"
+SEPIDAR_OPENING_QUALIFICATION_SHA256="${DEPLOYMENT_SEPIDAR_OPENING_QUALIFICATION_SHA256:-}"
 allocation_predecessor=""
 if [ "${CUSTOMER_ALLOCATION_CURRENT_DATA_ROLLBACK}" -eq 1 ]; then
   [ -z "${ALLOCATION_EVIDENCE_DIR}" ] && [ -n "${ALLOCATION_AUTHORITY_DIR}" ] \
@@ -618,6 +625,21 @@ run_customer_allocation_controller() {
       --label "io.sabalan.deployment.id=${DEPLOYMENT_ID}" \
       --mount "type=bind,src=${ALLOCATION_AUTHORITY_DIR},dst=/allocation-authority,readonly" "$@" \
       "${allocation_control_image}" node /app/operations/deploy/scripts/customer-allocation-release.mjs "${allocation_mode}"
+}
+
+run_sepidar_opening_controller() {
+  verify_database_role_pin || return 1
+  sepidar_stage="$1"
+  sepidar_candidate_id="$(docker image inspect --format '{{.Id}}' "${DEPLOYMENT_TARGET_BACKEND_IMAGE}")" || return 1
+  protected_compose_config | node "${SEPIDAR_OPENING_RELEASE_SCRIPT}" input \
+    "${SEPIDAR_OPENING_APPROVER_SHA256}" "${SEPIDAR_OPENING_QUALIFICATION_SHA256}" \
+    "${sepidar_candidate_id}" "${DEPLOYMENT_PREVIOUS_BACKEND_IMAGE}" "${SEPIDAR_OPENING_SCOPE}" \
+    | docker run --rm -i --pull never --network "${sepidar_opening_network}" \
+      --user "$(id -u):$(id -g)" --read-only --cap-drop ALL --security-opt no-new-privileges \
+      --label "io.sabalan.deployment.id=${DEPLOYMENT_ID}" \
+      --mount "type=bind,src=${SEPIDAR_OPENING_EVIDENCE_DIR},dst=/sepidar-opening-evidence,readonly" \
+      --mount "type=bind,src=${SEPIDAR_OPENING_AUTHORITY_DIR},dst=/sepidar-opening-authority,readonly" \
+      "${sepidar_candidate_id}" node /app/operations/deploy/scripts/sepidar-opening-release.mjs "${sepidar_stage}"
 }
 
 control() {
@@ -1750,6 +1772,20 @@ node "${OPERATIONS_ROOT}/deploy/scripts/backup-retention-host.mjs" --inspect "${
 verify_database_role_pin || exit 1
 refresh_performance_database_identity
 
+if [ -n "${SEPIDAR_OPENING_EVIDENCE_DIR}${SEPIDAR_OPENING_AUTHORITY_DIR}${SEPIDAR_OPENING_APPROVER_SHA256}${SEPIDAR_OPENING_QUALIFICATION_SHA256}" ]; then
+  [ "${DEPLOYMENT_MODE}" = release ] && [ "${BOOTSTRAP}" -eq 0 ] && [ "${CAPTURE_ONLY}" -eq 0 ] \
+    && [ "${DEPLOYMENT_CLAMAV_REPAIR}" = false ] && [ "${OFFLINE_CLAMAV_INCIDENT}" -eq 0 ] \
+    && [ "${CUSTOMER_ALLOCATION_CURRENT_DATA_ROLLBACK}" -eq 0 ] && [ -z "${ALLOCATION_EVIDENCE_DIR}" ] \
+    && [ -n "${SEPIDAR_OPENING_EVIDENCE_DIR}" ] && [ -n "${SEPIDAR_OPENING_AUTHORITY_DIR}" ] \
+    && [ "${SEPIDAR_OPENING_EVIDENCE_DIR}" != "${SEPIDAR_OPENING_AUTHORITY_DIR}" ] || {
+      echo 'Sepidar opening requires its own ordinary protected release and private evidence and authority directories.' >&2
+      exit 1
+    }
+  sepidar_opening_network="$(protected_compose_config | node "${SEPIDAR_OPENING_RELEASE_SCRIPT}" preflight \
+    "${SEPIDAR_OPENING_EVIDENCE_DIR}" "${SEPIDAR_OPENING_AUTHORITY_DIR}" \
+    "${SEPIDAR_OPENING_APPROVER_SHA256}" "${SEPIDAR_OPENING_QUALIFICATION_SHA256}" "${SEPIDAR_OPENING_SCOPE}")" || exit 1
+fi
+
 if [ -n "${ALLOCATION_EVIDENCE_DIR}" ]; then
   allocation_request="$(node "${ALLOCATION_RELEASE_SCRIPT}" request "${allocation_predecessor}" "${DEPLOYMENT_TARGET_COMMIT}" \
     "${DEPLOYMENT_BACKEND_IMAGE}" "${DEPLOYMENT_FRONTEND_IMAGE}" "${DEPLOYMENT_INQUIRY_IMAGE}" "${DEPLOYMENT_ID}" "${DEPLOYMENT_RELEASE_ID}")" || exit 1
@@ -2087,6 +2123,30 @@ evidence_apply_name="contract-financial-evidence-apply-${DEPLOYMENT_ID}.json"
 remaining="$(remaining_mutation_seconds)" || exit 1
 run_backend_timed "${remaining}" node dist/scripts/reconcile-contract-financial-evidence.js --apply --deployment-checkpoint \
   --output="/app/deployment-reports/${evidence_apply_name}"
+
+if [ -n "${SEPIDAR_OPENING_EVIDENCE_DIR}" ]; then
+  remaining_mutation_seconds >/dev/null || exit 1
+  verify_public_maintenance || exit 1
+  assert_original_legacy_still_stopped || exit 1
+  assert_qa_remote_checkpoint_mount || exit 1
+  control heartbeat || exit 1
+  sepidar_opening_request="$(run_original_owned_with_heartbeat run_sepidar_opening_controller request)" || exit 1
+  printf '%s\n' "${sepidar_opening_request}" | node "${SEPIDAR_OPENING_RELEASE_SCRIPT}" publish-request "${SEPIDAR_OPENING_EVIDENCE_DIR}" || exit 1
+  unset sepidar_opening_request
+  remaining="$(remaining_mutation_seconds)" || exit 1
+  wait_for_cutover_approval "${SEPIDAR_OPENING_EVIDENCE_DIR}/decision.json" "${remaining}" "independently signed Sepidar opening decision" || exit 1
+  remaining_mutation_seconds >/dev/null || exit 1
+  verify_public_maintenance || exit 1
+  assert_original_legacy_still_stopped || exit 1
+  assert_qa_remote_checkpoint_mount || exit 1
+  control heartbeat || exit 1
+  sepidar_opening_receipt="$(run_original_owned_with_heartbeat run_sepidar_opening_controller activate)" || exit 1
+  case "${sepidar_opening_receipt}" in
+    ''|*[!a-f0-9]*) echo 'Sepidar opening enrollment receipt is invalid.' >&2; exit 1 ;;
+  esac
+  [ "${#sepidar_opening_receipt}" -eq 64 ] || exit 1
+  remaining_mutation_seconds >/dev/null || exit 1
+fi
 
 if [ -n "${ALLOCATION_EVIDENCE_DIR}" ]; then
   remaining="$(remaining_mutation_seconds)" || exit 1

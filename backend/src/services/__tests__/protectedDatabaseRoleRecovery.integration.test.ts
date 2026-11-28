@@ -12,7 +12,8 @@ const { Client } = require('pg') as { Client: new (config: { connectionString: s
 
 const localUrl = process.env.SABALAN_ROLE_RECOVERY_TEST_DATABASE_URL;
 
-test('protected staging recovers exact ACLs including security-definer revocations', { skip: !localUrl }, async () => {
+for (const scope of ['none', 'customers', 'cheques']) test(`protected staging recovers exact ACLs ${scope} Sepidar opening`, { skip: !localUrl }, async () => {
+  const withSepidar = scope !== 'none';
   const base = new URL(localUrl!);
   assert.equal(base.hostname, '127.0.0.1');
   assert.equal(base.port, '55432');
@@ -30,7 +31,16 @@ test('protected staging recovers exact ACLs including security-definer revocatio
   runtimeUrl.password = runtimeSecret;
   const admin = new Client({ connectionString: base.toString() });
   await admin.connect();
+  const sepidar = 'sabalan_sepidar_opening_controller';
+  const openingLock = 'public.sepidar_customer_opening_lock(text, text, text)';
+  const openingRegister = 'public.sepidar_customer_opening_register_manifest(text, text, text, text, text)';
+  const openingRead = 'public.sepidar_customer_opening_runtime_admitted(text, text, text, text, text, timestamptz, text, text, text, text, text, text)';
+  let testOwnsSepidarRole = false;
   try {
+    if (withSepidar && !(await admin.query('SELECT oid FROM pg_roles WHERE rolname = $1', [sepidar])).rows.length) {
+      await admin.query(`CREATE ROLE ${sepidar} NOINHERIT`);
+      testOwnsSepidarRole = true;
+    }
     await admin.query(`CREATE ROLE ${roles.runtime} LOGIN NOINHERIT PASSWORD '${runtimeSecret}'; CREATE ROLE ${roles.controller} NOINHERIT`);
     await admin.query(`CREATE DATABASE ${source}`);
     await admin.query(`CREATE DATABASE ${target}`);
@@ -56,6 +66,31 @@ test('protected staging recovers exact ACLs including security-definer revocatio
         REVOKE USAGE ON SCHEMA public FROM PUBLIC;
         GRANT USAGE ON SCHEMA public TO ${roles.runtime}, ${roles.controller};
       `);
+      if (withSepidar) {
+        await sourceClient.query(`
+          CREATE TABLE public.sepidar_customer_opening_admissions (id text PRIMARY KEY);
+          CREATE FUNCTION ${openingLock} RETURNS boolean LANGUAGE sql SECURITY DEFINER AS 'SELECT true';
+          CREATE FUNCTION ${openingRegister} RETURNS boolean LANGUAGE sql SECURITY DEFINER AS 'SELECT true';
+          CREATE FUNCTION ${openingRead} RETURNS boolean LANGUAGE sql SECURITY DEFINER AS 'SELECT false';
+          REVOKE EXECUTE ON FUNCTION ${openingLock}, ${openingRegister}, ${openingRead} FROM PUBLIC;
+          GRANT EXECUTE ON FUNCTION ${openingLock}, ${openingRegister} TO ${sepidar};
+          GRANT EXECUTE ON FUNCTION ${openingRead} TO ${roles.runtime};
+          GRANT CONNECT ON DATABASE ${source} TO ${sepidar};
+          GRANT USAGE ON SCHEMA public TO ${sepidar};
+        `);
+      }
+      if (scope === 'cheques') {
+        const register = 'public.sepidar_cheque_batch_register(text, text, text, text, text)';
+        const read = 'public.sepidar_opening_cheques_runtime_admitted(text, text, text, text)';
+        await sourceClient.query(`
+          CREATE TABLE public.sepidar_cheque_batch_admissions (id text PRIMARY KEY);
+          CREATE FUNCTION ${register} RETURNS boolean LANGUAGE sql SECURITY DEFINER AS 'SELECT true';
+          CREATE FUNCTION ${read} RETURNS boolean LANGUAGE sql SECURITY DEFINER AS 'SELECT false';
+          REVOKE EXECUTE ON FUNCTION ${register}, ${read} FROM PUBLIC;
+          GRANT EXECUTE ON FUNCTION ${register} TO ${sepidar};
+          GRANT EXECUTE ON FUNCTION ${read} TO ${roles.runtime};
+        `);
+      }
     } finally { await sourceClient.end(); }
     const compose = ['compose', '-f', 'docker-compose.local.yml'];
     const services = execFileSync('docker', [...compose, 'ps'], { encoding: 'utf8' });
@@ -74,11 +109,24 @@ test('protected staging recovers exact ACLs including security-definer revocatio
         '--no-owner', '--no-privileges', '--exit-on-error'], { input: dump });
     });
     const foreign = structuredClone(captured);
+    assert.equal(captured.roles.some(role => role.name === sepidar), withSepidar);
     foreign.objects.find(object => object.kind === 'TABLE')!.grants.push({
       grantee: roles.runtime, privilege: 'EXECUTE', grantable: false, grantor: captured.control,
     });
     await assert.rejects(applyProtectedDatabaseRoles(urlFor(stage), roles, foreign, source), /outside the protected role contract/);
     await assert.rejects(applyProtectedDatabaseRoles(urlFor(stage), roles, captured, 'different_source'), /snapshot identity/);
+    if (withSepidar) {
+      const broadened = structuredClone(captured);
+      const gate = broadened.objects.find(object => object.name === 'sepidar_customer_opening_register_manifest')!;
+      gate.grants.push({ grantee: roles.runtime, privilege: 'EXECUTE', grantable: false, grantor: captured.control });
+      await assert.rejects(applyProtectedDatabaseRoles(urlFor(stage), roles, broadened, source), /grants differ/);
+    }
+    if (scope === 'cheques') {
+      const broadened = structuredClone(captured);
+      const gate = broadened.objects.find(object => object.name === 'sepidar_cheque_batch_register')!;
+      gate.grants.push({ grantee: roles.runtime, privilege: 'EXECUTE', grantable: false, grantor: captured.control });
+      await assert.rejects(applyProtectedDatabaseRoles(urlFor(stage), roles, broadened, source), /grants differ/);
+    }
     await applyProtectedDatabaseRoles(urlFor(stage), roles, captured, source);
     const privateStage = new Client({ connectionString: runtimeUrl.toString() });
     try {
@@ -103,9 +151,25 @@ test('protected staging recovers exact ACLs including security-definer revocatio
       `, [roles.runtime, roles.controller]);
       assert.deepEqual(rows, [{ exact_snapshot: 1, schema_usage: true, schema_create: false, business_read: true, business_delete: false, sequence_use: true, connect: true,
         temp: false, controller_denied: false, controller_allowed: true, overload_allowed: true, revoke_only: false }]);
+      if (withSepidar) {
+        const { rows: access } = await db.query(`
+          SELECT has_function_privilege($1, $3, 'EXECUTE') AS controller_can_enroll,
+            has_function_privilege($2, $3, 'EXECUTE') AS runtime_can_enroll,
+            has_function_privilege($2, $4, 'EXECUTE') AS runtime_can_check,
+            has_table_privilege($1, 'public.sepidar_customer_opening_admissions', 'SELECT') AS controller_can_read_admissions
+        `, [sepidar, roles.runtime, openingRegister, openingRead]);
+        assert.deepEqual(access, [{ controller_can_enroll: true, runtime_can_enroll: false, runtime_can_check: true,
+          controller_can_read_admissions: false }]);
+      }
     } finally { await db.end(); }
     await promoteProtectedDatabaseStage(urlFor(target), stage, safety);
     await verifyPromotedProtectedDatabaseRoles(urlFor(target), roles, captured, source);
+    if (withSepidar) {
+      const broadened = structuredClone(captured);
+      const gate = broadened.objects.find(object => object.name === 'sepidar_customer_opening_register_manifest')!;
+      gate.grants.push({ grantee: roles.runtime, privilege: 'EXECUTE', grantable: false, grantor: captured.control });
+      await assert.rejects(verifyPromotedProtectedDatabaseRoles(urlFor(target), roles, broadened, source), /promoted ACLs/);
+    }
     const drifted = structuredClone(captured);
     drifted.roles[0].connectionLimit = 5;
     await assert.rejects(verifyPromotedProtectedDatabaseRoles(urlFor(target), roles, drifted, source), /promoted role checkpoint identity/);
@@ -134,6 +198,7 @@ test('protected staging recovers exact ACLs including security-definer revocatio
       await admin.query(`DROP DATABASE IF EXISTS ${target} WITH (FORCE)`);
       await admin.query(`DROP DATABASE IF EXISTS ${source} WITH (FORCE)`);
       await admin.query(`DROP ROLE IF EXISTS ${roles.runtime}, ${roles.controller}`);
+      if (testOwnsSepidarRole) await admin.query(`DROP ROLE ${sepidar}`);
     } finally { await admin.end(); }
   }
 });

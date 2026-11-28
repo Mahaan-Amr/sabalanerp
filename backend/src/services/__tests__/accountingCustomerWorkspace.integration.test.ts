@@ -101,6 +101,33 @@ test('customer workspace: exact balances, immutable history, refund limits and C
     const workspace = await readCustomerWorkspace(db, { id, asOf: new Date(), userId: actor.id });
     assert.equal(workspace.treasuryChecks.length, 1);
     assert.equal(workspace.netBalanceRials, 400n);
+    const openingLedgerLine = await db.accountingLedgerLine.findFirstOrThrow();
+    const openingAt = new Date('2026-03-21T00:00:00Z');
+    const returnAt = new Date('2026-06-13T00:00:00Z');
+    const imported = await db.accountingCheckInstrument.create({ data: {
+      legalEntityId: entity.id, profileId, direction: 'RECEIVABLE', serialNumber: 'opening-returned', bankName: 'بانک آزمون',
+      amountRials: '500', dueAt: returnAt, status: 'RETURNED', evidenceHash: 'test-opening-evidence', createdBy: actor.id,
+      createdAt: new Date('2026-11-26T00:00:00Z'), events: { create: [
+        { sequence: 1, eventType: 'RECEIVED', occurredAt: openingAt, actorId: actor.id, evidence: {}, evidenceHash: 'test-open' },
+        { sequence: 2, eventType: 'RETURNED', occurredAt: returnAt, actorId: actor.id, evidence: {}, evidenceHash: 'test-return' },
+      ] },
+    }, include: { events: { where: { sequence: 1 } } } });
+    await db.accountingSepidarOpeningCheque.create({ data: {
+      bookId: book.id, sourceInstrumentId: 'opening-returned', sourceOpeningLineId: 'source-opening-line',
+      amountRials: '500', openingLedgerLineId: openingLedgerLine.id, instrumentId: imported.id, openingEventId: imported.events[0].id,
+      snapshotSha256: '1'.repeat(64), planSha256: '2'.repeat(64),
+    } });
+    const asOf = async (at: Date) => (await readCustomerWorkspace(db, { id, asOf: at, userId: actor.id }))
+      .treasuryChecks.find(check => check.id === imported.id);
+    assert.equal(await asOf(new Date(openingAt.getTime() - 1)), undefined);
+    const carrying = await asOf(openingAt);
+    assert.equal(carrying?.status, 'RECEIVED');
+    assert.equal(carrying?.clearedRials.toString(), '0');
+    assert.deepEqual(carrying?.events, [{ sequence: 1 }]);
+    const returned = await asOf(returnAt);
+    assert.equal(returned?.status, 'RETURNED');
+    assert.equal(returned?.receipt, null);
+    assert.deepEqual(returned?.events, [{ sequence: 2 }]);
     const trial = await listPostedTrialBalance(db, { bookId: book.id, fiscalYearId: year.id });
     assert.ok(trial.length > 0);
     assert.equal(trial.reduce((sum, row) => sum + BigInt(row.debitRials.toString()), 0n), trial.reduce((sum, row) => sum + BigInt(row.creditRials.toString()), 0n));

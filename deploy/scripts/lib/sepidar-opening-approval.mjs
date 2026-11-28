@@ -58,6 +58,7 @@ export function verifySepidarOpeningApproval(envelope, observed, approver) {
   for (const field of ['idempotencyKey', 'destinationKey', 'sourceCustomerId', 'sourceVoucherItemId']) {
     if (new Set(commands.map(command => command[field])).size !== commands.length) reject();
   }
+  if (!Array.isArray(observed.commands) || canonicalGoPayload(commands) !== canonicalGoPayload(observed.commands)) reject();
 
   const bytes = Buffer.from(canonicalGoPayload(payload));
   if (!verify(null, bytes, approver.publicKey, Buffer.from(signature, 'base64'))) reject();

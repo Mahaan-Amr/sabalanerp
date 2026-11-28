@@ -38,14 +38,21 @@ const sepidarOpeningAdmissionName = '20261125112000_sepidar_customer_opening_adm
 const projectReturnGuardReleaseName = '20261125140000_project_return_guard_release';
 const sepidarChequeAnchorsName = '20261125142000_sepidar_opening_cheque_anchors';
 const projectReturnVersionImmutabilityName = '20261125180000_project_return_version_immutability';
+const sepidarChequeRuntimeName = '20261127121000_sepidar_cheque_anchor_runtime_permissions';
+const sepidarChequeBatchName = '20261127120000_sepidar_cheque_batch_admission';
+const sepidarAdmissionTables = ['sepidar_customer_opening_manifests', 'sepidar_customer_opening_admissions'];
+const sepidarAdmissionFunctions = ['protect_sepidar_customer_opening_admission', 'sepidar_customer_opening_lock',
+  'sepidar_customer_opening_register_manifest', 'sepidar_customer_opening_runtime_admitted',
+  'verify_sepidar_customer_opening_review'];
+const sepidarChequeBatchTables = ['sepidar_cheque_batch_admissions'];
+const sepidarChequeBatchFunctions = ['sepidar_cheque_batch_register', 'sepidar_opening_cheques_runtime_admitted'];
 const nextReleaseCatalog = {
+  [sepidarChequeRuntimeName]: { tables: ['accounting_sepidar_opening_cheques'], functions: [] },
+  [sepidarChequeBatchName]: { tables: sepidarChequeBatchTables, functions: sepidarChequeBatchFunctions },
   [neutralNormalSideName]: { tables: [], functions: [] },
   [projectReturnGuardAdmissionName]: { tables: ['guard_driver_queue_turns'], functions: [] },
   [sepidarOpeningAdmissionName]: {
-    tables: ['sepidar_customer_opening_manifests', 'sepidar_customer_opening_admissions', 'accounting_customer_opening_reviews'],
-    functions: ['protect_sepidar_customer_opening_admission', 'sepidar_customer_opening_lock',
-      'sepidar_customer_opening_register_manifest', 'sepidar_customer_opening_runtime_admitted',
-      'verify_sepidar_customer_opening_review'],
+    tables: [...sepidarAdmissionTables, 'accounting_customer_opening_reviews'], functions: sepidarAdmissionFunctions,
   },
   [sepidarChequeAnchorsName]: {
     tables: ['accounting_sepidar_opening_cheques'], functions: ['sepidar_opening_cheques_runtime_admitted'],
@@ -215,10 +222,12 @@ const currentRelease = {
   [projectReturnVersionImmutabilityName]: ['7f4969f2669c87e127b0604b09a4a2cad0623335abfab9649283b35eface7176', 10],
   '20261126090000_project_return_item_area': ['0d56e8b36ca807c5d07cc65ad10aded838c0a20aa47d0ab352e5624c62a9bc96', 1],
   '20261126100000_project_return_sepidar_revisions': ['085560fc59159493457236ac7822a70880fc08ccf99ccb31dac3456003e8a8a3', 2],
+  [sepidarChequeBatchName]: ['a8749d73a0a48d272a7c47fb663c0b3580f59fc9ff1f9a895e9a335423972185', 10],
+  [sepidarChequeRuntimeName]: ['4d7ded44bbb6319e9df0fa8bfae431ab8cb13f4f24ab961a1c9efac886b48e5c', 2],
 } as const;
 export const protectedCurrentReleaseNames: readonly string[] = Object.freeze(Object.keys(currentRelease));
 // Each release extends the ledger while preserving the prior release-set hashes.
-const protectedReleaseEpochEnds = Object.freeze([12, 22, 24, 25, 35, 36, 37, 38, 41, 42, 43, 44, 45, 46, 47, 48, 49, 54, 65, 67]);
+const protectedReleaseEpochEnds = Object.freeze([12, 22, 24, 25, 35, 36, 37, 38, 41, 42, 43, 44, 45, 46, 47, 48, 49, 54, 65, 67, 69]);
 const wrappedCurrentReleaseMigrations = new Set([
   '20261108000100_start_new_waybill_numbers_at_one', retireAttachmentScanStatusName,
   protectPartnerNumberReservationName, sepidarInvoiceName, projectReturnGuardAdmissionName,
@@ -425,8 +434,11 @@ async function catalog(tx: Prisma.TransactionClient, input: {
         ['EDITED', 'CANCELLED', 'REWORK_REQUESTED', 'RETURNED_TO_LOGISTICS']),
     }),
   };
-  const sepidarOpening = input.appliedNames?.has(sepidarOpeningAdmissionName)
-    ? { sepidarOpening: await proveClosedSepidarOpening(tx) } : {};
+  // Existing receipts bind the original catalog proof. Extend it only after the new migration.
+  const sepidarOpening = input.appliedNames?.has(sepidarChequeBatchName)
+    ? await protectedSepidarOpeningProof(tx, input.appliedNames)
+    : input.appliedNames?.has(sepidarOpeningAdmissionName)
+      ? { sepidarOpening: await proveClosedSepidarOpening(tx) } : {};
   return sha(JSON.stringify(canonical({ tables, functions, ...pickupSource, ...partnerReadinessProjection,
     ...runtimeAcl, ...shipmentEvidence, ...newEnums, ...sepidarOpening })));
 }
@@ -476,6 +488,70 @@ async function proveClosedSepidarOpening(tx: Prisma.TransactionClient) {
     failure('PROTECTED_CURRENT_RELEASE_SEPIDAR_OPENING_CLOSED_UNPROVEN');
   }
   return 'CLOSED';
+}
+
+export async function protectedSepidarOpeningProof(tx: Prisma.TransactionClient, applied?: ReadonlySet<string>) {
+  if (!applied?.has(neutralNormalSideName)) return {};
+  const enumRows = await tx.$queryRaw<Array<{ label: string }>>`
+    SELECT enumlabel::text AS label FROM pg_catalog.pg_enum
+    WHERE enumtypid = 'public."AccountingNormalSide"'::regtype ORDER BY enumsortorder
+  `;
+  const normalSides = enumRows.map(row => row.label);
+  if (normalSides.join(',') !== 'DEBIT,CREDIT,NEUTRAL') failure('PROTECTED_SEPIDAR_OPENING_NORMAL_SIDE_DRIFT');
+  if (!applied.has(sepidarOpeningAdmissionName)) return { normalSides };
+
+  const [role] = await tx.$queryRaw<Array<{ admitted: boolean }>>`
+    SELECT NOT (r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolinherit OR r.rolreplication OR r.rolbypassrls)
+      AND r.rolconfig IS NULL AND (r.rolcanlogin OR a.rolpassword IS NULL)
+      AND NOT EXISTS (SELECT FROM pg_catalog.pg_auth_members m WHERE m.member = r.oid OR m.roleid = r.oid)
+      AND NOT EXISTS (SELECT FROM pg_catalog.pg_db_role_setting s WHERE s.setrole = r.oid)
+      AND NOT EXISTS (SELECT FROM pg_catalog.pg_shdepend d
+        WHERE d.refclassid = 'pg_catalog.pg_authid'::regclass AND d.refobjid = r.oid AND d.deptype = 'o') AS admitted
+    FROM pg_catalog.pg_roles r JOIN pg_catalog.pg_authid a USING (oid)
+    WHERE r.rolname = 'sabalan_sepidar_opening_controller'
+  `;
+  if (!role?.admitted) failure('PROTECTED_SEPIDAR_OPENING_CONTROLLER_UNPROVEN');
+  const chequeBatchApplied = applied.has(sepidarChequeBatchName);
+  const chequeAnchorAccessApplied = applied.has(sepidarChequeRuntimeName);
+  const admissionTables = [...sepidarAdmissionTables,
+    ...(chequeBatchApplied ? sepidarChequeBatchTables : []),
+    ...(chequeAnchorAccessApplied ? ['accounting_sepidar_opening_cheques'] : [])];
+  const admissionFunctions = chequeBatchApplied ? [...sepidarAdmissionFunctions, ...sepidarChequeBatchFunctions] : sepidarAdmissionFunctions;
+
+  const objects = await tx.$queryRaw<Array<{ name: string; owner: string; columnAcl: boolean; grants: CatalogGrant[] }>>(Prisma.sql`
+    WITH scoped AS (
+      SELECT c.relname AS name, c.relowner AS owner, c.relacl AS acl, 'r'::"char" AS code,
+        EXISTS (SELECT FROM pg_catalog.pg_attribute a WHERE a.attrelid = c.oid AND a.attacl IS NOT NULL) AS column_acl
+      FROM pg_catalog.pg_class c WHERE c.relnamespace = 'public'::regnamespace
+        AND c.relname IN (${Prisma.join(admissionTables)})
+      UNION ALL
+      SELECT p.proname, p.proowner, p.proacl, 'f'::"char", false
+      FROM pg_catalog.pg_proc p WHERE p.pronamespace = 'public'::regnamespace
+        AND p.proname IN (${Prisma.join(admissionFunctions)})
+    )
+    SELECT s.name, pg_catalog.pg_get_userbyid(s.owner) AS owner, s.column_acl AS "columnAcl",
+      COALESCE((SELECT jsonb_agg(jsonb_build_object('grantee', CASE WHEN a.grantee = 0 THEN '' ELSE pg_catalog.pg_get_userbyid(a.grantee) END,
+        'privilege', a.privilege_type, 'grantable', a.is_grantable, 'grantor', pg_catalog.pg_get_userbyid(a.grantor)))
+        FROM pg_catalog.aclexplode(COALESCE(s.acl, pg_catalog.acldefault(s.code,s.owner))) a WHERE a.grantee <> s.owner), '[]'::jsonb) AS grants
+    FROM scoped s
+  `);
+  const allowed: Record<string, string> = {
+    sepidar_customer_opening_lock: 'sabalan_sepidar_opening_controller',
+    sepidar_customer_opening_register_manifest: 'sabalan_sepidar_opening_controller',
+    sepidar_customer_opening_runtime_admitted: 'sabalan_application_runtime',
+    ...(chequeBatchApplied ? { sepidar_cheque_batch_register: 'sabalan_sepidar_opening_controller',
+      sepidar_opening_cheques_runtime_admitted: 'sabalan_application_runtime' } : {}),
+  };
+  const [identity] = await tx.$queryRaw<Array<{ owner: string }>>`SELECT current_user AS owner`;
+  if (objects.length !== admissionTables.length + admissionFunctions.length
+    || new Set(objects.map(object => object.name)).size !== objects.length
+    || objects.some(object => object.columnAcl || object.owner !== identity?.owner
+      || JSON.stringify(canonical(object.grants)) !== JSON.stringify(canonical(object.name === 'accounting_sepidar_opening_cheques'
+        ? ['INSERT', 'SELECT'].map(privilege => ({ privilege, grantee: 'sabalan_application_runtime', grantable: false, grantor: identity?.owner }))
+        : allowed[object.name] ? [{ grantee: allowed[object.name], privilege: 'EXECUTE', grantable: false, grantor: identity?.owner }] : [])))) {
+    failure('PROTECTED_SEPIDAR_OPENING_ACL_DRIFT');
+  }
+  return { normalSides, sepidarOpeningGrants: allowed };
 }
 
 /** Also required when discovery finds no pending work. A successful no-op

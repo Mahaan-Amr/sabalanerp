@@ -5,6 +5,7 @@ import {
   createAccountingSupplyChainApplication as createBaseAccountingSupplyChainApplication,
   createInMemorySupplyChainRepository,
   hashSupplyChainEvidence,
+  SEPIDAR_CHEQUE_SUPPLIER_ENDORSEMENT,
 } from '../accountingSupplyChain';
 
 const createAccountingSupplyChainApplication = (
@@ -72,6 +73,22 @@ test('matched inventory invoice posts once and creates one payable and immutable
   assert.equal(aging.buckets.overdue31To60Rials, 10_500_000n);
   assert.equal(aging.totalRials, 10_500_000n);
   assert.equal((await repository.getParty('supplier-1'))?.roles.includes('SUPPLIER'), true);
+});
+
+test('a historical supplier payable endorsement is visible without creating invoice allocations or advances', async () => {
+  const repository = createInMemorySupplyChainRepository();
+  const common = { partyId: 'supplier-1', kind: 'ASSIGNED_CUSTOMER_CHECK' as const, occurredAt: now, actorId: actor.id };
+  await repository.savePayment({ ...common, id: 'historical', amountRials: 1_250_000_000n, voucherId: 'old-payment',
+    evidence: { ...evidence('sepidar-history'), type: SEPIDAR_CHEQUE_SUPPLIER_ENDORSEMENT } });
+  await repository.savePayment({ ...common, id: 'ordinary', amountRials: 500n, voucherId: 'current-payment',
+    evidence: evidence('current-history') });
+  const app = createAccountingSupplyChainApplication(repository, {
+    now: () => now,
+    post: async () => { throw new Error('Supplier projection must be read-only'); },
+  });
+  assert.deepEqual(await app.getSupplierProjection('supplier-1'), {
+    payableRials: 0n, openItemCount: 0, advanceRials: 500n, historicalPayableEndorsementRials: 1_250_000_000n,
+  });
 });
 
 test('application boundary resolves authoritative evidence and audits a denied command', async () => {

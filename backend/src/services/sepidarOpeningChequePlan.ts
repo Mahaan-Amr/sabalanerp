@@ -11,10 +11,12 @@ type SourceDocument = Readonly<{
 
 type PostingReference = Readonly<{
   kind: ReferenceKind; sourceId: string; targetId: string; supplierCheckId?: string;
+  historicalSupplierSettlement?: Readonly<{ settlementId: string; sourcePartyId: string; reviewSha256: string }>;
 }>;
 type PostingLine = Readonly<{
   sourceLineId: string; targetLineId: string; targetAccountId: string; signedRials: bigint;
 }>;
+type SourceTracking = Readonly<{ TrackingNumber: string | null; TrackingDate: string | null }>;
 type ReviewedPosting = Readonly<{
   voucherId: string; bookId: string; reference: PostingReference; lines: readonly PostingLine[];
 }>;
@@ -33,8 +35,14 @@ type SourceInstrument = Readonly<{
 
 type SourceLedgerLine = Readonly<{
   id: string; voucherId: string; issuerKind: DocumentKind; issuerHeaderId: string;
-  accountId: number; detailId: string | null; signedRials: bigint; description: string;
+  accountId: number; detailId: string | null; signedRials: bigint; description: string; tracking?: SourceTracking;
 }>;
+
+function validTrackingDate(value: unknown) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?Z?)?$/.test(value)) return false;
+  const parsed = new Date(value.includes('T') && !value.endsWith('Z') ? `${value}Z` : value);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().startsWith(value.slice(0, 10));
+}
 
 export type SepidarOpeningChequeEvidence = Readonly<{
   snapshotSha256: string; bookId: string; openingVoucherId: string; sourceOpeningVoucherId: string; basisAt: string; throughAt: string;
@@ -43,6 +51,16 @@ export type SepidarOpeningChequeEvidence = Readonly<{
   events: readonly SourceEvent[];
   ledgerLines: readonly SourceLedgerLine[];
 }>;
+
+export function readSepidarOpeningChequeEvidence(text: string): SepidarOpeningChequeEvidence {
+  return JSON.parse(text.replace(/^\uFEFF/, ''), (key, value: unknown) => {
+    if (key !== 'amountRials' && key !== 'signedRials') return value;
+    if (typeof value !== 'string' || !/^(0|-?[1-9][0-9]{0,19})$/.test(value)) {
+      throw new Error('INVALID_RIAL_AMOUNT');
+    }
+    return BigInt(value);
+  }) as SepidarOpeningChequeEvidence;
+}
 
 type Effect = Readonly<{
   eventType: 'DEPOSITED' | 'CLEARED' | 'ENDORSED' | 'RECIPIENT_RETURNED' | 'RETURNED';
@@ -58,7 +76,7 @@ type PlannedChequeEvent = {
   status: ChequeStatus;
   occurredAt: string;
   document: SourceDocument;
-  targetPosting: ReviewedPosting;
+  targetPosting: Omit<ReviewedPosting, 'lines'> & { lines: readonly (PostingLine & { tracking?: SourceTracking })[] };
 };
 
 type ErrorCode = 'INVALID_SCOPE' | 'INVALID_INSTRUMENT' | 'INVALID_OPENING_LINE' | 'INVALID_HISTORY'
@@ -177,6 +195,7 @@ export function previewSepidarOpeningCheques(evidence: SepidarOpeningChequeEvide
   const targetAccounts = new Map<number, string>();
   const targetReferences = new Map<string, string>();
   const supplierCheckOwners = new Map<string, string>();
+  const historicalSettlementIds = new Set<string>();
   const targetCustomers = new Map<string, SourceInstrument['target']>();
   const eventsByInstrument = new Map<string, Map<string, SourceEvent>>();
   for (const event of [...evidence.events].sort(orderById)) {
@@ -234,9 +253,15 @@ export function previewSepidarOpeningCheques(evidence: SepidarOpeningChequeEvide
         && posting.reference.kind === effect.referenceKind && posting.reference.sourceId === effect.sourceReferenceId
         && present(posting.reference.targetId), 'INVALID_POSTING', event.id);
       const reference = posting.reference;
-      requireEvidence(effect.referenceKind === 'SUPPLIER' ? present(reference.supplierCheckId) && instrument.sayadId !== null
-        : reference.supplierCheckId === undefined,
-        'INVALID_POSTING', event.id);
+      const historicalSettlement = reference.historicalSupplierSettlement;
+      if (historicalSettlement !== undefined) {
+        requireEvidence(effect.referenceKind === 'SUPPLIER' && reference.supplierCheckId === undefined && historicalSettlement
+          && present(historicalSettlement.sourcePartyId) && /^[0-9a-f]{64}$/.test(historicalSettlement.reviewSha256), 'INVALID_POSTING', event.id);
+        addUnique(historicalSettlementIds, historicalSettlement.settlementId, 'INVALID_POSTING', event.id);
+      } else {
+        requireEvidence(effect.referenceKind === 'SUPPLIER' ? present(reference.supplierCheckId) && instrument.sayadId !== null
+          : reference.supplierCheckId === undefined, 'INVALID_POSTING', event.id);
+      }
       const referenceKey = `${reference.kind}:${reference.sourceId}`;
       const reviewedTarget = targetReferences.get(referenceKey);
       requireEvidence(!reviewedTarget || reviewedTarget === reference.targetId, 'INVALID_POSTING', event.id);
@@ -256,8 +281,8 @@ export function previewSepidarOpeningCheques(evidence: SepidarOpeningChequeEvide
       let assets = 0n;
       let counterparts = 0n;
       const sourceLineIds = new Set<string>();
-      const lines = [...posting.lines].sort((a, b) => orderById({ id: a.sourceLineId }, { id: b.sourceLineId }));
-      for (const allocation of lines) {
+      const allocations = [...posting.lines].sort((a, b) => orderById({ id: a.sourceLineId }, { id: b.sourceLineId }));
+      const lines = allocations.map(allocation => {
         const source = ledgerLines.get(allocation.sourceLineId);
         requireEvidence(source && source.voucherId === document.voucherId && source.issuerKind === document.kind
           && source.issuerHeaderId === document.headerId && allocation.signedRials !== 0n
@@ -284,7 +309,18 @@ export function previewSepidarOpeningCheques(evidence: SepidarOpeningChequeEvide
             && (effect.counterDetailId === undefined || source.detailId === effect.counterDetailId), 'INVALID_POSTING', event.id);
           counterparts += allocation.signedRials;
         }
-      }
+        const tracking = source.tracking;
+        const { sourceLineId, targetLineId, targetAccountId, signedRials } = allocation;
+        const plannedLine = { sourceLineId, targetLineId, targetAccountId, signedRials };
+        if (tracking === undefined) return plannedLine;
+        requireEvidence(tracking, 'INVALID_POSTING', source.id);
+        const { TrackingNumber, TrackingDate } = tracking;
+        const hasNumber = typeof TrackingNumber === 'string' && TrackingNumber.trim().length > 0;
+        const hasDate = validTrackingDate(TrackingDate);
+        requireEvidence((hasNumber || TrackingNumber === null) && (hasDate || TrackingDate === null)
+          && (hasNumber || hasDate), 'INVALID_POSTING', source.id);
+        return { ...plannedLine, tracking: { TrackingNumber, TrackingDate } };
+      });
       requireEvidence(assets === amountRials * effect.assetSign && assets + counterparts === 0n, 'INVALID_POSTING', event.id);
       status = effect.status;
       events.push({ historyId: event.id, previousHistoryId: event.previousHistoryId, sequence: index + 2,

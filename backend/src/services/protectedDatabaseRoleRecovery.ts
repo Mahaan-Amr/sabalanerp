@@ -5,6 +5,24 @@ import { readDeploymentMaintenance } from './deploymentMaintenance';
 import { nativePostgresCliConnection } from './nativePostgresCli';
 
 type RoleSplit = { runtime: string; controller: string };
+const sepidarController = 'sabalan_sepidar_opening_controller';
+const sepidarRoutines = new Map([
+  ['sepidar_customer_opening_lock', 'text, text, text'],
+  ['sepidar_customer_opening_register_manifest', 'text, text, text, text, text'],
+  ['sepidar_customer_opening_runtime_admitted', 'text, text, text, text, text, timestamp with time zone, text, text, text, text, text, text'],
+]);
+const chequeRoutines = new Map([
+  ['sepidar_cheque_batch_register', 'text, text, text, text, text'],
+  ['sepidar_opening_cheques_runtime_admitted', 'text, text, text, text'],
+]);
+const sepidarRuntimeRoutines = new Set(['sepidar_customer_opening_runtime_admitted', 'sepidar_opening_cheques_runtime_admitted']);
+const sepidarRoutineArguments = (name: string) => sepidarRoutines.get(name) ?? chequeRoutines.get(name);
+const sepidarRolePrivileges = (kind: string, name: string, args: string, securityDefiner: boolean) => {
+  if (kind === 'DATABASE' && name === '') return ['CONNECT'];
+  if (kind === 'SCHEMA' && name === 'public') return ['USAGE'];
+  if (kind === 'FUNCTION' && !sepidarRuntimeRoutines.has(name) && sepidarRoutineArguments(name) === args && securityDefiner) return ['EXECUTE'];
+  return [];
+};
 type Client = {
   connect(): Promise<void>;
   end(): Promise<void>;
@@ -108,7 +126,12 @@ async function readIdentity(client: Client, roles: RoleSplit) {
     fail('The protected recovery connection does not own the database under its authenticated control role.');
   }
   const { rows: attributes } = await client.query(`
+    WITH sepidar_schema AS (
+      SELECT EXISTS (SELECT FROM pg_catalog.pg_proc p
+        WHERE p.pronamespace = 'public'::regnamespace AND p.proname = ANY($4::text[])) AS present
+    )
     SELECT r.rolname AS name, r.rolcanlogin AS login, r.rolconnlimit AS "connectionLimit", r.rolvaliduntil::text AS "validUntil",
+      sepidar_schema.present AS "hasSepidar",
       NOT (r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolinherit OR r.rolreplication OR r.rolbypassrls)
       AND r.rolconfig IS NULL AND (r.rolcanlogin OR auth.rolpassword IS NULL)
       AND NOT EXISTS (SELECT FROM pg_auth_members WHERE member = r.oid OR roleid = r.oid)
@@ -117,9 +140,10 @@ async function readIdentity(client: Client, roles: RoleSplit) {
         WHERE refclassid = 'pg_authid'::regclass AND refobjid = r.oid AND deptype = 'o'
       )
       AND NOT EXISTS (SELECT FROM pg_db_role_setting WHERE setrole = r.oid) AS restricted
-    FROM pg_roles r JOIN pg_authid auth USING (oid) WHERE r.rolname IN ($1, $2)
-  `, [roles.runtime, roles.controller]);
-  if (attributes.length !== 2 || attributes.some(role => !role.restricted
+    FROM pg_roles r JOIN pg_authid auth USING (oid) CROSS JOIN sepidar_schema
+    WHERE r.rolname IN ($1, $2) OR (sepidar_schema.present AND r.rolname = $3)
+  `, [roles.runtime, roles.controller, sepidarController, [...sepidarRoutines.keys()]]);
+  if (attributes.length !== (attributes[0]?.hasSepidar ? 3 : 2) || attributes.some(role => !role.restricted
     || (role.name === 'sabalan_application_runtime' && !role.login))) {
     fail('The protected database roles are missing or have unsupported attributes or memberships.');
   }
@@ -153,6 +177,7 @@ function canonicalObjects(objects: ObjectAcl[], control: string, roles: RoleSpli
       || (owner !== control && !(kind === 'SCHEMA' && name === 'public' && owner === 'pg_database_owner'))
       || !Array.isArray(grants)) return fail('An ACL object has unsupported identity or ownership.');
     const grantees = new Set([owner, '', roles.runtime, roles.controller]);
+    if (sepidarRolePrivileges(kind, name, argumentTypes, securityDefiner).length) grantees.add(sepidarController);
     const validPrivileges: readonly string[] = privileges[kind];
     const id = objectIdentity({ kind, name, arguments: argumentTypes } as ObjectAcl);
     if (identities.has(id)) return fail('The ACL snapshot contains a duplicate object.');
@@ -171,16 +196,42 @@ function canonicalObjects(objects: ObjectAcl[], control: string, roles: RoleSpli
 
 function assertRestrictedAccess(catalog: CatalogAcl[], roles: RoleSplit) {
   const protectedTables = new Set(['_prisma_migrations', 'deployment_operations',
-    'customer_allocation_release_control', 'customer_allocation_release_audit']);
+    'customer_allocation_release_control', 'customer_allocation_release_audit',
+    'sepidar_customer_opening_manifests', 'sepidar_customer_opening_admissions', 'sepidar_cheque_batch_admissions']);
+  const openingRoutines = catalog.filter(object => sepidarRoutines.has(object.name));
+  if (openingRoutines.length && (openingRoutines.length !== sepidarRoutines.size
+    || new Set(openingRoutines.map(object => object.name)).size !== sepidarRoutines.size)) {
+    fail('The protected Sepidar opening routine set is incomplete.');
+  }
+  const chequeBatch = catalog.some(object => object.kind === 'TABLE' && object.name === 'sepidar_cheque_batch_admissions');
+  const chequeFunctions = catalog.filter(object => chequeRoutines.has(object.name) && object.securityDefiner);
+  if ((chequeBatch && (chequeFunctions.length !== chequeRoutines.size
+    || new Set(chequeFunctions.map(object => object.name)).size !== chequeRoutines.size)) || (!chequeBatch && chequeFunctions.length)) {
+    fail('The protected Sepidar cheque routine set is incomplete.');
+  }
   for (const object of catalog) {
+    const sepidarRoutine = chequeBatch ? sepidarRoutineArguments(object.name) : sepidarRoutines.get(object.name);
+    const openingRuntimeCheck = sepidarRuntimeRoutines.has(object.name);
+    if (sepidarRoutine) {
+      const external = object.grants.filter(grant => grant.grantee !== object.owner);
+      const principal = openingRuntimeCheck ? roles.runtime : sepidarController;
+      if (object.kind !== 'FUNCTION' || object.arguments !== sepidarRoutine || !object.securityDefiner
+        || external.length !== 1 || external[0].grantee !== principal || external[0].privilege !== 'EXECUTE'
+        || external[0].grantable || external[0].grantor !== object.owner) {
+        fail('The protected Sepidar opening grants differ from the reviewed capability.');
+      }
+    }
     for (const grant of object.grants) {
       const runtimeAccess = [roles.runtime, ''].includes(grant.grantee);
       const controllerAccess = [roles.controller, ''].includes(grant.grantee);
       if (((object.kind === 'DATABASE' || object.kind === 'SCHEMA') && grant.privilege === 'CREATE'
           && (runtimeAccess || controllerAccess))
         || (object.kind === 'TABLE' && protectedTables.has(object.name) && (runtimeAccess || controllerAccess))
+        || (grant.grantee === sepidarController && (!openingRoutines.length
+          || !sepidarRolePrivileges(object.kind, object.name, object.arguments, object.securityDefiner).includes(grant.privilege)))
         || (object.securityDefiner && (grant.grantee === ''
-          || (grant.grantee === roles.runtime && !(object.name === 'customer_allocation_runtime_admitted' && object.arguments === 'text, text'))))) {
+          || (grant.grantee === roles.runtime && !openingRuntimeCheck
+            && !(object.name === 'customer_allocation_runtime_admitted' && object.arguments === 'text, text'))))) {
         fail('The protected ACLs would expose database control authority to a restricted role.');
       }
     }

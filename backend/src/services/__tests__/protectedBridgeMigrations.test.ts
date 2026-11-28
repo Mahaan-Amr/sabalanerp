@@ -94,13 +94,15 @@ test('the complete current release is admitted only with its reviewed ordered SQ
     '20261125180000_project_return_version_immutability',
     '20261126090000_project_return_item_area',
     '20261126100000_project_return_sepidar_revisions',
+    '20261127120000_sepidar_cheque_batch_admission',
+    '20261127121000_sepidar_cheque_anchor_runtime_permissions',
   ];
   const files = names.map(name => [name, fs.readFileSync(path.join(directory, name, 'migration.sql'))] as const);
   const release = compileProtectedCurrentRelease(files);
   assert.deepEqual(release.map(row => row.name), names);
   assert.ok(release.every(row => row.statements.length > 0));
   assert.ok(release.flatMap(row => row.statements).every(sql => !/^\s*(?:BEGIN|COMMIT)\s*;?\s*$/i.test(sql)));
-  assert.deepEqual(release.slice(54).map(row => row.statements.length), [1, 6, 22, 21, 2, 3, 5, 3, 5, 3, 10, 1, 2]);
+  assert.deepEqual(release.slice(54).map(row => row.statements.length), [1, 6, 22, 21, 2, 3, 5, 3, 5, 3, 10, 1, 2, 10, 2]);
   assert.ok(release[56].tables.includes('accounting_customer_opening_reviews'));
   assert.ok(release[56].functions.includes('sepidar_customer_opening_runtime_admitted'));
   assert.ok(release[64].tables.includes('project_return_version_items'));

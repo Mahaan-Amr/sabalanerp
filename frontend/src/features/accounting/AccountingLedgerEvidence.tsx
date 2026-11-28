@@ -16,6 +16,10 @@ const amount = (value: unknown) => {
   try { return `${BigInt(raw.split('.')[0]).toLocaleString('fa-IR')} ریال`; } catch { return 'ثبت نشده'; }
 };
 const date = (value: unknown) => typeof value === 'string' && !Number.isNaN(Date.parse(value)) ? new Date(value).toLocaleDateString('fa-IR') : 'ثبت نشده';
+const trackingDate = (value: unknown) => {
+  const day = typeof value === 'string' ? /^\d{4}-\d{2}-\d{2}(?=T|$)/.exec(value)?.[0] : undefined;
+  return day && !Number.isNaN(Date.parse(day)) ? new Date(day).toLocaleDateString('fa-IR', { timeZone: 'UTC' }) : undefined;
+};
 
 export default function AccountingLedgerEvidence({ evidence }: { evidence: any }) {
   const [verification, setVerification] = useState(false);
@@ -32,6 +36,9 @@ export default function AccountingLedgerEvidence({ evidence }: { evidence: any }
     </div></ErpCard>
     {evidence.lines?.map((line: any) => {
       const row = line.evidencePayload?.row || line.evidencePayload || {};
+      const sepidarRow = line.evidenceType === 'SEPIDAR_ACC_VOUCHER_ITEM' ? row : undefined;
+      const trackingNumber = typeof sepidarRow?.TrackingNumber === 'string' ? sepidarRow.TrackingNumber.trim() : '';
+      const trackedOn = trackingDate(sepidarRow?.TrackingDate);
       return <ErpCard key={line.id} className="p-4"><h3 className="font-semibold">آرتیکل {Number(line.sequence).toLocaleString('fa-IR')}</h3>
         <div className="mt-3 grid gap-3 sm:grid-cols-2"><ErpFieldView label="مدرک" value={evidenceTypeTitle(line.evidenceType)} />
           <ErpFieldView label="نسخه مدرک" value={Number(line.evidenceVersion).toLocaleString('fa-IR')} />
@@ -41,6 +48,8 @@ export default function AccountingLedgerEvidence({ evidence }: { evidence: any }
           {(line.description || row.Description || row.description) && <ErpFieldView label="شرح" value={line.description || row.Description || row.description} />}
           {line.party && <ErpFieldView label="طرف حساب" value={line.party.displayName} />}
           {line.financialAccount && <ErpFieldView label="حساب مالی" value={line.financialAccount.titlePersian} />}
+          {trackingNumber && <ErpFieldView label="شماره پیگیری سپیدار" value={<bdi>{trackingNumber}</bdi>} />}
+          {trackedOn && <ErpFieldView label="تاریخ پیگیری سپیدار" value={trackedOn} />}
         </div></ErpCard>;
     })}
     <ErpButton label={verification ? 'بستن اطلاعات تطبیق مدرک' : 'نمایش اطلاعات تطبیق مدرک'} variant="outline" onClick={() => setVerification(!verification)} />

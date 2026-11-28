@@ -177,18 +177,20 @@ async function directCandidates(tx: Tx, scope: Scope, existing: StoneReturnCandi
         && snapshot.customerId === scope.customerId && frozen.projectId === projectId
         && inferLogisticsContractUnit({ productType }, frozenRow) === scope.unit ? line : null;
       // A quantity captured retrospectively from a live ContractItem cannot prove the original sale.
-      const sealedFallback = sealedRow && frozenCatalogId === scope.productId
+      const approvedQuantityRow = sealedRow && frozenCatalogId === scope.productId
         && (snapshot.id == null || snapshot.id === contract.id)
         && (snapshot.customerId ?? frozen.customerId) === scope.customerId && frozen.projectId === projectId ? sealedRow : null;
-      const proof = exactApprovalLine ?? sealedFallback;
+      const proof = approvedQuantityRow ?? exactApprovalLine;
       if (!proof) continue;
       const quantity = 'contractedQuantity' in proof ? proof.contractedQuantity : proof.quantity;
       const limits = capacity(quantity, returned.get(saleRowKey({ contractId: contract.id, productRowId })) ?? 0n, scope.unit);
       if (!limits) continue;
       const rate = exactApprovalLine && moneyRials(exactApprovalLine.unitPrice.toFixed(), invoice.currency);
       const seller = contract.realizedSeller ?? contract.responsibleSeller;
+      // Preserve existing drafts' allocation key even when the approved quantity comes from another record.
+      const financialLineId = exactApprovalLine?.quantity.gt(0) ? exactApprovalLine.id : proof.id;
       candidates.push({
-        financialRecordId: invoice.id, financialLineId: proof.id,
+        financialRecordId: invoice.id, financialLineId,
         financialParty: { kind: 'CUSTOMER', id: scope.customerId }, originalInvoiceNumber: invoice.systemInvoiceNumber!,
         contractId: contract.id, contractItemId, contractNumber: contract.contractNumber, productRowId, projectId,
         partnerCaseId: null, dispatchEvidenceId: null, unit: scope.unit, ...limits,

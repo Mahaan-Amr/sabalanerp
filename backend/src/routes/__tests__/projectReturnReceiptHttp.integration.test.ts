@@ -625,16 +625,20 @@ test('Logistics records and reopens exact multi-project receipt quantities and h
       where: { contractNumber: 'SECRET-RETURN-507' }, include: { items: { where: { productRowId: 'length' } } },
     });
     const [linearStone] = linearContract.items;
+    const linearSnapshot = linearContract.contractData as { projectId: string; products: Array<{ rowId: string }> };
     const linearRecord = await db.accountingFinancialRecord.create({ data: {
       kind: 'INVOICE_CANDIDATE', status: 'ISSUED', sourceKind: 'SALES_CONTRACT', contractId: linearContract.id,
       sourceId: linearContract.id, customerId: customer.id, systemInvoiceNumber: 'RETURN-515-APPROVED-CAPTURE',
       amount: '48000000', createdBy: actor.id, financiallyApprovedBy: actor.id, financiallyApprovedAt: approvedAt, postedAt: approvedAt,
-      sourceSnapshot: { id: linearContract.id, customerId: customer.id, contractData: linearContract.contractData! },
+      sourceSnapshot: { id: linearContract.id, customerId: customer.id, contractData: {
+        ...linearSnapshot, products: linearSnapshot.products.map(row => row.rowId === 'length'
+          ? { ...row, quantity: 0, smartCutDerivedQuantity: true } : row),
+      } },
       metadata: { mode: 'FROM_CONTRACT_TOTAL' },
     } });
     const witness = {
       id: 'return-515-capture', contractId: linearContract.id, contractItemId: linearStone.id, productRowId: 'length',
-      unit: 'meter', kind: 'CONTRACTED_SET' as const, quantity: '220.000',
+      unit: 'meter', kind: 'CONTRACTED_SET' as const, quantity: '125.000',
       effectiveAt: approvedAt.toISOString(), recordedAt: approvedAt.toISOString(),
       sourceType: 'FINANCIALLY_APPROVED_CONTRACT_QUANTITY_VERSION', sourceId: `${linearRecord.id}:${linearStone.id}`, sourceVersion: 1,
       metadata: { financialRecordId: linearRecord.id, financiallyApprovedAt: approvedAt.toISOString() },
@@ -642,26 +646,34 @@ test('Logistics records and reopens exact multi-project receipt quantities and h
     await db.shipmentQuantityEvidence.create({ data: { ...witness, integrityHash: shipmentQuantityEvidenceIntegrityHash({
       ...witness, integrityHash: '',
     }) } });
+    const jowkarExit = {
+      ...witness, id: 'return-515-jowkar-exit', kind: 'PHYSICAL_EXIT' as const, quantity: '116.4',
+      sourceType: 'GUARD_PHYSICAL_EXIT', sourceId: 'return-515-jowkar-guard-exit',
+    };
+    await db.shipmentQuantityEvidence.create({ data: { ...jowkarExit, integrityHash: shipmentQuantityEvidenceIntegrityHash({
+      ...jowkarExit, integrityHash: '',
+    }) } });
     const captureVisit = await call(guard, { source: 'PERSONAL_PICKUP', plate: '51 ب 345 ایران 67', purpose: 'PROJECT_RETURN' });
     const captureCase = await call(receipts, { ...command, visitId: captureVisit.data.id, projectIds: [extraProject.id],
-      items: [{ productId: lengthProduct.id, unit: 'meter', healthyQuantity: '13.5', damagedQuantity: '0' }] });
+      items: [{ productId: lengthProduct.id, unit: 'meter', healthyQuantity: '116.4', damagedQuantity: '0' }] });
     assert.equal(captureCase.status, 201, JSON.stringify(captureCase));
     const capturePath = `/api/accounting/project-returns/${captureCase.data.id}`;
     assert.equal((await call(capturePath)).data.items[0].candidates.length, 0);
     const versionIdentity = { contractId: linearContract.id, sourceFinancialRecordId: linearRecord.id, versionNumber: 1 };
     const rowPayload = {
-      ...versionIdentity, versionId: 'return-515-legacy-seal', contractItemId: linearStone.id, productRowId: 'length',
-      ordinal: 1, contractedQuantity: '220.000', unit: 'meter', canonicalAllInTotal: '48000000.000000000000',
+      ...versionIdentity, versionId: 'return-515-jowkar-seal', contractItemId: linearStone.id, productRowId: 'length',
+      ordinal: 1, contractedQuantity: '125.000', unit: 'meter', canonicalAllInTotal: '48000000.000000000000',
       discountEligible: false, componentEvidence: {},
     };
     const rowHash = approvedPricingRowIntegrityHash(rowPayload);
     const versionPayload = {
       ...versionIdentity, id: rowPayload.versionId, approvedAt, approvedBy: actor.id, schemaVersion: 1, currency: 'ریال',
       grossAmount: '48000000.000000000000', netAmount: '48000000.000000000000', discountAmount: '0.000000000000',
-      sourceEvidence: { origin: 'LEGACY_SEAL', customerId: customer.id, projectId: extraProject.id },
+      sourceEvidence: { financialApproval: { mode: 'FROM_CONTRACT_TOTAL' },
+        customer: { id: customer.id }, destination: { projectId: extraProject.id } },
     };
     await db.contractApprovedPricingVersion.create({ data: {
-      ...versionPayload, origin: 'LEGACY_SEAL', legacySourceReference: versionIdentity,
+      ...versionPayload, origin: 'FINANCIAL_APPROVAL',
       integrityHash: approvedPricingVersionIntegrityHash({ ...versionPayload, rowHashes: [rowHash] }),
       rows: { create: { id: 'return-515-sealed-row', contractItemId: rowPayload.contractItemId,
         linkedContractItemId: linearStone.id, productRowId: rowPayload.productRowId, unit: rowPayload.unit, ordinal: rowPayload.ordinal,
@@ -670,7 +682,37 @@ test('Logistics records and reopens exact multi-project receipt quantities and h
     } });
     const sealedReview = await call(capturePath);
     assert.deepEqual(sealedReview.data.items[0].candidates.map((row: { financialLineId: string; remainingQuantity: string }) =>
-      [row.financialLineId, row.remainingQuantity]), [['return-515-sealed-row', '220.000']]);
+      [row.financialLineId, row.remainingQuantity]), [['return-515-sealed-row', '125.000']]);
+    const invoiceLine = await db.accountingInvoiceCandidateItem.create({ data: {
+      invoiceId: linearRecord.id, contractItemId: linearStone.id, productId: lengthProduct.id,
+      description: 'Optimizer-derived linear stone', quantity: '0', unitPrice: '32500000',
+    } });
+    await approveOrdinaryFixture(linearRecord);
+    const optimizerReview = await call(capturePath);
+    assert.deepEqual(optimizerReview.data.items[0].candidates.map((row: {
+      financialLineId: string; remainingQuantity: string;
+    }) => [row.financialLineId, row.remainingQuantity]), [['return-515-sealed-row', '125.000']],
+    'A zero invoice quantity for optimizer-derived stone must use the verified approved quantity');
+    const optimizerDraft = await call(`${capturePath}/allocations`, {
+      expectedVersionId: captureCase.data.version.id, expectedDraftNumber: 0,
+      items: [{ itemId: captureCase.data.version.items[0].id, agreedUnitRateRials: '32500000',
+        agreedRateBasis: 'HEALTHY_SQUARE_METER',
+        rows: [{ financialRecordId: linearRecord.id, financialLineId: 'return-515-sealed-row', quantity: '116.4' }] }],
+    }, 'PUT');
+    assert.equal(optimizerDraft.status, 200, JSON.stringify(optimizerDraft));
+    assert.equal(optimizerDraft.data.allocationStatus, 'ALLOCATION_COMPLETE');
+    assert.equal(optimizerDraft.data.items[0].candidates[0].draftRemainingQuantity, '8.600');
+    assert.equal(optimizerDraft.data.items[0].draftAmountRials, '1513200000');
+    // Exercise the same approved quantity with an ordinary invoice snapshot and a positive raw quantity.
+    await db.accountingFinancialRecord.update({ where: { id: linearRecord.id }, data: {
+      sourceSnapshot: { id: linearContract.id, customerId: customer.id, contractData: linearSnapshot },
+    } });
+    await db.accountingInvoiceCandidateItem.update({ where: { id: invoiceLine.id }, data: { quantity: '150' } });
+    const ordinaryReview = await call(capturePath);
+    const [ordinaryCandidate] = ordinaryReview.data.items[0].candidates;
+    assert.equal(ordinaryCandidate.originalInvoicedQuantity, '125.000',
+      'All rows must prefer the approved accounting quantity over a conflicting raw quantity');
+    assert.equal(ordinaryCandidate.financialLineId, invoiceLine.id, 'Keep the allocation key used by existing positive invoice rows');
     await db.accountingFinancialRecord.update({ where: { id: linearRecord.id }, data: { status: 'VOIDED' } });
     assert.equal((await call(capturePath)).data.items[0].candidates.length, 0);
 
